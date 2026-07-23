@@ -156,6 +156,7 @@
     <ClInclude Include="Core\ECDIAssert.h" />
     <ClInclude Include="EventSystem\EventRouter.h" />
     <ClInclude Include="EventSystem\EventDispatcher.h" />
+    <ClInclude Include="EventSystem\InputEvent.h" />
     <ClInclude Include="EventSystem\WindowCloseRequsted.h" />
     <ClInclude Include="EventSystem\WindowCreatedEvent.h" />
     <ClInclude Include="EventSystem\WindowDestroyEvent.h" />

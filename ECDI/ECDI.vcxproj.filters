@@ -46,7 +46,7 @@
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="EventSystem\EventRouter.cpp">
-      <Filter>源文件</Filter>
+      <Filter>EventSystem</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -90,7 +90,10 @@
       <Filter>EventSystem</Filter>
     </ClInclude>
     <ClInclude Include="EventSystem\EventRouter.h">
-      <Filter>头文件</Filter>
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\InputEvent.h">
+      <Filter>EventSystem</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
