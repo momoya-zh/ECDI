@@ -1,0 +1,54 @@
+# ===== 编译输出 =====
+x64/
+x86/
+[ECDI]/x64/
+[ECDI]/Debug/
+[ECDI]/Release/
+Debug/
+Release/
+build/
+out/
+
+# 可执行文件 / 库
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.idb
+
+# ===== Visual Studio 中间产物 =====
+*.obj
+*.tlog
+*.log
+*.recipe
+*.unsuccessfulbuild
+*.lastbuildstate
+*.FileListAbsolute.txt
+*.aps
+*.rcb
+
+# ===== Visual Studio IDE =====
+.vs/
+*.vcxproj.user
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# ===== CMake =====
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# ===== 工具目录（私有）=====
+.workbuddy/
+.mimocode/
+
+# ===== 临时文件 =====
+*.tmp
+*.bak
+*.swp
+*~

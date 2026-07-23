@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="ECDI/ECDI.vcxproj" Id="c56946bd-530e-4662-83ad-ef0b86ffd3a9" />
+</Solution>

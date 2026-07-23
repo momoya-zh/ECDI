@@ -1,0 +1,101 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="源文件">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="头文件">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="资源文件">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Application">
+      <UniqueIdentifier>{1479dbf4-a5cb-4915-83ef-8f67984e8dc4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Window">
+      <UniqueIdentifier>{48a68af9-2e74-4eb8-98a1-fac8ae8f998e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Core">
+      <UniqueIdentifier>{114e367d-5aae-44e6-bb48-4ea19ae67c20}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="EventSystem">
+      <UniqueIdentifier>{fae6b795-768e-4948-a50b-9cb795df8b10}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Window.cpp">
+      <Filter>Window</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\WindowClass.cpp">
+      <Filter>Window</Filter>
+    </ClCompile>
+    <ClCompile Include="Application\Application.cpp">
+      <Filter>Application</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\ECDI.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Logger.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="EventSystem\EventRouter.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Window\Window.h">
+      <Filter>Window</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\WindowClass.h">
+      <Filter>Window</Filter>
+    </ClInclude>
+    <ClInclude Include="Application\Application.h">
+      <Filter>Application</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\ECDIAssert.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\Logger.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Event.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\EventType.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\WindowDestroyEvent.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\WindowResizedEvent.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\WindowEvent.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\EventDispatcher.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\WindowCloseRequsted.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\WindowCreatedEvent.h">
+      <Filter>EventSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\EventRouter.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ECDI开发规范.md">
+      <Filter>资源文件</Filter>
+    </None>
+  </ItemGroup>
+</Project>
