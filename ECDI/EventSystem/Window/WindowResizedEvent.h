@@ -1,8 +1,8 @@
 #pragma once
 #include "WindowEvent.h"
 
-class WindowResizedEvent : public WindowEvent
-{
+class WindowResizedEvent : public WindowEvent{
+
 public:
 
 	WindowResizedEvent(

@@ -6,5 +6,8 @@ class InputEvent :public Event {
 
 protected:
 
-	InputEvent() = default;
+	explicit InputEvent(Window* window):Event(window){
+
+	}
+
 };

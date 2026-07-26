@@ -1,11 +1,13 @@
 ﻿#pragma once
 #include<string>
 #include<Windows.h>
+#include"WindowMessageHandler.h"
 
 class WindowClass;
 class Application;
 class Window {
 	public:
+
 
 		Window(Application* app,
 			WindowClass &windowClass,
@@ -44,4 +46,6 @@ private:
 		HWND m_handle=nullptr;
 
 		Application* m_application = nullptr;
+
+		WindowMessageHandler m_messageHandler;
 };

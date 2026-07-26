@@ -148,6 +148,7 @@
     <ClCompile Include="Core\Logger.cpp" />
     <ClCompile Include="EventSystem\EventRouter.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Window\WindowMessageHandler.cpp" />
     <ClCompile Include="Window\Window.cpp" />
     <ClCompile Include="Window\WindowClass.cpp" />
   </ItemGroup>
@@ -156,17 +157,30 @@
     <ClInclude Include="Core\ECDIAssert.h" />
     <ClInclude Include="EventSystem\EventRouter.h" />
     <ClInclude Include="EventSystem\EventDispatcher.h" />
-    <ClInclude Include="EventSystem\InputEvent.h" />
-    <ClInclude Include="EventSystem\WindowCloseRequsted.h" />
-    <ClInclude Include="EventSystem\WindowCreatedEvent.h" />
-    <ClInclude Include="EventSystem\WindowDestroyEvent.h" />
+    <ClInclude Include="EventSystem\Input\InputEvent.h" />
+    <ClInclude Include="EventSystem\Input\KeyBoard\CharInputEvent.h" />
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyCode.h" />
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyDownEvent.h" />
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyEvent.h" />
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyUpEvent.h" />
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButton.h" />
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonDownEvent.h" />
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonEvent.h" />
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonUpEvent.h" />
+    <ClInclude Include="EventSystem\Input\Mouse\MouseEvent.h" />
+    <ClInclude Include="EventSystem\Input\Mouse\MouseMoveEvent.h" />
+    <ClInclude Include="EventSystem\Input\Mouse\MouseWheelEvent.h" />
+    <ClInclude Include="EventSystem\Window\WindowCloseRequsted.h" />
+    <ClInclude Include="EventSystem\Window\WindowCreatedEvent.h" />
+    <ClInclude Include="EventSystem\Window\WindowDestroyEvent.h" />
     <ClInclude Include="EventSystem\Event.h" />
     <ClInclude Include="EventSystem\EventType.h" />
     <ClInclude Include="Core\Logger.h" />
-    <ClInclude Include="EventSystem\WindowResizedEvent.h" />
+    <ClInclude Include="EventSystem\Window\WindowResizedEvent.h" />
+    <ClInclude Include="Window\WindowMessageHandler.h" />
     <ClInclude Include="Window\Window.h" />
     <ClInclude Include="Window\WindowClass.h" />
-    <ClInclude Include="EventSystem\WindowEvent.h" />
+    <ClInclude Include="EventSystem\Window\WindowEvent.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ECDI开发规范.md" />

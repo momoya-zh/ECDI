@@ -25,6 +25,18 @@
     <Filter Include="EventSystem">
       <UniqueIdentifier>{fae6b795-768e-4948-a50b-9cb795df8b10}</UniqueIdentifier>
     </Filter>
+    <Filter Include="EventSystem\Window">
+      <UniqueIdentifier>{15f2281e-071e-47a8-b6dd-249d6e734123}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="EventSystem\Input">
+      <UniqueIdentifier>{f8e0a41e-916e-4d8a-b0a9-c8202e77e7bf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="EventSystem\Input\Mouse">
+      <UniqueIdentifier>{d6f46986-4b61-4e45-a786-291e57cd93dc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="EventSystem\Input\KeyBoard">
+      <UniqueIdentifier>{74a27ce6-a088-462a-9e7f-282be6aaa6f0}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -47,6 +59,9 @@
     </ClCompile>
     <ClCompile Include="EventSystem\EventRouter.cpp">
       <Filter>EventSystem</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\WindowMessageHandler.cpp">
+      <Filter>Window</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -71,29 +86,68 @@
     <ClInclude Include="EventSystem\EventType.h">
       <Filter>EventSystem</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\WindowDestroyEvent.h">
-      <Filter>EventSystem</Filter>
-    </ClInclude>
-    <ClInclude Include="EventSystem\WindowResizedEvent.h">
-      <Filter>EventSystem</Filter>
-    </ClInclude>
-    <ClInclude Include="EventSystem\WindowEvent.h">
-      <Filter>EventSystem</Filter>
-    </ClInclude>
     <ClInclude Include="EventSystem\EventDispatcher.h">
-      <Filter>EventSystem</Filter>
-    </ClInclude>
-    <ClInclude Include="EventSystem\WindowCloseRequsted.h">
-      <Filter>EventSystem</Filter>
-    </ClInclude>
-    <ClInclude Include="EventSystem\WindowCreatedEvent.h">
       <Filter>EventSystem</Filter>
     </ClInclude>
     <ClInclude Include="EventSystem\EventRouter.h">
       <Filter>EventSystem</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\InputEvent.h">
-      <Filter>EventSystem</Filter>
+    <ClInclude Include="EventSystem\Window\WindowCloseRequsted.h">
+      <Filter>EventSystem\Window</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Window\WindowCreatedEvent.h">
+      <Filter>EventSystem\Window</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Window\WindowDestroyEvent.h">
+      <Filter>EventSystem\Window</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Window\WindowEvent.h">
+      <Filter>EventSystem\Window</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Window\WindowResizedEvent.h">
+      <Filter>EventSystem\Window</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\InputEvent.h">
+      <Filter>EventSystem\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButton.h">
+      <Filter>EventSystem\Input\Mouse</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonEvent.h">
+      <Filter>EventSystem\Input\Mouse</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\Mouse\MouseEvent.h">
+      <Filter>EventSystem\Input\Mouse</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\Mouse\MouseMoveEvent.h">
+      <Filter>EventSystem\Input\Mouse</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonUpEvent.h">
+      <Filter>EventSystem\Input\Mouse</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\Mouse\MouseWheelEvent.h">
+      <Filter>EventSystem\Input\Mouse</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonDownEvent.h">
+      <Filter>EventSystem\Input\Mouse</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyUpEvent.h">
+      <Filter>EventSystem\Input\KeyBoard</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyEvent.h">
+      <Filter>EventSystem\Input\KeyBoard</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyDownEvent.h">
+      <Filter>EventSystem\Input\KeyBoard</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\KeyBoard\KeyCode.h">
+      <Filter>EventSystem\Input\KeyBoard</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\WindowMessageHandler.h">
+      <Filter>Window</Filter>
+    </ClInclude>
+    <ClInclude Include="EventSystem\Input\KeyBoard\CharInputEvent.h">
+      <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

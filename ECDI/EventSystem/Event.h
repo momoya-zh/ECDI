@@ -5,15 +5,30 @@
 class Window;
 
 class Event{
+
 public:
 
 	virtual ~Event() = default;
 
 	Window* GetWindow() const noexcept{
+
 		return m_window;
+
 	}
 
 	virtual EventType GetType() const = 0;
+
+	bool IsHandled() const noexcept{
+
+		return m_handled;
+
+	}
+
+	void SetHandled() noexcept{
+
+		m_handled = true;
+
+	}
 
 protected:
 
@@ -24,5 +39,6 @@ protected:
 protected:
 
 	Window* m_window=nullptr;
+	bool m_handled = false;
 };
 

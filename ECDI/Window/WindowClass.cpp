@@ -14,7 +14,11 @@ WindowClass::WindowClass(const std::wstring& className, WNDPROC windowProc):
 	wc.hInstance = m_instance;
 
 	wc.lpszClassName = m_className.c_str();
-
+	
+	wc.hCursor = LoadCursorW(
+	nullptr,
+	IDC_ARROW
+);
 	ATOM atom = RegisterClassW(&wc);
 
 	if (atom == 0) {

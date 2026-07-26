@@ -1,16 +1,15 @@
 ﻿#include"Window.h"
 #include"WindowClass.h"
-#include"WindowEvent.h"
 #include"Application.h"
-#include"Logger.h"
-#include"WindowDestroyEvent.h"
-#include"WindowResizedEvent.h"
-#include"WindowCloseRequsted.h"
 
 #include<string>
 #include<system_error>
+#include<Windows.h>
 
-Window::Window(Application* app,WindowClass &windowClass,const std::wstring& title, int width, int height):m_application(app) {
+Window::Window(Application* app,WindowClass &windowClass,const std::wstring& title, int width, int height)
+	: m_application(app)
+	, m_messageHandler(m_application)
+{
 	m_handle = CreateWindowExW(
 		0,
 		windowClass.GetClassName(),
@@ -32,12 +31,14 @@ Window::Window(Application* app,WindowClass &windowClass,const std::wstring& tit
 			"CreateWindowExW failed");
 	}
 }
+
 void Window::Show() {
 	if (m_handle != nullptr) {
 		ShowWindow(m_handle, SW_SHOW);
 		UpdateWindow(m_handle);
 	}
 }
+
 LRESULT CALLBACK Window::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	Window* window = nullptr;
 	if (msg == WM_NCCREATE) {
@@ -57,43 +58,18 @@ LRESULT CALLBACK Window::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 }
 
 LRESULT Window::HandleMessage(HWND hwnd,UINT msg, WPARAM wParam, LPARAM lParam) {
-	switch (msg) {
-	case WM_CLOSE: {
-		WindowCloseRequestedEvent event(this);
-
-		m_application->OnEvent(event);
-
-		return 0;
-	}
-	case WM_DESTROY:{
-
+	// WM_DESTROY: 清理 m_handle（Window 资源管理，不是消息翻译职责）
+	if (msg == WM_DESTROY) {
 		m_handle = nullptr;
-
-		WindowDestroyedEvent event(this);
-
-		m_application->OnEvent(event);
-
-		return 0;
-	}
-	case WM_SIZE: {
-		const int width = LOWORD(lParam);
-
-		const int height = HIWORD(lParam);
-
-		WindowResizedEvent event(
-			this,
-			width,
-			height
-		);
-		m_application->OnEvent(event);
-		break;
 	}
 
+	auto result = m_messageHandler.Handle(this, hwnd, msg, wParam, lParam);
+	if (result) {
+		return *result;
 	}
-
-	return DefWindowProcW(hwnd,msg,wParam,lParam);
-	
+	return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
+
 bool Window::Release() noexcept {
 	if (m_handle==nullptr) {
 		return true;

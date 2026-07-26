@@ -4,8 +4,8 @@
 
 
 class WindowEvent : public Event{
-public:
 
+public:
 
 protected:
 

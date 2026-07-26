@@ -1,15 +1,14 @@
 #include"Application.h"
 #include"Window.h"
-#include"WindowResizedEvent.h"
-#include"WindowDestroyEvent.h"
-#include"WindowCreatedEvent.h"
-#include"WindowCloseRequsted.h"
+#include"Window/WindowResizedEvent.h"
+#include"Window/WindowDestroyEvent.h"
+#include"Window/WindowCreatedEvent.h"
+#include"Window/WindowCloseRequsted.h"
 #include"ECDIAssert.h"
-#include"Logger.h"
 
 #include<Windows.h>
-Application::Application():m_windowClass(L"MyFrameWork",Window::WindowProc) {
 
+Application::Application():m_windowClass(L"ECDI FrameWork",Window::WindowProc) {
 
 }
 
@@ -18,6 +17,7 @@ WindowClass& Application::GetWindowClass() {
 }
 
 int Application::Run() {
+
 	MSG message{};
 	while (GetMessageW(&message, nullptr, 0, 0)) {
 		TranslateMessage(&message);
@@ -59,10 +59,6 @@ void Application::ProcessDeferredDestroy() {
 void Application::OnWindowCreated(
 	const WindowCreatedEvent& event)
 {
-	Logger::Log(
-		LogLevel::Debug,
-		L"Window Created Received"
-	);
 }
 
 void Application::OnWindowDestroyed(
@@ -76,14 +72,11 @@ void Application::OnWindowDestroyed(
 				event.GetWindow();
 		});
 
-
 	FRAMEWORK_ASSERT(it != m_windows.end());
-
 
 	if (it == m_windows.end()){
 		return;
 	}
-
 
 	m_deferredDestroy.emplace_back(
 		std::move(*it)
@@ -101,19 +94,11 @@ void Application::OnWindowDestroyed(
 void Application::OnWindowResized(
 	const WindowResizedEvent& event)
 {
-	Logger::Log(
-		LogLevel::Debug,
-		L"Window Resize"
-	);
 }
 
 void Application::OnWindowCloseRequested(
 	const WindowCloseRequestedEvent& event
 )
 {
-	Logger::Log(
-		LogLevel::Debug,
-		L"Window Close Requested"
-	);
 	event.GetWindow()->Release();
 }
