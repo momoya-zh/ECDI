@@ -1,15 +1,24 @@
-# ===== 编译输出 =====
+# ============================================
+# ECDI .gitignore
+# 目录名模式（无前缀）会匹配任意层级的同名目录，
+# 因此 x64/、Debug/ 同时覆盖根目录与 ECDI/ 下的产物。
+# ============================================
+
+# ===== 编译输出目录（任意层级）=====
 x64/
 x86/
-[ECDI]/x64/
-[ECDI]/Debug/
-[ECDI]/Release/
 Debug/
 Release/
 build/
+build-*/
 out/
 
-# 可执行文件 / 库
+# ===== ECDI/ 下的 VS 输出（显式列出，便于阅读）=====
+ECDI/Debug/
+ECDI/x64/
+ECDI/Release/
+
+# ===== 可执行文件 / 库 / 调试符号 =====
 *.exe
 *.dll
 *.lib
@@ -17,8 +26,9 @@ out/
 *.ilk
 *.idb
 
-# ===== Visual Studio 中间产物 =====
+# ===== 编译器中间产物 =====
 *.obj
+*.o
 *.tlog
 *.log
 *.recipe
@@ -27,6 +37,9 @@ out/
 *.FileListAbsolute.txt
 *.aps
 *.rcb
+*.res
+*.exp
+*.map
 
 # ===== Visual Studio IDE =====
 .vs/
@@ -36,19 +49,28 @@ out/
 *.sdf
 *.VC.db
 *.VC.opendb
+ipch/
 
 # ===== CMake =====
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 compile_commands.json
+CTestTestfile.cmake
+*.cmake.stamp
 
-# ===== 工具目录（私有）=====
+# ===== 工具目录（私有，不提交）=====
 .workbuddy/
 .mimocode/
+.vscode/
+.idea/
 
-# ===== 临时文件 =====
+# ===== 临时 / 诊断文件 =====
+error.txt
 *.tmp
 *.bak
 *.swp
 *~
+Thumbs.db
+Desktop.ini
+

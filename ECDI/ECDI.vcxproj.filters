@@ -37,116 +37,161 @@
     <Filter Include="EventSystem\Input\KeyBoard">
       <UniqueIdentifier>{74a27ce6-a088-462a-9e7f-282be6aaa6f0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Widget">
+      <UniqueIdentifier>{7f00a40a-d4d1-4267-a2bd-6d76677a7b1e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="Window\Window.cpp">
+    <ClCompile Include="src\Window\Window.cpp">
       <Filter>Window</Filter>
     </ClCompile>
-    <ClCompile Include="Window\WindowClass.cpp">
+    <ClCompile Include="src\Window\WindowClass.cpp">
       <Filter>Window</Filter>
     </ClCompile>
-    <ClCompile Include="Application\Application.cpp">
+    <ClCompile Include="src\Application\Application.cpp">
       <Filter>Application</Filter>
     </ClCompile>
-    <ClCompile Include="Core\ECDI.cpp">
+    <ClCompile Include="src\Core\ECDI.cpp">
       <Filter>Core</Filter>
     </ClCompile>
-    <ClCompile Include="Core\Logger.cpp">
+    <ClCompile Include="src\Core\Logger.cpp">
       <Filter>Core</Filter>
     </ClCompile>
-    <ClCompile Include="EventSystem\EventRouter.cpp">
+    <ClCompile Include="src\EventSystem\EventRouter.cpp">
       <Filter>EventSystem</Filter>
     </ClCompile>
-    <ClCompile Include="Window\WindowMessageHandler.cpp">
+    <ClCompile Include="src\Window\WindowMessageHandler.cpp">
       <Filter>Window</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Widget\Widget.cpp">
+      <Filter>Widget</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Widget\Panel.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Widget\Label.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Widget\Button.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Layout\Layout.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Layout\VerticalLayout.cpp">
+      <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Window\Window.h">
+    <ClInclude Include="Include\ECDI\Window\Window.h">
       <Filter>Window</Filter>
     </ClInclude>
-    <ClInclude Include="Window\WindowClass.h">
+    <ClInclude Include="Include\ECDI\Window\WindowClass.h">
       <Filter>Window</Filter>
     </ClInclude>
-    <ClInclude Include="Application\Application.h">
+    <ClInclude Include="Include\ECDI\Application\Application.h">
       <Filter>Application</Filter>
     </ClInclude>
-    <ClInclude Include="Core\ECDIAssert.h">
+    <ClInclude Include="Include\ECDI\Core\ECDIAssert.h">
       <Filter>Core</Filter>
     </ClInclude>
-    <ClInclude Include="Core\Logger.h">
+    <ClInclude Include="Include\ECDI\Core\Logger.h">
       <Filter>Core</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Event.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Event.h">
       <Filter>EventSystem</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\EventType.h">
+    <ClInclude Include="Include\ECDI\EventSystem\EventType.h">
       <Filter>EventSystem</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\EventDispatcher.h">
+    <ClInclude Include="Include\ECDI\EventSystem\EventDispatcher.h">
       <Filter>EventSystem</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\EventRouter.h">
+    <ClInclude Include="Include\ECDI\EventSystem\EventRouter.h">
       <Filter>EventSystem</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Window\WindowCloseRequsted.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowCloseRequsted.h">
       <Filter>EventSystem\Window</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Window\WindowCreatedEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowCreatedEvent.h">
       <Filter>EventSystem\Window</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Window\WindowDestroyEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowDestroyEvent.h">
       <Filter>EventSystem\Window</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Window\WindowEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowEvent.h">
       <Filter>EventSystem\Window</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Window\WindowResizedEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h">
       <Filter>EventSystem\Window</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\InputEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\InputEvent.h">
       <Filter>EventSystem\Input</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButton.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButton.h">
       <Filter>EventSystem\Input\Mouse</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButtonEvent.h">
       <Filter>EventSystem\Input\Mouse</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\Mouse\MouseEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseEvent.h">
       <Filter>EventSystem\Input\Mouse</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\Mouse\MouseMoveEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseMoveEvent.h">
       <Filter>EventSystem\Input\Mouse</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonUpEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButtonUpEvent.h">
       <Filter>EventSystem\Input\Mouse</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\Mouse\MouseWheelEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseWheelEvent.h">
       <Filter>EventSystem\Input\Mouse</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonDownEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButtonDownEvent.h">
       <Filter>EventSystem\Input\Mouse</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyUpEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyUpEvent.h">
       <Filter>EventSystem\Input\KeyBoard</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyEvent.h">
       <Filter>EventSystem\Input\KeyBoard</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyDownEvent.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyDownEvent.h">
       <Filter>EventSystem\Input\KeyBoard</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyCode.h">
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyCode.h">
       <Filter>EventSystem\Input\KeyBoard</Filter>
     </ClInclude>
-    <ClInclude Include="Window\WindowMessageHandler.h">
+    <ClInclude Include="Include\ECDI\Window\WindowMessageHandler.h">
       <Filter>Window</Filter>
     </ClInclude>
-    <ClInclude Include="EventSystem\Input\KeyBoard\CharInputEvent.h">
+    <ClInclude Include="Include\ECDI\Widget\WidgetState.h">
+      <Filter>Widget</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Widget\Widget.h">
+      <Filter>Widget</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Widget\Geometry.h">
+      <Filter>Widget</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\CharInputEvent.h">
+      <Filter>EventSystem\Input\KeyBoard</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Widget\Panel.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Widget\Label.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Widget\Button.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Layout\Layout.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Layout\VerticalLayout.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

@@ -71,9 +71,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>C:\Users\a1367\source\repos\ECDI\ECDI\EventSystem;C:\Users\a1367\source\repos\ECDI\ECDI\Application;C:\Users\a1367\source\repos\ECDI\ECDI\Core;C:\Users\a1367\source\repos\ECDI\ECDI\Window;$(IncludePath)</IncludePath>
-  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -115,6 +113,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -143,44 +142,58 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Application\Application.cpp" />
-    <ClCompile Include="Core\ECDI.cpp" />
-    <ClCompile Include="Core\Logger.cpp" />
-    <ClCompile Include="EventSystem\EventRouter.cpp" />
+    <ClCompile Include="src\Application\Application.cpp" />
+    <ClCompile Include="src\Layout\Layout.cpp" />
+    <ClCompile Include="src\Layout\VerticalLayout.cpp" />
+    <ClCompile Include="src\Widget\Button.cpp" />
+    <ClCompile Include="src\Core\ECDI.cpp" />
+    <ClCompile Include="src\Core\Logger.cpp" />
+    <ClCompile Include="src\EventSystem\EventRouter.cpp" />
+    <ClCompile Include="src\Widget\Label.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="Window\WindowMessageHandler.cpp" />
-    <ClCompile Include="Window\Window.cpp" />
-    <ClCompile Include="Window\WindowClass.cpp" />
+    <ClCompile Include="src\Widget\Panel.cpp" />
+    <ClCompile Include="src\Widget\Widget.cpp" />
+    <ClCompile Include="src\Window\WindowMessageHandler.cpp" />
+    <ClCompile Include="src\Window\Window.cpp" />
+    <ClCompile Include="src\Window\WindowClass.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Application\Application.h" />
-    <ClInclude Include="Core\ECDIAssert.h" />
-    <ClInclude Include="EventSystem\EventRouter.h" />
-    <ClInclude Include="EventSystem\EventDispatcher.h" />
-    <ClInclude Include="EventSystem\Input\InputEvent.h" />
-    <ClInclude Include="EventSystem\Input\KeyBoard\CharInputEvent.h" />
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyCode.h" />
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyDownEvent.h" />
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyEvent.h" />
-    <ClInclude Include="EventSystem\Input\KeyBoard\KeyUpEvent.h" />
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButton.h" />
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonDownEvent.h" />
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonEvent.h" />
-    <ClInclude Include="EventSystem\Input\Mouse\MouseButtonUpEvent.h" />
-    <ClInclude Include="EventSystem\Input\Mouse\MouseEvent.h" />
-    <ClInclude Include="EventSystem\Input\Mouse\MouseMoveEvent.h" />
-    <ClInclude Include="EventSystem\Input\Mouse\MouseWheelEvent.h" />
-    <ClInclude Include="EventSystem\Window\WindowCloseRequsted.h" />
-    <ClInclude Include="EventSystem\Window\WindowCreatedEvent.h" />
-    <ClInclude Include="EventSystem\Window\WindowDestroyEvent.h" />
-    <ClInclude Include="EventSystem\Event.h" />
-    <ClInclude Include="EventSystem\EventType.h" />
-    <ClInclude Include="Core\Logger.h" />
-    <ClInclude Include="EventSystem\Window\WindowResizedEvent.h" />
-    <ClInclude Include="Window\WindowMessageHandler.h" />
-    <ClInclude Include="Window\Window.h" />
-    <ClInclude Include="Window\WindowClass.h" />
-    <ClInclude Include="EventSystem\Window\WindowEvent.h" />
+    <ClInclude Include="Include\ECDI\Application\Application.h" />
+    <ClInclude Include="include\ECDI\Layout\Layout.h" />
+    <ClInclude Include="include\ECDI\Layout\VerticalLayout.h" />
+    <ClInclude Include="Include\ECDI\Widget\Button.h" />
+    <ClInclude Include="Include\ECDI\Core\ECDIAssert.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\EventRouter.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\EventDispatcher.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\InputEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\CharInputEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyCode.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyDownEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyUpEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButton.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButtonDownEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButtonEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButtonUpEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseMoveEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseWheelEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowCloseRequsted.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowCreatedEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowDestroyEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Event.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\EventType.h" />
+    <ClInclude Include="Include\ECDI\Core\Logger.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h" />
+    <ClInclude Include="Include\ECDI\Widget\Label.h" />
+    <ClInclude Include="Include\ECDI\Widget\Panel.h" />
+    <ClInclude Include="Include\ECDI\Widget\Geometry.h" />
+    <ClInclude Include="Include\ECDI\Widget\Widget.h" />
+    <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
+    <ClInclude Include="Include\ECDI\Window\WindowMessageHandler.h" />
+    <ClInclude Include="Include\ECDI\Window\Window.h" />
+    <ClInclude Include="Include\ECDI\Window\WindowClass.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Window\WindowEvent.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ECDI开发规范.md" />
