@@ -1,4 +1,6 @@
 ﻿#pragma once
+namespace ECDI
+{
 
 /// @brief 框架层键盘按键枚举（与 Win32 VK_* 解耦）
 /// @details
@@ -99,3 +101,5 @@ enum class KeyCode
 	NumpadEnter,
 
 };
+
+}

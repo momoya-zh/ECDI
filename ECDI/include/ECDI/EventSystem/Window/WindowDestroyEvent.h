@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "WindowEvent.h"
+namespace ECDI
+{
 
 /// @brief 窗口销毁事件
 /// @details
@@ -25,3 +27,5 @@ public:
 
 	}
 };
+
+}

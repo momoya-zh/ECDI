@@ -3,6 +3,8 @@
 #include "ECDI/EventSystem/Input/InputEvent.h"
 
 #include "KeyCode.h"
+namespace ECDI
+{
 
 /// @brief 键盘事件基类（KeyDown / KeyUp 的公共基类）
 /// @details 携带 KeyCode（物理按键标识），不携带字符码。
@@ -33,3 +35,5 @@ private:
 	KeyCode m_keyCode;
 
 };
+
+}

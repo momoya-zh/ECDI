@@ -1,6 +1,8 @@
 #include "ECDI/Widget/Label.h"
 
 #include <utility>
+namespace ECDI
+{
 
 Label::Label(const std::wstring& text): m_text(text){
 
@@ -27,4 +29,5 @@ const std::wstring& Label::GetText() const noexcept{
 
 	return m_text;
 
+}
 }

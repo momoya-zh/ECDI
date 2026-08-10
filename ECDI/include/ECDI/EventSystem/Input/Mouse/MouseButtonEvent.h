@@ -2,6 +2,8 @@
 
 #include "MouseEvent.h"
 #include "MouseButton.h"
+namespace ECDI
+{
 
 
 /// @brief 鼠标按键事件基类（ButtonDown / ButtonUp 的公共基类）
@@ -39,3 +41,5 @@ private:
 	MouseButton m_button;
 
 };
+
+}

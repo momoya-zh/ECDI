@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include"Event.h"
+namespace ECDI
+{
 
 class WindowCreatedEvent;
 class WindowDestroyedEvent;
@@ -81,3 +83,5 @@ protected:
 	){}
 
 };
+
+}

@@ -3,21 +3,27 @@
 #include"ECDI/Application/Application.h"
 #include"ECDI/Widget/Widget.h"
 #include"ECDI/Core/ECDIAssert.h"
+#include"ECDI/Core/String.h"
 
 
 #include<string>
 #include<system_error>
 #include<Windows.h>
+namespace ECDI
+{
 
-Window::Window(Application* app,const WindowClass &windowClass,const std::wstring& title, int width, int height)
+Window::Window(Application* app,const WindowClass &windowClass,const std::string& title, int width, int height)
 	: m_application(app)
 	, m_messageHandler(m_application){
+
+	// 公共 API 为 UTF-8（std::string），在平台边界转换到 UTF-16（字符串边界划分）
+	const std::wstring wideTitle = UTF8ToWide(title);
 
 	// 创建 Win32 窗口（WS_OVERLAPPEDWINDOW = 标题栏 + 边框 + 最小化/最大化/关闭按钮）
 	m_handle = CreateWindowExW(
 		0,
 		windowClass.GetClassName(),
-		title.c_str(),
+		wideTitle.c_str(),
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
@@ -202,5 +208,7 @@ void Window::SetFocusedWidget(Widget* widget){
 	FRAMEWORK_ASSERT(current == &GetRootWidget());
 
 	m_focusedWidget = widget;
+
+}
 
 }

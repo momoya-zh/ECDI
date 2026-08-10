@@ -6,6 +6,14 @@
 #include <vector>
 #include <memory>
 
+// Phase 3 GDI 临时桥梁：必须保持在全局作用域（HDC 是 Windows.h 的全局类型；
+// 放进 namespace ECDI 会声明 ECDI::HDC__（与 ::HDC__ 不同的类）→ 类型不匹配编译错误。
+// Phase 4 删除此桥梁（见 docs/phase4-renderer-design.md §13）。
+struct HDC__;
+using HDC = HDC__*;
+
+namespace ECDI
+{
 
 // 前向声明：避免头文件循环依赖
 class MouseMoveEvent;
@@ -16,8 +24,6 @@ class KeyDownEvent;
 class KeyUpEvent;
 class CharInputEvent;
 class Layout;
-struct HDC__;
-using HDC = HDC__*;
 
 /// @brief ECDI Framework 的 Widget 基类
 /// @details
@@ -177,3 +183,5 @@ protected:
 
 	virtual void OnPaint(HDC hdc,int x,int y);
 };
+
+}

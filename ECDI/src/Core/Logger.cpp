@@ -4,6 +4,8 @@
 #include<stdexcept>
 #include<cassert>
 #include<Windows.h>
+namespace ECDI
+{
 
 /// @brief 将 LogLevel 转为可读的宽字符串标签
 static std::wstring_view ToString(LogLevel level)noexcept {
@@ -45,4 +47,6 @@ void Logger::Log(LogLevel level, std::wstring_view message)
 
 	// 输出到调试器（VS Output 窗口 / DebugView 等）
 	OutputDebugStringW(log.c_str());
+}
+
 }

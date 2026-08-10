@@ -20,6 +20,8 @@
 
 #include <Windows.h>
 #include <windowsx.h>  // GET_X_LPARAM / GET_Y_LPARAM / GET_WHEEL_DELTA_WPARAM 等宏
+namespace ECDI
+{
 
 WindowMessageHandler::WindowMessageHandler(Application* app) noexcept
 	: m_application(app)
@@ -429,4 +431,6 @@ KeyCode WindowMessageHandler::TranslateKeyCode(
 	}
 
 	return KeyCode::Unknown;
+}
+
 }

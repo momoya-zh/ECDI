@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include "WindowEvent.h"
+namespace ECDI
+{
 
 /// @brief 窗口大小变化事件
 /// @details
@@ -53,3 +55,5 @@ private:
 	int m_width;
 	int m_height;
 };
+
+}

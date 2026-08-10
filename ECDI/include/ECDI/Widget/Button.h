@@ -3,6 +3,8 @@
 #include"Widget.h"
 
 #include<string>
+namespace ECDI
+{
 
 class MouseButtonDownEvent;
 class MouseButtonUpEvent;
@@ -42,3 +44,5 @@ protected:
 	void OnPaint(HDC hdc,int x,int y) override;
 };
 
+
+}

@@ -2,6 +2,8 @@
 
 #include<Windows.h>
 #include<string>
+namespace ECDI
+{
 
 /// @brief Win32 窗口类（WNDCLASS）的 RAII 包装
 /// @details
@@ -13,7 +15,7 @@ public:
 
 	/// @param className 窗口类名（注册到系统）
 	/// @param windowProc 窗口消息回调函数
-	WindowClass(const std::wstring& className,WNDPROC windowProc);
+	WindowClass(const std::string& className,WNDPROC windowProc);
 
 	// 禁止拷贝
 	WindowClass(const WindowClass&) = delete;
@@ -47,3 +49,5 @@ private:
 	bool m_registered = false;	///< 是否已注册
 
 };
+
+}

@@ -34,6 +34,12 @@ if(MINGW)
     target_link_options(ECDI PRIVATE -municode -static)
 endif()
 
+# UTF-8 源码/字面量：公共 API 用 std::string（UTF-8），MSVC/clang-cl 需显式 /utf-8
+# （GCC/MinGW 默认 UTF-8 源码，无需此项）
+if(MSVC)
+    target_compile_options(ECDI PRIVATE /utf-8)
+endif()
+
 if(WIN32)
     target_link_libraries(ECDI PRIVATE user32)
 endif()

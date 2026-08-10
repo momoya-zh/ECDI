@@ -79,6 +79,7 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -97,6 +98,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -113,6 +115,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -132,6 +135,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -148,6 +152,7 @@
     <ClCompile Include="src\Widget\Button.cpp" />
     <ClCompile Include="src\Core\ECDI.cpp" />
     <ClCompile Include="src\Core\Logger.cpp" />
+    <ClCompile Include="src\Core\String.cpp" />
     <ClCompile Include="src\EventSystem\EventRouter.cpp" />
     <ClCompile Include="src\Widget\Label.cpp" />
     <ClCompile Include="main.cpp" />
@@ -184,6 +189,7 @@
     <ClInclude Include="Include\ECDI\EventSystem\Event.h" />
     <ClInclude Include="Include\ECDI\EventSystem\EventType.h" />
     <ClInclude Include="Include\ECDI\Core\Logger.h" />
+    <ClInclude Include="Include\ECDI\Core\String.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h" />
     <ClInclude Include="Include\ECDI\Widget\Label.h" />
     <ClInclude Include="Include\ECDI\Widget\Panel.h" />

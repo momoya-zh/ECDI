@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "EventType.h"
+namespace ECDI
+{
 
 class Window;
 
@@ -54,3 +56,5 @@ protected:
 	Window* m_window=nullptr;	///< 事件来源窗口
 	bool m_handled = false;		///< 是否已被处理（传播层状态）
 };
+
+}

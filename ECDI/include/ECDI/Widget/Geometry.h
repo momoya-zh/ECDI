@@ -1,4 +1,6 @@
 ﻿#pragma once
+namespace ECDI
+{
 
 /// @brief Widget 的位置与尺寸（局部坐标系）
 /// @details
@@ -13,3 +15,5 @@ struct Geometry{
 	int height = 0;	///< 高度
 
 };
+
+}

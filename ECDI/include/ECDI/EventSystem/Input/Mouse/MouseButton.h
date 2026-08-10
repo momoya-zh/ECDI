@@ -1,4 +1,6 @@
 ﻿#pragma once
+namespace ECDI
+{
 
 /// @brief 鼠标按键枚举
 enum class MouseButton{
@@ -10,3 +12,5 @@ enum class MouseButton{
 	X2			///< 扩展键 2（侧键"前进"）
 
 };
+
+}

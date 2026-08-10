@@ -1,4 +1,6 @@
 ﻿#pragma once
+namespace ECDI
+{
 
 /// @brief Framework 事件类型枚举
 /// @details
@@ -24,3 +26,5 @@ enum class EventType{
 	KeyUp,					///< 键盘按键释放
 	CharInput				///< 字符输入（由 WM_CHAR 翻译，一个 wchar_t = 一个事件）
 };
+
+}

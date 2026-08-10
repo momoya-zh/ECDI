@@ -4,6 +4,8 @@
 
 #include<Windows.h>
 #include<utility>
+namespace ECDI
+{
 
 Button::Button(const std::wstring& text):m_text(text){
 
@@ -69,4 +71,5 @@ void Button::OnPaint(
 	HBRUSH brush = CreateSolidBrush(RGB(80,120,220));
 	FillRect(hdc,&rect,brush);
 	DeleteObject(brush);
+}
 }

@@ -21,9 +21,11 @@
 
 #include<Windows.h>
 #include<algorithm>
+namespace ECDI
+{
 
 
-Application::Application():m_windowClass(L"ECDI FrameWork",Window::WindowProc) {
+Application::Application():m_windowClass("ECDI FrameWork",Window::WindowProc) {
 
 }
 
@@ -45,7 +47,7 @@ int Application::Run() {
 	return static_cast<int>(message.wParam);
 }
 
-Window& Application::Create(const std::wstring& title, int width, int height) {
+Window& Application::Create(const std::string& title, int width, int height) {
 	m_windows.emplace_back(std::make_unique<Window>(
 		this,
 		m_windowClass,
@@ -284,4 +286,5 @@ void Application::OnKeyUp(const KeyUpEvent& event) {
 
 	target->OnKeyUp(event);
 
+}
 }

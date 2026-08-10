@@ -1,10 +1,13 @@
 ﻿#include"ECDI/Window/WindowClass.h"
 #include"ECDI/Window/Window.h"
+#include"ECDI/Core/String.h"
 
 #include<system_error>
+namespace ECDI
+{
 
-WindowClass::WindowClass(const std::wstring& className, WNDPROC windowProc):
-	m_className(className),
+WindowClass::WindowClass(const std::string& className, WNDPROC windowProc):
+	m_className(UTF8ToWide(className)),
 	m_instance(GetModuleHandleW(nullptr)),
 	m_windowProc(windowProc){
 
@@ -131,4 +134,6 @@ bool WindowClass::Release()noexcept {
 	}
 
 	return false;
+}
+
 }

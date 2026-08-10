@@ -14,6 +14,8 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
+namespace ECDI
+{
 
 void EventRouter::OnEvent(
 	const Event& event
@@ -93,4 +95,6 @@ void EventRouter::OnEvent(
 			OnCharInput(e);
 
 		});
+}
+
 }

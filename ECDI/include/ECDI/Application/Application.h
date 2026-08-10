@@ -6,6 +6,8 @@
 #include<memory>
 #include<string>
 #include<vector>
+namespace ECDI
+{
 
 class WindowCloseRequestedEvent;
 class WindowCreatedEvent;
@@ -49,7 +51,7 @@ public :
 	/// @param width  窗口总宽度
 	/// @param height 窗口总高度
 	/// @return 新创建窗口的引用
-	Window& Create(const std::wstring&title,int width,int height);
+	Window& Create(const std::string&title,int width,int height);
 
 	/// @brief 退出消息循环
 	void Exit();
@@ -109,3 +111,5 @@ private:
 
 	bool m_running=true;	///< 消息循环是否继续运行
 };
+
+}

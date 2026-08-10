@@ -15,6 +15,8 @@
 
 #include <algorithm>
 #include <utility>
+namespace ECDI
+{
 
 Widget::Widget() = default;
 
@@ -226,3 +228,5 @@ void Widget::OnKeyDown(const KeyDownEvent&) {}
 void Widget::OnKeyUp(const KeyUpEvent&) {}
 
 void Widget::OnCharInput(const CharInputEvent&) {}
+
+}

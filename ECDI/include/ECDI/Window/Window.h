@@ -4,6 +4,8 @@
 #include<string>
 #include<Windows.h>
 #include<memory>
+namespace ECDI
+{
 
 class WindowClass;
 class Application;
@@ -23,7 +25,7 @@ class Window {
 		/// @param title       窗口标题
 		/// @param width       窗口总宽度（含边框和标题栏）
 		/// @param height      窗口总高度
-		Window(Application* app,const WindowClass &windowClass,const std::wstring&title,int width,int height);
+		Window(Application* app,const WindowClass &windowClass,const std::string&title,int width,int height);
 
 		// 禁止拷贝
 		Window(const Window&) = delete;
@@ -73,3 +75,5 @@ private:
 		Widget* m_focusedWidget = nullptr;	///< 当前拥有键盘焦点的 Widget（非拥有指针）
 
 };
+
+}

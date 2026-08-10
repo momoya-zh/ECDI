@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "ECDI/EventSystem/Input/InputEvent.h"
+namespace ECDI
+{
 
 /// @brief 字符输入事件
 /// @details
@@ -50,3 +52,5 @@ private:
 	wchar_t m_character;
 
 };
+
+}

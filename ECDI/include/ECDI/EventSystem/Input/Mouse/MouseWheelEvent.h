@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include"MouseEvent.h"
+namespace ECDI
+{
 
 /// @brief 鼠标滚轮事件
 /// @details
@@ -46,3 +48,5 @@ public:
 private:
 	int m_delta;
 };
+
+}

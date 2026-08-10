@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include<string_view>
+namespace ECDI
+{
 
 /// @brief 日志级别，从低到高排列
 enum class LogLevel
@@ -35,3 +37,5 @@ public:
 	Logger& operator=(const Logger&) = delete;
 
 };
+
+}

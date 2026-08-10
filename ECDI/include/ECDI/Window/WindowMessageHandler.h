@@ -5,6 +5,8 @@
 
 #include "ECDI/EventSystem/Input/Mouse/MouseButton.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyCode.h"
+namespace ECDI
+{
 
 class Window;
 class Application;
@@ -43,3 +45,5 @@ private:
 	/// @details 通过 lParam 位区分左右修饰键（Shift/Ctrl/Alt）和主键盘/小键盘 Enter
 	static KeyCode TranslateKeyCode(WPARAM wParam, LPARAM lParam);
 };
+
+}
