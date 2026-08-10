@@ -1,6 +1,6 @@
 ﻿#pragma once
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief Framework 事件类型枚举
 /// @details

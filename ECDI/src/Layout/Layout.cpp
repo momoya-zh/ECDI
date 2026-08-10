@@ -1,4 +1,3 @@
-namespace ECDI
-{
+namespace ECDI{
 
 }

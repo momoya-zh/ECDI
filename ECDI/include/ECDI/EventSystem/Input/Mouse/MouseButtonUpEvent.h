@@ -1,8 +1,8 @@
 ﻿#pragma once
 
 #include"MouseButtonEvent.h"
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 鼠标按键释放事件
 /// @details

@@ -1,8 +1,8 @@
 ﻿#pragma once
 
 #include "Widget.h"
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 容器面板 Widget
 /// @details
@@ -27,9 +27,5 @@ protected:
 
 	void OnPaint(HDC hdc,int x,int y)override;
 };
-
-
-
-
 
 }

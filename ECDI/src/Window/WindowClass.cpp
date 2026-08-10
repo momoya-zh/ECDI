@@ -3,8 +3,8 @@
 #include"ECDI/Core/String.h"
 
 #include<system_error>
-namespace ECDI
-{
+
+namespace ECDI{
 
 WindowClass::WindowClass(const std::string& className, WNDPROC windowProc):
 	m_className(UTF8ToWide(className)),

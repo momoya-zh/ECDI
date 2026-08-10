@@ -3,8 +3,8 @@
 #include"Widget.h"
 
 #include<string>
-namespace ECDI
-{
+
+namespace ECDI{
 
 class Label: public Widget{
 

@@ -1,14 +1,17 @@
 ﻿#pragma once
 
 #include "ECDI/EventSystem/Input/InputEvent.h"
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 字符输入事件
 /// @details
-/// 由 WM_CHAR 翻译而来，携带一个 wchar_t 字符码。
+/// 由 WM_CHAR 翻译而来，携带一个 Unicode 码点（char32_t）。
 /// 与 KeyEvent 平级（不继承 KeyEvent），因为 CharInput 的数据是字符而非物理按键。
-/// 一个 wchar_t = 一个事件（接受 emoji 拆成两个代理项的限制）。
+/// 一个事件 = 一个码点：Win32 翻译器负责把 UTF-16 代理对组合成完整码点
+/// （emoji 等 BMP 外字符收到一个事件，而非两个代理项）。
+/// 框架层不暴露 wchar_t、不绑定 UTF-16 编码表示——编码表示泄露是分层破坏
+/// （wchar_t 本身不是问题，问题是事件层暴露了平台的 UTF-16 表示）。
 class CharInputEvent : public InputEvent{
 
 public:
@@ -30,26 +33,26 @@ public:
 public:
 
 	/// @param window    事件来源窗口
-	/// @param character 输入的字符（wchar_t）
+	/// @param codepoint 输入的 Unicode 码点（U+0000 - U+10FFFF，跨平台语义明确）
 	CharInputEvent(
 		Window* window,
-		wchar_t character
-	):InputEvent(window),m_character(character){
+		char32_t codepoint
+	):InputEvent(window),m_codepoint(codepoint){
 
 	}
 
 
-	/// @brief 获取输入的字符
-	wchar_t GetCharacter() const noexcept {
+	/// @brief 获取输入的 Unicode 码点
+	char32_t GetCodepoint() const noexcept {
 
-		return m_character;
+		return m_codepoint;
 
 	}
 
 
 private:
 
-	wchar_t m_character;
+	char32_t m_codepoint;
 
 };
 

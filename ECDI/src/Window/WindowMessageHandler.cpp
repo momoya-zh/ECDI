@@ -20,13 +20,10 @@
 
 #include <Windows.h>
 #include <windowsx.h>  // GET_X_LPARAM / GET_Y_LPARAM / GET_WHEEL_DELTA_WPARAM 等宏
-namespace ECDI
-{
 
-WindowMessageHandler::WindowMessageHandler(Application* app) noexcept
-	: m_application(app)
-{
-}
+namespace ECDI{
+
+WindowMessageHandler::WindowMessageHandler(Application* app) noexcept: m_application(app){}
 
 std::optional<LRESULT> WindowMessageHandler::Handle(
 	Window* window,
@@ -34,10 +31,8 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 	UINT msg,
 	WPARAM wParam,
 	LPARAM lParam
-)
-{
-	switch (msg)
-	{
+){
+	switch (msg){
 
 	// ── 窗口生命周期 ──────────────────────────────────
 
@@ -192,16 +187,17 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		return std::nullopt;
 	}
 
-	// 字符输入（WM_CHAR 的 wParam 直接是字符码）
+	// 字符输入：WM_CHAR/WM_SYSCHAR 的 wParam 是 UTF-16 码元流。
+	// 共享代理对状态（本质都是 UTF-16 input unit stream，不维护两套状态）
 	case WM_CHAR:
-	case WM_SYSCHAR:
-	{
-		CharInputEvent event(
-			window,
-			static_cast<wchar_t>(wParam)
-		);
+	case WM_SYSCHAR:{
+		// UTF-16 码元 → 代理对组合 → 完整 Unicode 码点；nullopt 时无事件产出
+		if (auto codepoint = ConsumeCodeUnit(static_cast<wchar_t>(wParam))){
 
-		m_application->OnEvent(event);
+			CharInputEvent event(window, *codepoint);
+
+			m_application->OnEvent(event);
+		}
 
 		return std::nullopt;
 	}
@@ -211,10 +207,43 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 	return std::nullopt;
 }
 
-MouseButton WindowMessageHandler::TranslateMouseButton(
-	UINT message,
-	WPARAM wParam
-) {
+std::optional<char32_t> WindowMessageHandler::ConsumeCodeUnit(wchar_t unit){
+
+	// 高位代理 0xD800-0xDBFF：暂存等待低位配对
+	if (unit >= 0xD800 && unit <= 0xDBFF){
+
+		// 若已有未配对高位：替换（旧序列非法，简单丢弃——不负责 error recovery）
+		m_pendingHighSurrogate = unit;
+
+		return std::nullopt;
+	}
+
+	// 低位代理 0xDC00-0xDFFF：与暂存高位组合成完整码点
+	if (unit >= 0xDC00 && unit <= 0xDFFF){
+
+		if (m_pendingHighSurrogate != 0){
+
+			const char32_t codepoint =
+				0x10000
+				+ (static_cast<char32_t>(m_pendingHighSurrogate) - 0xD800) * 0x400
+				+ (static_cast<char32_t>(unit) - 0xDC00);
+
+			m_pendingHighSurrogate = 0;
+
+			return codepoint;
+		}
+
+		// 孤立低位代理：非法输入，丢弃（不负责 Unicode error recovery）
+		return std::nullopt;
+	}
+
+	// 普通 BMP 字符：清空待配对状态，独立事件
+	m_pendingHighSurrogate = 0;
+
+	return static_cast<char32_t>(unit);
+}
+
+MouseButton WindowMessageHandler::TranslateMouseButton(UINT message,WPARAM wParam) {
 
 	switch (message) {
 
@@ -255,11 +284,7 @@ MouseButton WindowMessageHandler::TranslateMouseButton(
 
 }
 
-KeyCode WindowMessageHandler::TranslateKeyCode(
-	WPARAM wParam,
-	LPARAM lParam
-)
-{
+KeyCode WindowMessageHandler::TranslateKeyCode(WPARAM wParam,LPARAM lParam){
 	switch (wParam)
 	{
 		// ── Letters ──────────────────────────────────────
@@ -331,29 +356,32 @@ KeyCode WindowMessageHandler::TranslateKeyCode(
 	case VK_F24: return KeyCode::F24;
 
 		// ── Modifier Keys（通过 lParam 位区分左右）──────
-	case VK_SHIFT:
-	{
+	case VK_SHIFT:{
+
 		UINT scanCode = (lParam >> 16) & 0xFF;
 		UINT vk = MapVirtualKey(scanCode, MAPVK_VSC_TO_VK_EX);
 		return vk == VK_RSHIFT ?
 			KeyCode::RightShift :
 			KeyCode::LeftShift;
+
 	}
 
-	case VK_CONTROL:
-	{
+	case VK_CONTROL:{
+
 		bool extended = (lParam & (1 << 24)) != 0;
 		return extended ?
 			KeyCode::RightCtrl :
 			KeyCode::LeftCtrl;
+
 	}
 
-	case VK_MENU:
-	{
+	case VK_MENU:{
+
 		bool extended = (lParam & (1 << 24)) != 0;
 		return extended ?
 			KeyCode::RightAlt :
 			KeyCode::LeftAlt;
+
 	}
 
 	// ── Win Keys ────────────────────────────────────────
@@ -361,12 +389,13 @@ KeyCode WindowMessageHandler::TranslateKeyCode(
 	case VK_RWIN:  return KeyCode::RightWin;
 
 		// Enter（主键盘 Enter / 小键盘 Enter，通过 lParam extended bit 区分）
-	case VK_RETURN:
-	{
+	case VK_RETURN:{
+
 		bool extended = (lParam & (1 << 24)) != 0;
 		return extended ?
 			KeyCode::NumpadEnter :
 			KeyCode::Enter;
+
 	}
 
 	// ── Numpad Digits ───────────────────────────────────
@@ -428,6 +457,7 @@ KeyCode WindowMessageHandler::TranslateKeyCode(
 	case VK_OEM_MINUS:  return KeyCode::Minus;
 	case VK_OEM_COMMA:  return KeyCode::Comma;
 	case VK_OEM_PERIOD: return KeyCode::Period;
+
 	}
 
 	return KeyCode::Unknown;

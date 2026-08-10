@@ -1,14 +1,13 @@
 ﻿#pragma once
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 框架层键盘按键枚举（与 Win32 VK_* 解耦）
 /// @details
 /// 覆盖标准 VK_* 中所有键盘消息能传递的键。
 /// 不包含 Fn/Power/多媒体键（这些键不产生 WM_KEYDOWN/WM_CHAR）。
 /// 修饰键（Shift/Ctrl/Alt）通过 lParam 位区分左右。
-enum class KeyCode
-{
+enum class KeyCode{
 	Unknown,
 
 	// ── 字母键 ──────────────────────────────────────

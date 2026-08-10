@@ -4,8 +4,7 @@
 #include<string>
 #include<Windows.h>
 #include<memory>
-namespace ECDI
-{
+namespace ECDI{
 
 class WindowClass;
 class Application;

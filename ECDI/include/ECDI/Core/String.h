@@ -2,8 +2,7 @@
 
 #include <string>
 
-namespace ECDI
-{
+namespace ECDI{
 
 /// @brief UTF-8（std::string）→ UTF-16（std::wstring）
 /// @details 字符串边界转换工具（Win32 平台层使用）。

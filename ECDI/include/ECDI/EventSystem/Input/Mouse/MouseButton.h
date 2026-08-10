@@ -1,6 +1,5 @@
 ﻿#pragma once
-namespace ECDI
-{
+namespace ECDI{
 
 /// @brief 鼠标按键枚举
 enum class MouseButton{

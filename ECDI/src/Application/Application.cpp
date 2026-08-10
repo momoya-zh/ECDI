@@ -21,9 +21,8 @@
 
 #include<Windows.h>
 #include<algorithm>
-namespace ECDI
-{
 
+namespace ECDI{
 
 Application::Application():m_windowClass("ECDI FrameWork",Window::WindowProc) {
 
@@ -287,4 +286,5 @@ void Application::OnKeyUp(const KeyUpEvent& event) {
 	target->OnKeyUp(event);
 
 }
+
 }

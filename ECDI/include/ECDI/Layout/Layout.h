@@ -1,6 +1,6 @@
 #pragma once
-namespace ECDI
-{
+
+namespace ECDI{
 
 class Widget;
 
@@ -13,4 +13,5 @@ public:
     virtual void Arrange(Widget& parent) = 0;
 
 };
+
 }

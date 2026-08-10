@@ -2,9 +2,8 @@
 
 #include "MouseEvent.h"
 #include "MouseButton.h"
-namespace ECDI
-{
 
+namespace ECDI{
 
 /// @brief 鼠标按键事件基类（ButtonDown / ButtonUp 的公共基类）
 /// @details 在 MouseEvent 基础上增加 MouseButton（哪个按键）。

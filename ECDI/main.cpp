@@ -6,7 +6,9 @@
 #include "ECDI/Widget/Label.h"
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Layout/VerticalLayout.h"
+#include "ECDI/Core/String.h"
 #include <iostream>
+#include <string>
 #include <utility>
 
 /// @brief 演示用按钮：override OnClick 输出日志（验证事件分发 + Focus 获取）
@@ -24,6 +26,33 @@ protected:
 	}
 };
 
+/// @brief 将 Unicode 码点编码为 UTF-8 追加到字符串（演示用；框架不负责 UTF-8 编码）
+static void AppendUTF8(std::string& out, char32_t codepoint)
+{
+	if (codepoint <= 0x7F)
+	{
+		out += static_cast<char>(codepoint);
+	}
+	else if (codepoint <= 0x7FF)
+	{
+		out += static_cast<char>(0xC0 | (codepoint >> 6));
+		out += static_cast<char>(0x80 | (codepoint & 0x3F));
+	}
+	else if (codepoint <= 0xFFFF)
+	{
+		out += static_cast<char>(0xE0 | (codepoint >> 12));
+		out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+		out += static_cast<char>(0x80 | (codepoint & 0x3F));
+	}
+	else
+	{
+		out += static_cast<char>(0xF0 | (codepoint >> 18));
+		out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+		out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+		out += static_cast<char>(0x80 | (codepoint & 0x3F));
+	}
+}
+
 /// @brief 演示用 Application：override OnCharInput 输出日志（验证键盘分发链路）
 class DemoApplication : public ECDI::Application
 {
@@ -31,13 +60,15 @@ protected:
 
 	void OnCharInput(const ECDI::CharInputEvent& event) override
 	{
-		wchar_t buffer[64]{};
-		swprintf_s(
-			buffer,
-			L"CharInput: %c",
-			event.GetCharacter()
+		// 码点 → UTF-8 → UTF-16（Logger 契约）→ 调试输出；emoji 验证代理对组合
+		std::string utf8 = "CharInput: ";
+
+		AppendUTF8(utf8, event.GetCodepoint());
+
+		ECDI::Logger::Log(
+			ECDI::LogLevel::Info,
+			ECDI::UTF8ToWide(utf8)
 		);
-		ECDI::Logger::Log(ECDI::LogLevel::Info, buffer);
 	}
 };
 

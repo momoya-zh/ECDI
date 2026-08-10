@@ -2,14 +2,14 @@
 
 #include<Windows.h>
 
-namespace ECDI
-{
+namespace ECDI{
 
-std::wstring UTF8ToWide(const std::string& utf8)
-{
-	if (utf8.empty())
-	{
+std::wstring UTF8ToWide(const std::string& utf8){
+
+	if (utf8.empty()){
+
 		return {};
+
 	}
 
 	const int length = MultiByteToWideChar(
@@ -20,9 +20,10 @@ std::wstring UTF8ToWide(const std::string& utf8)
 		nullptr,
 		0);
 
-	if (length <= 0)
-	{
+	if (length <= 0){
+
 		return {};
+
 	}
 
 	std::wstring result(length, L'\0');
@@ -38,11 +39,12 @@ std::wstring UTF8ToWide(const std::string& utf8)
 	return result;
 }
 
-std::string WideToUTF8(const std::wstring& wide)
-{
-	if (wide.empty())
-	{
+std::string WideToUTF8(const std::wstring& wide){
+
+	if (wide.empty()){
+
 		return {};
+
 	}
 
 	const int length = WideCharToMultiByte(
@@ -55,9 +57,10 @@ std::string WideToUTF8(const std::wstring& wide)
 		nullptr,
 		nullptr);
 
-	if (length <= 0)
-	{
+	if (length <= 0){
+
 		return {};
+
 	}
 
 	std::string result(length, '\0');

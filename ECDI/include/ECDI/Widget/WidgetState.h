@@ -1,6 +1,6 @@
 ﻿#pragma once
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief Widget 的基础布尔状态
 struct WidgetState{

@@ -1,8 +1,8 @@
 ﻿#pragma once
 
 #include"ECDI/EventSystem/Input/InputEvent.h"
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 鼠标事件基类
 /// @details

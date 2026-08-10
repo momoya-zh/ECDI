@@ -9,8 +9,8 @@
 #include<string>
 #include<system_error>
 #include<Windows.h>
-namespace ECDI
-{
+
+namespace ECDI{
 
 Window::Window(Application* app,const WindowClass &windowClass,const std::string& title, int width, int height)
 	: m_application(app)

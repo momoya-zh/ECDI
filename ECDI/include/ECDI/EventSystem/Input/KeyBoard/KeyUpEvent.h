@@ -1,8 +1,8 @@
 ﻿#pragma once
 
 #include "KeyEvent.h"
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 键盘按键释放事件
 /// @details

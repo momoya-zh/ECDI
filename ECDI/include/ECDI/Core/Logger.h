@@ -1,12 +1,12 @@
 ﻿#pragma once
 
 #include<string_view>
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 日志级别，从低到高排列
-enum class LogLevel
-{
+enum class LogLevel{
+
 	Trace,		///< 最细粒度的跟踪信息
 	Debug,		///< 调试信息
 	Info,		///< 一般信息

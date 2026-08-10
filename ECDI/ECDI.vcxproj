@@ -190,10 +190,12 @@
     <ClInclude Include="Include\ECDI\EventSystem\EventType.h" />
     <ClInclude Include="Include\ECDI\Core\Logger.h" />
     <ClInclude Include="Include\ECDI\Core\String.h" />
+    <ClInclude Include="Include\ECDI\Core\Rect.h" />
+    <ClInclude Include="Include\ECDI\Core\Point.h" />
+    <ClInclude Include="Include\ECDI\Core\Color.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h" />
     <ClInclude Include="Include\ECDI\Widget\Label.h" />
     <ClInclude Include="Include\ECDI\Widget\Panel.h" />
-    <ClInclude Include="Include\ECDI\Widget\Geometry.h" />
     <ClInclude Include="Include\ECDI\Widget\Widget.h" />
     <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
     <ClInclude Include="Include\ECDI\Window\WindowMessageHandler.h" />

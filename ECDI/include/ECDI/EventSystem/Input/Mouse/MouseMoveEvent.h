@@ -1,9 +1,8 @@
 ﻿#pragma once
 
 #include "MouseEvent.h"
-namespace ECDI
-{
 
+namespace ECDI{
 
 /// @brief 鼠标移动事件
 /// @details

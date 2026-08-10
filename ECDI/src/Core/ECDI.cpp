@@ -6,14 +6,14 @@
 #include<sstream>
 #include<Windows.h>
 
-namespace ECDI::Detail
-{
+namespace ECDI::Detail{
+
 	void HandleAssertFailure(
 		std::string_view expression,
 		std::string_view file,
 		int line,
-		std::string_view function)
-	{
+		std::string_view function){
+
 		// 将窄字符串信息转为宽字符串（当前项目源文件均为 ASCII 兼容编码）
 		std::wstring wExpression(expression.begin(), expression.end());
 		std::wstring wFile(file.begin(), file.end());

@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "Geometry.h"
+#include "ECDI/Core/Rect.h"
 #include "WidgetState.h"
 
 #include <vector>
@@ -12,8 +12,7 @@
 struct HDC__;
 using HDC = HDC__*;
 
-namespace ECDI
-{
+namespace ECDI{
 
 // 前向声明：避免头文件循环依赖
 class MouseMoveEvent;
@@ -37,8 +36,7 @@ class Layout;
 /// - Geometry：位置与尺寸（SetPosition / SetSize / GetX 等）
 /// - State：   可见性与启用状态（IsVisible / IsEnabled）
 /// - Event：   事件响应虚函数（OnMouseMove / OnKeyDown 等）
-class Widget
-{
+class Widget{
 
 public:
 
@@ -79,21 +77,21 @@ public:
 	// ── Geometry ────────────────────────────────────
 
 	/// @brief 获取几何信息（位置 + 尺寸）的只读引用
-	const Geometry& GetGeometry() const noexcept { return m_geometry; }
+	const Rect& GetGeometry() const noexcept { return m_geometry; }
 
 	/// @brief 设置相对于父 Widget 的位置
-	void SetPosition(int x, int y) { m_geometry.x = x; m_geometry.y = y; }
+	void SetPosition(int x, int y) { m_geometry.x = static_cast<float>(x); m_geometry.y = static_cast<float>(y); }
 
 	/// @brief 设置宽高
-	void SetSize(int w, int h) { m_geometry.width = w; m_geometry.height = h; }
+	void SetSize(int w, int h) { m_geometry.width = static_cast<float>(w); m_geometry.height = static_cast<float>(h); }
 
-	int GetX() const noexcept { return m_geometry.x; }
+	int GetX() const noexcept { return static_cast<int>(m_geometry.x); }
 
-	int GetY() const noexcept { return m_geometry.y; }
+	int GetY() const noexcept { return static_cast<int>(m_geometry.y); }
 
-	int GetWidth() const noexcept { return m_geometry.width; }
+	int GetWidth() const noexcept { return static_cast<int>(m_geometry.width); }
 
-	int GetHeight() const noexcept { return m_geometry.height; }
+	int GetHeight() const noexcept { return static_cast<int>(m_geometry.height); }
 
 
 	// ── State ───────────────────────────────────────
@@ -167,7 +165,7 @@ private:
 
 	std::vector<std::unique_ptr<Widget>> m_children;	///< 子节点列表（有序，后添加的在上层）
 
-	Geometry m_geometry;		///< 位置与尺寸
+	Rect m_geometry;		///< 位置与尺寸（Core 公共类型 Rect(float)，决策 1）
 
 	WidgetState m_state;		///< 可见性与启用状态
 
@@ -176,8 +174,7 @@ private:
 protected:
 
 	/// @brief 判断局部坐标 (x,y) 是否落在当前 Widget 的命中区域内
-	/// @details
-	/// 默认实现：矩形区域 [0, width) × [0, height)。
+	/// @details /// 默认实现：矩形区域 [0, width) × [0, height)。
 	/// 子类可 override 实现圆形、不规则形状等自定义命中区域（Template Method）。
 	virtual bool ContainsPoint(int x, int y) const noexcept;
 

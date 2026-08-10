@@ -4,8 +4,7 @@
 #include<stdexcept>
 #include<cassert>
 #include<Windows.h>
-namespace ECDI
-{
+namespace ECDI{
 
 /// @brief 将 LogLevel 转为可读的宽字符串标签
 static std::wstring_view ToString(LogLevel level)noexcept {

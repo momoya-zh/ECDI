@@ -1,11 +1,10 @@
 ﻿#include "ECDI/Widget/Panel.h"
 
 #include<Windows.h>
-namespace ECDI
-{
 
-void Panel::OnPaint(HDC hdc,int x,int y)
-{
+namespace ECDI{
+
+void Panel::OnPaint(HDC hdc,int x,int y){
     RECT rect{
         x,
 
@@ -20,4 +19,5 @@ void Panel::OnPaint(HDC hdc,int x,int y)
     FillRect(hdc,&rect,(HBRUSH)GetStockObject(LTGRAY_BRUSH));
 
 }
+
 }

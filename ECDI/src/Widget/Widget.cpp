@@ -15,8 +15,8 @@
 
 #include <algorithm>
 #include <utility>
-namespace ECDI
-{
+
+namespace ECDI{
 
 Widget::Widget() = default;
 
@@ -124,8 +124,8 @@ Widget* Widget::HitTest(int x, int y) noexcept {
 		Widget* child = it->get();
 
 		// 坐标转换：从当前 Widget 的局部坐标转到子 Widget 的局部坐标
-		const int localX = x - child->m_geometry.x;
-		const int localY = y - child->m_geometry.y;
+		const int localX = x - static_cast<int>(child->m_geometry.x);
+		const int localY = y - static_cast<int>(child->m_geometry.y);
 
 		// 递归检测子节点
 		if (Widget* target = child->HitTest(localX, localY))
@@ -194,8 +194,8 @@ void Widget::Paint(HDC hdc,int offsetX,int offsetY){
 	if (!IsVisible())
 		return;
 
-	int x = offsetX + m_geometry.x;
-	int y = offsetY + m_geometry.y;
+	int x = offsetX + static_cast<int>(m_geometry.x);
+	int y = offsetY + static_cast<int>(m_geometry.y);
 
 	OnPaint(hdc,x,y);
 
@@ -206,10 +206,6 @@ void Widget::Paint(HDC hdc,int offsetX,int offsetY){
 	}
 
 }
-
-
-
-
 
 // ── 事件处理默认实现（空函数，子类按需 override）────────────
 

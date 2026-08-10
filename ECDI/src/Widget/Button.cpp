@@ -4,8 +4,9 @@
 
 #include<Windows.h>
 #include<utility>
-namespace ECDI
-{
+
+namespace ECDI{
+
 
 Button::Button(const std::wstring& text):m_text(text){
 
@@ -51,11 +52,7 @@ void Button::OnMouseButtonUp(const MouseButtonUpEvent&){
 
 void Button::OnClick(){}
 
-void Button::OnPaint(
-	HDC hdc,
-	int x,
-	int y)
-{
+void Button::OnPaint(HDC hdc,int x,int y){
 	RECT rect{
 
 		x,
@@ -72,4 +69,5 @@ void Button::OnPaint(
 	FillRect(hdc,&rect,brush);
 	DeleteObject(brush);
 }
+
 }

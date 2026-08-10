@@ -14,13 +14,11 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
-namespace ECDI
-{
 
-void EventRouter::OnEvent(
-	const Event& event
-)
-{
+namespace ECDI{
+
+void EventRouter::OnEvent(const Event& event){
+
 	EventDispatcher dispatcher(event);
 
 	// 依次尝试分派到各事件类型的具名处理函数

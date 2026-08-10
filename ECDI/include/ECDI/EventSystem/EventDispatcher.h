@@ -3,8 +3,8 @@
 #include "Event.h"
 
 #include <utility>
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief 事件类型分派器（模板分派）
 /// @details

@@ -2,10 +2,10 @@
 
 #include<string_view>
 
-namespace ECDI
-{
-	namespace Detail
-	{
+namespace ECDI{
+
+	namespace Detail{
+
 		/// @brief 断言失败处理函数（内部使用）
 		/// @param expression 失败的条件表达式文本
 		/// @param file       源文件路径

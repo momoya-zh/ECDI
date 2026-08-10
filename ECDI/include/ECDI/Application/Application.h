@@ -6,8 +6,8 @@
 #include<memory>
 #include<string>
 #include<vector>
-namespace ECDI
-{
+
+namespace ECDI{
 
 class WindowCloseRequestedEvent;
 class WindowCreatedEvent;
@@ -32,8 +32,8 @@ class Widget;
 ///
 /// 事件流控制（HitTest → Target Dispatch → Bubbling）全部在 Application 完成，
 /// Widget 只负责事件响应。
-class Application : public EventRouter
-{
+class Application : public EventRouter{
+
 public :
 
 	friend class Window;

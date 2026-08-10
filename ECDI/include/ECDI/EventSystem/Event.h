@@ -1,8 +1,8 @@
 ﻿#pragma once
 
 #include "EventType.h"
-namespace ECDI
-{
+
+namespace ECDI{
 
 class Window;
 

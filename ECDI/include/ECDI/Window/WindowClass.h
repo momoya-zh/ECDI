@@ -2,8 +2,8 @@
 
 #include<Windows.h>
 #include<string>
-namespace ECDI
-{
+
+namespace ECDI{
 
 /// @brief Win32 窗口类（WNDCLASS）的 RAII 包装
 /// @details
