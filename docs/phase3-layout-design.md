@@ -3,6 +3,17 @@
 > 阶段：第三阶段 Widget System → Layout 子模块 → 详细设计（五阶段法第 3 步）
 > 前置：Layout 职责确认 + 初步设计已评审通过（决策表 21 项）
 > 本文档拍板详细设计层面的事项，供评审后进入实现。
+> **状态：已实现并测试通过（2026-08-06，T1~T4 全过）。修订记录见文末。**
+
+---
+
+## 修订记录
+
+| 版本 | 日期 | 修改 |
+|------|------|------|
+| v1.0 | 2026-08-06 | 初版详细设计 |
+| v1.1 | 2026-08-06 | 实现中修正：`unique_ptr<Layout>` 成员的**构造函数**也必须移出内联（非仅析构），详见 §3.2 |
+| v1.2 | 2026-08-08 | 文档整理：标注已实现状态；修正文件结构（`Layout.cpp` 按 YAGNI 未创建） |
 
 ---
 
@@ -28,8 +39,8 @@ ECDI/include/ECDI/Layout/
     VerticalLayout.h    ← 第一版布局实现
 
 ECDI/src/Layout/
-    Layout.cpp          ← 纯虚基类（可无实现，占位）
     VerticalLayout.cpp  ← Arrange 实现
+    Layout.cpp          ← 未创建（YAGNI：基类仅内联析构 + 纯虚函数，无实现内容）
 ```
 
 include 关系：
@@ -152,22 +163,30 @@ void Arrange();
 std::unique_ptr<Layout> m_layout;   ///< 布局策略（非拥有性：不持有 children）
 ```
 
-### 3.2 析构函数调整（关键实现细节）
+### 3.2 构造函数/析构函数调整（关键实现细节，v1.1 修正）
 
-现状：`virtual ~Widget() = default;`（头文件内联）
+现状：`Widget() = default;` 与 `virtual ~Widget() = default;`（头文件内联）
 
-改造：**声明式析构，定义移入 Widget.cpp**：
+改造：**构造函数与析构函数都改声明式，定义移入 Widget.cpp**：
 
 ```cpp
 // Widget.h
-virtual ~Widget();     // 不再 = default 内联
+Widget();            // 不再 = default 内联
+virtual ~Widget();   // 不再 = default 内联
 
 // Widget.cpp
 #include "ECDI/Layout/Layout.h"
+Widget::Widget() = default;
 Widget::~Widget() = default;   // 此处 Layout 是完整类型，unique_ptr 可正确析构
 ```
 
-原因：`std::unique_ptr<Layout>` 成员析构需要 Layout 完整类型，而 Widget.h 只前向声明 Layout。内联 `= default` 会在每个包含 Widget.h 的编译单元生成析构点，导致编译错误。
+原因：`std::unique_ptr<Layout>` 成员要求 Layout 完整类型才能生成删除器。内联 `= default` 会在每个包含 Widget.h 的编译单元实例化构造函数/析构函数：
+
+- **析构函数**：`delete m_layout` 需要 `sizeof(Layout)` → 前向声明不够 → C2027
+- **构造函数**：同样会炸——构造函数自带**异常清理路径**（构造过程中抛异常时要析构已构造的成员 `m_layout`），该路径同样实例化 `unique_ptr<Layout>::~unique_ptr`。实测：只移析构不移动构造函数，Button.cpp/Label.cpp/main.cpp 全部报 C2027，错误定位在 `<memory>` 的 `default_delete<Layout>::operator()`（MSVC C2027 / C2338 / C4150）
+
+> 这是 PIMPL 惯用法的经典配套规则：持有 `unique_ptr<不完整类型>` 成员的类，其构造函数和析构函数的定义都必须放在能看到完整类型的翻译单元。
+> 附注：`SetLayout` 的传参方式（按值 vs `&&`）与此问题无关，两者均可用。
 
 ### 3.3 新增 GetChildAt（Layout 的前置依赖）
 
@@ -304,4 +323,4 @@ void Application::OnWindowResized(const WindowResizedEvent& event)
 4. VerticalLayout 不跳过不可见子 Widget——确认接受？
 5. 目录 `ECDI/include/ECDI/Layout/` + `ECDI/src/Layout/`——命名与位置是否认可？
 
-确认后进入实现。
+
