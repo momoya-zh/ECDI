@@ -25,7 +25,7 @@ public:
 
 protected:
 
-	void OnPaint(HDC hdc,int x,int y)override;
+	void OnPaint(PaintContext& ctx,int x,int y)override;
 };
 
 }

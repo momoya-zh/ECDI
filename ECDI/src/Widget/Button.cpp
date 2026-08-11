@@ -2,7 +2,6 @@
 #include"ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include"ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
 
-#include<Windows.h>
 #include<utility>
 
 namespace ECDI{
@@ -52,22 +51,18 @@ void Button::OnMouseButtonUp(const MouseButtonUpEvent&){
 
 void Button::OnClick(){}
 
-void Button::OnPaint(HDC hdc,int x,int y){
-	RECT rect{
+void Button::OnPaint(PaintContext& ctx,int x,int y){
 
-		x,
-
-		y,
-
-		x + GetWidth(),
-
-		y + GetHeight()
-
-	};
-
-	HBRUSH brush = CreateSolidBrush(RGB(80,120,220));
-	FillRect(hdc,&rect,brush);
-	DeleteObject(brush);
+	// 决策 6：最终坐标 x/y + GetWidth/GetHeight；颜色用 FromRGBA8 精确保持原 RGB(80,120,220)
+	ctx.DrawRect(
+		Rect{
+			static_cast<float>(x),
+			static_cast<float>(y),
+			static_cast<float>(GetWidth()),
+			static_cast<float>(GetHeight())
+		},
+		Color::FromRGBA8(80, 120, 220)
+	);
 }
 
 }

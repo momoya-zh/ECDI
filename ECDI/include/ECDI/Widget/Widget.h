@@ -1,16 +1,11 @@
 ﻿#pragma once
 
 #include "ECDI/Core/Rect.h"
+#include "ECDI/Render/PaintContext.h"
 #include "WidgetState.h"
 
 #include <vector>
 #include <memory>
-
-// Phase 3 GDI 临时桥梁：必须保持在全局作用域（HDC 是 Windows.h 的全局类型；
-// 放进 namespace ECDI 会声明 ECDI::HDC__（与 ::HDC__ 不同的类）→ 类型不匹配编译错误。
-// Phase 4 删除此桥梁（见 docs/phase4-renderer-design.md §13）。
-struct HDC__;
-using HDC = HDC__*;
 
 namespace ECDI{
 
@@ -154,7 +149,7 @@ public:
 
 	const Widget* GetChildAt(size_t index) const noexcept;
 
-	void Paint(HDC hdc,int offsetX,int offsetY);
+	void Paint(PaintContext& ctx,int offsetX,int offsetY);
 
 private:
 
@@ -178,7 +173,7 @@ protected:
 	/// 子类可 override 实现圆形、不规则形状等自定义命中区域（Template Method）。
 	virtual bool ContainsPoint(int x, int y) const noexcept;
 
-	virtual void OnPaint(HDC hdc,int x,int y);
+	virtual void OnPaint(PaintContext& ctx,int x,int y);
 };
 
 }

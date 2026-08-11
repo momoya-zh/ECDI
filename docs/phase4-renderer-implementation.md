@@ -2,7 +2,7 @@
 
 > 前置：`docs/phase4-renderer-design.md` v1.7（42 条决策 + §20 Header 规则 + §21 实现顺序）
 > 本文档：落地实现蓝图——文件树 / 类定义 / 成员 / 签名 / Commit 修改范围 / 验证方式
-> 修订记录：v1.0 初版（2026-08-10）
+> 修订记录：v1.0 初版（2026-08-10）；v1.1（2026-08-11）实现完成，4.1-4.7 全部落地并验证通过
 
 ---
 
@@ -51,7 +51,7 @@ Core 三个类型**纯数据、全 inline 头文件实现**（无 .cpp）；Rend
 | `Widget/Panel.h/.cpp`、`Button.h/.cpp` | OnPaint 改 PaintContext 版本 | 4.6 |
 | `Window/Window.h/.cpp` | 加 GDIBackend/Renderer/CommandBuffer 成员 + PaintFrame 编排 | 4.7 |
 | `ECDI/ECDI.vcxproj` | 文件条目增删（Geometry 删 / Rect·Point·Color·Render 加） | 随各 commit |
-| `CMakeLists.txt` | src 为 GLOB_RECURSE 自动包含（新 .cpp 需 rerun cmake）；include 目录已含 | 随各 commit |
+| `CMakeLists.txt` | src 为 GLOB_RECURSE + **CONFIGURE_DEPENDS**（新增 .cpp 自动 reconfigure，避免 GLOB 旧列表漏文件）；include 目录已含 | 随各 commit |
 
 ## 3. 类定义与接口（照抄 design §18，供直接编码）
 
@@ -243,9 +243,9 @@ public:
 
 ## 4. Commit 修改范围与验证（修订后顺序 4.1 - 4.7）
 
-### Commit 4.1 Core 类型 + Geometry 迁移（决策 1）
+### Commit 4.1 Core 类型 + Geometry 迁移（决策 1）✅ 已实现
 
-**新增**：`Core/Rect.h`、`Core/Point.h`、`Core/Color.h`
+**新增**：`Core/Rect.h`、`Core/Point.h`、`Core/Color.h`（float + 默认初始化 + constexpr 标准色/FromRGBA8）
 **修改**：
 - `Widget.h`：include `"Geometry.h"` → `"ECDI/Core/Rect.h"`；成员 `Geometry m_geometry` → `Rect m_geometry`（float）；`GetGeometry()` 返回 `const Rect&`；`SetPosition/SetSize` 内部 int→float 存；`GetX/GetY/GetWidth/GetHeight` 内部 float→int 返（公开 API 保持 int 签名）
 - `Widget.cpp`：3 处 `m_geometry.x/y/width/height` 的 int 语义适配（float 成员需 cast）：
@@ -255,25 +255,25 @@ public:
 **删除**：`Widget/Geometry.h`（vcxproj ClInclude 移除）
 **验证**：编译 + main.exe 窗口正常显示（绘制逻辑未动，决策 1"Layout/HitTest/main.cpp 零改动"——Layout 走公共 API 已确认）
 
-### Commit 4.2 RenderingBackend 接口
+### Commit 4.2 RenderingBackend 接口 ✅ 已实现
 
 **新增**：`Render/RenderingBackend.h`（§20 示例，零依赖）
 **验证**：编译
 
-### Commit 4.3 RenderCommand
+### Commit 4.3 RenderCommand ✅ 已实现
 
 **新增**：`Render/RenderCommand.h`（DrawRectCommand + variant + CommandBuffer）
 **验证**：编译
 
-### Commit 4.4 PaintContext
+### Commit 4.4 PaintContext ✅ 已实现
 
 **新增**：`Render/PaintContext.h/.cpp`（决策 42：class + 私有 m_commands + emplace_back）
 **验证**：编译（4.5 起随 Renderer 测试覆盖，不在本 commit 单独测）
 
-### Commit 4.5 Renderer + RecordingBackend（核心验证点）
+### Commit 4.5 Renderer + RecordingBackend（核心验证点）✅ 已实现
 
 **新增**：`Render/Renderer.h/.cpp`、`Render/RecordingBackend.h/.cpp`
-**验证（第二层测试，不碰 GDI）**：main.cpp 临时测试段（或独立测试函数）：
+**验证（第二层测试，不碰 GDI）**：main.cpp wWinMain 开头测试段（5 条 FRAMEWORK_ASSERT：数量 + rect/color 逐字段）：
 ```cpp
 ECDI::RecordingBackend backend;
 ECDI::Renderer renderer(backend);
@@ -284,18 +284,18 @@ renderer.Execute(commands);
 ```
 **窗口仍正常**（此阶段未动 Widget 绘制——Widget 还画 HDC）
 
-### Commit 4.6 Widget Paint 迁移（决策 6，⚠️ 窗口暂白是预期中间态）
+### Commit 4.6 Widget Paint 迁移（决策 6，⚠️ 窗口暂白是预期中间态）✅ 已实现
 
 **修改**：
 - `Widget.h/.cpp`：`Paint(HDC, int, int)` → `Paint(PaintContext&, int offsetX, int offsetY)`（决策 6 **必须保留 offset**）；`OnPaint(HDC, int, int)` → `OnPaint(PaintContext&, int x, int y)`；**删除 HDC 临时桥梁**（`struct HDC__; using HDC = HDC__*;`，§13 迁移项）；include PaintContext.h
 - `Panel.h/.cpp`：`OnPaint` → `ctx.DrawRect(Rect{float(x), float(y), float(GetWidth()), float(GetHeight())}, Color::Gray())`
-- `Button.h/.cpp`：`OnPaint` → `ctx.DrawRect(..., Color::Blue())`（RGB(80,120,220) 的近似）
-- `Window.cpp`：WM_PAINT 特判里 `m_rootWidget->Paint(hdc,0,0)` 签名已变——**临时方案**：绘制部分先注释（窗口空白），4.7 接入 Renderer 后恢复。⚠️ 注意 OnPaint 不能用 GetRect()（§19-1，最终坐标 x/y + GetWidth/GetHeight）
+- `Button.h/.cpp`：`OnPaint` → `ctx.DrawRect(..., Color::FromRGBA8(80, 120, 220))`（**精确保持原 RGB(80,120,220)**，验收视觉一致）
+- `Window.cpp`：WM_PAINT 特判里 `m_rootWidget->Paint(hdc,0,0)` 签名已变——**临时方案**：绘制部分先注释（窗口白底），4.7 接入 Renderer 后恢复。⚠️ 注意 OnPaint 不能用 GetRect()（§19-1，最终坐标 x/y + GetWidth/GetHeight）
 **验证**：编译 + 第一层测试（Widget→PaintContext→CommandBuffer 断言：构造 Panel/Button，Paint 到 buffer，检查 DrawRectCommand 的 Rect/Color/顺序）
 
-### Commit 4.7 GDIBackend + Window 接入（窗口恢复）
+### Commit 4.7 GDIBackend + Window 接入（窗口恢复）✅ 已实现
 
-**新增**：`Render/GDIBackend.h/.cpp`（§3.6 全套）
+**新增**：`Render/GDIBackend.h/.cpp`（§3.6 全套：懒创建/先建后替/逆序释放/ToByte Clamp/完整 BitBlt）
 **修改**：
 - `Window.h`：include `GDIBackend.h` + `Renderer.h` + `RenderCommand.h`（§20 值成员必须完整类型）；成员声明顺序 **`GDIBackend m_backend;` 在 `Renderer m_renderer;` 前**（决策 35，初始化按声明序、析构逆序）；加 `CommandBuffer m_commands;`（决策 4 Window 持有复用）；加私有 `void PaintFrame();`（决策 41 改名）
 - `Window.cpp`：
@@ -329,7 +329,7 @@ void Window::PaintFrame() {
 10. **OnPaint 撞名已解决**（决策 41）：Window 编排叫 `PaintFrame`，Widget 绘制虚方法叫 `OnPaint`
 11. **编码**：新源文件 UTF-8（已配 /utf-8，MSVC 不再报 C4819）
 
-## 6. 验收标准（design §17）
+## 6. 验收标准（design §17）✅ 全部达成（2026-08-11）
 
 1. main.cpp 两窗口正常显示（灰 Panel + 蓝 Button）
 2. 视觉结果与 Phase 3 基本一致（Root 白 / Panel 灰 / Button 蓝）
@@ -341,3 +341,9 @@ void Window::PaintFrame() {
 ## 7. 修订记录
 
 - v1.0（2026-08-10）初版：基于 design v1.7 + GPT 评审修正（双缓冲并入 GDIBackend，Commit 4.7 一次到位；顺序 4.1-4.7；测试随 commit）
+- v1.1（2026-08-11）**实现完成**：4.1-4.7 全部落地并验证通过（三工具链编译 + Debug 运行两窗口正常显示 + 双层测试断言通过）。与实际实现的差异记录：
+  1. **Button 颜色**用 `Color::FromRGBA8(80, 120, 220)` 精确保持原 RGB（v1.0 写的 `Color::Blue()` 近似作废——验收要求视觉一致）
+  2. **测试段**放 main.cpp `wWinMain` 开头（4.5 五条 Recording 断言 + 4.6 命令断言，Debug 自检保留）
+  3. **CMake GLOB 加 `CONFIGURE_DEPENDS`**（新增 .cpp 自动 reconfigure——踩过"新文件不生效"的 GLOB 坑）
+  4. WindowProc 的 WM_PAINT 特判删除 → HandleMessage `case WM_PAINT: PaintFrame(); return 0;`（决策 39，与 WM_DESTROY/WM_SIZE 并列）
+  5. Geometry.h 在实现前已不存在（用户提前删除），仅清 vcxproj 条目

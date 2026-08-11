@@ -7,6 +7,10 @@
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Layout/VerticalLayout.h"
 #include "ECDI/Core/String.h"
+#include "ECDI/Core/ECDIAssert.h"
+#include "ECDI/Render/PaintContext.h"
+#include "ECDI/Render/Renderer.h"
+#include "ECDI/Render/RecordingBackend.h"
 #include <iostream>
 #include <string>
 #include <utility>
@@ -74,6 +78,44 @@ protected:
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, int nCmdShow)
 {
+	// ── 4.5 第二层测试：Command → Renderer → RecordingBackend（不碰 GDI）──
+	// 验证：Renderer 是否正确把命令转换成 Backend 的 DrawRect() 调用（决策 12）
+	{
+		ECDI::RecordingBackend backend;
+		ECDI::Renderer renderer(backend);
+
+		ECDI::CommandBuffer commands;
+		commands.emplace_back(ECDI::DrawRectCommand{ ECDI::Rect{ 0, 0, 100, 100 }, ECDI::Color::Red() });
+		commands.emplace_back(ECDI::DrawRectCommand{ ECDI::Rect{ 10, 20, 30, 40 }, ECDI::Color::Gray() });
+
+		renderer.Execute(commands);
+
+		// 断言：2 条命令 → 2 次 DrawRect 调用，内容逐字段匹配
+		FRAMEWORK_ASSERT(backend.draws.size() == 2);
+		FRAMEWORK_ASSERT(backend.draws[0].rect.x == 0.0f && backend.draws[0].rect.width == 100.0f);
+		FRAMEWORK_ASSERT(backend.draws[0].color.r == 1.0f && backend.draws[0].color.a == 1.0f);
+		FRAMEWORK_ASSERT(backend.draws[1].rect.x == 10.0f && backend.draws[1].rect.y == 20.0f);
+		FRAMEWORK_ASSERT(backend.draws[1].color.g == 0.5f);
+	}
+
+	// ── 4.6 第一层测试：Widget → PaintContext → CommandBuffer（命令断言，不碰 GDI）──
+	// 验证：Panel::OnPaint 是否正确产生 DrawRectCommand（Rect/Color/顺序）
+	{
+		ECDI::CommandBuffer commands;
+		ECDI::PaintContext ctx(commands);
+
+		ECDI::Panel panel;
+		panel.SetPosition(10, 20);
+		panel.SetSize(100, 50);
+		panel.Paint(ctx, 0, 0);
+
+		FRAMEWORK_ASSERT(commands.size() == 1);
+		const auto& cmd = std::get<ECDI::DrawRectCommand>(commands[0]);
+		FRAMEWORK_ASSERT(cmd.rect.x == 10.0f && cmd.rect.y == 20.0f);
+		FRAMEWORK_ASSERT(cmd.rect.width == 100.0f && cmd.rect.height == 50.0f);
+		FRAMEWORK_ASSERT(cmd.color.r == 0.5f && cmd.color.g == 0.5f);   // Color::Gray()
+	}
+
 	DemoApplication application;
 
 	// ── 窗口 1：Widget Demo ────────────────────────────

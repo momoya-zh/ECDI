@@ -84,6 +84,18 @@
     <ClCompile Include="src\Layout\VerticalLayout.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="src\Core\String.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Render\PaintContext.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Render\Renderer.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Render\RecordingBackend.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\ECDI\Window\Window.h">
@@ -173,9 +185,6 @@
     <ClInclude Include="Include\ECDI\Widget\Widget.h">
       <Filter>Widget</Filter>
     </ClInclude>
-    <ClInclude Include="Include\ECDI\Widget\Geometry.h">
-      <Filter>Widget</Filter>
-    </ClInclude>
     <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\CharInputEvent.h">
       <Filter>EventSystem\Input\KeyBoard</Filter>
     </ClInclude>
@@ -192,6 +201,33 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="include\ECDI\Layout\VerticalLayout.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Core\String.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Core\Rect.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Core\Point.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Core\Color.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Render\RenderingBackend.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Render\RenderCommand.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Render\PaintContext.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Render\Renderer.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Render\RecordingBackend.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

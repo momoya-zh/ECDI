@@ -2,9 +2,7 @@
 
 #include<string_view>
 
-namespace ECDI{
-
-	namespace Detail{
+namespace ECDI::Detail{
 
 		/// @brief 断言失败处理函数（内部使用）
 		/// @param expression 失败的条件表达式文本
@@ -18,7 +16,7 @@ namespace ECDI{
 			int line,
 			std::string_view function);
 	}
-}
+
 
 // Debug 模式：断言失败时输出详细信息并终止
 #ifdef _DEBUG

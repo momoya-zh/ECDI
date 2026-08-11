@@ -189,7 +189,7 @@ void Widget::Arrange(){
 
 }
 
-void Widget::Paint(HDC hdc,int offsetX,int offsetY){
+void Widget::Paint(PaintContext& ctx,int offsetX,int offsetY){
 	
 	if (!IsVisible())
 		return;
@@ -197,11 +197,11 @@ void Widget::Paint(HDC hdc,int offsetX,int offsetY){
 	int x = offsetX + static_cast<int>(m_geometry.x);
 	int y = offsetY + static_cast<int>(m_geometry.y);
 
-	OnPaint(hdc,x,y);
+	OnPaint(ctx,x,y);
 
 	for(auto& child : m_children){
 
-		child->Paint(hdc,x,y);
+		child->Paint(ctx,x,y);
 
 	}
 
@@ -209,7 +209,7 @@ void Widget::Paint(HDC hdc,int offsetX,int offsetY){
 
 // ── 事件处理默认实现（空函数，子类按需 override）────────────
 
-void Widget::OnPaint(HDC,int,int){}
+void Widget::OnPaint(PaintContext&,int,int){}
 
 void Widget::OnMouseMove(const MouseMoveEvent&) {}
 

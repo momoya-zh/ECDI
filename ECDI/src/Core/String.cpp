@@ -1,4 +1,4 @@
-#include"ECDI/Core/String.h"
+﻿#include"ECDI/Core/String.h"
 
 #include<Windows.h>
 

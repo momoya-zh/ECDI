@@ -4,6 +4,7 @@
 #include"ECDI/Widget/Widget.h"
 #include"ECDI/Core/ECDIAssert.h"
 #include"ECDI/Core/String.h"
+#include"ECDI/Render/PaintContext.h"
 
 
 #include<string>
@@ -14,7 +15,8 @@ namespace ECDI{
 
 Window::Window(Application* app,const WindowClass &windowClass,const std::string& title, int width, int height)
 	: m_application(app)
-	, m_messageHandler(m_application){
+	, m_messageHandler(m_application)
+	, m_renderer(m_backend){   // 决策 35：m_backend 先构造（默认构造），m_renderer 绑定引用
 
 	// 公共 API 为 UTF-8（std::string），在平台边界转换到 UTF-16（字符串边界划分）
 	const std::wstring wideTitle = UTF8ToWide(title);
@@ -43,6 +45,9 @@ Window::Window(Application* app,const WindowClass &windowClass,const std::string
 			"CreateWindowExW failed");
 
 	}
+
+	// 决策 35：hwnd 就绪后注入渲染后端（BeginFrame 才真正使用）
+	m_backend.SetHwnd(m_handle);
 
 	// 创建 RootWidget（Widget 树的根节点，代表窗口客户区）
 	m_rootWidget = std::make_unique<Widget>();
@@ -103,21 +108,6 @@ LRESULT CALLBACK Window::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
 	if (window) {
 
-		if (msg==WM_PAINT){
-
-			PAINTSTRUCT ps;
-
-			HDC hdc = BeginPaint(hwnd, &ps);
-
-			FillRect(hdc, &ps.rcPaint, (HBRUSH)GetStockObject(WHITE_BRUSH));
-
-			window->m_rootWidget->Paint(hdc,0,0);
-
-			EndPaint(hwnd, &ps);
-
-			return 0;
-		}
-
 		return window->HandleMessage(hwnd,msg, wParam, lParam);
 
 	}
@@ -130,6 +120,11 @@ LRESULT Window::HandleMessage(HWND hwnd,UINT msg, WPARAM wParam, LPARAM lParam) 
 
 	// ── 内部状态同步（在 Event 翻译前完成，保证 Handler 看到最新状态）──
 	switch (msg){
+
+	case WM_PAINT:
+		// 决策 39：绘制不走翻译器（不是 Event），Window 编排整帧
+		PaintFrame();
+		return 0;
 
 	case WM_DESTROY:
 		m_handle = nullptr;
@@ -158,6 +153,17 @@ LRESULT Window::HandleMessage(HWND hwnd,UINT msg, WPARAM wParam, LPARAM lParam) 
 
 	return DefWindowProcW(hwnd, msg, wParam, lParam);
 
+}
+
+void Window::PaintFrame()
+{
+	// 决策 10/13/33：完整编排，严格配对
+	m_commands.clear();                              // 决策 4：复用缓冲
+	PaintContext ctx(m_commands);
+	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
+	m_renderer.BeginFrame();                         // 决策 13：转发
+	m_renderer.Execute(m_commands);
+	m_renderer.EndFrame();
 }
 
 bool Window::Release() noexcept {

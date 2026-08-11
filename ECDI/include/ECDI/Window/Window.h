@@ -4,6 +4,9 @@
 #include<string>
 #include<Windows.h>
 #include<memory>
+#include"ECDI/Render/GDIBackend.h"
+#include"ECDI/Render/Renderer.h"
+#include"ECDI/Render/RenderCommand.h"
 namespace ECDI{
 
 class WindowClass;
@@ -63,6 +66,9 @@ private:
 		/// @brief 实例级消息处理（WindowProc 路由到这里）
 		LRESULT HandleMessage(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 
+		/// @brief 帧编排（决策 41 改名，原 OnPaint）：clear→Paint→BeginFrame→Execute→EndFrame
+		void PaintFrame();
+
 		HWND m_handle=nullptr;	///< 底层 Win32 窗口句柄
 
 		Application* m_application = nullptr;	///< 所属 Application
@@ -72,6 +78,12 @@ private:
 		std::unique_ptr<Widget> m_rootWidget;	///< Widget 树的根节点（拥有所有权）
 
 		Widget* m_focusedWidget = nullptr;	///< 当前拥有键盘焦点的 Widget（非拥有指针）
+
+		GDIBackend m_backend;	///< GDI 渲染后端（值成员，决策 35：声明在 Renderer 之前）
+
+		Renderer m_renderer;	///< 渲染执行器（引用 m_backend，决策 34）
+
+		CommandBuffer m_commands;	///< 命令缓冲（决策 4：Window 持有跨帧复用）
 
 };
 

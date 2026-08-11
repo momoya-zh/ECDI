@@ -9,8 +9,8 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build." FORCE)
 endif()
 
-# 源文件
-file(GLOB_RECURSE SOURCES
+# 源文件（CONFIGURE_DEPENDS：新增 .cpp 时自动触发重新 configure，避免 GLOB 旧列表漏文件）
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/main.cpp"
 )
