@@ -148,8 +148,17 @@ Widget* Application::FindFocusedWidget(Window& window)const noexcept {
 
 void Application::OnMouseMove(const MouseMoveEvent& event){
 
-	// 1. HitTest：通过坐标找到目标 Widget
-	Widget* target = FindTargetWidget(*event.GetWindow(), event.GetMouseX(), event.GetMouseY());
+	// 5.4.2：有 capture 直接派发（跳过 HitTest——按下后移出控件仍收 Move）
+	Window& window = *event.GetWindow();
+
+	Widget* target = window.GetCaptureWidget();
+
+	if (target == nullptr) {
+
+		// 1. HitTest：通过坐标找到目标 Widget
+		target = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
+
+	}
 
 	// 2. 无目标则忽略事件
 	if (target == nullptr) {
@@ -172,18 +181,28 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 
 void Application::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
-	Widget* target = FindTargetWidget(*event.GetWindow(), event.GetMouseX(), event.GetMouseY());
+	Window& window = *event.GetWindow();
+
+	Widget* target = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
 
 	if (target == nullptr) {
-	
+
+		// 防御：RootWidget 覆盖整个客户区，正常不会到这
 		return;
-	
+
 	}
-	
+
+	// 5.4.3 修正：点击不可聚焦区域（RootWidget/Panel 空白）→ 清焦点；可聚焦 → 设焦点
+	// （RootWidget 全覆盖下 target 恒非空，"空白"需按 CanFocus 判定——原 target==nullptr 判定永不触发）
+	window.SetFocusedWidget(target->CanFocus() ? target : nullptr);
+
+	// 5.4.2：隐式捕获——命中即捕获（后续 Move/Up 直接派发给它，跳过 HitTest）
+	window.SetCaptureWidget(target);
+
 	// Focus 获取：命中且可聚焦 → 设置窗口焦点（在派发前，避免回调改树影响焦点）
 	if (target->CanFocus()) {
 
-		event.GetWindow()->SetFocusedWidget(target);
+		window.SetFocusedWidget(target);
 
 	}
 
@@ -201,12 +220,14 @@ void Application::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 void Application::OnMouseButtonUp(const MouseButtonUpEvent& event){
 
-	Widget* target = FindTargetWidget(*event.GetWindow(), event.GetMouseX(), event.GetMouseY());
+	Window& window = *event.GetWindow();
+
+	Widget* target = window.GetCaptureWidget();
 
 	if (target == nullptr) {
 
-		return;
-	
+		target = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
+
 	}
 
 	Widget* current = target;
@@ -218,6 +239,9 @@ void Application::OnMouseButtonUp(const MouseButtonUpEvent& event){
 		current = current->GetParent();
 
 	}
+
+	// 5.4.2：先派发再释放（GPT 修正——控件 Up 里 GetCaptureWidget 仍能拿自身状态）
+	window.SetCaptureWidget(nullptr);
 
 }
 
@@ -259,15 +283,8 @@ void Application::OnCharInput(const CharInputEvent&event){
 
 void Application::OnKeyDown(const KeyDownEvent& event) {
 
-	Widget* target = FindFocusedWidget(*event.GetWindow());
-
-	if (target == nullptr) {
-	
-		return;
-
-	}
-
-	target->OnKeyDown(event);
+	// 5.4.4：键盘入口统一走 Window（Tab 拦截 + 焦点控件派发）——焦点属于 Window
+	event.GetWindow()->HandleKeyDown(event);
 
 }
 

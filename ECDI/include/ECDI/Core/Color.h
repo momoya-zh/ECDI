@@ -36,6 +36,9 @@ struct Color
 			a / 255.0f
 		};
 	}
+
+	/// @brief 相等比较（C++20 默认，r/g/b/a 四字段全比较；Alpha 就位后自动生效）
+	constexpr bool operator==(const Color&) const noexcept = default;
 };
 
 }

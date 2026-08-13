@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "ECDI/Core/Point.h"
 #include "ECDI/Core/Rect.h"
 #include "ECDI/Render/PaintContext.h"
 #include "ECDI/Widget/WidgetState.h"
@@ -10,6 +11,7 @@
 namespace ECDI{
 
 // 前向声明：避免头文件循环依赖
+class Window;
 class MouseMoveEvent;
 class MouseButtonUpEvent;
 class MouseButtonDownEvent;
@@ -128,6 +130,26 @@ public:
 	/// @details 只声明能力，visible/enabled 判断由事件系统前置处理
 	virtual bool CanFocus() const noexcept { return false; }
 
+	/// @brief 获得键盘焦点通知（5.4.3；由 Window::SetFocusedWidget 触发）
+	/// @details 子类 override 响应——TextBox 显示光标 / Button 画焦点框等；默认空实现
+	virtual void OnFocusGained() {}
+
+	/// @brief 失去键盘焦点通知（5.4.3；由 Window::SetFocusedWidget 触发）
+	/// @details 子类 override 响应——TextBox 清 Selection 等；默认空实现
+	virtual void OnFocusLost() {}
+
+	// ── 交互/重绘（5.4.1）────────────────────────────
+
+	/// @brief 请求重绘（上溯到根 → Window::Invalidate → WM_PAINT → PaintFrame）
+	/// @details 数据改变后调用（SetText / m_pressed / 未来 InsertCharacter 全走它）
+	void Invalidate();
+
+	/// @brief 当前 Widget 是否拥有键盘焦点（上溯到根查 Window 的焦点状态）
+	bool HasFocus() const noexcept;
+
+	/// @brief 获取绝对坐标（父链累加；TextBox 光标/ScrollBar/Popup/Tooltip 未来用）
+	Point GetAbsolutePosition() const noexcept;
+
 	// ── HitTest ─────────────────────────────────────
 
 	/// @brief 命中测试：在 Widget 子树中找到最深层的、包含 (x,y) 的 Widget
@@ -153,6 +175,11 @@ public:
 
 private:
 
+	/// @brief 设置所属 Window（仅 Window 构造 RootWidget 后调用；friend 授权）
+	void SetWindow(Window* window);
+
+	friend class Window;	///< SetWindow 私有化的配套授权
+
 	/// @brief 递归检测 widget 是否是 this 的后代（用于 AddChild 防环检测）
 	bool Contains(const Widget* widget) const noexcept;
 
@@ -166,7 +193,13 @@ private:
 
 	std::unique_ptr<Layout> m_layout;
 
+	Window* m_window = nullptr;		///< 所属 Window（非拥有；仅 RootWidget 由 Window 设置）
+
 protected:
+
+	/// @brief 获取所属 Window（沿父链上溯到根；派生控件可访问——TextBox/ScrollBar 等）
+	Window* GetWindow() noexcept;
+	const Window* GetWindow() const noexcept;
 
 	/// @brief 判断局部坐标 (x,y) 是否落在当前 Widget 的命中区域内
 	/// @details /// 默认实现：矩形区域 [0, width) × [0, height)。

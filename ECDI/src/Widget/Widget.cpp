@@ -10,6 +10,7 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/Layout/Layout.h"
+#include "ECDI/Window/Window.h"
 
 #include <algorithm>
 #include <utility>
@@ -222,5 +223,91 @@ void Widget::OnKeyDown(const KeyDownEvent&) {}
 void Widget::OnKeyUp(const KeyUpEvent&) {}
 
 void Widget::OnCharInput(const CharInputEvent&) {}
+
+// ── 交互/重绘（5.4.1）───────────────────────────────
+
+Window* Widget::GetWindow() noexcept{
+
+	Widget* root = this;
+
+	while (root->m_parent){
+
+		root = root->m_parent;
+
+	}
+
+	return root->m_window;
+
+}
+
+const Window* Widget::GetWindow() const noexcept{
+
+	const Widget* root = this;
+
+	while (root->m_parent){
+
+		root = root->m_parent;
+
+	}
+
+	return root->m_window;
+
+}
+
+void Widget::SetWindow(Window* window){
+
+	m_window = window;
+
+}
+
+void Widget::Invalidate(){
+
+	if (Window* window = GetWindow()){
+
+		window->Invalidate();
+
+	}
+
+}
+
+bool Widget::HasFocus() const noexcept{
+
+	const Widget* root = this;
+
+	while (root->m_parent){
+
+		root = root->m_parent;
+
+	}
+
+	return root->m_window && root->m_window->GetFocusedWidget() == this;
+
+}
+
+Point Widget::GetAbsolutePosition() const noexcept{
+
+	Point pos{
+
+		static_cast<float>(GetX()),
+
+		static_cast<float>(GetY())
+
+	};
+
+	const Widget* parent = m_parent;
+
+	while (parent){
+
+		pos.x += static_cast<float>(parent->GetX());
+
+		pos.y += static_cast<float>(parent->GetY());
+
+		parent = parent->GetParent();
+
+	}
+
+	return pos;
+
+}
 
 }

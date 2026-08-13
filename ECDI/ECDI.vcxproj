@@ -161,6 +161,7 @@
     <ClCompile Include="src\Widget\Label.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="src\Widget\Panel.cpp" />
+    <ClCompile Include="src\Widget\TextWidget.cpp" />
     <ClCompile Include="src\Widget\Widget.cpp" />
     <ClCompile Include="src\Window\WindowMessageHandler.cpp" />
     <ClCompile Include="src\Window\Window.cpp" />
@@ -209,6 +210,7 @@
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h" />
     <ClInclude Include="Include\ECDI\Widget\Label.h" />
     <ClInclude Include="Include\ECDI\Widget\Panel.h" />
+    <ClInclude Include="Include\ECDI\Widget\TextWidget.h" />
     <ClInclude Include="Include\ECDI\Widget\Widget.h" />
     <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
     <ClInclude Include="Include\ECDI\Window\WindowMessageHandler.h" />

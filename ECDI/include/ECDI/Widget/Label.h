@@ -1,14 +1,12 @@
 ﻿#pragma once
 
-#include "ECDI/Core/Color.h"
-#include "ECDI/Core/Font.h"
-#include "ECDI/Widget/Widget.h"
-
-#include <string>
+#include "ECDI/Widget/TextWidget.h"
 
 namespace ECDI{
 
-class Label: public Widget{
+/// @brief 文本标签控件（第一个文本消费者，5.2）
+/// @details 透明背景、只画文本；继承 TextWidget 默认对齐（左对齐 + 垂直居中）。
+class Label: public TextWidget{
 
 public:
 
@@ -18,27 +16,9 @@ public:
 
 	explicit Label(std::string&& text);
 
-	void SetText(const std::string& text);
-
-	void SetText(std::string&& text);
-
-	const std::string& GetText() const noexcept;
-
-	void SetTextColor(const Color& color);
-
-	const Color& GetTextColor() const noexcept;
-
 protected:
 
 	void OnPaint(PaintContext& ctx, int x, int y) override;
-
-private:
-
-	std::string m_text;
-
-	Color m_textColor = Color::Black();
-
-	Font m_font{};  // L4 预留：未来 SetFont() 一行接入（m_font = font），OnPaint 零改动
 
 };
 

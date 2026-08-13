@@ -166,6 +166,31 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 		FRAMEWORK_ASSERT(cmd.font.size == 14.0f);       // 默认 Font()
 	}
 
+	// ── 5.3 Button 文本链路：先背景后文本，命令顺序 = 绘制顺序 ──
+	// 验证：Button::OnPaint 先画蓝底（DrawRect）再画白字（DrawText，水平垂直居中）
+	{
+		ECDI::RecordingBackend backend;
+		ECDI::CommandBuffer commands;
+		ECDI::PaintContext ctx(commands, backend);
+
+		ECDI::Button button("OK");
+		button.SetPosition(10, 10);
+		button.SetSize(100, 40);
+		button.Paint(ctx, 0, 0);
+
+		FRAMEWORK_ASSERT(commands.size() == 2);                       // 背景 + 文本
+		const auto& bg = std::get<ECDI::DrawRectCommand>(commands[0]);   // 先背景
+		FRAMEWORK_ASSERT(bg.rect.x == 10.0f && bg.rect.width == 100.0f);
+		const auto& txt = std::get<ECDI::DrawTextCommand>(commands[1]);  // 后文本
+		FRAMEWORK_ASSERT(txt.text == "OK");
+		FRAMEWORK_ASSERT(txt.color == ECDI::Color::White());          // 完整比较（operator==）
+
+		const float expectedX = 10.0f + (100.0f - backend.MeasureText(ECDI::Font{}, "OK").width) / 2.0f;
+		FRAMEWORK_ASSERT(txt.pos.x == expectedX);                     // 水平居中（动态期望）
+		const float expectedY = 10.0f + (40.0f - backend.LineHeight(ECDI::Font{})) / 2.0f;
+		FRAMEWORK_ASSERT(txt.pos.y == expectedY);                     // 垂直居中（动态期望）
+	}
+
 	DemoApplication application;
 
 	// ── 窗口 1：Widget Demo ────────────────────────────
@@ -180,10 +205,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	auto label1 = std::make_unique<ECDI::Label>("ECDI Widget System");
 	label1->SetSize(300, 40);
 
-	auto btn1 = std::make_unique<DemoButton>(L"Click Me");
+	auto btn1 = std::make_unique<DemoButton>("Click Me");
 	btn1->SetSize(200, 50);
 
-	auto btn2 = std::make_unique<DemoButton>(L"Focus Test");
+	auto btn2 = std::make_unique<DemoButton>("Focus Test");
 	btn2->SetSize(200, 50);
 
 	panel1->AddChild(std::move(label1));
@@ -207,7 +232,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	auto label2 = std::make_unique<ECDI::Label>("Second Window");
 	label2->SetSize(300, 40);
 
-	auto btn3 = std::make_unique<DemoButton>(L"Another Button");
+	auto btn3 = std::make_unique<DemoButton>("Another Button");
 	btn3->SetSize(200, 50);
 
 	panel2->AddChild(std::move(label2));

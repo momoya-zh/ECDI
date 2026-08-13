@@ -5,14 +5,37 @@
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Core/String.h"
+#include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/Render/PaintContext.h"
 
 #include <Windows.h>
 
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace ECDI{
+
+namespace {
+
+// 5.4.4：DFS 收集可聚焦控件（树前序：父 → 子；匿名 namespace——Window 内部辅助，非公开能力）
+void CollectFocusables(Widget* node, std::vector<Widget*>& out){
+
+	if (node->CanFocus()){
+
+		out.push_back(node);
+
+	}
+
+	for (size_t i = 0; i < node->GetChildCount(); ++i){
+
+		CollectFocusables(node->GetChildAt(i), out);
+
+	}
+
+}
+
+}
 
 Window::Window(Application* app,const WindowClass &windowClass,const std::string& title, int width, int height)
 	: m_application(app)
@@ -52,6 +75,9 @@ Window::Window(Application* app,const WindowClass &windowClass,const std::string
 
 	// 创建 RootWidget（Widget 树的根节点，代表窗口客户区）
 	m_rootWidget = std::make_unique<Widget>();
+
+	// 5.4.1：根与 Window 建立关联（Widget::Invalidate/HasFocus 上溯到根后走它）
+	m_rootWidget->SetWindow(this);
 
 	FRAMEWORK_ASSERT(m_rootWidget != nullptr);
 
@@ -191,30 +217,123 @@ Widget* Window::GetFocusedWidget() const noexcept{
 
 }
 
+void Window::Invalidate(){
+
+	// 5.4.1：整个客户区无效 → WM_PAINT → PaintFrame（GDIBackend 双缓冲自动重绘）
+	if (m_handle){
+
+		InvalidateRect(m_handle, nullptr, FALSE);
+
+	}
+
+}
+
+void Window::SetCaptureWidget(Widget* widget){
+
+	// 5.4.2：隐式捕获——Down 命中设置、Up 后释放；非拥有指针（生命周期随 Widget 树）
+	m_captureWidget = widget;
+
+}
+
+Widget* Window::GetCaptureWidget() const noexcept{
+
+	return m_captureWidget;
+
+}
+
 void Window::SetFocusedWidget(Widget* widget){
 
-	// nullptr 表示清除焦点
-	if (widget == nullptr){
+	// 5.4.3：同控件短路——避免重复设置触发 Lost+Gained 空转
+	if (m_focusedWidget == widget){
 
-		m_focusedWidget = nullptr;
-		
 		return;
-	
+
 	}
 
-	// 沿 Parent 链回溯到树根，验证 widget 属于当前窗口的 Widget 树
-	Widget* current = widget;
+	// 5.4.3：通知旧焦点失去（数据变更前）
+	if (m_focusedWidget){
 
-	while (current->GetParent()){
+		m_focusedWidget->OnFocusLost();
 
-		current = current->GetParent();
-	
 	}
-
-	// 树根必须是当前窗口的 RootWidget
-	FRAMEWORK_ASSERT(current == &GetRootWidget());
 
 	m_focusedWidget = widget;
+
+	if (widget != nullptr){
+
+		// 沿 Parent 链回溯到树根，验证 widget 属于当前窗口的 Widget 树
+		Widget* current = widget;
+
+		while (current->GetParent()){
+
+			current = current->GetParent();
+
+		}
+
+		// 树根必须是当前窗口的 RootWidget
+		FRAMEWORK_ASSERT(current == &GetRootWidget());
+
+		// 5.4.3：通知新焦点获得
+		widget->OnFocusGained();
+
+	}
+
+	// 5.4.3：焦点变化重绘（设新/清空都重绘）
+	Invalidate();
+
+}
+
+void Window::HandleKeyDown(const KeyDownEvent& event){
+
+	// 5.4.4：Tab 框架拦截（焦点导航是 Window 职责；仅正向——Shift+Tab 留 5.5 与 KeyEvent 修饰键一起）
+	if (event.GetKeyCode() == KeyCode::Tab){
+
+		FocusNext();
+
+		return;
+
+	}
+
+	if (m_focusedWidget){
+
+		m_focusedWidget->OnKeyDown(event);
+
+	}
+
+}
+
+void Window::FocusNext(int direction){
+
+	// 5.4.4：树前序收集 CanFocus 控件 → 当前焦点 index + direction → 循环取模
+	std::vector<Widget*> focusables;
+
+	CollectFocusables(m_rootWidget.get(), focusables);
+
+	if (focusables.empty()){
+
+		return;
+
+	}
+
+	int index = -1;
+
+	for (size_t i = 0; i < focusables.size(); ++i){
+
+		if (focusables[i] == m_focusedWidget){
+
+			index = static_cast<int>(i);
+
+			break;
+
+		}
+
+	}
+
+	const int size = static_cast<int>(focusables.size());
+
+	const int next = (index < 0) ? 0 : (index + direction + size) % size;
+
+	SetFocusedWidget(focusables[next]);
 
 }
 

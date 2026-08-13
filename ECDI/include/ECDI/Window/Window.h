@@ -18,6 +18,7 @@ namespace ECDI{
 class WindowClass;
 class Application;
 class Widget;
+class KeyDownEvent;
 
 /// @brief 框架层 Window 封装
 /// @details
@@ -67,6 +68,20 @@ class Window {
 		/// @brief 获取当前拥有键盘焦点的 Widget（可能为 nullptr）
 		Widget* GetFocusedWidget() const noexcept;
 
+		/// @brief 请求重绘整个客户区（Widget::Invalidate 上溯到根后调用 → WM_PAINT → PaintFrame）
+		void Invalidate();
+
+		/// @brief 设置鼠标捕获控件（5.4.2 隐式捕获：Down 命中即捕获；Up 后释放）
+		/// @param widget 捕获目标（后续 MouseMove/Up 直接派发给它，跳过 HitTest）；nullptr 释放
+		void SetCaptureWidget(Widget* widget);
+
+		/// @brief 获取当前鼠标捕获控件（无捕获返回 nullptr）
+		Widget* GetCaptureWidget() const noexcept;
+
+		/// @brief 键盘按键按下入口（5.4.4；Application::OnKeyDown 路由到这里）
+		/// @details Tab → FocusNext（框架拦截，焦点导航是 Window 职责）；否则派发给焦点控件
+		void HandleKeyDown(const KeyDownEvent& event);
+
 private:
 
 		/// @brief 实例级消息处理（WindowProc 路由到这里）
@@ -74,6 +89,10 @@ private:
 
 		/// @brief 帧编排（决策 41 改名，原 OnPaint）：clear→Paint→BeginFrame→Execute→EndFrame
 		void PaintFrame();
+
+		/// @brief 焦点导航（5.4.4）：树前序收集 CanFocus 控件，当前焦点按 direction 移动（循环）
+		/// @param direction +1 正向（5.4 仅正向）；5.5 Shift+Tab 传 -1 反向
+		void FocusNext(int direction = 1);
 
 		HWND m_handle=nullptr;	///< 底层 Win32 窗口句柄
 
@@ -84,6 +103,8 @@ private:
 		std::unique_ptr<Widget> m_rootWidget;	///< Widget 树的根节点（拥有所有权）
 
 		Widget* m_focusedWidget = nullptr;	///< 当前拥有键盘焦点的 Widget（非拥有指针）
+
+		Widget* m_captureWidget = nullptr;	///< 当前鼠标捕获控件（5.4.2，非拥有指针）
 
 		GDIBackend m_backend;	///< GDI 渲染后端（值成员，决策 35：声明在 Renderer 之前）
 
