@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include"ECDI/EventSystem/Input/InputEvent.h"
+#include "ECDI/EventSystem/Input/InputEvent.h"
 
 namespace ECDI{
 

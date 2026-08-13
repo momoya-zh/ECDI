@@ -1,11 +1,12 @@
 ﻿#pragma once
-#include"ECDI/Window/WindowClass.h"
-#include"ECDI/Window/Window.h"
-#include"ECDI/EventSystem/EventRouter.h"
 
-#include<memory>
-#include<string>
-#include<vector>
+#include "ECDI/Window/WindowClass.h"
+#include "ECDI/Window/Window.h"
+#include "ECDI/EventSystem/EventRouter.h"
+
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace ECDI{
 

@@ -176,6 +176,7 @@
     <ClInclude Include="include\ECDI\Render\RenderingBackend.h" />
     <ClInclude Include="include\ECDI\Render\RecordingBackend.h" />
     <ClInclude Include="include\ECDI\Render\GDIBackend.h" />
+    <ClInclude Include="include\ECDI\Render\TextMeasurer.h" />
     <ClInclude Include="Include\ECDI\Widget\Button.h" />
     <ClInclude Include="Include\ECDI\Core\ECDIAssert.h" />
     <ClInclude Include="Include\ECDI\EventSystem\EventRouter.h" />
@@ -203,6 +204,8 @@
     <ClInclude Include="Include\ECDI\Core\Rect.h" />
     <ClInclude Include="Include\ECDI\Core\Point.h" />
     <ClInclude Include="Include\ECDI\Core\Color.h" />
+    <ClInclude Include="Include\ECDI\Core\Size.h" />
+    <ClInclude Include="Include\ECDI\Core\Font.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h" />
     <ClInclude Include="Include\ECDI\Widget\Label.h" />
     <ClInclude Include="Include\ECDI\Widget\Panel.h" />

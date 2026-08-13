@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include"ECDI/EventSystem/Event.h"
+#include "ECDI/EventSystem/Event.h"
 
 namespace ECDI{
 

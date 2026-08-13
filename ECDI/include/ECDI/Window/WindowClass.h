@@ -1,7 +1,11 @@
 ﻿#pragma once
 
-#include<Windows.h>
-#include<string>
+#include <Windows.h>
+#ifdef DrawText
+#undef DrawText   // Win32 宏防护：DrawText → DrawTextW 会污染公共头的方法名（与 GDIBackend.h 同款）
+#endif
+
+#include <string>
 
 namespace ECDI{
 

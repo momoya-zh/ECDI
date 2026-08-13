@@ -1,8 +1,10 @@
-#pragma once
+﻿#pragma once
 
-#include"Widget.h"
+#include "ECDI/Core/Color.h"
+#include "ECDI/Core/Font.h"
+#include "ECDI/Widget/Widget.h"
 
-#include<string>
+#include <string>
 
 namespace ECDI{
 
@@ -12,21 +14,32 @@ public:
 
 	Label() = default;
 
-	explicit Label(const std::wstring&text);
+	explicit Label(const std::string& text);
 
-	explicit Label(std::wstring&&text);
+	explicit Label(std::string&& text);
 
-	void SetText(const std::wstring& text);
+	void SetText(const std::string& text);
 
-	void SetText(std::wstring&& text);
+	void SetText(std::string&& text);
 
-	const std::wstring& GetText()const noexcept;
+	const std::string& GetText() const noexcept;
+
+	void SetTextColor(const Color& color);
+
+	const Color& GetTextColor() const noexcept;
+
+protected:
+
+	void OnPaint(PaintContext& ctx, int x, int y) override;
 
 private:
 
-	std::wstring m_text;
+	std::string m_text;
+
+	Color m_textColor = Color::Black();
+
+	Font m_font{};  // L4 预留：未来 SetFont() 一行接入（m_font = font），OnPaint 零改动
 
 };
-
 
 }

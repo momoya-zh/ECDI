@@ -1,6 +1,6 @@
-﻿#include"ECDI/Core/String.h"
+﻿#include "ECDI/Core/String.h"
 
-#include<Windows.h>
+#include <Windows.h>
 
 namespace ECDI{
 

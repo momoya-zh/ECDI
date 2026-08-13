@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "Widget.h"
+#include "ECDI/Widget/Widget.h"
 
 namespace ECDI{
 

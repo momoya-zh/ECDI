@@ -2,7 +2,7 @@
 
 #include "ECDI/Core/Rect.h"
 #include "ECDI/Render/PaintContext.h"
-#include "WidgetState.h"
+#include "ECDI/Widget/WidgetState.h"
 
 #include <vector>
 #include <memory>

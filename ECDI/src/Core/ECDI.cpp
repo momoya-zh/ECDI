@@ -1,10 +1,12 @@
-﻿#include"ECDI/Core/ECDIAssert.h"
-#include"ECDI/Core/Logger.h"
+﻿#include "ECDI/Core/ECDIAssert.h"
 
-#include<string>
-#include<cassert>
-#include<sstream>
-#include<Windows.h>
+#include "ECDI/Core/Logger.h"
+
+#include <Windows.h>
+
+#include <string>
+#include <cassert>
+#include <sstream>
 
 namespace ECDI::Detail{
 

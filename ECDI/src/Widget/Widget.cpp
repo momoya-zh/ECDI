@@ -1,16 +1,14 @@
 ﻿#include "ECDI/Widget/Widget.h"
-#include "ECDI/Core/ECDIAssert.h"
 
+#include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
-
 #include "ECDI/EventSystem/Input/KeyBoard/KeyEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
-
 #include "ECDI/Layout/Layout.h"
 
 #include <algorithm>

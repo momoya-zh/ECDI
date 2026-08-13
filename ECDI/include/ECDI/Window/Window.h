@@ -1,12 +1,18 @@
 ﻿#pragma once
-#include"WindowMessageHandler.h"
 
-#include<string>
-#include<Windows.h>
-#include<memory>
-#include"ECDI/Render/GDIBackend.h"
-#include"ECDI/Render/Renderer.h"
-#include"ECDI/Render/RenderCommand.h"
+#include "ECDI/Window/WindowMessageHandler.h"
+#include "ECDI/Render/GDIBackend.h"
+#include "ECDI/Render/Renderer.h"
+#include "ECDI/Render/RenderCommand.h"
+
+#include <Windows.h>
+#ifdef DrawText
+#undef DrawText   // Win32 宏防护：DrawText → DrawTextW 会污染公共头的方法名（与 GDIBackend.h 同款）
+#endif
+
+#include <string>
+#include <memory>
+
 namespace ECDI{
 
 class WindowClass;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include"RenderCommand.h"
+#include "ECDI/Render/RenderCommand.h"
 
 namespace ECDI {
 
@@ -20,6 +20,7 @@ namespace ECDI {
 
 	private:
 		void ExecuteCommand(const DrawRectCommand& cmd);   // 决策 9：重载集，未来加命令只加重载
+		void ExecuteCommand(const DrawTextCommand& cmd);   // D5：文本命令转发（穷尽性由 std::visit 保证）
 		RenderingBackend& m_backend;
 	};
 

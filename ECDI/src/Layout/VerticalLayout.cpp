@@ -1,6 +1,7 @@
 #include "ECDI/Layout/VerticalLayout.h"
 
 #include "ECDI/Widget/Widget.h"
+
 namespace ECDI{
 
 void VerticalLayout::Arrange(Widget& parent){

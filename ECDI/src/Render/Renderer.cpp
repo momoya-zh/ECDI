@@ -1,5 +1,6 @@
-#include"ECDI/Render/Renderer.h"
-#include"ECDI/Render/RenderingBackend.h"
+#include "ECDI/Render/Renderer.h"
+
+#include "ECDI/Render/RenderingBackend.h"
 
 namespace ECDI {
 
@@ -23,6 +24,12 @@ namespace ECDI {
 	void Renderer::ExecuteCommand(const DrawRectCommand& cmd)
 	{
 		m_backend.DrawRect(cmd.rect, cmd.color);
+	}
+
+	void Renderer::ExecuteCommand(const DrawTextCommand& cmd)
+	{
+		// D5：展开转发（不向 Backend 泄漏命令类型；参数原样传递）
+		m_backend.DrawText(cmd.pos, cmd.text, cmd.color, cmd.font);
 	}
 
 }

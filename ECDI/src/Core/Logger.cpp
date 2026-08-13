@@ -1,9 +1,11 @@
-﻿#include"ECDI/Core/Logger.h"
+﻿#include "ECDI/Core/Logger.h"
 
-#include<string>
-#include<stdexcept>
-#include<cassert>
-#include<Windows.h>
+#include <Windows.h>
+
+#include <string>
+#include <stdexcept>
+#include <cassert>
+
 namespace ECDI{
 
 /// @brief 将 LogLevel 转为可读的宽字符串标签

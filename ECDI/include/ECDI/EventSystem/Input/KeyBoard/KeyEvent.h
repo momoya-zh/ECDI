@@ -1,8 +1,7 @@
 ﻿#pragma once
 
 #include "ECDI/EventSystem/Input/InputEvent.h"
-
-#include "KeyCode.h"
+#include "ECDI/EventSystem/Input/KeyBoard/KeyCode.h"
 
 namespace ECDI{
 

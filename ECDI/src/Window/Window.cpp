@@ -1,15 +1,16 @@
-﻿#include"ECDI/Window/Window.h"
-#include"ECDI/Window/WindowClass.h"
-#include"ECDI/Application/Application.h"
-#include"ECDI/Widget/Widget.h"
-#include"ECDI/Core/ECDIAssert.h"
-#include"ECDI/Core/String.h"
-#include"ECDI/Render/PaintContext.h"
+﻿#include "ECDI/Window/Window.h"
 
+#include "ECDI/Window/WindowClass.h"
+#include "ECDI/Application/Application.h"
+#include "ECDI/Widget/Widget.h"
+#include "ECDI/Core/ECDIAssert.h"
+#include "ECDI/Core/String.h"
+#include "ECDI/Render/PaintContext.h"
 
-#include<string>
-#include<system_error>
-#include<Windows.h>
+#include <Windows.h>
+
+#include <string>
+#include <system_error>
 
 namespace ECDI{
 
@@ -159,7 +160,7 @@ void Window::PaintFrame()
 {
 	// 决策 10/13/33：完整编排，严格配对
 	m_commands.clear();                              // 决策 4：复用缓冲
-	PaintContext ctx(m_commands);
+	PaintContext ctx(m_commands, m_backend);         // 路线 X：m_backend 兼 TextMeasurer（测量帧无关）
 	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
 	m_renderer.BeginFrame();                         // 决策 13：转发
 	m_renderer.Execute(m_commands);

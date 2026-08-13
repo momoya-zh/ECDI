@@ -1,12 +1,10 @@
 ﻿#include "ECDI/EventSystem/EventRouter.h"
 
 #include "ECDI/EventSystem/EventDispatcher.h"
-
 #include "ECDI/EventSystem/Window/WindowCreatedEvent.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
-
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"

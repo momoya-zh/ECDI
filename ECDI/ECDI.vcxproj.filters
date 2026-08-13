@@ -96,6 +96,9 @@
     <ClCompile Include="src\Render\RecordingBackend.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="src\Render\GDIBackend.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\ECDI\Window\Window.h">
@@ -228,6 +231,18 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="include\ECDI\Render\RecordingBackend.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Render\GDIBackend.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ECDI\Render\TextMeasurer.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Core\Size.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Core\Font.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

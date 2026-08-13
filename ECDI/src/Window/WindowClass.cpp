@@ -1,8 +1,9 @@
-﻿#include"ECDI/Window/WindowClass.h"
-#include"ECDI/Window/Window.h"
-#include"ECDI/Core/String.h"
+﻿#include "ECDI/Window/WindowClass.h"
 
-#include<system_error>
+#include "ECDI/Window/Window.h"
+#include "ECDI/Core/String.h"
+
+#include <system_error>
 
 namespace ECDI{
 

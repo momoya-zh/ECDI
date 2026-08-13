@@ -1,8 +1,9 @@
-#include"ECDI/Widget/Button.h"
-#include"ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
-#include"ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
+#include "ECDI/Widget/Button.h"
 
-#include<utility>
+#include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
+
+#include <utility>
 
 namespace ECDI{
 

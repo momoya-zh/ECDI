@@ -1,4 +1,5 @@
 ﻿#include "ECDI/Window/Window.h"
+
 #include "ECDI/Application/Application.h"
 #include "ECDI/Core/Logger.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
@@ -7,10 +8,12 @@
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Layout/VerticalLayout.h"
 #include "ECDI/Core/String.h"
+#include "ECDI/Core/Point.h"
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Render/PaintContext.h"
 #include "ECDI/Render/Renderer.h"
 #include "ECDI/Render/RecordingBackend.h"
+
 #include <iostream>
 #include <string>
 #include <utility>
@@ -101,8 +104,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	// ── 4.6 第一层测试：Widget → PaintContext → CommandBuffer（命令断言，不碰 GDI）──
 	// 验证：Panel::OnPaint 是否正确产生 DrawRectCommand（Rect/Color/顺序）
 	{
+		ECDI::RecordingBackend measurer;             // 兼 TextMeasurer（固定测量值，测试便利）
 		ECDI::CommandBuffer commands;
-		ECDI::PaintContext ctx(commands);
+		ECDI::PaintContext ctx(commands, measurer);  // 路线 X：构造注入 TextMeasurer&
 
 		ECDI::Panel panel;
 		panel.SetPosition(10, 20);
@@ -116,6 +120,52 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 		FRAMEWORK_ASSERT(cmd.color.r == 0.5f && cmd.color.g == 0.5f);   // Color::Gray()
 	}
 
+	// ── 5.1 文本链路测试：DrawTextCommand → Renderer → RecordingBackend（转发原样性）──
+	// 验证：文本命令经 Renderer 展开转发后，Backend 收到的参数原样（D4 约束 2 / D5）
+	{
+		ECDI::RecordingBackend backend;
+		ECDI::Renderer renderer(backend);
+
+		ECDI::CommandBuffer commands;
+		commands.emplace_back(ECDI::DrawTextCommand{
+			ECDI::Point{ 30.0f, 40.0f },
+			"Hello ECDI",
+			ECDI::Color::Black(),
+			ECDI::Font{ 14.0f, "Arial" }
+		});
+		renderer.Execute(commands);
+
+		// 断言：1 条文本命令 → 1 次 DrawText 调用，参数原样转发
+		FRAMEWORK_ASSERT(backend.textDraws.size() == 1);
+		FRAMEWORK_ASSERT(backend.textDraws[0].pos.x == 30.0f && backend.textDraws[0].pos.y == 40.0f);
+		FRAMEWORK_ASSERT(backend.textDraws[0].text == "Hello ECDI");
+		FRAMEWORK_ASSERT(backend.textDraws[0].color.r == 0.0f);
+		FRAMEWORK_ASSERT(backend.textDraws[0].font.size == 14.0f);
+	}
+
+	// ── 5.2 Label 文本链路：Label → PaintContext → DrawTextCommand（命令断言）──
+	// 验证：第一个文本消费者——Label::OnPaint 正确产出 DrawTextCommand（text/pos/color/font）
+	{
+		ECDI::RecordingBackend backend;
+		ECDI::CommandBuffer commands;
+		ECDI::PaintContext ctx(commands, backend);
+
+		ECDI::Label label("Hello ECDI");
+		label.SetPosition(5, 5);
+		label.SetSize(100, 30);
+		label.Paint(ctx, 0, 0);
+
+		FRAMEWORK_ASSERT(commands.size() == 1);        // OnPaint 确实被调用（经 Widget::Paint 分发）
+		const auto& cmd = std::get<ECDI::DrawTextCommand>(commands[0]);
+		FRAMEWORK_ASSERT(cmd.text == "Hello ECDI");
+		FRAMEWORK_ASSERT(cmd.color.r == 0.0f);          // Color::Black()
+		FRAMEWORK_ASSERT(cmd.pos.x == 5.0f);
+
+		const float expectedY = 5.0f + (30.0f - backend.LineHeight(ECDI::Font{})) / 2.0f;
+		FRAMEWORK_ASSERT(cmd.pos.y == expectedY);       // 验证"用了垂直居中公式"，不耦合模拟值
+		FRAMEWORK_ASSERT(cmd.font.size == 14.0f);       // 默认 Font()
+	}
+
 	DemoApplication application;
 
 	// ── 窗口 1：Widget Demo ────────────────────────────
@@ -127,7 +177,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	panel1->SetSize(300, 250);
 	panel1->SetLayout(std::make_unique<ECDI::VerticalLayout>());
 
-	auto label1 = std::make_unique<ECDI::Label>(L"ECDI Widget System");
+	auto label1 = std::make_unique<ECDI::Label>("ECDI Widget System");
 	label1->SetSize(300, 40);
 
 	auto btn1 = std::make_unique<DemoButton>(L"Click Me");
@@ -154,7 +204,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	panel2->SetSize(300, 200);
 	panel2->SetLayout(std::make_unique<ECDI::VerticalLayout>());
 
-	auto label2 = std::make_unique<ECDI::Label>(L"Second Window");
+	auto label2 = std::make_unique<ECDI::Label>("Second Window");
 	label2->SetSize(300, 40);
 
 	auto btn3 = std::make_unique<DemoButton>(L"Another Button");

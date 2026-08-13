@@ -1,26 +1,24 @@
-﻿#include"ECDI/Application/Application.h"
+﻿#include "ECDI/Application/Application.h"
 
-#include"ECDI/Window/Window.h"
-#include"ECDI/EventSystem/Window/WindowResizedEvent.h"
-#include"ECDI/EventSystem/Window/WindowDestroyEvent.h"
-#include"ECDI/EventSystem/Window/WindowCreatedEvent.h"
-#include"ECDI/EventSystem/Window/WindowCloseRequsted.h"
+#include "ECDI/Window/Window.h"
+#include "ECDI/EventSystem/Window/WindowResizedEvent.h"
+#include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
+#include "ECDI/EventSystem/Window/WindowCreatedEvent.h"
+#include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
+#include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
+#include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
+#include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
+#include "ECDI/Widget/Widget.h"
+#include "ECDI/Core/ECDIAssert.h"
+#include "ECDI/Core/Logger.h"
 
-#include"ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
-#include"ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
-#include"ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
-#include"ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
+#include <Windows.h>
 
-#include"ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
-#include"ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
-#include"ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
-
-#include"ECDI/Widget/Widget.h"
-#include"ECDI/Core/ECDIAssert.h"
-#include"ECDI/Core/Logger.h"
-
-#include<Windows.h>
-#include<algorithm>
+#include <algorithm>
 
 namespace ECDI{
 

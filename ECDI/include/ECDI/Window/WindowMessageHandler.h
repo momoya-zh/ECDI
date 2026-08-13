@@ -1,10 +1,14 @@
 ﻿#pragma once
 
-#include <optional>
-#include <Windows.h>
-
 #include "ECDI/EventSystem/Input/Mouse/MouseButton.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyCode.h"
+
+#include <Windows.h>
+#ifdef DrawText
+#undef DrawText   // Win32 宏防护：DrawText → DrawTextW 会污染公共头的方法名（与 GDIBackend.h 同款）
+#endif
+
+#include <optional>
 
 namespace ECDI{
 

@@ -1,7 +1,7 @@
 ﻿#pragma once
 
-#include "MouseEvent.h"
-#include "MouseButton.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseButton.h"
 
 namespace ECDI{
 

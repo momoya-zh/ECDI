@@ -1,5 +1,7 @@
 ﻿#pragma once
-#include "WindowEvent.h"
+
+#include "ECDI/EventSystem/Window/WindowEvent.h"
+
 namespace ECDI
 {
 
