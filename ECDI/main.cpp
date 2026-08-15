@@ -8,6 +8,7 @@
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Widget/TextBox.h"
 #include "ECDI/Layout/VerticalLayout.h"
+#include "ECDI/Layout/HorizontalLayout.h"
 #include "ECDI/Core/String.h"
 #include "ECDI/Core/UTF8.h"
 #include "ECDI/Core/Point.h"
@@ -215,6 +216,77 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 		FRAMEWORK_ASSERT(box.GetCaret() == 3);
 	}
 
+	// ── Phase 6 HorizontalLayout：坐标计算断言（不依赖窗口；测试 1/2/3）──
+	{
+		// 测试 1：不同宽度累加（验证 x += childWidth，非固定步长）
+		ECDI::Panel panel;
+		panel.SetSize(300, 50);
+		panel.SetLayout(std::make_unique<ECDI::HorizontalLayout>());
+
+		auto box1 = std::make_unique<ECDI::Widget>();
+		box1->SetSize(100, 30);
+		auto box2 = std::make_unique<ECDI::Widget>();
+		box2->SetSize(80, 30);
+		auto box3 = std::make_unique<ECDI::Widget>();
+		box3->SetSize(60, 30);
+		auto* b1 = box1.get();
+		auto* b2 = box2.get();
+		auto* b3 = box3.get();
+
+		panel.AddChild(std::move(box1));
+		panel.AddChild(std::move(box2));
+		panel.AddChild(std::move(box3));
+		panel.Arrange();
+
+		FRAMEWORK_ASSERT(b1->GetX() == 0    && b1->GetY() == 0);
+		FRAMEWORK_ASSERT(b2->GetX() == 100  && b2->GetY() == 0);
+		FRAMEWORK_ASSERT(b3->GetX() == 180  && b3->GetY() == 0);
+
+		// 幂等（设计契约 1）：Arrange 重复调用位置一致
+		panel.Arrange();
+		FRAMEWORK_ASSERT(b1->GetX() == 0 && b2->GetX() == 100 && b3->GetX() == 180);
+	}
+
+	{
+		// 测试 2：超出父容器——Layout 不裁切不换行（总宽 300 > 父宽 200，第 3 子仍放 x=200）
+		ECDI::Panel panel;
+		panel.SetSize(200, 50);
+		panel.SetLayout(std::make_unique<ECDI::HorizontalLayout>());
+
+		auto box1 = std::make_unique<ECDI::Widget>();
+		box1->SetSize(100, 30);
+		auto box2 = std::make_unique<ECDI::Widget>();
+		box2->SetSize(100, 30);
+		auto box3 = std::make_unique<ECDI::Widget>();
+		box3->SetSize(100, 30);
+		auto* b3 = box3.get();
+
+		panel.AddChild(std::move(box1));
+		panel.AddChild(std::move(box2));
+		panel.AddChild(std::move(box3));
+		panel.Arrange();
+
+		FRAMEWORK_ASSERT(b3->GetX() == 200);
+	}
+
+	{
+		// 测试 3：边界——0 子控件不崩溃 / 1 子控件归零位
+		ECDI::Panel empty;
+		empty.SetSize(200, 50);
+		empty.SetLayout(std::make_unique<ECDI::HorizontalLayout>());
+		empty.Arrange();   // count=0：循环不跑，不崩
+
+		ECDI::Panel single;
+		single.SetSize(200, 50);
+		single.SetLayout(std::make_unique<ECDI::HorizontalLayout>());
+		auto box = std::make_unique<ECDI::Widget>();
+		box->SetSize(100, 30);
+		auto* b = box.get();
+		single.AddChild(std::move(box));
+		single.Arrange();
+		FRAMEWORK_ASSERT(b->GetX() == 0 && b->GetY() == 0);
+	}
+
 	DemoApplication application;
 
 	// ── 窗口 1：Widget Demo ────────────────────────────
@@ -245,7 +317,26 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	panel1->AddChild(std::move(btn2));
 
 	win1.GetRootWidget().AddChild(std::move(panel1));
-	win1.GetRootWidget().Arrange();
+
+	// Phase 6：水平布局示例（HorizontalLayout 交互验证——与 panel1 垂直布局同屏对照）
+	auto hpanel = std::make_unique<ECDI::Panel>();
+	hpanel->SetPosition(50, 300);
+	hpanel->SetSize(300, 50);
+	hpanel->SetLayout(std::make_unique<ECDI::HorizontalLayout>());
+
+	auto hb1 = std::make_unique<DemoButton>("B1");
+	hb1->SetSize(100, 40);
+	auto hb2 = std::make_unique<DemoButton>("B2");
+	hb2->SetSize(100, 40);
+	auto hb3 = std::make_unique<DemoButton>("B3");
+	hb3->SetSize(100, 40);
+
+	hpanel->AddChild(std::move(hb1));
+	hpanel->AddChild(std::move(hb2));
+	hpanel->AddChild(std::move(hb3));
+
+	win1.GetRootWidget().AddChild(std::move(hpanel));
+	win1.GetRootWidget().Arrange();   // 覆盖新 panel（与上重复调用，Arrange 幂等无害）
 
 	win1.Show();
 

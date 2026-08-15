@@ -19,14 +19,15 @@
 | Phase 5.5.1 | TextBox MVP（码点编辑/光标/点击定位/裁切） | ✅ 2026-08-13 |
 | Phase 5.5.2 | TextBox Selection + 修饰键（拖选/Shift+方向键/KeyModifier/Shift+Tab 反向） | ✅ 2026-08-14 |
 | Phase 5.6 | IME 候选窗跟随光标（系统 caret + ImmSetCompositionWindow 双通道；微软拼音实测 ptCurrentPos 按客户区解释） | ✅ 2026-08-15 |
+| Phase 6.1 | HorizontalLayout（布局系统完善——VerticalLayout 水平镜像，diff 同构 + 10 条设计契约） | ✅ 2026-08-15 |
 
 ### 🔄 当前
 
-- **Phase 6 控件完善**（HorizontalLayout 先行；v1.0 需要）——待开始
+- **Phase 6 布局系统完善**（6.1 HorizontalLayout 完成；6.2 待定——CheckBox/Radio 或下个布局模块）
 
 ### 🔲 未来
 
-- **Phase 6** 控件完善（HorizontalLayout + CheckBox/Radio 可选）
+- **Phase 6 剩余** 控件/布局模块（CheckBox/Radio 可选——状态控件，RadioGroup 引入 Group 概念；建议单独阶段）
 - **Phase 7** 平台抽象（PlatformWindow + Backend 注入）——**v1.0 转库前必须完成**；输入层抽象（TextInputInterface，见技术债）随本阶段
 - **Phase 8** 渲染增强（能力层：AlphaBlend + DrawRoundedRect + DrawLine + DrawImage）
 - **Phase 9** 主题系统（决策层，消费 Phase 8；样式演进 ApplyTheme/SetStyle）
@@ -37,11 +38,12 @@
 | 债务 | 位置 | 解决时机 |
 |------|------|---------|
 | Invalidate 解耦（两层结构 Internal+API） | TextBox 编辑操作 | Phase 7 API 审查 |
-| 文本裁切用字符串截断（O(n²)） | TextBox::OnPaint | Phase 6 裁剪区域（代码 TODO 已标） |
+| 文本裁切用字符串截断（O(n²)） | TextBox::OnPaint | Phase 8 渲染增强（PushClip/clipRect，代码 TODO 已标） |
 | IME 组合串内嵌（B 方案）——5.6 只做候选窗跟随，组合串不内嵌（I1 决策 A） | TextBox 编辑系统 | 文本系统 2.0（未来） |
 | **输入层抽象（TextInputInterface/TextInputContext）**——5.6 的 UpdateTextInputCaret 是半抽象（Window 中介），Phase 7 抽成契约层（Framework 坐标 Rect）+ Win32IME adapter（Client/IMM 内部转换），与 Renderer→Backend 同构（GPT 建议，YAGNI 等 Phase 7 第二锚点） | Window::UpdateTextInputCaret | Phase 7（随 PlatformWindow 下沉） |
 | **DPI 感知**——框架当前无 DPI 缩放，IME 坐标用逻辑像素 | 全局 | Phase 7 评估 |
-| 5.4 架构回顾（Mouse/Keyboard/Focus/Capture 责任交叉，评估 InputManager/FocusManager） | Application/Window | Phase 5 结束后 |
+| 键盘入口不对称（OnKeyDown 走 Window / OnKeyUp+CharInput 直派，3 入口）——已回顾保持现状（Tab 拦截必需 Window），未来全局快捷键时统一 | Application | 未来全局输入需求出现时（详见 phase5-architecture-review.md） |
+| 多窗口焦点语义（应用级 vs 窗口级焦点） | Window/Application | Phase 7 平台抽象时评估（详见 phase5-architecture-review.md） |
 | 编辑操作可见性（临时 public） | TextBox | Phase 7 API 审查 |
 
 ## Phase3 Widget System
@@ -73,6 +75,13 @@
 | [phase5-textbox-requirements.md](phase5-textbox-requirements.md) / [preliminary](phase5-textbox-preliminary-design.md) / [detailed](phase5-textbox-detailed-design.md) | 5.5 TextBox 三件套（码点编辑/光标/点击定位/裁切） | ✅ 5.5.1 MVP 已实现（2026-08-13） |
 | [phase5-selection-requirements.md](phase5-selection-requirements.md) / [preliminary](phase5-selection-preliminary-design.md) / [detailed](phase5-selection-detailed-design.md) | 5.5.2 Selection + 修饰键三件套 | ✅ 已实现（2026-08-14） |
 | [phase5-ime-requirements.md](phase5-ime-requirements.md) / [preliminary](phase5-ime-preliminary-design.md) / [detailed](phase5-ime-detailed-design.md) | 5.6 IME 候选窗跟随三件套（I1-I5 / P1-P5 / v1.0.4：系统 caret + IMM 双通道，客户区坐标语义） | ✅ 已实现（2026-08-15） |
+| [phase5-architecture-review.md](phase5-architecture-review.md) | Phase 5 收尾架构回顾（输入责任分布 + InputManager YAGNI 评估 + R1 冗余修复/R2-R4 记账） | ✅ 已实现（2026-08-15） |
+
+## Phase6 布局系统完善（进行中）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase6-horizontallayout-requirements.md](phase6-horizontallayout-requirements.md) / [preliminary](phase6-horizontallayout-preliminary-design.md) / [detailed](phase6-horizontallayout-detailed-design.md) | 6.1 HorizontalLayout 三件套（Layout 边界原则 / 4 决策点 / diff 同构 + 10 条设计契约） | ✅ 已实现（2026-08-15） |
 
 ## 文档约定
 

@@ -373,7 +373,7 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 	}
 	else{
 		// 超宽：逐码点累计找能放下的最大前缀（MVP 临时方案）
-		// TODO(Phase 6): 用裁剪区域（PushClip/clipRect，RenderCommand 层）代替字符串截断——
+		// TODO(Phase 8): 用裁剪区域（PushClip/clipRect，RenderCommand 层）代替字符串截断——
 		// 当前截断 O(n²) 且绘制/数据耦合，MVP 短文本可接受
 		size_t visibleCps = 0;
 		const size_t count = GetCodepointCount();

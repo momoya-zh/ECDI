@@ -192,19 +192,12 @@ void Application::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 	}
 
-	// 5.4.3 修正：点击不可聚焦区域（RootWidget/Panel 空白）→ 清焦点；可聚焦 → 设焦点
-	// （RootWidget 全覆盖下 target 恒非空，"空白"需按 CanFocus 判定——原 target==nullptr 判定永不触发）
+	// 5.4.3：点击焦点语义——可聚焦区域设焦点、不可聚焦（RootWidget/Panel 空白）清焦点
+	// （RootWidget 全覆盖下 target 恒非空，"空白"需按 CanFocus 判定；Phase 5 回顾 R1：删重复设置）
 	window.SetFocusedWidget(target->CanFocus() ? target : nullptr);
 
 	// 5.4.2：隐式捕获——命中即捕获（后续 Move/Up 直接派发给它，跳过 HitTest）
 	window.SetCaptureWidget(target);
-
-	// Focus 获取：命中且可聚焦 → 设置窗口焦点（在派发前，避免回调改树影响焦点）
-	if (target->CanFocus()) {
-
-		window.SetFocusedWidget(target);
-
-	}
 
 	Widget* current = target;
 
