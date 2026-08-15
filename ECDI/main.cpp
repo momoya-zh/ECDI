@@ -6,8 +6,10 @@
 #include "ECDI/Widget/Panel.h"
 #include "ECDI/Widget/Label.h"
 #include "ECDI/Widget/Button.h"
+#include "ECDI/Widget/TextBox.h"
 #include "ECDI/Layout/VerticalLayout.h"
 #include "ECDI/Core/String.h"
+#include "ECDI/Core/UTF8.h"
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Render/PaintContext.h"
@@ -33,33 +35,6 @@ protected:
 	}
 };
 
-/// @brief 将 Unicode 码点编码为 UTF-8 追加到字符串（演示用；框架不负责 UTF-8 编码）
-static void AppendUTF8(std::string& out, char32_t codepoint)
-{
-	if (codepoint <= 0x7F)
-	{
-		out += static_cast<char>(codepoint);
-	}
-	else if (codepoint <= 0x7FF)
-	{
-		out += static_cast<char>(0xC0 | (codepoint >> 6));
-		out += static_cast<char>(0x80 | (codepoint & 0x3F));
-	}
-	else if (codepoint <= 0xFFFF)
-	{
-		out += static_cast<char>(0xE0 | (codepoint >> 12));
-		out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-		out += static_cast<char>(0x80 | (codepoint & 0x3F));
-	}
-	else
-	{
-		out += static_cast<char>(0xF0 | (codepoint >> 18));
-		out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
-		out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-		out += static_cast<char>(0x80 | (codepoint & 0x3F));
-	}
-}
-
 /// @brief 演示用 Application：override OnCharInput 输出日志（验证键盘分发链路）
 class DemoApplication : public ECDI::Application
 {
@@ -67,15 +42,19 @@ protected:
 
 	void OnCharInput(const ECDI::CharInputEvent& event) override
 	{
-		// 码点 → UTF-8 → UTF-16（Logger 契约）→ 调试输出；emoji 验证代理对组合
-		std::string utf8 = "CharInput: ";
+		// 仅显示可打印字符（退格 0x08/Delete 0x7F 等控制字符不打日志——避免调试器乱码显示）。
+		// 控制字符仍正常传递给 Application（下方无条件转发）——不在此处改变事件语义，
+		// 过滤是 TextBox 消费者的职责（DemoApplication 只是演示程序，不做语义判断）。
+		const char32_t cp = event.GetCodepoint();
+		if (cp >= 0x20 && cp != 0x7F){
+			// 码点 → UTF-8 → UTF-16（Logger 契约）→ 调试输出；emoji 验证代理对组合
+			std::string utf8 = "CharInput: ";
+			utf8 += ECDI::EncodeUTF8(cp);
+			ECDI::Logger::Log(ECDI::LogLevel::Info, ECDI::UTF8ToWide(utf8));
+		}
 
-		AppendUTF8(utf8, event.GetCodepoint());
-
-		ECDI::Logger::Log(
-			ECDI::LogLevel::Info,
-			ECDI::UTF8ToWide(utf8)
-		);
+		// ⚠️ 5.5.1.4 修复：override 会吞掉框架派发——显式转发基类（焦点控件 OnCharInput）
+		ECDI::Application::OnCharInput(event);
 	}
 };
 
@@ -191,6 +170,51 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 		FRAMEWORK_ASSERT(txt.pos.y == expectedY);                     // 垂直居中（动态期望）
 	}
 
+	// ── 5.5.1.1 UTF-8 工具自测：码点 ↔ 字节转换正确性 ──
+	// 字节布局：a=1 / 中=3 / 😀=4，总 8——验证索引转换不切字（TextBox 光标正确性前提）
+	{
+		FRAMEWORK_ASSERT(ECDI::EncodeUTF8(U'A') == "A");
+		FRAMEWORK_ASSERT(ECDI::EncodeUTF8(U'中') == "\xE4\xB8\xAD");     // 3 字节
+		FRAMEWORK_ASSERT(ECDI::EncodeUTF8(U'😀') == "\xF0\x9F\x98\x80"); // 4 字节
+
+		const std::string s = "a中😀";
+		FRAMEWORK_ASSERT(ECDI::CodepointIndexToByteOffset(s, 0) == 0);
+		FRAMEWORK_ASSERT(ECDI::CodepointIndexToByteOffset(s, 1) == 1);   // a=1
+		FRAMEWORK_ASSERT(ECDI::CodepointIndexToByteOffset(s, 2) == 4);   // 中=3
+		FRAMEWORK_ASSERT(ECDI::CodepointIndexToByteOffset(s, 3) == 8);   // 😀=4 → 总 8
+		FRAMEWORK_ASSERT(ECDI::ByteOffsetToCodepointIndex(s, 4) == 2);
+		FRAMEWORK_ASSERT(ECDI::ByteOffsetToCodepointIndex(s, 8) == 3);
+	}
+
+	// ── 5.5.1.3 TextBox 编辑逻辑：Insert/Delete/Move（不依赖窗口；emoji/中文不切字）──
+	{
+		ECDI::TextBox box("abc");
+		box.MoveCaretToEnd();
+		box.InsertCodepoint(U'😀');                 // emoji 4 字节
+		FRAMEWORK_ASSERT(box.GetText() == "abc😀");
+		FRAMEWORK_ASSERT(box.GetCaret() == 4);
+		box.DeleteBackward();                       // 删 😀（删前一码点字节区间）
+		FRAMEWORK_ASSERT(box.GetText() == "abc");
+		FRAMEWORK_ASSERT(box.GetCaret() == 3);
+
+		box.MoveCaret(ECDI::TextBox::CaretDirection::Left);  // 光标到 'c' 后
+		box.InsertCodepoint(U'中');                 // 中文 3 字节
+		FRAMEWORK_ASSERT(box.GetText() == "ab中c");
+		FRAMEWORK_ASSERT(box.GetCaret() == 3);
+
+		box.DeleteForward();                        // 删光标后 = 'c'
+		FRAMEWORK_ASSERT(box.GetText() == "ab中");
+		FRAMEWORK_ASSERT(box.GetCaret() == 3);
+
+		box.MoveCaretToStart();
+		FRAMEWORK_ASSERT(box.GetCaret() == 0);
+		box.MoveCaret(ECDI::TextBox::CaretDirection::Left);   // 头边界钳制
+		FRAMEWORK_ASSERT(box.GetCaret() == 0);
+		box.MoveCaretToEnd();
+		box.MoveCaret(ECDI::TextBox::CaretDirection::Right);  // 尾边界钳制
+		FRAMEWORK_ASSERT(box.GetCaret() == 3);
+	}
+
 	DemoApplication application;
 
 	// ── 窗口 1：Widget Demo ────────────────────────────
@@ -208,10 +232,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	auto btn1 = std::make_unique<DemoButton>("Click Me");
 	btn1->SetSize(200, 50);
 
+	// 5.5.1-5.5.2：TextBox（预填 20-30 字符——验证拖选/裁切/Selection 交互）
+	auto textBox1 = std::make_unique<ECDI::TextBox>("Hello World, this is a very long text.");
+	textBox1->SetSize(200, 30);
+
 	auto btn2 = std::make_unique<DemoButton>("Focus Test");
 	btn2->SetSize(200, 50);
 
 	panel1->AddChild(std::move(label1));
+	panel1->AddChild(std::move(textBox1));
 	panel1->AddChild(std::move(btn1));
 	panel1->AddChild(std::move(btn2));
 

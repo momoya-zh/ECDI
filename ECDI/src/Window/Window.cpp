@@ -1,14 +1,17 @@
 ﻿#include "ECDI/Window/Window.h"
 
+#include "ECDI/Widget/TextBox.h"
 #include "ECDI/Window/WindowClass.h"
 #include "ECDI/Application/Application.h"
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Core/ECDIAssert.h"
+#include "ECDI/Core/Point.h"
 #include "ECDI/Core/String.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/Render/PaintContext.h"
 
 #include <Windows.h>
+#include <imm.h>
 
 #include <string>
 #include <system_error>
@@ -167,6 +170,16 @@ LRESULT Window::HandleMessage(HWND hwnd,UINT msg, WPARAM wParam, LPARAM lParam) 
 
 		break;
 
+	case WM_EXITSIZEMOVE:
+		// 5.6 v1.0.3 修复（2026-08-15 验证）：窗口移动/缩放结束后刷新文本输入插入点。
+		// 根因：TSF 输入法组合中已显示候选窗时**缓存位置**，不重新查询 GetCaretPos——
+		// 仅 SetCaretPos 更新系统 caret 不够，候选窗停在旧屏幕位置（实测"飘屏幕中部"）。
+		// 修复：销毁+重建系统 caret，强制 TSF 缓存失效重新查询（下一键 WM_IME_COMPOSITION 亦触发刷新）。
+		// 焦点非 TextBox 时 NotifyIMEComposition 内部 fail-safe 跳过（caret 销毁无害）。
+		DestroyTextInputCaret();
+		NotifyIMEComposition();   // 重建（UpdateTextInputCaret 懒创建 + SetCaretPos + Imm 刷新）
+		return 0;
+
 	}
 
 	// 将 Win32 消息翻译为 Framework Event 并派发
@@ -228,6 +241,13 @@ void Window::Invalidate(){
 
 }
 
+TextMeasurer& Window::GetTextMeasurer() noexcept{
+
+	// 5.5 T1：GDIBackend 兼 TextMeasurer（5.1 双接口）——返回抽象接口不暴露具体后端
+	return m_backend;
+
+}
+
 void Window::SetCaptureWidget(Widget* widget){
 
 	// 5.4.2：隐式捕获——Down 命中设置、Up 后释放；非拥有指针（生命周期随 Widget 树）
@@ -285,10 +305,10 @@ void Window::SetFocusedWidget(Widget* widget){
 
 void Window::HandleKeyDown(const KeyDownEvent& event){
 
-	// 5.4.4：Tab 框架拦截（焦点导航是 Window 职责；仅正向——Shift+Tab 留 5.5 与 KeyEvent 修饰键一起）
+	// 5.4.4 + 5.5.2：Tab 框架拦截（焦点导航是 Window 职责）；Shift+Tab 反向（5.4 债务落地）
 	if (event.GetKeyCode() == KeyCode::Tab){
 
-		FocusNext();
+		FocusNext(event.IsShiftDown() ? -1 : 1);
 
 		return;
 
@@ -297,6 +317,81 @@ void Window::HandleKeyDown(const KeyDownEvent& event){
 	if (m_focusedWidget){
 
 		m_focusedWidget->OnKeyDown(event);
+
+	}
+
+}
+
+void Window::NotifyIMEComposition(){
+
+	// MVP 技术债（显式记录）：Window 临时识别具体控件 TextBox（框架内首例"Window 认识具体控件"）。
+	// 可接受理由：fail-safe——非 TextBox 焦点时跳过更新，IME 交系统默认行为；
+	// 而 Widget 基类虚函数方案会把候选窗钉死在 (0,0)（fail-wrong）。
+	// 演进路径：第二个可编辑控件出现时 → 抽象 EditableTextWidget，
+	// dynamic_cast<TextBox*> 升级为 dynamic_cast<EditableTextWidget*>；
+	// 同时随 Phase 7 PlatformWindow 下沉 Imm 调用。
+	if (auto* textBox = dynamic_cast<TextBox*>(m_focusedWidget)){
+
+		// v1.0.3：IME 组合时同步插入点（双通道——系统 caret + ImmSetCompositionWindow 都在 UpdateTextInputCaret 内）
+		UpdateTextInputCaret(textBox->GetCaretClientPosition());   // 客户区坐标（TextBox 零平台依赖）
+
+	}
+
+}
+
+void Window::UpdateTextInputCaret(const Point& clientPos){
+
+	// ① 系统 caret（TSF 输入法主路径——Win11 微软拼音查询 GetCaretPos 定位候选窗，最小实验已验证）
+	// 懒创建：首次调用（TextBox 获焦）创建；后续只 SetCaretPos
+	if (!m_caretCreated){
+
+		CreateCaret(m_handle, nullptr, 2, 20);   // 2x20 竖线 caret（隐藏不显示，光标竖线由控件自画）
+
+		m_caretCreated = true;
+
+	}
+
+	SetCaretPos(static_cast<int>(clientPos.x), static_cast<int>(clientPos.y));   // 客户区坐标（caret 语义=左上角）
+
+	HideCaret(m_handle);   // 隐藏：系统 caret 仅作位置信标，视觉零变化
+
+	// ② ImmSetCompositionWindow（IMM 保底通道——GPT 双保险：兼容性最广）
+	// ⚠️ 关键修正（2026-08-15 用户洞察）：实测微软拼音（TSF）把 ptCurrentPos 当**客户区坐标**解释！
+	// 证据：最小实验 SetCaretPos(300,200) 时候选框出现在窗口内 (300,200)（客户区）而非屏幕 (300,200)。
+	// 若按 IMM 文档"屏幕坐标"传 ClientToScreen 后的值，候选框落在窗口内"屏幕坐标值"处（远离光标），
+	// 窗口移动时还叠加窗口偏移（"像素过多"）。故**不再 ClientToScreen，直接传客户区坐标**。
+	POINT pt{
+
+		static_cast<LONG>(clientPos.x),
+
+		static_cast<LONG>(clientPos.y)
+
+	};
+
+	// Imm 三件套：取上下文 → 设置组合窗口 → 释放（HIMC 判空：失败静默，交默认行为）
+	if (HIMC imc = ImmGetContext(m_handle)){
+
+		COMPOSITIONFORM cf{};
+
+		cf.dwStyle = CFS_POINT;         // 候选窗左上角对准 ptCurrentPos（客户区坐标——实测语义）
+
+		cf.ptCurrentPos = pt;
+
+		ImmSetCompositionWindow(imc, &cf);
+
+		ImmReleaseContext(m_handle, imc);
+
+	}
+
+}
+
+void Window::DestroyTextInputCaret(){
+
+	if (m_caretCreated){
+
+		DestroyCaret();
+
+		m_caretCreated = false;
 
 	}
 

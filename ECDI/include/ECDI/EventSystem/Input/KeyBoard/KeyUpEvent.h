@@ -28,8 +28,9 @@ public:
 
 	KeyUpEvent(
 		Window* window,
-		KeyCode keyCode
-	) : KeyEvent(window, keyCode) {
+		KeyCode keyCode,
+		KeyModifier modifier
+	) : KeyEvent(window, keyCode, modifier) {
 
 	}
 

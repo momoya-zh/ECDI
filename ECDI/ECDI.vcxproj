@@ -84,6 +84,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -103,6 +104,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -121,6 +123,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -140,6 +143,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -157,11 +161,13 @@
     <ClCompile Include="src\Core\ECDI.cpp" />
     <ClCompile Include="src\Core\Logger.cpp" />
     <ClCompile Include="src\Core\String.cpp" />
+    <ClCompile Include="src\Core\UTF8.cpp" />
     <ClCompile Include="src\EventSystem\EventRouter.cpp" />
     <ClCompile Include="src\Widget\Label.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="src\Widget\Panel.cpp" />
     <ClCompile Include="src\Widget\TextWidget.cpp" />
+    <ClCompile Include="src\Widget\TextBox.cpp" />
     <ClCompile Include="src\Widget\Widget.cpp" />
     <ClCompile Include="src\Window\WindowMessageHandler.cpp" />
     <ClCompile Include="src\Window\Window.cpp" />
@@ -187,6 +193,7 @@
     <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyCode.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyDownEvent.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyEvent.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyModifier.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Input\KeyBoard\KeyUpEvent.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButton.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseButtonDownEvent.h" />
@@ -207,10 +214,12 @@
     <ClInclude Include="Include\ECDI\Core\Color.h" />
     <ClInclude Include="Include\ECDI\Core\Size.h" />
     <ClInclude Include="Include\ECDI\Core\Font.h" />
+    <ClInclude Include="Include\ECDI\Core\UTF8.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h" />
     <ClInclude Include="Include\ECDI\Widget\Label.h" />
     <ClInclude Include="Include\ECDI\Widget\Panel.h" />
     <ClInclude Include="Include\ECDI\Widget\TextWidget.h" />
+    <ClInclude Include="Include\ECDI\Widget\TextBox.h" />
     <ClInclude Include="Include\ECDI\Widget\Widget.h" />
     <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
     <ClInclude Include="Include\ECDI\Window\WindowMessageHandler.h" />

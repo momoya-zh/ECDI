@@ -11,6 +11,7 @@
 #include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
+#include "ECDI/EventSystem/Input/KeyBoard/KeyModifier.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
 #include "ECDI/Core/ECDIAssert.h"
 
@@ -18,6 +19,24 @@
 #include <windowsx.h>// GET_X_LPARAM / GET_Y_LPARAM / GET_WHEEL_DELTA_WPARAM 等宏
 
 namespace ECDI{
+
+namespace{   // 匿名 namespace：翻译器内部辅助（不暴露）
+
+/// @brief 翻译当前修饰键状态（5.5.2；平台翻译器内查询 GetKeyState——分层允许
+/// "Win32 负责翻译"本职；各平台实现不同（X11/Wayland/macOS），不抽公共函数）
+KeyModifier TranslateModifier(){
+	KeyModifier m = KeyModifier::None;
+	const auto AddIfDown = [&m](int vk, KeyModifier mod){
+		if (GetKeyState(vk) & 0x8000)
+			m = m | mod;
+	};
+	AddIfDown(VK_SHIFT,   KeyModifier::Shift);
+	AddIfDown(VK_CONTROL, KeyModifier::Ctrl);
+	AddIfDown(VK_MENU,    KeyModifier::Alt);
+	return m;
+}
+
+}
 
 WindowMessageHandler::WindowMessageHandler(Application* app) noexcept: m_application(app){}
 
@@ -159,7 +178,8 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			TranslateKeyCode(
 				wParam,
 				lParam
-			)
+			),
+			TranslateModifier()
 		);
 
 		m_application->OnEvent(event);
@@ -175,7 +195,8 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			TranslateKeyCode(
 				wParam,
 				lParam
-			)
+			),
+			TranslateModifier()
 		);
 
 		m_application->OnEvent(event);
@@ -195,6 +216,29 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			m_application->OnEvent(event);
 		}
 
+		return std::nullopt;
+	}
+
+	// ── IME（5.6：候选窗口跟随光标——MVP 只在组合建立时定位）──
+
+	// 注意：IME 消息必须走 DefWindowProc（维护 IME 内部状态——与普通消息不同，不能 return 0 吞掉）
+	case WM_IME_STARTCOMPOSITION:{
+		// 组合开始 → 通知 Window 定位候选窗口（跟随焦点 TextBox 光标）
+		window->NotifyIMEComposition();
+
+		return std::nullopt;
+	}
+
+	case WM_IME_COMPOSITION:{
+		// 5.6 实测升级（2026-08-14）：STARTCOMPOSITION 单次定位不可靠——
+		// 窗口移动后候选窗飘回屏幕左上角（组合窗 START 时未创建，ImmSetCompositionWindow 被忽略）。
+		// 组合期间每次按键重新定位（候选窗持续跟随光标；调用开销极小——单次 Imm API）
+		window->NotifyIMEComposition();
+
+		return std::nullopt;
+	}
+
+	case WM_IME_ENDCOMPOSITION:{        // 预留通道：组合结束——MVP 无清理动作（未来组合串内嵌时用）
 		return std::nullopt;
 	}
 

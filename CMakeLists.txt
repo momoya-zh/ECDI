@@ -41,5 +41,5 @@ if(MSVC)
 endif()
 
 if(WIN32)
-    target_link_libraries(ECDI PRIVATE user32)
+    target_link_libraries(ECDI PRIVATE user32 imm32)
 endif()

@@ -1,9 +1,11 @@
 ﻿#pragma once
 
+#include "ECDI/Core/Point.h"
 #include "ECDI/Window/WindowMessageHandler.h"
 #include "ECDI/Render/GDIBackend.h"
 #include "ECDI/Render/Renderer.h"
 #include "ECDI/Render/RenderCommand.h"
+#include "ECDI/Render/TextMeasurer.h"
 
 #include <Windows.h>
 #ifdef DrawText
@@ -71,6 +73,10 @@ class Window {
 		/// @brief 请求重绘整个客户区（Widget::Invalidate 上溯到根后调用 → WM_PAINT → PaintFrame）
 		void Invalidate();
 
+		/// @brief 获取文本测量器（5.5 T1；GDIBackend 兼 TextMeasurer——返回抽象接口不暴露后端）
+		/// @details 控件经 protected GetWindow() 获取——非 Paint 时刻测量（点击定位光标等）
+		TextMeasurer& GetTextMeasurer() noexcept;
+
 		/// @brief 设置鼠标捕获控件（5.4.2 隐式捕获：Down 命中即捕获；Up 后释放）
 		/// @param widget 捕获目标（后续 MouseMove/Up 直接派发给它，跳过 HitTest）；nullptr 释放
 		void SetCaptureWidget(Widget* widget);
@@ -81,6 +87,23 @@ class Window {
 		/// @brief 键盘按键按下入口（5.4.4；Application::OnKeyDown 路由到这里）
 		/// @details Tab → FocusNext（框架拦截，焦点导航是 Window 职责）；否则派发给焦点控件
 		void HandleKeyDown(const KeyDownEvent& event);
+
+		/// @brief IME 组合窗口定位（5.6；WM_IME_STARTCOMPOSITION 触发）
+		/// @details MVP：焦点控件是 TextBox 时，把候选窗口移到光标位置
+		/// （TextBox 给客户区坐标 → 这里 ClientToScreen → ImmSetCompositionWindow）。
+		/// 非 TextBox 焦点直接返回（fail-safe：IME 交系统默认行为，不写错位置）。
+		void NotifyIMEComposition();
+
+		/// @brief 更新文本输入插入点位置（5.6 v1.0.3：系统 caret + IMM 双通道）
+		/// @details TextBox 光标变动/IME 组合时调用，两个通道：
+		/// ① SetCaretPos（TSF 输入法——Win11 微软拼音查询系统 caret 定位候选窗，实测主路径）
+		/// ② ImmSetCompositionWindow（老 IMM 输入法查询——保底，GPT 双保险）
+		/// 系统 caret 隐藏（HideCaret）：光标竖线由控件 OnPaint 自画，caret 仅作位置信标。
+		/// @param clientPos 光标顶部客户区坐标（TextBox 零平台依赖，坐标转换是 Window 职责）
+		void UpdateTextInputCaret(const Point& clientPos);
+
+		/// @brief 销毁文本输入插入点（TextBox 失焦时调用——系统 caret 释放）
+		void DestroyTextInputCaret();
 
 private:
 
@@ -105,6 +128,8 @@ private:
 		Widget* m_focusedWidget = nullptr;	///< 当前拥有键盘焦点的 Widget（非拥有指针）
 
 		Widget* m_captureWidget = nullptr;	///< 当前鼠标捕获控件（5.4.2，非拥有指针）
+
+		bool m_caretCreated = false;	///< 系统 caret 是否已创建（5.6 v1.0.3 懒创建标记）
 
 		GDIBackend m_backend;	///< GDI 渲染后端（值成员，决策 35：声明在 Renderer 之前）
 
