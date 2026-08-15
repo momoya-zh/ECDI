@@ -20,20 +20,26 @@
 | Phase 5.5.2 | TextBox Selection + 修饰键（拖选/Shift+方向键/KeyModifier/Shift+Tab 反向） | ✅ 2026-08-14 |
 | Phase 5.6 | IME 候选窗跟随光标（系统 caret + ImmSetCompositionWindow 双通道；微软拼音实测 ptCurrentPos 按客户区解释） | ✅ 2026-08-15 |
 | Phase 6.1 | HorizontalLayout（布局系统完善——VerticalLayout 水平镜像，diff 同构 + 10 条设计契约） | ✅ 2026-08-15 |
+| Phase 7.1.1 | PlatformWindow 骨架（Window 零 Win32：PlatformWindow/PlatformWindowHost 契约 + Win32PlatformWindow 实现；翻译器/IME 平台代码下沉） | ✅ 2026-08-15 |
 
 ### 🔄 当前
 
-- **Phase 6 布局系统完善**（6.1 HorizontalLayout 完成；6.2 待定——CheckBox/Radio 或下个布局模块）
+- **Phase 7 平台抽象 + 测试体系**——7.1.2 翻译器契约改造（拆 Translate/Dispatch → Host::OnEvent）
 
 ### 🔲 未来
 
-- **Phase 6 剩余** 控件/布局模块（CheckBox/Radio 可选——状态控件，RadioGroup 引入 Group 概念；建议单独阶段）
-- **Phase 7** 平台抽象（PlatformWindow + Backend 注入）——**v1.0 转库前必须完成**；输入层抽象（TextInputInterface，见技术债）随本阶段
-- **Phase 8** 渲染增强（能力层：AlphaBlend + DrawRoundedRect + DrawLine + DrawImage）
+- **Phase 6.2 CheckBox/Radio（延期 Phase 8 后，2026-08-15 决策）**：状态控件 + RadioGroup 同父互斥；勾/圆依赖 Phase 8 渲染能力，不做填充版——设计已定稿存档（phase6-checkboxradio-*.md）
+- **Phase 7** 平台抽象 + 测试体系（**7.1 PlatformWindow + Backend 注入**，输入层抽象 TextInputInterface 随本阶段；**7.2 测试体系**——补 Selection 等历史单元测试欠账）——**v1.0 转库前必须完成**
+- **Phase 7.5 事件回调（2026-08-15 用户定：插 7-8 之间）**：std::function 回调注册 API（Button::SetOnClick / CheckBox::SetOnCheckedChanged 等），继承 override 基座 + 回调便利层两套并存——**Phase 7 解耦后做**（回调 API 依赖稳定接口）
+- **Phase 8** 渲染增强（能力层：AlphaBlend + DrawRoundedRect + DrawLine + DrawImage）——**6.2 CheckBox/Radio 消费其勾/圆能力**
+- **Phase 8.5 文本系统 2.0（2026-08-15 用户定：插 8-9 之间）**：IME 组合串内嵌 + 剪贴板子系统（Ctrl+A/C/V/X + Copy-Cut-Paste）+ TextBox 多行/滚动/双击/光标闪烁 + Undo-Redo + AutoSize 评估 + SetFont
 - **Phase 9** 主题系统（决策层，消费 Phase 8；样式演进 ApplyTheme/SetStyle）
+- **Phase 9.5 收尾补充（2026-08-15 用户定：插 9-10 之间）**：局部更新/裁剪系统（Clip/Dirty Region）+ LinearLayout 抽象 + WM_MOVE 场景 + Hover/MouseEnter/Leave + Shortcut System/键盘入口统一/InputManager（v1.0 前择机完成，详见 roadmap-deferred.md）
 - **Phase 10** v1.0 收尾（转库静态库化 + API 审查；开源待定）
 
 ### 📋 技术债务（记账）
+
+> 完整延期排期见 **[roadmap-deferred.md](roadmap-deferred.md)**（全部延期项 → 阶段总表）。
 
 | 债务 | 位置 | 解决时机 |
 |------|------|---------|
@@ -64,7 +70,7 @@
 | [phase4-renderer-design.md](phase4-renderer-design.md) | Phase4 详细设计：42 条决策记录（variant 命令 / PaintContext 门面 / Renderer 持引用 / GDIBackend 双缓冲全套 / Header 依赖规则 / 实现顺序） | ✅ 完成态（v1.7，2026-08-10） |
 | [phase4-renderer-implementation.md](phase4-renderer-implementation.md) | Phase4 实现蓝图：文件树 / 类定义 / Commit 4.1-4.7 修改范围 / 验收标准 / 双层测试 | ✅ 已实现（v1.1，2026-08-11，4.1-4.7 全部落地并验证通过） |
 
-## Phase5 文本 + 控件（进行中）
+## Phase5 文本 + 控件（✅ 已完成，2026-08-15）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
@@ -77,11 +83,12 @@
 | [phase5-ime-requirements.md](phase5-ime-requirements.md) / [preliminary](phase5-ime-preliminary-design.md) / [detailed](phase5-ime-detailed-design.md) | 5.6 IME 候选窗跟随三件套（I1-I5 / P1-P5 / v1.0.4：系统 caret + IMM 双通道，客户区坐标语义） | ✅ 已实现（2026-08-15） |
 | [phase5-architecture-review.md](phase5-architecture-review.md) | Phase 5 收尾架构回顾（输入责任分布 + InputManager YAGNI 评估 + R1 冗余修复/R2-R4 记账） | ✅ 已实现（2026-08-15） |
 
-## Phase6 布局系统完善（进行中）
+## Phase6 布局系统完善（✅ 6.1 完成，2026-08-15；6.2 延期 Phase 8 后）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [phase6-horizontallayout-requirements.md](phase6-horizontallayout-requirements.md) / [preliminary](phase6-horizontallayout-preliminary-design.md) / [detailed](phase6-horizontallayout-detailed-design.md) | 6.1 HorizontalLayout 三件套（Layout 边界原则 / 4 决策点 / diff 同构 + 10 条设计契约） | ✅ 已实现（2026-08-15） |
+| [phase6-checkboxradio-requirements.md](phase6-checkboxradio-requirements.md) / [preliminary](phase6-checkboxradio-preliminary-design.md) | 6.2 CheckBox/Radio（StateWidget 契约 6 条 + 勾/圆渲染约束） | ⏸️ 延期 Phase 8 后（2026-08-15 决策，设计定稿存档） |
 
 ## 文档约定
 

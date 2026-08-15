@@ -1,5 +1,6 @@
 ﻿#include "ECDI/Application/Application.h"
 
+#include "ECDI/Platform/Win32/Win32PlatformWindow.h"
 #include "ECDI/Window/Window.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
@@ -22,7 +23,7 @@
 
 namespace ECDI{
 
-Application::Application():m_windowClass("ECDI FrameWork",Window::WindowProc) {
+Application::Application():m_windowClass("ECDI FrameWork",Win32PlatformWindow::WindowProc) {
 
 }
 

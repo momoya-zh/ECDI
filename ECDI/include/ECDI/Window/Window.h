@@ -1,34 +1,31 @@
 ﻿#pragma once
 
 #include "ECDI/Core/Point.h"
-#include "ECDI/Window/WindowMessageHandler.h"
+#include "ECDI/Platform/PlatformWindowHost.h"
 #include "ECDI/Render/GDIBackend.h"
 #include "ECDI/Render/Renderer.h"
 #include "ECDI/Render/RenderCommand.h"
 #include "ECDI/Render/TextMeasurer.h"
-
-#include <Windows.h>
-#ifdef DrawText
-#undef DrawText   // Win32 宏防护：DrawText → DrawTextW 会污染公共头的方法名（与 GDIBackend.h 同款）
-#endif
 
 #include <string>
 #include <memory>
 
 namespace ECDI{
 
-class WindowClass;
+class PlatformWindow;   // 前置声明（unique_ptr 成员——平台抽象，7.1.1）
+class WindowClass;      // 前置声明（构造参数引用，P4 定稿——WindowClass 标记 7.1.5）
 class Application;
 class Widget;
 class KeyDownEvent;
 
 /// @brief 框架层 Window 封装
 /// @details
-/// 管理一个 Win32 HWND，拥有 RootWidget 和 Focus 状态。
-/// Window 通过 WindowProc 静态函数接收系统消息，分发给 WindowMessageHandler 翻译为 Framework Event。
+/// 拥有 RootWidget、Focus 状态和 PlatformWindow（平台抽象——7.1.1 起零 Win32）。
+/// Window 实现 PlatformWindowHost 契约：平台事件（绘制/尺寸/移动结束）→ Host 回调 → 框架响应。
+/// 平台细节（HWND/WindowProc/消息翻译/IME 调用）全部在 Win32PlatformWindow。
 ///
-/// 禁止拷贝和移动（HWND 通过 GWLP_USERDATA 绑定对象地址）。
-class Window {
+/// 禁止拷贝和移动（Widget 树节点地址稳定 + PlatformWindow 生命周期绑定）。
+class Window : public PlatformWindowHost {
 	public:
 
 		/// @param app         所属 Application
@@ -56,10 +53,7 @@ class Window {
 		/// @brief 获取 RootWidget（Widget 树的根节点，代表窗口客户区）
 		Widget& GetRootWidget() noexcept;
 
-		/// @brief Win32 窗口消息回调（静态函数，通过 GWLP_USERDATA 路由到实例）
-		static LRESULT CALLBACK WindowProc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
-
-		/// @brief 销毁底层 HWND
+		/// @brief 销毁底层窗口句柄（转调 m_platformWindow->Release——幂等）
 		bool Release()noexcept;
 
 		/// @brief 设置当前拥有键盘焦点的 Widget
@@ -88,27 +82,37 @@ class Window {
 		/// @details Tab → FocusNext（框架拦截，焦点导航是 Window 职责）；否则派发给焦点控件
 		void HandleKeyDown(const KeyDownEvent& event);
 
-		/// @brief IME 组合窗口定位（5.6；WM_IME_STARTCOMPOSITION 触发）
+		/// @brief IME 组合窗口定位（5.6；翻译器 WM_IME_START/COMPOSITION 直调）
 		/// @details MVP：焦点控件是 TextBox 时，把候选窗口移到光标位置
-		/// （TextBox 给客户区坐标 → 这里 ClientToScreen → ImmSetCompositionWindow）。
+		/// （TextBox 给客户区坐标 → 转调 m_platformWindow->UpdateTextInputCaret）。
 		/// 非 TextBox 焦点直接返回（fail-safe：IME 交系统默认行为，不写错位置）。
+		/// dynamic_cast<TextBox*> 为 Phase 5 遗留债务（7.1.1 不处理——EditableTextWidget 以后做）。
 		void NotifyIMEComposition();
 
 		/// @brief 更新文本输入插入点位置（5.6 v1.0.3：系统 caret + IMM 双通道）
-		/// @details TextBox 光标变动/IME 组合时调用，两个通道：
-		/// ① SetCaretPos（TSF 输入法——Win11 微软拼音查询系统 caret 定位候选窗，实测主路径）
-		/// ② ImmSetCompositionWindow（老 IMM 输入法查询——保底，GPT 双保险）
-		/// 系统 caret 隐藏（HideCaret）：光标竖线由控件 OnPaint 自画，caret 仅作位置信标。
-		/// @param clientPos 光标顶部客户区坐标（TextBox 零平台依赖，坐标转换是 Window 职责）
+		/// @details TextBox 光标变动/IME 组合时调用——薄转发 m_platformWindow
+		/// （平台实现：SetCaretPos + ImmSetCompositionWindow，客户区坐标语义封装在平台层）。
+		/// @param clientPos 光标顶部客户区坐标（TextBox 零平台依赖，坐标转换是平台职责）
 		void UpdateTextInputCaret(const Point& clientPos);
 
-		/// @brief 销毁文本输入插入点（TextBox 失焦时调用——系统 caret 释放）
+		/// @brief 销毁文本输入插入点（TextBox 失焦时调用——薄转发 m_platformWindow）
 		void DestroyTextInputCaret();
 
-private:
+	private:
 
-		/// @brief 实例级消息处理（WindowProc 路由到这里）
-		LRESULT HandleMessage(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
+		// ── PlatformWindowHost 实现（7.1.1：平台事件 → 框架响应）──
+
+		/// @brief 绘制请求（WM_PAINT）→ 帧编排
+		void OnPaint() override;
+
+		/// @brief 客户区尺寸变化（WM_SIZE）→ RootWidget 尺寸同步
+		void OnResized(int width, int height) override;
+
+		/// @brief 窗口移动/缩放结束（WM_EXITSIZEMOVE）→ 销毁+重建文本插入点（IME 归位）
+		void OnExitSizeMove() override;
+
+		/// @brief 事件来源窗口（翻译器构造 Event 需 Window*）
+		Window* GetWindow() const noexcept override;
 
 		/// @brief 帧编排（决策 41 改名，原 OnPaint）：clear→Paint→BeginFrame→Execute→EndFrame
 		void PaintFrame();
@@ -117,11 +121,9 @@ private:
 		/// @param direction +1 正向（5.4 仅正向）；5.5 Shift+Tab 传 -1 反向
 		void FocusNext(int direction = 1);
 
-		HWND m_handle=nullptr;	///< 底层 Win32 窗口句柄
-
 		Application* m_application = nullptr;	///< 所属 Application
 
-		WindowMessageHandler m_messageHandler;	///< Win32 消息 → Framework Event 翻译器
+		std::unique_ptr<PlatformWindow> m_platformWindow;	///< 平台窗口（组合，非拥有创建；7.1.1）
 
 		std::unique_ptr<Widget> m_rootWidget;	///< Widget 树的根节点（拥有所有权）
 
@@ -129,9 +131,7 @@ private:
 
 		Widget* m_captureWidget = nullptr;	///< 当前鼠标捕获控件（5.4.2，非拥有指针）
 
-		bool m_caretCreated = false;	///< 系统 caret 是否已创建（5.6 v1.0.3 懒创建标记）
-
-		GDIBackend m_backend;	///< GDI 渲染后端（值成员，决策 35：声明在 Renderer 之前）
+		GDIBackend m_backend;	///< GDI 渲染后端（值成员，决策 35：声明在 Renderer 之前；7.1.4 改注入）
 
 		Renderer m_renderer;	///< 渲染执行器（引用 m_backend，决策 34）
 
