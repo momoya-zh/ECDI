@@ -1,7 +1,5 @@
-﻿#include "ECDI/Window/WindowMessageHandler.h"
+﻿#include "ECDI/Platform/Win32/WindowMessageHandler.h"
 
-#include "ECDI/Window/Window.h"
-#include "ECDI/Application/Application.h"
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
@@ -38,7 +36,7 @@ KeyModifier TranslateModifier(){
 
 }
 
-WindowMessageHandler::WindowMessageHandler(Application* app) noexcept: m_application(app){}
+WindowMessageHandler::WindowMessageHandler(PlatformWindowHost& host) noexcept: m_host(host){}
 
 std::optional<LRESULT> WindowMessageHandler::Handle(
 	Window* window,
@@ -55,7 +53,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		// 用户点击关闭按钮或 Alt+F4 → 翻译为 WindowCloseRequestedEvent
 		WindowCloseRequestedEvent event(window);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);   // 7.1.2：经 Host 派发（不再直连应用层入口）
 
 		return 0;
 	}
@@ -65,7 +63,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		// 窗口即将销毁 → 翻译为 WindowDestroyedEvent
 		WindowDestroyedEvent event(window);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
 		return 0;
 	}
@@ -82,9 +80,9 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			height
 		);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
-		// 返回 nullopt 让调用方继续走 DefWindowProc（内部状态已在 Window::HandleMessage 中同步）
+		// 返回 nullopt 让调用方继续走 DefWindowProc（内部状态已在 Win32PlatformWindow 中同步）
 		return std::nullopt;
 	}
 
@@ -101,7 +99,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			y
 		);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
 		return std::nullopt;
 	}
@@ -119,7 +117,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			TranslateMouseButton(msg, wParam)
 		);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
 		return std::nullopt;
 	}
@@ -137,7 +135,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			TranslateMouseButton(msg, wParam)
 		);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
 		return std::nullopt;
 	}
@@ -161,7 +159,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			delta
 		);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
 		return std::nullopt;
 	}
@@ -182,7 +180,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			TranslateModifier()
 		);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
 		return std::nullopt;
 	}
@@ -199,7 +197,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			TranslateModifier()
 		);
 
-		m_application->OnEvent(event);
+		m_host.OnEvent(event);
 
 		return std::nullopt;
 	}
@@ -213,34 +211,15 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 
 			CharInputEvent event(window, *codepoint);
 
-			m_application->OnEvent(event);
+			m_host.OnEvent(event);
 		}
 
 		return std::nullopt;
 	}
 
-	// ── IME（5.6：候选窗口跟随光标——MVP 只在组合建立时定位）──
-
-	// 注意：IME 消息必须走 DefWindowProc（维护 IME 内部状态——与普通消息不同，不能 return 0 吞掉）
-	case WM_IME_STARTCOMPOSITION:{
-		// 组合开始 → 通知 Window 定位候选窗口（跟随焦点 TextBox 光标）
-		window->NotifyIMEComposition();
-
-		return std::nullopt;
-	}
-
-	case WM_IME_COMPOSITION:{
-		// 5.6 实测升级（2026-08-14）：STARTCOMPOSITION 单次定位不可靠——
-		// 窗口移动后候选窗飘回屏幕左上角（组合窗 START 时未创建，ImmSetCompositionWindow 被忽略）。
-		// 组合期间每次按键重新定位（候选窗持续跟随光标；调用开销极小——单次 Imm API）
-		window->NotifyIMEComposition();
-
-		return std::nullopt;
-	}
-
-	case WM_IME_ENDCOMPOSITION:{        // 预留通道：组合结束——MVP 无清理动作（未来组合串内嵌时用）
-		return std::nullopt;
-	}
+	// ⚠️ WM_IME_* 已移出（7.1.2 方案 B）：IME 属输入法子系统（TSF/IMM/候选窗），
+	// 由 Win32PlatformWindow::HandleMessage 状态同步区处理（host.OnIMEComposition()）
+	// ——翻译器职责纯粹化（Translate → Event → Host）
 
 	}
 

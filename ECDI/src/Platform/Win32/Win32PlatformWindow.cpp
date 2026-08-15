@@ -11,11 +11,10 @@
 
 namespace ECDI{
 
-Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host, Application* app,
+Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
 		const WindowClass& windowClass, const std::string& title, int width, int height)
 	: m_host(host)
-	, m_application(app)
-	, m_messageHandler(app){
+	, m_messageHandler(m_host){
 
 	// 公共 API 为 UTF-8（std::string），在平台边界转换到 UTF-16（字符串边界划分）
 	const std::wstring wideTitle = UTF8ToWide(title);
@@ -150,7 +149,7 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		return 0;
 
 	case WM_DESTROY:
-		m_hwnd = nullptr;   // 句柄失效（Window 端无需动作——YAGNI，无 OnDestroyed 回调）
+		m_hwnd = nullptr;   // 句柄失效（框架层无需动作——YAGNI，无 OnDestroyed 回调）
 		break;
 
 	case WM_SIZE:
@@ -159,17 +158,28 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		break;
 
 	case WM_EXITSIZEMOVE:
-		// 5.6 v1.0.3 修复（2026-08-15 验证）：窗口移动/缩放结束后刷新文本输入插入点。
-		// 根因：TSF 输入法组合中已显示候选窗时**缓存位置**，不重新查询 GetCaretPos——
-		// 仅 SetCaretPos 更新系统 caret 不够，候选窗停在旧屏幕位置（实测"飘屏幕中部"）。
-		// 修复：销毁+重建系统 caret，强制 TSF 缓存失效重新查询。
-		m_host.OnExitSizeMove();   // → Window 销毁+重建 caret（dynamic_cast<TextBox*> 在框架层）
+		// 7.1.1 职责：窗口移动/缩放结束 → 通知 Host（框架层决定如何响应）。
+		// 背景（5.6 实测）：TSF 输入法组合中已显示候选窗时缓存位置，不重新查询系统 caret——
+		// 框架层 OnExitSizeMove 会销毁+重建 caret 强制 TSF 缓存失效（候选窗归位）。
+		// 平台层只报告"移动结束了"，不碰 caret/IME 细节。
+		m_host.OnExitSizeMove();
 		return 0;
+
+	case WM_IME_STARTCOMPOSITION:
+	case WM_IME_COMPOSITION:
+		// 7.1.2 方案 B（GPT 三轮）：IME 属输入法子系统（TSF/IMM/候选窗/系统 caret——
+		// 独立状态机，非事件系统成员），平台层状态同步区上报，不再经翻译器
+		// （翻译器职责纯粹化：Translate → Event → Host）
+		m_host.OnIMEComposition();   // → Window::NotifyIMEComposition（候选窗定位）
+		break;   // 走翻译器（无 WM_IME case）→ nullopt → DefWindowProcW（IME 内部状态机必需）
+
+	case WM_IME_ENDCOMPOSITION:
+		break;   // 预留通道（未来组合串内嵌用——8.5）；同样走 DefWindowProcW
 
 	}
 
-	// 将 Win32 消息翻译为 Framework Event 并派发（翻译器保持现状：直派 Application；
-	// 结构 7.1.2 再拆 Translate/Dispatch——GPT 边界守则 F1）
+	// 将 Win32 消息翻译为 Framework Event 并派发（翻译器纯翻译 + 经 Host 派发——7.1.2；
+	// 结构 Translate→Event→Host 已定稿，翻译逻辑本体零改动）
 	auto result = m_messageHandler.Handle(m_host.GetWindow(), hwnd, msg, wParam, lParam);
 
 	if (result) {

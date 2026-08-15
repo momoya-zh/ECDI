@@ -21,10 +21,11 @@
 | Phase 5.6 | IME 候选窗跟随光标（系统 caret + ImmSetCompositionWindow 双通道；微软拼音实测 ptCurrentPos 按客户区解释） | ✅ 2026-08-15 |
 | Phase 6.1 | HorizontalLayout（布局系统完善——VerticalLayout 水平镜像，diff 同构 + 10 条设计契约） | ✅ 2026-08-15 |
 | Phase 7.1.1 | PlatformWindow 骨架（Window 零 Win32：PlatformWindow/PlatformWindowHost 契约 + Win32PlatformWindow 实现；翻译器/IME 平台代码下沉） | ✅ 2026-08-15 |
+| Phase 7.1.2 | 翻译器契约改造（翻译器迁 Platform/Win32/ + 构造 Host& 派发；WM_IME 移出方案 B——翻译器纯翻译；Platform 零 Application/零 Window.h） | ✅ 2026-08-15 |
 
 ### 🔄 当前
 
-- **Phase 7 平台抽象 + 测试体系**——7.1.2 翻译器契约改造（拆 Translate/Dispatch → Host::OnEvent）
+- **Phase 7 平台抽象 + 测试体系**——7.1.3 输入层抽象（CaretGeometry + IME adapter）
 
 ### 🔲 未来
 

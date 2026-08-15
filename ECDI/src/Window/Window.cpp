@@ -46,8 +46,9 @@ Window::Window(Application* app,const WindowClass &windowClass,const std::string
 	, m_renderer(m_backend){   // 决策 35：m_backend 先构造（默认构造），m_renderer 绑定引用
 
 	// 7.1.1：工厂创建平台窗口——CreateWindowExW 在 Win32PlatformWindow 构造内完成
+	// 7.1.2：去 app 参数（翻译器不再需要 Application*——经 Host 派发）
 	auto platform = std::make_unique<Win32PlatformWindow>(
-		*this, app, windowClass, title, width, height);
+		*this, windowClass, title, width, height);
 
 	// ⚠️ 过渡（7.1.2 拆派发 / 7.1.4 PlatformRenderContext 替换）：后端注入 HWND——
 	// GDIBackend 是 4.7 稳定代码（skill 23 不碰内部），SetHwnd 接口保持，仅调用点经平台层中转
@@ -288,6 +289,22 @@ void Window::OnExitSizeMove(){
 Window* Window::GetWindow() const noexcept{
 
 	return const_cast<Window*>(this);
+
+}
+
+void Window::OnEvent(const Event& event){
+
+	// Transitional adapter（GPT 二轮）：平台层经 Window 转发翻译后的事件，
+	// 直到 Application 解耦（7.1.5）完成——最终派发目标可能变化（可能直接 EventRouter）。
+	// 临时代码标记：非框架最终形态。
+	m_application->OnEvent(event);
+
+}
+
+void Window::OnIMEComposition(){
+
+	// 7.1.2 方案 B：平台层状态同步区上报 → 转发既有框架逻辑（候选窗定位）
+	NotifyIMEComposition();
 
 }
 

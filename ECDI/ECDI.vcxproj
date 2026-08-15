@@ -171,7 +171,7 @@
     <ClCompile Include="src\Widget\TextWidget.cpp" />
     <ClCompile Include="src\Widget\TextBox.cpp" />
     <ClCompile Include="src\Widget\Widget.cpp" />
-    <ClCompile Include="src\Window\WindowMessageHandler.cpp" />
+    <ClCompile Include="src\Platform\Win32\WindowMessageHandler.cpp" />
     <ClCompile Include="src\Window\Window.cpp" />
     <ClCompile Include="src\Window\WindowClass.cpp" />
   </ItemGroup>
@@ -228,7 +228,7 @@
     <ClInclude Include="Include\ECDI\Widget\TextBox.h" />
     <ClInclude Include="Include\ECDI\Widget\Widget.h" />
     <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
-    <ClInclude Include="Include\ECDI\Window\WindowMessageHandler.h" />
+    <ClInclude Include="Include\ECDI\Platform\Win32\WindowMessageHandler.h" />
     <ClInclude Include="Include\ECDI\Window\Window.h" />
     <ClInclude Include="Include\ECDI\Window\WindowClass.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowEvent.h" />

@@ -17,6 +17,7 @@ class WindowClass;      // 前置声明（构造参数引用，P4 定稿——Wi
 class Application;
 class Widget;
 class KeyDownEvent;
+class Event;            // 前置声明（OnEvent 引用参数——7.1.2）
 
 /// @brief 框架层 Window 封装
 /// @details
@@ -113,6 +114,15 @@ class Window : public PlatformWindowHost {
 
 		/// @brief 事件来源窗口（翻译器构造 Event 需 Window*）
 		Window* GetWindow() const noexcept override;
+
+		/// @brief 事件转发（7.1.2 Dispatch 一级：翻译器 → 框架契约 → 本方法）
+		/// @details Transitional adapter——当前转发 m_application->OnEvent；
+		/// 最终派发目标可能随 7.1.5 Application 解耦变化（可能直接 EventRouter）
+		void OnEvent(const Event& event) override;
+
+		/// @brief IME 组合发生（7.1.2 方案 B：平台层状态同步区上报，非事件系统成员）
+		/// @details 转发既有框架逻辑 NotifyIMEComposition（候选窗定位）
+		void OnIMEComposition() override;
 
 		/// @brief 帧编排（决策 41 改名，原 OnPaint）：clear→Paint→BeginFrame→Execute→EndFrame
 		void PaintFrame();
