@@ -19,6 +19,10 @@ namespace{   // 匿名 namespace：TextBox 内部常量（不暴露）
 	/// @brief 选择高亮色（浅蓝——标准文本选择观感；不写死为魔法数字——主题友好，未来 ThemeSystem 替换）
 	const Color kSelectionColor = Color::FromRGBA8(173, 216, 230);
 
+	/// @brief 光标竖线宽（7.1.3 GPT 二轮：OnPaint 绘制与 CaretGeometry 输出同源——
+	/// 不散落魔法数字；未来 Theme/Style/Accessibility 可改）
+	constexpr float kCaretWidth = 2.0f;
+
 }
 
 TextBox::TextBox(const std::string& text): TextWidget(text){
@@ -149,18 +153,25 @@ Point TextBox::CalculateCaretPosition(TextMeasurer& measurer) const{
 	return Point{ textPos.x + caretX, textPos.y };
 }
 
-Point TextBox::GetCaretClientPosition(){
+CaretGeometry TextBox::GetCaretClientGeometry(){
 	// 客户区绝对坐标 = 控件绝对位置 + 光标相对控件位置（同一 CalculateCaretPosition 变换链）
 	const Point abs = GetAbsolutePosition();
-	const Point local = CalculateCaretPosition(GetWindow()->GetTextMeasurer());
-	return Point{ abs.x + local.x, abs.y + local.y };
+	TextMeasurer& measurer = GetWindow()->GetTextMeasurer();
+	const Point local = CalculateCaretPosition(measurer);
+	// 光标尺寸：宽 kCaretWidth（与 OnPaint 竖线同源——F2）+ 高 lineH（与 CalculateCaretPosition 同源测量）
+	const Size textSize = measurer.MeasureText(m_font, m_text);
+	const float lineH = (textSize.height > 0.0f) ? textSize.height : measurer.LineHeight(m_font);
+	return CaretGeometry{
+		Rect{ abs.x + local.x, abs.y + local.y, kCaretWidth, lineH },
+		m_showCaret   // 逻辑可见性：焦点显示 / 失焦隐藏（false → 平台层 HideCaret）
+	};
 }
 
 void TextBox::SyncTextInputCaret(){
 	// 5.6 v1.0.3：光标变动 → 更新系统 caret + ImmSetCompositionWindow 双通道
-	// （测量经 Window——GetCaretClientPosition 与点击定位同源；失焦走 DestroyTextInputCaret）
+	// （测量经 Window——GetCaretClientGeometry 与点击定位同源；失焦走 DestroyTextInputCaret）
 	if (Window* window = GetWindow()){
-		window->UpdateTextInputCaret(GetCaretClientPosition());
+		window->UpdateTextInputCaret(GetCaretClientGeometry());
 	}
 }
 
@@ -394,7 +405,8 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 		// 与 PaintFrame 注入为同一 TextMeasurer 实例（m_backend），结果一致
 		// v1.0.3：CalculateCaretPosition 返回光标顶部——竖线直接用它（系统 caret 同锚点）
 		const Point caretLocal = CalculateCaretPosition(GetWindow()->GetTextMeasurer());
-		ctx.DrawRect(Rect{ fx + caretLocal.x, fy + caretLocal.y, 2.0f, lineH }, Color::Black());
+		// 7.1.3：宽度用 kCaretWidth（与 CaretGeometry 输出同源——F2，不散落魔法数字）
+		ctx.DrawRect(Rect{ fx + caretLocal.x, fy + caretLocal.y, kCaretWidth, lineH }, Color::Black());
 	}
 }
 

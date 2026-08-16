@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "ECDI/Widget/TextWidget.h"
+#include "ECDI/Widget/CaretGeometry.h"
 
 namespace ECDI{
 
@@ -31,14 +32,15 @@ public:
 	void MoveCaretToEnd();                      // End
 	size_t GetCaret() const noexcept;           // 码点索引
 
-	// ── IME 位置（5.6）────────────────────────────────
-	/// @brief 光标顶部客户区坐标（文本输入插入点——系统 caret/IME 候选窗锚点，v1.0.3 C5 统一顶部）
+	// ── IME 位置（5.6；7.1.3 升级 CaretGeometry）────────────────
+	/// @brief 光标客户区几何（文本输入插入点——系统 caret/IME 候选窗锚点）
 	/// @details 纯几何查询：GetAbsolutePosition + CalculateCaretPosition（与光标绘制同源）。
 	/// 返回值 = 窗口客户区坐标（与 GetAbsolutePosition/事件 GetMouseX 同一坐标系——
 	/// 非屏幕坐标、非控件相对坐标；命名保留决议 2026-08-14：项目内 Client == 窗口客户区已统一）。
-	/// 平台转换（ClientToScreen）是 Window 职责（I2 分层——TextBox 不知道屏幕坐标）。
+	/// 7.1.3 改名（GPT 二轮）：返回值已是 CaretGeometry（rect + 逻辑可见性），Position 名不副实。
+	/// 平台转换是平台职责（TextBox 零平台依赖，只输出客户区几何）。
 	/// 非 const：测量需经 GetWindow()->GetTextMeasurer()（Window 接口非 const，与 OnMouseButtonDown 同性质）。
-	Point GetCaretClientPosition();
+	CaretGeometry GetCaretClientGeometry();
 
 protected:
 

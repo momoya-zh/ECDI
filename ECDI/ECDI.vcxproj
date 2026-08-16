@@ -191,6 +191,7 @@
     <ClInclude Include="include\ECDI\Render\GDIBackend.h" />
     <ClInclude Include="include\ECDI\Render\TextMeasurer.h" />
     <ClInclude Include="Include\ECDI\Widget\Button.h" />
+    <ClInclude Include="Include\ECDI\Widget\CaretGeometry.h" />
     <ClInclude Include="Include\ECDI\Core\ECDIAssert.h" />
     <ClInclude Include="Include\ECDI\EventSystem\EventRouter.h" />
     <ClInclude Include="Include\ECDI\EventSystem\EventDispatcher.h" />

@@ -227,18 +227,19 @@ void Window::NotifyIMEComposition(){
 	if (auto* textBox = dynamic_cast<TextBox*>(m_focusedWidget)){
 
 		// v1.0.3：IME 组合时同步插入点（双通道——系统 caret + ImmSetCompositionWindow 都在平台层）
-		UpdateTextInputCaret(textBox->GetCaretClientPosition());   // 客户区坐标（TextBox 零平台依赖）
+		// 7.1.3：GetCaretClientGeometry（CaretGeometry——改名 + 参数升级）
+		UpdateTextInputCaret(textBox->GetCaretClientGeometry());
 
 	}
 
 }
 
-void Window::UpdateTextInputCaret(const Point& clientPos){
+void Window::UpdateTextInputCaret(const CaretGeometry& geometry){
 
 	// 7.1.1 薄转发：平台实现（SetCaretPos + ImmSetCompositionWindow 双通道）在 Win32PlatformWindow
 	if (m_platformWindow){
 
-		m_platformWindow->UpdateTextInputCaret(clientPos);
+		m_platformWindow->UpdateTextInputCaret(geometry);
 
 	}
 

@@ -22,10 +22,11 @@
 | Phase 6.1 | HorizontalLayout（布局系统完善——VerticalLayout 水平镜像，diff 同构 + 10 条设计契约） | ✅ 2026-08-15 |
 | Phase 7.1.1 | PlatformWindow 骨架（Window 零 Win32：PlatformWindow/PlatformWindowHost 契约 + Win32PlatformWindow 实现；翻译器/IME 平台代码下沉） | ✅ 2026-08-15 |
 | Phase 7.1.2 | 翻译器契约改造（翻译器迁 Platform/Win32/ + 构造 Host& 派发；WM_IME 移出方案 B——翻译器纯翻译；Platform 零 Application/零 Window.h） | ✅ 2026-08-15 |
+| Phase 7.1.3 | 输入层抽象（CaretGeometry{ rect, visible } 文本插入点模型升级——光标不是点是矩形；kCaretWidth 同源；CreateCaret 尺寸来自 rect） | ✅ 2026-08-16 |
 
 ### 🔄 当前
 
-- **Phase 7 平台抽象 + 测试体系**——7.1.3 输入层抽象（CaretGeometry + IME adapter）
+- **Phase 7 平台抽象 + 测试体系**——7.1.4 Backend 注入（unique_ptr\<RenderingBackend\> + PlatformRenderContext）
 
 ### 🔲 未来
 

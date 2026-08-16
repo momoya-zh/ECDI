@@ -2,6 +2,7 @@
 
 #include "ECDI/Core/Point.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
+#include "ECDI/Widget/CaretGeometry.h"
 #include "ECDI/Render/GDIBackend.h"
 #include "ECDI/Render/Renderer.h"
 #include "ECDI/Render/RenderCommand.h"
@@ -90,11 +91,12 @@ class Window : public PlatformWindowHost {
 		/// dynamic_cast<TextBox*> 为 Phase 5 遗留债务（7.1.1 不处理——EditableTextWidget 以后做）。
 		void NotifyIMEComposition();
 
-		/// @brief 更新文本输入插入点位置（5.6 v1.0.3：系统 caret + IMM 双通道）
+		/// @brief 更新文本输入插入点位置（5.6 v1.0.3：系统 caret + IMM 双通道；7.1.3 参数升级 CaretGeometry）
 		/// @details TextBox 光标变动/IME 组合时调用——薄转发 m_platformWindow
-		/// （平台实现：SetCaretPos + ImmSetCompositionWindow，客户区坐标语义封装在平台层）。
-		/// @param clientPos 光标顶部客户区坐标（TextBox 零平台依赖，坐标转换是平台职责）
-		void UpdateTextInputCaret(const Point& clientPos);
+		/// （平台实现：SetCaretPos + ImmSetCompositionWindow，客户区坐标语义封装在平台层；
+		/// visible=逻辑可见性——false 平台层 HideCaret）。
+		/// @param geometry 插入点几何（客户区坐标，TextBox 零平台依赖）
+		void UpdateTextInputCaret(const CaretGeometry& geometry);
 
 		/// @brief 销毁文本输入插入点（TextBox 失焦时调用——薄转发 m_platformWindow）
 		void DestroyTextInputCaret();

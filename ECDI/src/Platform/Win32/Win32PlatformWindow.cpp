@@ -198,21 +198,37 @@ HWND Win32PlatformWindow::GetHandle() const noexcept{
 
 }
 
-void Win32PlatformWindow::UpdateTextInputCaret(const Point& clientPos){
+void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
+
+	// 7.1.3：visible 判断在**平台表现层**（GPT：Window 不知 CreateCaret/HideCaret 细节）
+	// visible=false → HideCaret（**存在 ≠ 可见**——caret 仍存在但不显示；
+	// 区别于"销毁"（DestroyTextInputCaret）——失焦销毁 vs 存在隐藏是两种语义）
+	if (!geometry.visible){
+
+		HideCaret(m_hwnd);
+
+		return;
+
+	}
 
 	// ① 系统 caret（TSF 输入法主路径——Win11 微软拼音查询 GetCaretPos 定位候选窗，最小实验已验证）
 	// 懒创建：首次调用（TextBox 获焦）创建；后续只 SetCaretPos
+	// 7.1.3：尺寸来自 rect（消灭硬编码 2x20——定位/绘制/输入同源，TextBox 输出完整几何）
 	if (!m_caretCreated){
 
-		CreateCaret(m_hwnd, nullptr, 2, 20);   // 2x20 竖线 caret（隐藏不显示，光标竖线由控件自画）
+		CreateCaret(m_hwnd, nullptr,
+			static_cast<int>(geometry.rect.width),
+			static_cast<int>(geometry.rect.height));
 
 		m_caretCreated = true;
 
 	}
 
-	SetCaretPos(static_cast<int>(clientPos.x), static_cast<int>(clientPos.y));   // 客户区坐标（caret 语义=左上角）
+	SetCaretPos(static_cast<int>(geometry.rect.x), static_cast<int>(geometry.rect.y));   // 客户区坐标（caret 语义=左上角）
 
-	HideCaret(m_hwnd);   // 隐藏：系统 caret 仅作位置信标，视觉零变化
+	// ⚠️ 保持 5.6 行为：始终 HideCaret（**不自画双光标**——系统 caret 仅作 TSF 位置信标，
+	// 光标竖线由控件 OnPaint 自画）。visible=true 不做 ShowCaret（GPT 三轮认同——分歧消解）。
+	HideCaret(m_hwnd);
 
 	// ② ImmSetCompositionWindow（IMM 保底通道——GPT 双保险：兼容性最广）
 	// ⚠️ 关键修正（2026-08-15 用户洞察）：实测微软拼音（TSF）把 ptCurrentPos 当**客户区坐标**解释！
@@ -221,9 +237,9 @@ void Win32PlatformWindow::UpdateTextInputCaret(const Point& clientPos){
 	// 窗口移动时还叠加窗口偏移（"像素过多"）。故**不再 ClientToScreen，直接传客户区坐标**。
 	POINT pt{
 
-		static_cast<LONG>(clientPos.x),
+		static_cast<LONG>(geometry.rect.x),
 
-		static_cast<LONG>(clientPos.y)
+		static_cast<LONG>(geometry.rect.y)
 
 	};
 

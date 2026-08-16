@@ -38,7 +38,7 @@ public:
 	bool Release() noexcept override;
 	void Invalidate() override;
 	Size GetClientSize() const override;
-	void UpdateTextInputCaret(const Point& clientPos) override;
+	void UpdateTextInputCaret(const CaretGeometry& geometry) override;
 	void DestroyTextInputCaret() override;
 
 	/// @brief 静态窗口过程（应用层注册 WindowClass 用；GWLP_USERDATA 绑定本实例）
