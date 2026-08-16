@@ -11,8 +11,6 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/Render/PaintContext.h"
 
-#include <Windows.h>
-
 #include <string>
 #include <memory>
 #include <system_error>
@@ -41,20 +39,17 @@ void CollectFocusables(Widget* node, std::vector<Widget*>& out){
 
 }
 
-Window::Window(Application* app,const WindowClass &windowClass,const std::string& title, int width, int height)
+Window::Window(Application* app,const WindowClass &windowClass,const std::string& title, int width, int height,
+               RenderServices services)
 	: m_application(app)
-	, m_renderer(m_backend){   // 决策 35：m_backend 先构造（默认构造），m_renderer 绑定引用
+	, m_renderBackend(std::move(services.renderer))
+	, m_textMeasurer(std::move(services.measurer))
+	, m_renderer(*m_renderBackend)   // 决策 34：Renderer 持 RenderingBackend&——⚠️ m_renderBackend 声明在 m_renderer 前
+	, m_platformWindow(std::make_unique<Win32PlatformWindow>(*this, windowClass, title, width, height)){
 
-	// 7.1.1：工厂创建平台窗口——CreateWindowExW 在 Win32PlatformWindow 构造内完成
-	// 7.1.2：去 app 参数（翻译器不再需要 Application*——经 Host 派发）
-	auto platform = std::make_unique<Win32PlatformWindow>(
-		*this, windowClass, title, width, height);
-
-	// ⚠️ 过渡（7.1.2 拆派发 / 7.1.4 PlatformRenderContext 替换）：后端注入 HWND——
-	// GDIBackend 是 4.7 稳定代码（skill 23 不碰内部），SetHwnd 接口保持，仅调用点经平台层中转
-	m_backend.SetHwnd(platform->GetHandle());
-
-	m_platformWindow = std::move(platform);
+	// 7.1.4：句柄注入经 PlatformRenderContext（取代 7.1.1 过渡 SetHwnd(GetHandle())——
+	// Window 不再接触 HWND；识别发生在平台实现内部 static_cast）
+	m_renderBackend->Initialize(m_platformWindow->GetRenderContext());
 
 	// 创建 RootWidget（Widget 树的根节点，代表窗口客户区）
 	m_rootWidget = std::make_unique<Widget>();
@@ -93,7 +88,7 @@ void Window::PaintFrame()
 {
 	// 决策 10/13/33：完整编排，严格配对
 	m_commands.clear();                              // 决策 4：复用缓冲
-	PaintContext ctx(m_commands, m_backend);         // 路线 X：m_backend 兼 TextMeasurer（测量帧无关）
+	PaintContext ctx(m_commands, *m_textMeasurer);   // 7.1.4：测量独立指针（GDITextMeasurer）
 	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
 	m_renderer.BeginFrame();                         // 决策 13：转发
 	m_renderer.Execute(m_commands);
@@ -137,8 +132,8 @@ void Window::Invalidate(){
 
 TextMeasurer& Window::GetTextMeasurer() noexcept{
 
-	// 5.5 T1：GDIBackend 兼 TextMeasurer（5.1 双接口）——返回抽象接口不暴露具体后端
-	return m_backend;
+	// 7.1.4：独立测量器（GDITextMeasurer——拆类后不再兼后端）——返回抽象接口不暴露具体实现
+	return *m_textMeasurer;
 
 }
 

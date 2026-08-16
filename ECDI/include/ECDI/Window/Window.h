@@ -3,7 +3,9 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
 #include "ECDI/Widget/CaretGeometry.h"
-#include "ECDI/Render/GDIBackend.h"
+#include "ECDI/Render/RenderServices.h"
+#include "ECDI/Render/BackendFactory.h"
+#include "ECDI/Render/RenderingBackend.h"
 #include "ECDI/Render/Renderer.h"
 #include "ECDI/Render/RenderCommand.h"
 #include "ECDI/Render/TextMeasurer.h"
@@ -35,7 +37,10 @@ class Window : public PlatformWindowHost {
 		/// @param title       窗口标题
 		/// @param width       窗口总宽度（含边框和标题栏）
 		/// @param height      窗口总高度
-		Window(Application* app,const WindowClass &windowClass,const std::string&title,int width,int height);
+		/// @param services    渲染服务（7.1.4：默认 GDIBackend+GDITextMeasurer——平台默认工厂；
+		///                   测试/未来可注入其他后端）
+		Window(Application* app,const WindowClass &windowClass,const std::string&title,int width,int height,
+		       RenderServices services = CreateDefaultRenderServices());
 
 		// 禁止拷贝
 		Window(const Window&) = delete;
@@ -69,7 +74,7 @@ class Window : public PlatformWindowHost {
 		/// @brief 请求重绘整个客户区（Widget::Invalidate 上溯到根后调用 → WM_PAINT → PaintFrame）
 		void Invalidate();
 
-		/// @brief 获取文本测量器（5.5 T1；GDIBackend 兼 TextMeasurer——返回抽象接口不暴露后端）
+		/// @brief 获取文本测量器（7.1.4：m_textMeasurer——独立测量器，拆类后不再兼后端）
 		/// @details 控件经 protected GetWindow() 获取——非 Paint 时刻测量（点击定位光标等）
 		TextMeasurer& GetTextMeasurer() noexcept;
 
@@ -143,9 +148,13 @@ class Window : public PlatformWindowHost {
 
 		Widget* m_captureWidget = nullptr;	///< 当前鼠标捕获控件（5.4.2，非拥有指针）
 
-		GDIBackend m_backend;	///< GDI 渲染后端（值成员，决策 35：声明在 Renderer 之前；7.1.4 改注入）
+		// 7.1.4：能力接口分离（用户决策）——绘制/测量各自独立对象（unique_ptr）；
+		// ⚠️ m_renderBackend 必须声明在 m_renderer 前（Renderer 持 RenderingBackend&，初始化列表绑定）
+		std::unique_ptr<RenderingBackend> m_renderBackend;	///< 绘制能力（GDIBackend——声明在 m_renderer 前！）
 
-		Renderer m_renderer;	///< 渲染执行器（引用 m_backend，决策 34）
+		std::unique_ptr<TextMeasurer> m_textMeasurer;	///< 测量能力（GDITextMeasurer）
+
+		Renderer m_renderer;	///< 渲染执行器（引用 *m_renderBackend，决策 34）
 
 		CommandBuffer m_commands;	///< 命令缓冲（决策 4：Window 持有跨帧复用）
 

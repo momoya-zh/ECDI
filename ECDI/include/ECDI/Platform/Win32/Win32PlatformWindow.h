@@ -2,6 +2,7 @@
 
 #include "ECDI/Platform/PlatformWindow.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
+#include "ECDI/Platform/Win32/Win32RenderContext.h"
 #include "ECDI/Platform/Win32/WindowMessageHandler.h"
 
 #include <Windows.h>
@@ -38,14 +39,12 @@ public:
 	bool Release() noexcept override;
 	void Invalidate() override;
 	Size GetClientSize() const override;
+	const PlatformRenderContext& GetRenderContext() const override;   ///< 7.1.4：后端经此拿平台句柄
 	void UpdateTextInputCaret(const CaretGeometry& geometry) override;
 	void DestroyTextInputCaret() override;
 
 	/// @brief 静态窗口过程（应用层注册 WindowClass 用；GWLP_USERDATA 绑定本实例）
 	static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-	/// @brief 原生句柄（过渡：Window 构造给 GDIBackend::SetHwnd；7.1.4 PlatformRenderContext 替换）
-	HWND GetHandle() const noexcept;
 
 private:
 
@@ -56,6 +55,7 @@ private:
 	WindowMessageHandler m_messageHandler;	///< 翻译器（7.1.2：构造传 m_host——不再认识应用层）
 	HWND m_hwnd = nullptr;	///< 窗口句柄（原 Window::m_handle）
 	bool m_caretCreated = false;	///< 系统 caret 是否已创建（5.6 v1.0.3 懒创建标记）
+	Win32RenderContext m_renderContext;	///< 渲染上下文（7.1.4：构造体 CreateWindowExW 成功后 SetHandle）
 
 };
 

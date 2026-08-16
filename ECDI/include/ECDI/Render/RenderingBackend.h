@@ -9,9 +9,11 @@
 
 namespace ECDI {
 
+class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——零 include 依赖，7.1.4）
+
 /// @brief 渲染后端抽象接口（操作粒度，决策 11/14）
 /// @details
-/// 能力提供者，不是命令消费者：只暴露操作（BeginFrame/DrawRect/DrawText/EndFrame），
+/// 能力提供者，不是命令消费者：只暴露操作（Initialize/BeginFrame/DrawRect/DrawText/EndFrame），
 /// 不认识 RenderCommand/variant/Widget/PaintContext——任何系统都能直接用。
 /// 替换具体绘制 API 时，上层渲染流程无需修改。
 
@@ -20,6 +22,11 @@ namespace ECDI {
 	public:
 
 		virtual ~RenderingBackend() = default;
+
+		/// @brief 平台句柄注入（7.1.4：决策 35 代价解决——后端可替换的接入点）
+		/// @param context 平台渲染上下文（Win32 后端 static_cast 取句柄——体系内约定，
+		/// 非跨层 dynamic_cast；无需平台句柄的后端（如 RecordingBackend）继承默认空实现零改动）
+		virtual void Initialize(const PlatformRenderContext& context) {}
 
 		/// @brief 帧开始（后端建立绘制目标：清屏/拿 HDC/建缓冲）
 		virtual void BeginFrame() = 0;

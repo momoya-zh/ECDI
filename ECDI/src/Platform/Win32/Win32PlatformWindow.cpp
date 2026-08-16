@@ -44,6 +44,9 @@ Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
 
 	}
 
+	// 7.1.4：hwnd 就绪后绑定渲染上下文（后端经 GetRenderContext() 拿句柄）
+	m_renderContext.SetHandle(m_hwnd);
+
 }
 
 Win32PlatformWindow::~Win32PlatformWindow(){
@@ -192,9 +195,10 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 
 }
 
-HWND Win32PlatformWindow::GetHandle() const noexcept{
+const PlatformRenderContext& Win32PlatformWindow::GetRenderContext() const{
 
-	return m_hwnd;
+	// 7.1.4：返回渲染上下文（构造时已 SetHandle——后端 Initialize 经 static_cast 取 HWND）
+	return m_renderContext;
 
 }
 

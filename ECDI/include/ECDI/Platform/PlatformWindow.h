@@ -6,6 +6,7 @@
 namespace ECDI{
 
 class PlatformWindowHost;   // 前置声明（构造注入 Host&）
+class PlatformRenderContext;   // 前置声明（GetRenderContext 返回 const&——零 include 依赖，7.1.4）
 
 /// @brief 平台窗口抽象（7.1）：平台负责"窗口存在"，框架负责"窗口里面发生什么"
 /// @details Window 组合此接口——Window 不接触 HWND/创建细节；
@@ -27,6 +28,10 @@ public:
 
 	/// @brief 客户区尺寸（框架层 Size，非 Win32 RECT——类型封装在实现内）
 	virtual Size GetClientSize() const = 0;
+
+	/// @brief 平台渲染上下文（7.1.4：后端经此拿平台句柄——"参数识别"→"平台返回"，
+	/// Window 层零识别；识别发生在平台实现内部 static_cast）
+	virtual const PlatformRenderContext& GetRenderContext() const = 0;
 
 	/// @brief 更新文本输入插入点（5.6 双通道：系统 caret + ImmSetCompositionWindow；
 	/// 7.1.3 参数升级 CaretGeometry——插入点矩形 + 逻辑可见性）

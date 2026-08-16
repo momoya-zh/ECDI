@@ -402,7 +402,7 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 	// 3. 光标竖线（5.6 改 CalculateCaretPosition：点击定位/光标绘制/IME 同一变换链）
 	if (m_showCaret){
 		// 测量经 Window：PaintContext 封装不暴露 measurer（决策 8）——
-		// 与 PaintFrame 注入为同一 TextMeasurer 实例（m_backend），结果一致
+		// 与 PaintFrame 注入为同一 TextMeasurer 实例（*m_textMeasurer——7.1.4 拆类后独立测量器），结果一致
 		// v1.0.3：CalculateCaretPosition 返回光标顶部——竖线直接用它（系统 caret 同锚点）
 		const Point caretLocal = CalculateCaretPosition(GetWindow()->GetTextMeasurer());
 		// 7.1.3：宽度用 kCaretWidth（与 CaretGeometry 输出同源——F2，不散落魔法数字）

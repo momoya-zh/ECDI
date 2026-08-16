@@ -23,10 +23,11 @@
 | Phase 7.1.1 | PlatformWindow 骨架（Window 零 Win32：PlatformWindow/PlatformWindowHost 契约 + Win32PlatformWindow 实现；翻译器/IME 平台代码下沉） | ✅ 2026-08-15 |
 | Phase 7.1.2 | 翻译器契约改造（翻译器迁 Platform/Win32/ + 构造 Host& 派发；WM_IME 移出方案 B——翻译器纯翻译；Platform 零 Application/零 Window.h） | ✅ 2026-08-15 |
 | Phase 7.1.3 | 输入层抽象（CaretGeometry{ rect, visible } 文本插入点模型升级——光标不是点是矩形；kCaretWidth 同源；CreateCaret 尺寸来自 rect） | ✅ 2026-08-16 |
+| Phase 7.1.4 | Backend 注入（决策 35 代价解决：Window 持 unique_ptr\<RenderingBackend\> + unique_ptr\<TextMeasurer\>；GDIBackend 拆类 + GDITextMeasurer；RenderServices bundle + 工厂；PlatformRenderContext 句柄注入；Window.h 零具体后端零 Windows.h） | ✅ 2026-08-16 |
 
 ### 🔄 当前
 
-- **Phase 7 平台抽象 + 测试体系**——7.1.4 Backend 注入（unique_ptr\<RenderingBackend\> + PlatformRenderContext）
+- **Phase 7 平台抽象 + 测试体系**——7.1.4 完成；**7.1.5 Application 解耦评估**（回看暴露面再决定）
 
 ### 🔲 未来
 

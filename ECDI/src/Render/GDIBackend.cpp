@@ -2,6 +2,7 @@
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Core/String.h"
+#include "ECDI/Platform/Win32/Win32RenderContext.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,7 +16,7 @@ GDIBackend::~GDIBackend()
 	// 决策 31：缓冲统一释放（空句柄防御在 ReleaseBackBuffer 内部）
 	ReleaseBackBuffer();
 
-	// D1：字体缓存统一清理（GDI 对象 10,000 上限纪律）
+	// D1：字体缓存统一清理（GDI 对象 10,000 上限纪律——渲染 DrawText 用）
 	for (auto& entry : m_fontCache)
 	{
 		DeleteObject(entry.second);
@@ -23,9 +24,11 @@ GDIBackend::~GDIBackend()
 	m_fontCache.clear();
 }
 
-void GDIBackend::SetHwnd(HWND hwnd)
+void GDIBackend::Initialize(const PlatformRenderContext& context)
 {
-	m_hwnd = hwnd;
+	// 7.1.4：平台句柄注入（取代 SetHwnd 过渡）——static_cast 体系内约定：
+	// GDIBackend 是 Win32 后端，识别 Win32RenderContext 是"同体系内"（非跨层 dynamic_cast）
+	m_hwnd = static_cast<const Win32RenderContext&>(context).GetHandle();
 }
 
 void GDIBackend::BeginFrame()
@@ -204,69 +207,6 @@ HFONT GDIBackend::GetOrCreateFont(const Font& font)
 
 	m_fontCache.emplace(key, hfont);
 	return hfont;
-}
-
-Size GDIBackend::MeasureText(const Font& font, const std::string& text)
-{
-	// D2：帧无关测量——Paint 阶段测量发生在 BeginFrame 前、帧内 DC 不存在，
-	// 故用 GetDC(NULL) 临时屏幕 DC（仅测量，不承担绘制职责）
-	Size result{};
-
-	HDC measureDC = GetDC(nullptr);
-	if (!measureDC)
-	{
-		return result;
-	}
-
-	HFONT hfont = GetOrCreateFont(font);
-	if (hfont)
-	{
-		// D2 补充 3：SelectObject 后恢复原字体（GDI 纪律）
-		HGDIOBJ oldFont = SelectObject(measureDC, hfont);
-
-		const std::wstring wideText = UTF8ToWide(text);
-		SIZE extent{};
-		if (!wideText.empty() && GetTextExtentPoint32W(measureDC, wideText.c_str(),
-		                                               static_cast<int>(wideText.size()), &extent))
-		{
-			result.width = static_cast<float>(extent.cx);
-			result.height = static_cast<float>(extent.cy);
-		}
-
-		SelectObject(measureDC, oldFont);
-	}
-
-	ReleaseDC(nullptr, measureDC);
-	return result;
-}
-
-float GDIBackend::LineHeight(const Font& font)
-{
-	// D2：同 MeasureText 的帧无关测量模式；GetTextMetrics 精确行高（P7）
-	float height = font.size;   // 兜底：字号
-
-	HDC measureDC = GetDC(nullptr);
-	if (!measureDC)
-	{
-		return height;
-	}
-
-	HFONT hfont = GetOrCreateFont(font);
-	if (hfont)
-	{
-		HGDIOBJ oldFont = SelectObject(measureDC, hfont);
-
-		TEXTMETRICW metrics{};
-		if (GetTextMetricsW(measureDC, &metrics))
-		{
-			height = static_cast<float>(metrics.tmHeight);
-		}
-
-		SelectObject(measureDC, oldFont);
-	}
-
-	ReleaseDC(nullptr, measureDC);
-	return height;
 }
 
 void GDIBackend::EndFrame()
