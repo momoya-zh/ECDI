@@ -2,7 +2,6 @@
 
 #include "ECDI/Platform/Win32/Win32PlatformWindow.h"
 #include "ECDI/Widget/TextBox.h"
-#include "ECDI/Window/WindowClass.h"
 #include "ECDI/Application/Application.h"
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Core/ECDIAssert.h"
@@ -39,13 +38,13 @@ void CollectFocusables(Widget* node, std::vector<Widget*>& out){
 
 }
 
-Window::Window(Application* app,const WindowClass &windowClass,const std::string& title, int width, int height,
+Window::Window(Application* app,const std::string& title, int width, int height,
                RenderServices services)
 	: m_application(app)
 	, m_renderBackend(std::move(services.renderer))
 	, m_textMeasurer(std::move(services.measurer))
 	, m_renderer(*m_renderBackend)   // 决策 34：Renderer 持 RenderingBackend&——⚠️ m_renderBackend 声明在 m_renderer 前
-	, m_platformWindow(std::make_unique<Win32PlatformWindow>(*this, windowClass, title, width, height)){
+	, m_platformWindow(std::make_unique<Win32PlatformWindow>(*this, title, width, height)){
 
 	// 7.1.4：句柄注入经 PlatformRenderContext（取代 7.1.1 过渡 SetHwnd(GetHandle())——
 	// Window 不再接触 HWND；识别发生在平台实现内部 static_cast）
@@ -290,9 +289,8 @@ Window* Window::GetWindow() const noexcept{
 
 void Window::OnEvent(const Event& event){
 
-	// Transitional adapter（GPT 二轮）：平台层经 Window 转发翻译后的事件，
-	// 直到 Application 解耦（7.1.5）完成——最终派发目标可能变化（可能直接 EventRouter）。
-	// 临时代码标记：非框架最终形态。
+	// 事件转发（框架内，7.1.5 注释转正）：Application 是事件最终入口（EventRouter 基类）——
+	// 平台事件 → Host::OnEvent → Window → Application 分发链（HitTest/Bubbling/焦点）
 	m_application->OnEvent(event);
 
 }

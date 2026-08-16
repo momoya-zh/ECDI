@@ -24,10 +24,11 @@
 | Phase 7.1.2 | 翻译器契约改造（翻译器迁 Platform/Win32/ + 构造 Host& 派发；WM_IME 移出方案 B——翻译器纯翻译；Platform 零 Application/零 Window.h） | ✅ 2026-08-15 |
 | Phase 7.1.3 | 输入层抽象（CaretGeometry{ rect, visible } 文本插入点模型升级——光标不是点是矩形；kCaretWidth 同源；CreateCaret 尺寸来自 rect） | ✅ 2026-08-16 |
 | Phase 7.1.4 | Backend 注入（决策 35 代价解决：Window 持 unique_ptr\<RenderingBackend\> + unique_ptr\<TextMeasurer\>；GDIBackend 拆类 + GDITextMeasurer；RenderServices bundle + 工厂；PlatformRenderContext 句柄注入；Window.h 零具体后端零 Windows.h） | ✅ 2026-08-16 |
+| Phase 7.1.5 | Application 解耦（**7.1 平台抽象闭环**：WindowClass::Instance 下沉 + PlatformApplication 消息泵抽象；Application.h/cpp 零 Win32；框架抽象头零 Windows.h） | ✅ 2026-08-16 |
 
 ### 🔄 当前
 
-- **Phase 7 平台抽象 + 测试体系**——7.1.4 完成；**7.1.5 Application 解耦评估**（回看暴露面再决定）
+- **Phase 7 平台抽象 + 测试体系**——**7.1 平台抽象全部完成（7.1.1-7.1.5）**；下一步 **7.2 测试体系**（补 Selection 等历史单元测试欠账——5.5.2 P8 承诺）
 
 ### 🔲 未来
 
@@ -54,6 +55,7 @@
 | 键盘入口不对称（OnKeyDown 走 Window / OnKeyUp+CharInput 直派，3 入口）——已回顾保持现状（Tab 拦截必需 Window），未来全局快捷键时统一 | Application | 未来全局输入需求出现时（详见 phase5-architecture-review.md） |
 | 多窗口焦点语义（应用级 vs 窗口级焦点） | Window/Application | Phase 7 平台抽象时评估（详见 phase5-architecture-review.md） |
 | 编辑操作可见性（临时 public） | TextBox | Phase 7 API 审查 |
+| **RenderingBackend::DrawText 命名与 Win32 宏冲突**（skill 13 历史遗留违反——现用防御性 undef 兜底，用户零负担） | RenderingBackend/RecordingBackend/GDIBackend | Phase 10 v1.0 API 审查改名（如 DrawTextContent）
 
 ## Phase3 Widget System
 

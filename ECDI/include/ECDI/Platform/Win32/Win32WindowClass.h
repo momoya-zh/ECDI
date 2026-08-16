@@ -13,9 +13,15 @@ namespace ECDI{
 /// @details
 /// 构造时 RegisterClassW，析构时 UnregisterClassW。
 /// 禁止拷贝，支持移动（转移注册所有权）。
+/// 7.1.5 归位 Platform/Win32/——窗口系统资源（RegisterClassW 唯一归属）。
 class WindowClass
 {
 public:
+
+	/// @brief 共享窗口类实例（7.1.5：注册一次跨窗口共用——窗口系统资源归窗口类自身）
+	/// @details static 局部 RAII（进程退出反注册）；WindowProc 平台内闭环（cpp 同族引用）。
+	/// 替代原 Application 持有 m_windowClass（Application 不再认识窗口类）。
+	static WindowClass& Instance();
 
 	/// @param className 窗口类名（注册到系统）
 	/// @param windowProc 窗口消息回调函数

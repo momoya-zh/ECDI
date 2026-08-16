@@ -1,4 +1,7 @@
-﻿#include "ECDI/Window/Window.h"
+﻿#include <Windows.h>   // wWinMain 入口（WINAPI/HINSTANCE——7.1.5 前经 Application→WindowClass 传递 include，解耦后显式引入）
+
+
+#include "ECDI/Window/Window.h"
 
 #include "ECDI/Application/Application.h"
 #include "ECDI/Core/Logger.h"

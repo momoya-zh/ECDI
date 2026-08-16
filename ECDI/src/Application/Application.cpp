@@ -1,6 +1,6 @@
 ﻿#include "ECDI/Application/Application.h"
 
-#include "ECDI/Platform/Win32/Win32PlatformWindow.h"
+#include "ECDI/Platform/Win32/Win32PlatformApplication.h"
 #include "ECDI/Window/Window.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
@@ -17,38 +17,31 @@
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Core/Logger.h"
 
-#include <Windows.h>
-
 #include <algorithm>
 
 namespace ECDI{
 
-Application::Application():m_windowClass("ECDI FrameWork",Win32PlatformWindow::WindowProc) {
+Application::Application()
+	: m_platformApplication(std::make_unique<Win32PlatformApplication>()){
+
+	// 7.1.5：延迟清理逻辑注册给平台循环（时机平台控制——每条消息后 PerformDeferredCleanup）
+	m_platformApplication->SetDeferredCleanup([this]{ ProcessDeferredDestroy(); });
 
 }
 
-WindowClass& Application::GetWindowClass() {
-	return m_windowClass;
-}
+Application::~Application() = default;   // 7.1.5：析构点在此（Win32PlatformApplication.h 已 include——PlatformApplication 完整）
 
 int Application::Run() {
 
+	// 7.1.5：消息循环下沉平台层（GetMessageW/TranslateMessage/DispatchMessageW 唯一归属
+	// Win32PlatformApplication——Application 零 Win32）
+	return m_platformApplication->Run();
 
-	MSG message{};
-	// 标准 Win32 消息循环：GetMessage 返回 0 时退出（收到 WM_QUIT）
-	while (GetMessageW(&message, nullptr, 0, 0)) {
-		TranslateMessage(&message);
-		DispatchMessageW(&message);
-		// 每帧末尾处理延迟销毁的窗口（避免在消息处理过程中销毁窗口导致悬空指针）
-		ProcessDeferredDestroy();
-	}
-	return static_cast<int>(message.wParam);
 }
 
 Window& Application::Create(const std::string& title, int width, int height) {
 	m_windows.emplace_back(std::make_unique<Window>(
 		this,
-		m_windowClass,
 		title,
 		width,
 		height
@@ -68,7 +61,7 @@ void Application::Exit(){
 	if (!m_running)
 		return;
 	m_running = false;
-	PostQuitMessage(0);
+	m_platformApplication->RequestExit();   // 7.1.5：退出请求下沉（PostQuitMessage 唯一归属平台层）
 }
 
 void Application::ProcessDeferredDestroy() {

@@ -48,9 +48,6 @@
     <ClCompile Include="src\Window\Window.cpp">
       <Filter>Window</Filter>
     </ClCompile>
-    <ClCompile Include="src\Window\WindowClass.cpp">
-      <Filter>Window</Filter>
-    </ClCompile>
     <ClCompile Include="src\Application\Application.cpp">
       <Filter>Application</Filter>
     </ClCompile>
@@ -102,9 +99,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\ECDI\Window\Window.h">
-      <Filter>Window</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\ECDI\Window\WindowClass.h">
       <Filter>Window</Filter>
     </ClInclude>
     <ClInclude Include="Include\ECDI\Application\Application.h">

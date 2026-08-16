@@ -1,6 +1,6 @@
 ﻿#include "ECDI/Platform/Win32/Win32PlatformWindow.h"
 
-#include "ECDI/Window/WindowClass.h"
+#include "ECDI/Platform/Win32/Win32WindowClass.h"
 #include "ECDI/Core/String.h"
 
 #include <Windows.h>
@@ -12,12 +12,15 @@
 namespace ECDI{
 
 Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
-		const WindowClass& windowClass, const std::string& title, int width, int height)
+		const std::string& title, int width, int height)
 	: m_host(host)
 	, m_messageHandler(m_host){
 
 	// 公共 API 为 UTF-8（std::string），在平台边界转换到 UTF-16（字符串边界划分）
 	const std::wstring wideTitle = UTF8ToWide(title);
+
+	// 7.1.5：窗口类注册下沉——窗口系统资源归窗口类自身（WindowClass::Instance()）
+	const WindowClass& windowClass = WindowClass::Instance();
 
 	// 创建 Win32 窗口（WS_OVERLAPPEDWINDOW = 标题栏 + 边框 + 最小化/最大化/关闭按钮）
 	m_hwnd = CreateWindowExW(

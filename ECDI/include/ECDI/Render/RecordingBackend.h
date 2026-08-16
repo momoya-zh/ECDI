@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef DrawText
+#undef DrawText   // 防御性 undef（2026-08-16）：本头声明 DrawText override——自包含防护
+// （虽经 RenderingBackend.h 传递 undef，但头应自给自足——声明 DrawText 的头自己防护）
+#endif
+
 #include "ECDI/Render/RenderingBackend.h"
 #include "ECDI/Render/TextMeasurer.h"
 

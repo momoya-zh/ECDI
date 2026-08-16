@@ -1,5 +1,11 @@
 ﻿#pragma once
 
+#ifdef DrawText
+#undef DrawText   // 防御性 undef（2026-08-16）：本头声明 DrawText 方法（公共抽象接口）——
+// 用户业务代码若先 include Windows.h（wWinMain 入口），DrawText 宏会污染本头声明 →
+// override 不匹配/链接错；#ifdef 包裹 = 用户零负担（宏未定义则无副作用，已定义则自动免疫）
+#endif
+
 #include "ECDI/Core/Rect.h"
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"

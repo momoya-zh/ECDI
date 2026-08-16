@@ -16,7 +16,6 @@
 namespace ECDI{
 
 class PlatformWindow;   // 前置声明（unique_ptr 成员——平台抽象，7.1.1）
-class WindowClass;      // 前置声明（构造参数引用，P4 定稿——WindowClass 标记 7.1.5）
 class Application;
 class Widget;
 class KeyDownEvent;
@@ -33,13 +32,13 @@ class Window : public PlatformWindowHost {
 	public:
 
 		/// @param app         所属 Application
-		/// @param windowClass 已注册的窗口类
 		/// @param title       窗口标题
 		/// @param width       窗口总宽度（含边框和标题栏）
 		/// @param height      窗口总高度
 		/// @param services    渲染服务（7.1.4：默认 GDIBackend+GDITextMeasurer——平台默认工厂；
 		///                   测试/未来可注入其他后端）
-		Window(Application* app,const WindowClass &windowClass,const std::string&title,int width,int height,
+		/// 7.1.5：窗口类参数移除（窗口系统资源归平台层 WindowClass::Instance()——Window 不再认识平台对象）
+		Window(Application* app,const std::string&title,int width,int height,
 		       RenderServices services = CreateDefaultRenderServices());
 
 		// 禁止拷贝

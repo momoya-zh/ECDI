@@ -175,7 +175,8 @@
     <ClCompile Include="src\Widget\Widget.cpp" />
     <ClCompile Include="src\Platform\Win32\WindowMessageHandler.cpp" />
     <ClCompile Include="src\Window\Window.cpp" />
-    <ClCompile Include="src\Window\WindowClass.cpp" />
+    <ClCompile Include="src\Platform\Win32\Win32WindowClass.cpp" />
+    <ClCompile Include="src\Platform\Win32\Win32PlatformApplication.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\ECDI\Application\Application.h" />
@@ -185,8 +186,11 @@
     <ClInclude Include="include\ECDI\Platform\PlatformWindow.h" />
     <ClInclude Include="include\ECDI\Platform\PlatformWindowHost.h" />
     <ClInclude Include="include\ECDI\Platform\PlatformRenderContext.h" />
+    <ClInclude Include="include\ECDI\Platform\PlatformApplication.h" />
     <ClInclude Include="include\ECDI\Platform\Win32\Win32PlatformWindow.h" />
     <ClInclude Include="include\ECDI\Platform\Win32\Win32RenderContext.h" />
+    <ClInclude Include="include\ECDI\Platform\Win32\Win32WindowClass.h" />
+    <ClInclude Include="include\ECDI\Platform\Win32\Win32PlatformApplication.h" />
     <ClInclude Include="include\ECDI\Render\PaintContext.h" />
     <ClInclude Include="include\ECDI\Render\RenderCommand.h" />
     <ClInclude Include="include\ECDI\Render\Renderer.h" />
@@ -238,7 +242,6 @@
     <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
     <ClInclude Include="Include\ECDI\Platform\Win32\WindowMessageHandler.h" />
     <ClInclude Include="Include\ECDI\Window\Window.h" />
-    <ClInclude Include="Include\ECDI\Window\WindowClass.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowEvent.h" />
   </ItemGroup>
   <ItemGroup>

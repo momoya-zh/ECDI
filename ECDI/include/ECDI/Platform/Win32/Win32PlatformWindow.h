@@ -14,23 +14,20 @@
 
 namespace ECDI{
 
-class WindowClass;   // 前置声明（构造参数引用，P4 定稿——WindowClass 标记 7.1.5）
-
 /// @brief Win32 平台窗口实现（7.1.1 唯一实现）
 /// @details 承载全部 Win32：窗口生命周期 / WindowProc / 消息处理 / 翻译器 / IME 平台调用。
 /// 平台代码不再出现在框架类（Window）中——Window.h 零 Win32（V2 验收）。
 /// 持 Host& 回调框架层（Platform 不认识框架具体类，只认识契约）。
+/// 7.1.5：窗口类注册下沉（WindowClass::Instance()——窗口系统资源归窗口类自身）。
 class Win32PlatformWindow final : public PlatformWindow{
 public:
 
 	/// @param host     Host 回调（框架契约）
-	/// @param windowClass 窗口类（应用层持有，此处仅用类名/实例句柄）
 	/// @param title    窗口标题（UTF-8，内部转 UTF-16）
 	/// @param width    窗口总宽度（含边框和标题栏）
 	/// @param height   窗口总高度
 	/// @throws std::system_error CreateWindowExW 失败
 	Win32PlatformWindow(PlatformWindowHost& host,
-	                    const WindowClass& windowClass,
 	                    const std::string& title, int width, int height);
 
 	~Win32PlatformWindow() override;   ///< Release（幂等）

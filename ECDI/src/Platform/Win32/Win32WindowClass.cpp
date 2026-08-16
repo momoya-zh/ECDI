@@ -1,11 +1,25 @@
-﻿#include "ECDI/Window/WindowClass.h"
+﻿#include "ECDI/Platform/Win32/Win32WindowClass.h"
 
-#include "ECDI/Window/Window.h"
+#include "ECDI/Platform/Win32/Win32PlatformWindow.h"
 #include "ECDI/Core/String.h"
 
 #include <system_error>
 
 namespace ECDI{
+
+namespace{   // 匿名 namespace：窗口类内部常量
+const char* kWindowClassName = "ECDI FrameWork";   // 窗口类名（原 Application 构造硬编码，7.1.5 下沉）
+}
+
+WindowClass& WindowClass::Instance(){
+
+	// 7.1.5：窗口类注册归"窗口系统"自身——static 局部 RAII（注册一次跨窗口共用，进程退出反注册）。
+	// WindowProc 符号平台内闭环（Win32PlatformWindow——cpp 同族引用，Application 永不知晓）
+	static WindowClass windowClass(kWindowClassName, &Win32PlatformWindow::WindowProc);
+
+	return windowClass;
+
+}
 
 WindowClass::WindowClass(const std::string& className, WNDPROC windowProc):
 	m_className(UTF8ToWide(className)),
