@@ -177,6 +177,11 @@
     <ClCompile Include="src\Window\Window.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32WindowClass.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32PlatformApplication.cpp" />
+    <ClCompile Include="src\Tests\LayoutTests.cpp" />
+    <ClCompile Include="src\Tests\RendererTests.cpp" />
+    <ClCompile Include="src\Tests\RunAllTests.cpp" />
+    <ClCompile Include="src\Tests\TextBoxTests.cpp" />
+    <ClCompile Include="src\Tests\WidgetTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\ECDI\Application\Application.h" />
