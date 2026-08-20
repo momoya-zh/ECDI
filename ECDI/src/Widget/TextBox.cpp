@@ -11,6 +11,7 @@
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace ECDI{
 
@@ -59,6 +60,7 @@ void TextBox::InsertCodepoint(char32_t codepoint){
 	ClearSelection();   // 5.5.2：插入后同步 anchor——否则产生幽灵选择（anchor=插入前caret, caret=+1）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+	RaiseTextChanged();     // 7.5：编辑操作实际改文本 → 通知回调（D7：仅编辑操作触发）
 }
 
 void TextBox::DeleteBackward(){
@@ -67,10 +69,11 @@ void TextBox::DeleteBackward(){
 		m_caret = DeleteSelection();
 		Invalidate();
 		SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+		RaiseTextChanged();     // 7.5：删选中区 → 文本变化 → 通知
 		return;
 	}
 	if (m_caret == 0)
-		return;                                   // 头边界
+		return;                                   // 头边界：空操作 → 不触发（D7 边界语义）
 	const size_t cur = CodepointIndexToByteOffset(m_text, m_caret);
 	const size_t prev = CodepointIndexToByteOffset(m_text, m_caret - 1);
 	m_text.erase(prev, cur - prev);               // 删前一个码点的字节区间
@@ -78,6 +81,7 @@ void TextBox::DeleteBackward(){
 	ClearSelection();   // 5.5.2：删除后同步 anchor（防之前残留幽灵选择）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+	RaiseTextChanged();     // 7.5：实际删字符 → 通知
 }
 
 void TextBox::DeleteForward(){
@@ -86,16 +90,18 @@ void TextBox::DeleteForward(){
 		m_caret = DeleteSelection();
 		Invalidate();
 		SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+		RaiseTextChanged();     // 7.5：删选中区 → 通知
 		return;
 	}
 	if (m_caret >= GetCodepointCount())
-		return;                                   // 尾边界
+		return;                                   // 尾边界：空操作 → 不触发（D7 边界语义）
 	const size_t cur = CodepointIndexToByteOffset(m_text, m_caret);
 	const size_t next = CodepointIndexToByteOffset(m_text, m_caret + 1);
 	m_text.erase(cur, next - cur);
 	ClearSelection();   // 5.5.2：DeleteForward 光标不动但同步 anchor（防之前残留）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：文本变化（光标可能越界）→ 更新插入点
+	RaiseTextChanged();     // 7.5：实际删字符 → 通知
 }
 
 void TextBox::MoveCaret(CaretDirection direction){
@@ -206,6 +212,18 @@ void TextBox::ClearSelection() noexcept{
 	m_selectionAnchor = m_caret;   // 锚点无效化（anchor == caret = 无选择）
 }
 
+// ── 选择查询（7.2 新增）──────────────────────────────
+
+std::optional<TextBox::SelectionRange> TextBox::GetSelection() const {
+	if (m_selectionAnchor == m_caret) {
+		return std::nullopt;
+	}
+	return SelectionRange{
+		(std::min)(m_selectionAnchor, m_caret),
+		(std::max)(m_selectionAnchor, m_caret)
+	};
+}
+
 // ── 点击定位算法（5.5.1.4；5.5.2 Selection 拖选/双击/Shift+单击复用）──
 
 size_t TextBox::CaretIndexFromX(TextMeasurer& measurer, float innerX) const{
@@ -231,6 +249,26 @@ size_t TextBox::CaretIndexFromX(TextMeasurer& measurer, float innerX) const{
 
 size_t TextBox::GetCaret() const noexcept{
 	return m_caret;
+}
+
+// ── 回调通知（7.5：D4 三段式——RaiseTextChanged 内部先虚方法后回调，彼此独立）──
+
+void TextBox::RaiseTextChanged(){
+
+	OnTextChanged(m_text);            // ① 虚方法（子类可 override 扩展）
+
+	if (m_onTextChanged)              // ② 回调（独立通道，override 无法吞掉）
+
+		m_onTextChanged(m_text);
+
+}
+
+void TextBox::OnTextChanged(const std::string& /*text*/){}
+
+void TextBox::SetOnTextChanged(TextChangedCallback callback){
+
+	m_onTextChanged = std::move(callback);
+
 }
 
 // ── 事件映射（事件 → 编辑操作，薄薄一层；逻辑集中在上面）──

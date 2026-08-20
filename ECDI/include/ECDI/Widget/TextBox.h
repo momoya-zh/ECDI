@@ -3,6 +3,9 @@
 #include "ECDI/Widget/TextWidget.h"
 #include "ECDI/Widget/CaretGeometry.h"
 
+#include <functional>
+#include <optional>
+
 namespace ECDI{
 
 /// @brief 单行文本框（5.5；第三个文本控件，继承 TextWidget）
@@ -19,6 +22,18 @@ public:
 
 	bool CanFocus() const noexcept override { return true; }
 
+	// ── 回调注册（7.5 新增：表单/数据绑定核心需求）──────────
+
+	using TextChangedCallback = std::function<void(const std::string&)>;   ///< 文本变化回调类型
+
+	/// @brief 注册文本变化回调（覆盖式：传空 = 解除注册）
+	/// @details 触发点 = 编辑操作（InsertCodepoint/DeleteBackward/DeleteForward）
+	/// 实际改变文本时（D7：SetText 不触发——避免初始化误报）。
+	/// 回调在 RaiseTextChanged() 内、OnTextChanged() 虚方法之后调用——
+	/// 子类 override OnTextChanged 不影响回调触发（D4 RaiseXxx 分离模式）。
+	/// @param callback 参数 = 新文本（UTF-8）
+	void SetOnTextChanged(TextChangedCallback callback);
+
 	// ── 光标方向（类型即文档：MoveCaret(-1) 的 -1 是什么？——可读性）──
 	enum class CaretDirection{ Left, Right };
 
@@ -31,6 +46,19 @@ public:
 	void MoveCaretToStart();                    // Home
 	void MoveCaretToEnd();                      // End
 	size_t GetCaret() const noexcept;           // 码点索引
+
+	// ── 选择查询（7.2 新增：只读，无副作用——Phase 10 集成测试前置）──────────
+
+	/// @brief 选择区间（start <= end；码点索引，非字节偏移）
+	struct SelectionRange {
+		size_t start;
+		size_t end;
+	};
+
+	/// @brief 获取当前选中区（如果存在）
+	/// @return 无选中区 → nullopt；有选中区 → SelectionRange{min, anchor}
+	/// @details 只读查询——不修改内部状态；供调试/测试/序列化使用。
+	std::optional<SelectionRange> GetSelection() const;
 
 	// ── IME 位置（5.6；7.1.3 升级 CaretGeometry）────────────────
 	/// @brief 光标客户区几何（文本输入插入点——系统 caret/IME 候选窗锚点）
@@ -53,13 +81,24 @@ protected:
 	void OnCharInput(const CharInputEvent&) override; // 字符插入（5.5.1.3）
 	void OnPaint(PaintContext& ctx, int x, int y) override;
 
+	/// @brief 文本变化虚方法（子类可 override 扩展行为；空实现）
+	/// @details 调用链：编辑操作 → RaiseTextChanged → OnTextChanged() + m_onTextChanged()
+	/// 保护可见性：仅子类/自身可调（D3 GPT 修订）
+	virtual void OnTextChanged(const std::string& text);
+
 private:
+
+	/// @brief 文本变化通知入口（非虚，内部唯一入口——D9 契约）
+	/// @details 先调 OnTextChanged() 虚方法，再调 m_onTextChanged() 回调——彼此独立
+	void RaiseTextChanged();
 
 	size_t m_caret = 0;          ///< 光标位置（码点索引；构造后默认文本起始，不自动跳末尾——标准行为）
 	bool m_showCaret = false;    ///< 是否显示光标（焦点时 true；闪烁状态未来另立）
 
 	size_t m_selectionAnchor = 0;   ///< 选择锚点（固定端；无选择时无意义——Selection 扩张/收缩的核心）
 	bool m_mouseDown = false;       ///< 鼠标按下（拖选进行中——Capture ≠ 拖选中，两状态分离；未来双击/三击升级 m_dragSelecting 6.x）
+
+	TextChangedCallback m_onTextChanged;   ///< 文本变化回调（7.5 新增：表单/数据绑定核心需求）
 
 	/// @brief 码点总数（私有辅助——消除 DeleteForward/MoveCaret/MoveCaretToEnd 多处重复统计）
 	size_t GetCodepointCount() const;

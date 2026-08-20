@@ -60,13 +60,31 @@ void Button::OnMouseButtonUp(const MouseButtonUpEvent& event){
 
 	if (inside){
 
-		OnClick();
+		RaiseClick();   // 7.5：RaiseXxx 分离模式——虚方法 + 回调独立通道（D4）
 
 	}
 
 }
 
 void Button::OnClick(){}
+
+// ── 回调通知（7.5：D4 三段式——RaiseClick 内部先虚方法后回调，彼此独立）──
+
+void Button::RaiseClick(){
+
+	OnClick();                    // ① 虚方法（子类可 override 扩展）
+
+	if (m_onClick)                // ② 回调（独立通道，override 无法吞掉）
+
+		m_onClick();
+
+}
+
+void Button::SetOnClick(ClickCallback callback){
+
+	m_onClick = std::move(callback);
+
+}
 
 void Button::OnPaint(PaintContext& ctx,int x,int y){
 
