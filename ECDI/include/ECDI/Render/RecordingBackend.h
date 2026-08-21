@@ -5,6 +5,7 @@
 // （虽经 RenderingBackend.h 传递 undef，但头应自给自足——声明 DrawText 的头自己防护）
 #endif
 
+#include "ECDI/Core/Image.h"
 #include "ECDI/Render/RenderingBackend.h"
 #include "ECDI/Render/TextMeasurer.h"
 
@@ -37,9 +38,49 @@ namespace ECDI {
 			Font font;
 		};
 
+		// Phase 8：记录结构（公开，测试断言）——与命令字段一一对应，验证原样转发
+		struct LineDraw
+		{
+			Point start;
+			Point end;
+			float width = 1.0f;
+			Color color;
+		};
+
+		struct RoundedRectDraw
+		{
+			Rect rect;
+			float cornerRadius = 0.0f;
+			Color color;
+		};
+
+		struct ImageDraw
+		{
+			Rect dest;   ///< 目标矩形（拉伸语义）
+			Image image; ///< 值拷贝（命令持有独立副本——值语义测试用）
+		};
+
+		struct ClipOp
+		{
+			Rect rect;
+			bool isPush = false;   ///< true=Push，false=Pop（Push/Pop 共享一列保序）
+		};
+
+		struct FocusRectDraw
+		{
+			Rect rect;
+			Color color;
+		};
+
 		std::vector<DrawCall> draws;   ///< DrawRect 记录（公开，测试断言）
 
 		std::vector<TextDraw> textDraws;   ///< DrawText 记录（公开，测试断言）
+
+		std::vector<LineDraw> lineCalls;            ///< DrawLine 记录（Phase 8）
+		std::vector<RoundedRectDraw> roundedRectCalls;   ///< DrawRoundedRect 记录（Phase 8）
+		std::vector<ImageDraw> imageCalls;          ///< DrawImage 记录（Phase 8）
+		std::vector<ClipOp> clipOps;                ///< Push/Pop 共列保序（Phase 8）
+		std::vector<FocusRectDraw> focusRectCalls;  ///< DrawFocusRect 记录（Phase 8）
 
 		void BeginFrame() override {}           
 
@@ -47,6 +88,20 @@ namespace ECDI {
 
 		void DrawText(const Point& pos, const std::string& text,
 		              const Color& color, const Font& font) override;    // textDraws.emplace_back
+
+		void DrawLine(const Point& start, const Point& end,
+		              float width, const Color& color) override;         // Phase 8
+
+		void DrawRoundedRect(const Rect& rect, float cornerRadius,
+		                     const Color& color) override;               // Phase 8
+
+		void DrawImage(const Rect& dest, const Image& image) override;   // Phase 8（值拷贝）
+
+		void PushClip(const Rect& rect) override;                        // Phase 8（isPush=true）
+
+		void PopClip() override;                                         // Phase 8（isPush=false）
+
+		void DrawFocusRect(const Rect& rect, const Color& color) override;   // Phase 8
 
 		void EndFrame() override {}
 

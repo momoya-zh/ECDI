@@ -10,6 +10,7 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Font.h"
+#include "ECDI/Core/Image.h"
 
 #include <string>
 
@@ -49,6 +50,40 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		/// @param font  字体描述符（实例化封在后端内，D1/D3）
 		virtual void DrawText(const Point& pos, const std::string& text,
 		                      const Color& color, const Font& font) = 0;
+
+		/// @brief 绘制直线（Phase 8，详细设计 §8.1）
+		/// @param start 起点（最终坐标）
+		/// @param end   终点（最终坐标）
+		/// @param width 线宽（框架层 API 为 float；GDI 端 lround 取整 + 下限 1px
+		///             属后端实现细节——Phase 8 不做亚像素线宽）
+		/// @param color 线色
+		virtual void DrawLine(const Point& start, const Point& end,
+		                      float width, const Color& color) = 0;
+
+		/// @brief 绘制圆角矩形（Phase 8，详细设计 §8.2）
+		/// @param rect         边界矩形（最终坐标）
+		/// @param cornerRadius 圆角半径（后端钳制到 [0, min(w,h)/2]，保证 GDI 行为确定）
+		/// @param color        填充色（实心填充，无边框）
+		virtual void DrawRoundedRect(const Rect& rect, float cornerRadius,
+		                             const Color& color) = 0;
+
+		/// @brief 绘制图像（Phase 8，详细设计 §8.3）
+		/// @param dest  目标矩形（整图映射到 dest，尺寸不同则拉伸——值语义，仅读取）
+		/// @param image 像素数据（32bpp premultiplied BGRA；空图像不绘制）
+		virtual void DrawImage(const Rect& dest, const Image& image) = 0;
+
+		/// @brief 裁剪入栈（Phase 8，状态命令——无像素输出）
+		/// @param rect 裁剪矩形（与当前裁剪区求交；后续绘制命令受其约束）
+		virtual void PushClip(const Rect& rect) = 0;
+
+		/// @brief 裁剪出栈（Phase 8，状态命令）
+		/// @details 恢复上一层裁剪区；栈为空时跳过（防御，契约层允许无损）。
+		virtual void PopClip() = 0;
+
+		/// @brief 绘制焦点框（Phase 8，详细设计 §8.4）
+		/// @param rect  焦点框边界（最终坐标）
+		/// @param color 点线颜色（主题层赋值——Phase 9）
+		virtual void DrawFocusRect(const Rect& rect, const Color& color) = 0;
 
 		/// @brief 帧结束（后端提交绘制结果：BitBlt/换缓冲）
 		virtual void EndFrame() = 0;

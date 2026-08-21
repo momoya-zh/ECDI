@@ -10,10 +10,12 @@
 #endif
 
 #include"ECDI/Core/Point.h"
+#include"ECDI/Core/Image.h"
 #include"ECDI/Render/RenderingBackend.h"
 
 #include<map>
 #include<string>
+#include<vector>
 
 namespace ECDI {
 
@@ -36,6 +38,14 @@ public:
 	void DrawRect(const Rect& rect, const Color& color) override;   ///< 决策 21-25
 	void DrawText(const Point& pos, const std::string& text,
 	              const Color& color, const Font& font) override;   ///< D5/D6：TextOutW
+	void DrawLine(const Point& start, const Point& end,
+	              float width, const Color& color) override;        ///< Phase 8 §8.1：lround + 1px 下限
+	void DrawRoundedRect(const Rect& rect, float cornerRadius,
+	                     const Color& color) override;              ///< Phase 8 §8.2：NULL_PEN + RoundRect
+	void DrawImage(const Rect& dest, const Image& image) override;  ///< Phase 8 §8.3：DIB + AlphaBlend
+	void PushClip(const Rect& rect) override;                       ///< Phase 8 §8.5：SaveDC + IntersectClipRect
+	void PopClip() override;                                        ///< Phase 8 §8.5：栈空防御 + RestoreDC
+	void DrawFocusRect(const Rect& rect, const Color& color) override;  ///< Phase 8 §8.4：PS_DOT + NULL_BRUSH
 	void EndFrame() override;              ///< 决策 17 EndPaint + 27/29 GetClientRect + BitBlt
 
 private:
@@ -53,6 +63,8 @@ private:
 	int m_bitmapWidth = 0;                 ///< 尺寸自检（决策 26）
 	int m_bitmapHeight = 0;
 	bool m_inFrame = false;                ///< 决策 32：Begin/End 配对断言
+
+	std::vector<int> m_clipStack;          ///< Phase 8 §8.5：SaveDC 返回值栈（Push 时入、Pop 时出）
 
 	std::map<std::pair<float, std::string>, HFONT> m_fontCache;   ///< D1：Font→HFONT 缓存（渲染 DrawText 用；测量缓存归 GDITextMeasurer）
 };

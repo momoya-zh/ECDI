@@ -4,6 +4,7 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Font.h"
+#include "ECDI/Core/Image.h"
 #include "ECDI/Render/RenderCommand.h"
 #include "ECDI/Render/TextMeasurer.h"
 
@@ -27,6 +28,28 @@ namespace ECDI {
 		/// @param pos 文本起点（最终坐标，对齐偏移由控件算好）
 		void DrawText(const Point& pos, const std::string& text,
 		              const Color& color, const Font& font = Font());
+
+		/// @brief 绘制直线（Phase 8：原样进命令，GDI 端取整属后端细节）
+		/// @param width 线宽（框架层 float API；Phase 8 不做亚像素线宽）
+		void DrawLine(const Point& start, const Point& end,
+		              float width, const Color& color);
+
+		/// @brief 绘制圆角矩形（Phase 8：实心填充，半径钳制封在后端）
+		void DrawRoundedRect(const Rect& rect, float cornerRadius,
+		                     const Color& color);
+
+		/// @brief 绘制图像（Phase 8：Image 值拷贝进命令——命令持有独立副本）
+		/// @param dest 目标矩形（整图映射到 dest，尺寸不同则拉伸）
+		void DrawImage(const Rect& dest, const Image& image);
+
+		/// @brief 裁剪入栈（Phase 8：状态命令，写入缓冲维持与绘制命令的相对顺序）
+		void PushClip(const Rect& rect);
+
+		/// @brief 裁剪出栈（Phase 8：状态命令，与 PushClip 成对使用）
+		void PopClip();
+
+		/// @brief 绘制焦点框（Phase 8：指定颜色点线框，颜色由主题层赋值——Phase 9）
+		void DrawFocusRect(const Rect& rect, const Color& color);
 
 		/// @brief 测量文本尺寸（转发 m_measurer，D2 帧无关）
 		Size MeasureText(const Font& font, const std::string& text);

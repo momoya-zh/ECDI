@@ -24,6 +24,49 @@ namespace ECDI {
 
 	}
 
+	void PaintContext::DrawLine(const Point& start, const Point& end,
+	                            float width, const Color& color){
+
+		// 原样进命令：宽度 float 契约层数据，GDI 端 lround 取整（后端实现细节）
+		m_commands.emplace_back(DrawLineCommand{ start, end, width, color });
+
+	}
+
+	void PaintContext::DrawRoundedRect(const Rect& rect, float cornerRadius,
+	                                   const Color& color){
+
+		// 半径钳制封在后端（[0, min(w,h)/2]）——契约层只保证 cornerRadius >= 0
+		m_commands.emplace_back(DrawRoundedRectCommand{ rect, cornerRadius, color });
+
+	}
+
+	void PaintContext::DrawImage(const Rect& dest, const Image& image){
+
+		// Image 值拷贝进命令：命令持有独立副本，调用方随后修改/释放不影响绘制
+		m_commands.emplace_back(DrawImageCommand{ dest, image });
+
+	}
+
+	void PaintContext::PushClip(const Rect& rect){
+
+		// 状态命令：缓冲中的位置 = 生效范围起点（与其后绘制命令求交）
+		m_commands.emplace_back(PushClipCommand{ rect });
+
+	}
+
+	void PaintContext::PopClip(){
+
+		// 状态命令：缓冲中的位置 = 裁剪区恢复点
+		m_commands.emplace_back(PopClipCommand{});
+
+	}
+
+	void PaintContext::DrawFocusRect(const Rect& rect, const Color& color){
+
+		m_commands.emplace_back(DrawFocusRectCommand{ rect, color });
+
+	}
+
 	Size PaintContext::MeasureText(const Font& font, const std::string& text){
 
 		// 转发测量器（D2：测量帧无关，任何时刻可测）

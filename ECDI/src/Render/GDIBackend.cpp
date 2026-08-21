@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace ECDI {
 
@@ -171,6 +172,198 @@ void GDIBackend::DrawText(const Point& pos, const std::string& text,
 	         static_cast<LONG>(pos.y),
 	         wideText.c_str(),
 	         static_cast<int>(wideText.size()));
+}
+
+void GDIBackend::DrawLine(const Point& start, const Point& end,
+                          float width, const Color& color)
+{
+	// Phase 8 §8.1：宽度 lround 取整 + 下限 1px（lround(0.4f)=0 → CreatePen(0) 实为 1px cosmetic pen，
+	// 显式下限使契约确定）；所有坐标同样 lround（亚像素线段 Phase 8 不做）
+	const LONG penWidth = (std::max)(1L, std::lround(width));
+	HPEN pen = CreatePen(PS_SOLID, penWidth, ToColorRef(color));
+	if (!pen)
+	{
+		return;   // 决策 30：局部失败跳过
+	}
+
+	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, pen));
+	MoveToEx(m_memoryDC, std::lround(start.x), std::lround(start.y), nullptr);
+	LineTo(m_memoryDC, std::lround(end.x), std::lround(end.y));
+
+	// 决策 24 风格：GDI 对象每次创建/销毁（避免 10,000 句柄上限）
+	SelectObject(m_memoryDC, oldPen);
+	DeleteObject(pen);
+}
+
+void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
+                                 const Color& color)
+{
+	// Phase 8 §8.2：空矩形 no-op（契约层确定边界，避免 GDI 未定义行为）
+	if (rect.width <= 0.0f || rect.height <= 0.0f)
+	{
+		return;
+	}
+
+	// 半径钳制到 [0, min(w,h)/2]：GDI RoundRect 对过大半径行为未定义（§8.2 契约）
+	const LONG w = static_cast<LONG>(rect.width);
+	const LONG h = static_cast<LONG>(rect.height);
+	const LONG clampedRadius = std::clamp(std::lround(cornerRadius),
+	                                      0L, (std::min)(w, h) / 2);
+
+	// 实心填充：NULL_PEN 无边框 + 实心画刷 + RoundRect
+	HPEN nullPen = CreatePen(PS_NULL, 0, 0);
+	HBRUSH brush = CreateSolidBrush(ToColorRef(color));
+	if (!nullPen || !brush)
+	{
+		if (nullPen) DeleteObject(nullPen);
+		if (brush) DeleteObject(brush);
+		return;
+	}
+
+	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, nullPen));
+	HBRUSH oldBrush = static_cast<HBRUSH>(SelectObject(m_memoryDC, brush));
+
+	// 决策 24 风格：left/top/right/bottom 开区间 [x, x+width)（与 DrawRect 一致）
+	RECT rc{};
+	rc.left = static_cast<LONG>(rect.x);
+	rc.top = static_cast<LONG>(rect.y);
+	rc.right = static_cast<LONG>(rect.x + rect.width);
+	rc.bottom = static_cast<LONG>(rect.y + rect.height);
+	RoundRect(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom,
+	          clampedRadius, clampedRadius);
+
+	SelectObject(m_memoryDC, oldPen);
+	SelectObject(m_memoryDC, oldBrush);
+	DeleteObject(nullPen);
+	DeleteObject(brush);
+}
+
+void GDIBackend::DrawImage(const Rect& dest, const Image& image)
+{
+	// Phase 8 §8.3：空图像 no-op（width == 0 || height == 0 → 不绘制，契约层确定边界）
+	if (image.width == 0 || image.height == 0)
+	{
+		return;
+	}
+
+	// 契约防御：stride >= width*4 且 pixels >= stride*height（§3.1）——不满足 = 数据损坏，跳过
+	const int width = image.width;
+	const int height = image.height;
+	if (image.stride < width * 4 ||
+	    image.pixels.size() < static_cast<size_t>(image.stride) * static_cast<size_t>(height))
+	{
+		return;
+	}
+
+	// 32bpp 顶向下 DIB：biHeight 取负 → DIB row 0 = 图像顶行（无需行翻转，§8.3）
+	BITMAPINFO bmi{};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = width;
+	bmi.bmiHeader.biHeight = -height;
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	HDC dibDC = CreateCompatibleDC(m_memoryDC);
+	if (!dibDC)
+	{
+		return;
+	}
+	void* dibBits = nullptr;
+	HBITMAP dibBitmap = CreateDIBSection(dibDC, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+	if (!dibBitmap || !dibBits)
+	{
+		if (dibBitmap) DeleteObject(dibBitmap);
+		DeleteDC(dibDC);
+		return;
+	}
+
+	// 逐行拷贝：按 row*stride 定位（§8.3 不能整体 memcpy——stride 可能大于 width*4）
+	const int dibStride = width * 4;
+	BYTE* dst = static_cast<BYTE*>(dibBits);
+	for (int row = 0; row < height; ++row)
+	{
+		memcpy(dst + static_cast<size_t>(row) * dibStride,
+		       image.pixels.data() + static_cast<size_t>(row) * image.stride,
+		       static_cast<size_t>(dibStride));
+	}
+
+	HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(dibDC, dibBitmap));
+
+	// AlphaBlend（msimg32）：AC_SRC_OVER + AC_SRC_ALPHA = 源含 premultiplied alpha（§8.3）
+	// dest 为拉伸语义：整图映射到 dest 矩形
+	BLENDFUNCTION blend{};
+	blend.BlendOp = AC_SRC_OVER;
+	blend.SourceConstantAlpha = 255;
+	blend.AlphaFormat = AC_SRC_ALPHA;
+	AlphaBlend(m_memoryDC,
+	           std::lround(dest.x), std::lround(dest.y),
+	           std::lround(dest.width), std::lround(dest.height),
+	           dibDC, 0, 0, width, height, blend);
+
+	SelectObject(dibDC, oldBitmap);
+	DeleteObject(dibBitmap);
+	DeleteDC(dibDC);
+}
+
+void GDIBackend::PushClip(const Rect& rect)
+{
+	// Phase 8 §8.5：SaveDC 失败返回 0——0 不是合法 RestoreDC ID，不入栈（防御）
+	const int savedId = SaveDC(m_memoryDC);
+	if (savedId == 0)
+	{
+		return;
+	}
+
+	// 与当前裁剪区求交（默认裁剪区 = 整个内存缓冲）；最终坐标 lround 统一
+	RECT rc{};
+	rc.left = std::lround(rect.x);
+	rc.top = std::lround(rect.y);
+	rc.right = std::lround(rect.x + rect.width);
+	rc.bottom = std::lround(rect.y + rect.height);
+	IntersectClipRect(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom);
+
+	m_clipStack.push_back(savedId);
+}
+
+void GDIBackend::PopClip()
+{
+	// Phase 8 §8.5：栈空跳过（防御）+ savedId != 0 双重校验（RestoreDC 合法 ID）
+	if (m_clipStack.empty())
+	{
+		return;
+	}
+	const int savedId = m_clipStack.back();
+	m_clipStack.pop_back();
+	if (savedId != 0)
+	{
+		RestoreDC(m_memoryDC, savedId);
+	}
+}
+
+void GDIBackend::DrawFocusRect(const Rect& rect, const Color& color)
+{
+	// Phase 8 §8.4：框架级"指定颜色点线框"——CreatePen(PS_DOT) + NULL_BRUSH + Rectangle。
+	// 不用系统 DrawFocusRect（User32 XOR 绘制与双缓冲/自绘样式冲突；颜色由主题层控制）
+	HPEN pen = CreatePen(PS_DOT, 1, ToColorRef(color));
+	if (!pen)
+	{
+		return;
+	}
+
+	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, pen));
+	HBRUSH oldBrush = static_cast<HBRUSH>(SelectObject(m_memoryDC, GetStockObject(NULL_BRUSH)));
+
+	RECT rc{};
+	rc.left = std::lround(rect.x);
+	rc.top = std::lround(rect.y);
+	rc.right = std::lround(rect.x + rect.width);
+	rc.bottom = std::lround(rect.y + rect.height);
+	Rectangle(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom);
+
+	SelectObject(m_memoryDC, oldPen);
+	SelectObject(m_memoryDC, oldBrush);
+	DeleteObject(pen);
 }
 
 HFONT GDIBackend::GetOrCreateFont(const Font& font)
