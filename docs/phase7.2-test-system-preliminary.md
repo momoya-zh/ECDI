@@ -1,6 +1,6 @@
 ﻿# Phase 7.2 测试体系补强 初步设计
 
-> 状态：v0.1（2026-08-23）｜初步设计待审
+> 状态：v0.2（2026-08-23）｜初步设计待审（GPT 评审整合）
 > 前序：职责确认 v1.1 ✅（`phase7.2-test-system-requirements.md`）
 > 产出：本稿 + 后续详细设计
 
@@ -49,32 +49,48 @@ void ECDI::Test::RunWidgetTests() {
 | **测试断言（新增）** | 测试期望值（test failure） | 记录失败（表达式/文件/行/函数）+ **继续** |
 
 初步形态（倾向，签名级留详细设计）：
-- `EXPECT_TRUE(cond)` / `EXPECT_EQ(a, b)` / `EXPECT_NEAR(a, b, eps)`（浮点，替代散落的 FloatEq）
+- **第一版断言范围（v0.2 明确）**：仅 `EXPECT_TRUE / EXPECT_FALSE / EXPECT_EQ / EXPECT_NE / EXPECT_NEAR`（NEAR 覆盖浮点，替代散落的 FloatEq）——**不做模板魔法**（不搞 EXPECT_VECTOR_EQ/EXPECT_RECT_EQ/EXPECT_COLOR_EQ，不做任意类型 pretty-print），保持"轻"
 - **宏形态**（与 FRAMEWORK_ASSERT 风格一致：自动捕获 `__FILE__/__LINE__/__func__`）
 - 失败计数挂在"当前测试上下文"（Runner 提供），断言只上报不弹框
+- **两层责任分离（v0.2 明确）**：断言只保证"断言失败不终止测试"；**不保证测试代码自身的非法访问（如解引用 nullptr）不终止**——那是测试代码正确性问题，Runner 的 try-catch 只负责"测试函数抛异常 → 标记 FAIL 继续下一个"
 
 ### 3.2 注册（Registry）——决策 C 落地（显式优先）
 
-**方案**：模块入口**签名不变**（`RunXxxTests()` 仍无参），语义从"执行"变为"**注册**"：
+**方案（v0.2：模块入口改名）**：模块入口**签名不变**（无参），**语义与命名对齐**——`RunXxxTests()` 改为 **`RegisterXxxTests()`**（它不再"执行"，只"注册"，命名必须匹配语义，避免阅读认知错位）：
 
 ```cpp
-void ECDI::Test::RunWidgetTests() {
-    GetTestRegistry().Add("Widget.PanelPaint", &TestPanelPaint);
-    GetTestRegistry().Add("Widget.LabelPaint", &TestLabelPaint);
+// TestCase 是真正的数据结构（非裸函数指针/平行数组）
+using TestFunction = void (*)();
+struct TestCase {
+    const char* name;        ///< 带模块前缀："Widget.PanelPaint"
+    TestFunction function;
+};
+
+// 模块入口：注册语义
+void ECDI::Test::RegisterWidgetTests() {
+    GetTestRegistry().Add(TestCase{ "Widget.PanelPaint", &TestPanelPaint });
+    GetTestRegistry().Add(TestCase{ "Widget.LabelPaint", &TestLabelPaint });
     ...
 }
 ```
 
-- 测试名带模块前缀（汇总报告可读性）
-- `RunAllTests` 演进为：**注册（调 4 模块入口）→ Runner 统一执行 → 汇总**
+- `RunAllTests` 演进为：**注册（调 4 个 RegisterXxxTests）→ Runner 统一执行 → 汇总**
 - **main.cpp 零改动**（仍调 `RunAllTests`）
 - 判断标准（职责确认 C）：显式优先；仅当测试数量增长后显式维护成本明显高于自动注册时才转自动注册
 
-### 3.3 Runner
+### 3.3 Runner 与 TestResult
 
-- 遍历 Registry 逐个执行测试函数
-- **每个测试独立 try-catch**（捕获严重异常 → 记为失败 + 继续下一个——决策 B 细化）
-- 维护统计：总测试数 / 通过 / 失败（失败含断言消息 + 位置）
+- 遍历 Registry 逐个执行测试函数；**每个测试独立 try-catch**（异常 → 标记 FAIL + 继续下一个——决策 B 细化）
+- **Test Case 状态模型（v0.2 明确）**：
+  ```
+  TestResult
+  ├── name        // "Widget.PanelPaint"
+  ├── passed      // true / false
+  └── failures[]  // 断言失败记录（expression / file / line / message）
+  ```
+  - 多断言失败 → **仍是一个 FAIL Test Case**，但保留多个 failure records（不是"每个断言算一个 Failed Test"）
+  - 异常 / EXPECT 失败 → 均 FAIL
+- 维护统计：总测试数 / 通过 / 失败（基于 TestResult 汇总）
 
 ### 3.4 Summary（汇总报告）
 
@@ -82,12 +98,14 @@ void ECDI::Test::RunWidgetTests() {
 - 格式（倾向）：
   ```
   [PASS] Widget.PanelPaint
-  [FAIL] Widget.WidgetTree  (TestWidgetTree:123  commands.size() == 1)
+  [FAIL] Widget.WidgetTree
+      WidgetTests.cpp:123  EXPECT_EQ(commands.size(), 1)
+      WidgetTests.cpp:130  EXPECT_TRUE(widget->IsVisible())
   ...
   ─────────────────────────
   Tests: 20  Passed: 18  Failed: 2
   ```
-- **有失败 → 结束时 MessageBox 汇总一次**（保留"失败提醒"，替代逐个弹框）
+- **MessageBox 定位（v0.2 明确）**：只负责"**提醒失败**"（如 `"Tests failed: 2"`），**不是报告载体**——完整信息（逐测试行 + failure records）在 Debug Output；失败几十条时 MessageBox 塞全量日志会不可读
 
 ### 3.5 接入迁移策略（核心：不重写）
 
@@ -95,9 +113,23 @@ void ECDI::Test::RunWidgetTests() {
 |---|---|
 | 测试函数体 `FRAMEWORK_ASSERT(期望值)` | **机械替换**为测试断言（EXPECT_*）——语义保持，仅失败行为变（记录继续） |
 | "测框架断言路径"的测试 | 保留 FRAMEWORK_ASSERT（双轨依据，不迁移） |
-| 模块入口 `RunXxxTests()` | 执行 → 注册（签名不变） |
-| `RunAllTests` | 注册 + Runner 执行 + 汇总（main.cpp 零改动） |
+| 模块入口 `RunXxxTests()` | **改名 `RegisterXxxTests()`** + 执行 → 注册（签名不变） |
+| `RunAllTests` | 注册（调 RegisterXxxTests）+ Runner 执行 + 汇总（main.cpp 零改动） |
 | `RecordingBackend` / 像素测试 | 不动，正常注册进 Runner |
+
+### 3.6 TestFramework 自测（v0.2 新增——基础设施本身不能无测试）
+
+TestFramework 是新代码，若不测自身则成了"没有测试的基础设施"。**最小自测**（防"测试框架测自己"的递归，直接复用框架自身即可）：
+
+| 自测项 | 验证点 |
+|---|---|
+| Registry 注册 | 能注册 TestCase 且可取回 |
+| Runner 执行 | 能执行全部注册测试 |
+| 失败不阻塞 | 一个 FAIL 不阻止后续 TestCase 执行 |
+| 多失败汇总 | 多个 failure records 正确归集到单个 FAIL TestCase |
+| 异常标记 | 抛异常的 TestCase 被记为 FAIL，Runner 继续 |
+
+**归属**：单独一组（如 `TestFrameworkTests`），注册进统一 Runner——与业务测试同构，只是测的是框架自身。
 
 ## 4. P0：TextBox Selection 测试边界（初步拆分）
 
@@ -110,7 +142,7 @@ void ECDI::Test::RunWidgetTests() {
 | 双击选择 | 词选择 |
 | 边界 | 跨 emoji/中文代理对；选区与光标一致性；Delete/Insert/退格对选区的影响（删选区 vs 删单字符） |
 
-具体用例拆分留详细设计（需先确认 TextBox 现有 Selection API 能力面）。
+具体用例拆分留详细设计，但**详细设计第一步不是写测试，而是先确认 TextBox Selection 的索引单位契约（v0.2 强调）**——Selection 单位是 UTF-16 code unit、Unicode code point 还是 grapheme cluster，是**已有语义契约**；必须先确认实现口径，否则测试会"偷偷定义新需求"（测试按 code point 写、实现按 code unit 算 → 测试失败其实是需求不清）。确认顺序：**先读 TextBox Selection 实现 → 定索引单位契约 → 再拆用例**。
 
 ## 5. P1 方向（Event + 7.1 回归，可测性初判）
 
@@ -119,11 +151,13 @@ void ECDI::Test::RunWidgetTests() {
 - 覆盖方向：Event 基类/类型分发 / Router 具名方法分派 / 输入事件层次
 
 ### 5.2 Phase 7.1 关键边界契约回归（只测契约，不追消息覆盖率）
+**总原则（v0.2 明确）**：**若某个 7.1 回归测试必须创建真实 HWND 才能测，先证明该真实窗口依赖无法被平台抽象隔离；否则优先测抽象后的边界**——防 Phase 7.2 变回 "Win32 integration test suite"（与 7.1 解耦成果背道而驰）。
+
 | 链路 | 可测性初判 |
 |---|---|
 | Window message → Translator → Event | **可无窗口测**（若 Translator 为纯函数：构造消息结构 → 断言 Event 输出）——详细设计核实 WindowMessageHandler 形态 |
 | Translator → Application / EventRouter | 可无窗口测（Event 对象级联） |
-| Window::Host 回调边界 | 待详细设计核实（可能需要最小窗口） |
+| Window::Host 回调边界 | 待详细设计核实（可能需要最小窗口）——若必须 HWND，先证隔离不可行 |
 | CaretGeometry → PlatformWindow | 待核实（坐标/几何纯计算部分可测） |
 | IME composition → Framework | 待核实（Win32 IME 上下文强绑定，可能仅契约层验证） |
 
@@ -140,11 +174,12 @@ void ECDI::Test::RunWidgetTests() {
 
 | # | 决策点 | 倾向 |
 |---|---|---|
-| D1 | 测试框架文件位置 | `ECDI/src/Tests/TestFramework.h/.cpp`（测试模块内部，非公共 include——测试基础设施不属框架运行时公共 API；与 RecordingBackend 的公共位置差异待权衡） |
-| D2 | 断言宏命名 | `EXPECT_TRUE / EXPECT_EQ / EXPECT_NEAR`（EXPECT 前缀，与 FRAMEWORK_ASSERT 的 ASSERT 语义区分） |
+| D1 | 测试框架文件位置 | `ECDI/src/Tests/TestFramework.h/.cpp`（测试模块内部，非公共 include）。**逻辑分块、物理单文件（v0.2）**：内部按 TestCase / TestRegistry / TestRunner / TestContext / TestResult / TestAssert 分块组织，不新增文件数（YAGNI） |
+| D2 | 断言宏命名 | `EXPECT_TRUE / EXPECT_FALSE / EXPECT_EQ / EXPECT_NE / EXPECT_NEAR`（EXPECT 前缀，与 FRAMEWORK_ASSERT 的 ASSERT 语义区分；第一版不扩模板魔法） |
 | D3 | 迁移策略 | 确认"机械替换期望值断言 + 保留框架断言路径测试"（双轨落地） |
-| D4 | 失败汇总行为 | 结束时 MessageBox 汇总一次（替代逐个弹框）；失败详情同时进 Debug 输出 |
+| D4 | 失败汇总行为 | MessageBox 只提醒失败数（"Tests failed: N"），完整报告（逐测试行 + failure records）在 Debug Output |
 | D5 | P0/P1 测试组织 | Selection 并入 TextBoxTests.cpp / Event 新开 EventTests.cpp（兑现 RunEventTests 挂起） |
+| D6 | 模块入口命名（v0.2 新增） | `RunXxxTests()` → **`RegisterXxxTests()`**（语义=注册非执行，命名与语义对齐；改的是测试基础设施内部 API，成本最低时机） |
 
 ## 8. 明确不做（重申职责确认 §4）
 
@@ -154,4 +189,5 @@ void ECDI::Test::RunWidgetTests() {
 
 | 版本 | 日期 | 内容 |
 |---|---|---|
+| v0.2 | 2026-08-23 | GPT 评审整合：模块入口改名 RegisterXxxTests（D6）；TestCase/TestResult 明确为数据结构；EXPECT 首版范围限定（5 个基础断言，无模板魔法）；断言/异常两层责任分离；MessageBox 仅提醒失败数；新增 §3.6 TestFramework 自测；P0 先确认 Selection 索引单位契约；7.1 回归加"真实 HWND 依赖先证隔离不可行"原则 |
 | v0.1 | 2026-08-23 | 初稿（5 组件方案 + 接入迁移策略 + P0/P1 边界 + 决策点 D1-D5） |
