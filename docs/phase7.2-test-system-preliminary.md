@@ -1,6 +1,6 @@
 ﻿# Phase 7.2 测试体系补强 初步设计
 
-> 状态：v0.2（2026-08-23）｜初步设计待审（GPT 评审整合）
+> 状态：v0.3（2026-08-23）｜初步设计待审（GPT 评审整合；v0.2 审查通过，补详细设计约束）
 > 前序：职责确认 v1.1 ✅（`phase7.2-test-system-requirements.md`）
 > 产出：本稿 + 后续详细设计
 
@@ -131,6 +131,11 @@ TestFramework 是新代码，若不测自身则成了"没有测试的基础设�
 
 **归属**：单独一组（如 `TestFrameworkTests`），注册进统一 Runner——与业务测试同构，只是测的是框架自身。
 
+### 3.7 详细设计约束（v0.3，GPT 补充——不改变决策，仅约束详细设计）
+
+1. **状态生命周期与拥有关系**：目标模型为 `TestRegistry`（持有 `TestCase[]`）→ `TestRunner`（持有当前 `TestResult`（内含 `failures[]`）→ 执行 `TestFunction` → 内部经 TestContext 调用 `EXPECT_*` 上报。**避免全局测试状态**（`g_currentTest / g_failures / g_runner`）——全局状态越少越好，为未来跨平台迁移减负（不并行，但也不留全局负担）。
+2. **RunAllTests 定位 = orchestration，不是第二个 Runner**：只做 `Register all → Run → Report` 三件事；测试核心（Registry/Runner/Result/Assert）保持平台无关——未来跨平台时 `WindowsTestMain / LinuxTestMain` 只是不同平台入口，核心复用（与 Phase 7.1 平台解耦方向一致）。
+
 ## 4. P0：TextBox Selection 测试边界（初步拆分）
 
 现有 TextBoxTests 已有部分 Selection 测试（9 处引用）——**P0 是补全，非从零**。覆盖方向：
@@ -189,5 +194,6 @@ TestFramework 是新代码，若不测自身则成了"没有测试的基础设�
 
 | 版本 | 日期 | 内容 |
 |---|---|---|
+| v0.3 | 2026-08-23 | v0.2 审查通过（GPT）；补 §3.7 详细设计约束 2 条：状态生命周期（避免全局测试状态）/ RunAllTests = orchestration（平台入口与测试核心分离） |
 | v0.2 | 2026-08-23 | GPT 评审整合：模块入口改名 RegisterXxxTests（D6）；TestCase/TestResult 明确为数据结构；EXPECT 首版范围限定（5 个基础断言，无模板魔法）；断言/异常两层责任分离；MessageBox 仅提醒失败数；新增 §3.6 TestFramework 自测；P0 先确认 Selection 索引单位契约；7.1 回归加"真实 HWND 依赖先证隔离不可行"原则 |
 | v0.1 | 2026-08-23 | 初稿（5 组件方案 + 接入迁移策略 + P0/P1 边界 + 决策点 D1-D5） |
