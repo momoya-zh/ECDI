@@ -1,6 +1,6 @@
 ﻿# Phase 7.2 测试体系补强 初步设计
 
-> 状态：v0.3（2026-08-23）｜初步设计待审（GPT 评审整合；v0.2 审查通过，补详细设计约束）
+> 状态：v0.4（2026-08-23）｜初步设计待审（GPT 评审整合；v0.3 审查通过，补视觉验证资产记账）
 > 前序：职责确认 v1.1 ✅（`phase7.2-test-system-requirements.md`）
 > 产出：本稿 + 后续详细设计
 
@@ -9,7 +9,7 @@
 | 目标 | 说明 |
 |---|---|
 | **最低侵入接入** | 现有 ~1000 行测试（4 模块）**接入不重写**——机械迁移 + 形态调整 |
-| 5 组件落地 | TestCase / Registry / Runner / Assert / Summary |
+| 轻量测试基础设施落地 | TestCase / TestRegistry / TestRunner / TestContext / TestResult / TestAssert / Summary（物理上单文件，逻辑分块——见 D1） |
 | 硬约束 | 零第三方依赖；无窗口哲学；双轨断言；失败继续 + 汇总；单测失败不影响其他；严重异常 Runner 捕获 |
 
 ## 2. 现状基线（接入面）
@@ -38,6 +38,16 @@ void ECDI::Test::RunWidgetTests() {
 - 浮点场景普遍用 `FloatEq` 辅助（kEpsilon = 0.001）
 
 **关键结论**：现有 FRAMEWORK_ASSERT 的"失败即终止"与"失败继续"目标冲突 → **测试内"期望值断言"必须迁移为测试断言**（机械替换，非重写）；"测框架断言路径"的少量测试保留 FRAMEWORK_ASSERT（双轨的依据）。
+
+**已有测试/验证资产（三层结构，v0.4 记账——防转库时产生"从未做过视觉验证"的错觉）**：
+
+```
+契约测试（自动）        RecordingBackend / RendererTests      → 验证 RenderCommand / Backend 契约
+真实后端测试（自动）     TestGDIBackendAlphaBlend（像素断言）    → 验证实际 GDI 渲染路径
+视觉验证（人工/实际渲染） Phase 8 收尾实际渲染目测（8-21）       → 确认最终视觉表现
+```
+
+> Phase 8 收尾阶段已完成实际渲染视觉验证（AlphaDemoPanel：半透明红叠蓝目测混合正确），用于确认新增渲染能力在真实 GDI 渲染路径上的最终视觉结果。属人工/实际渲染结果确认，**不扩展为自动化 UI 测试体系**——"测试不是所有东西都必须自动化"：契约适合自动测试，实际后端适合少量真实测试，最终视觉表现保留视觉验证。
 
 ## 3. 组件设计（初步方案）
 
@@ -80,7 +90,8 @@ void ECDI::Test::RegisterWidgetTests() {
 
 ### 3.3 Runner 与 TestResult
 
-- 遍历 Registry 逐个执行测试函数；**每个测试独立 try-catch**（异常 → 标记 FAIL + 继续下一个——决策 B 细化）
+- 遍历 Registry 逐个执行测试函数；**每个测试独立 try-catch**
+- **异常捕获边界（v0.4 措辞严谨化）**：Runner 只捕获**标准 C++ 异常**（`throw std::runtime_error` 等）→ 标记 FAIL + 继续；**不承诺捕获访问违规（access violation）、栈溢出等 SEH/进程级异常**（Windows 下这些不是 C++ exception）——测试框架不是"进程崩溃隔离器"，非法访问是测试代码自身正确性问题
 - **Test Case 状态模型（v0.2 明确）**：
   ```
   TestResult
@@ -129,7 +140,7 @@ TestFramework 是新代码，若不测自身则成了"没有测试的基础设�
 | 多失败汇总 | 多个 failure records 正确归集到单个 FAIL TestCase |
 | 异常标记 | 抛异常的 TestCase 被记为 FAIL，Runner 继续 |
 
-**归属**：单独一组（如 `TestFrameworkTests`），注册进统一 Runner——与业务测试同构，只是测的是框架自身。
+**归属与定位（v0.4 明确）**：单独一组（如 `TestFrameworkTests`），注册进统一 Runner——与业务测试同构，只是测的是框架自身。**定位为"基础设施回归测试"，而非"Runner 正确性证明"**（存在天然的鸡生蛋问题：Runner 若严重损坏，自测自身也可能无法运行）——**不作为 Runner 正常运行的硬前置依赖**。
 
 ### 3.7 详细设计约束（v0.3，GPT 补充——不改变决策，仅约束详细设计）
 
@@ -194,6 +205,7 @@ TestFramework 是新代码，若不测自身则成了"没有测试的基础设�
 
 | 版本 | 日期 | 内容 |
 |---|---|---|
+| v0.4 | 2026-08-23 | GPT 评审通过 + 补充：视觉验证历史资产记账（三层：契约/真实后端/人工视觉——Phase 8 收尾目测留痕）；异常捕获边界措辞严谨化（只捕标准 C++ 异常，不承诺 SEH/访问违规/栈溢出）；自测定位明确（基础设施回归测试，非 Runner 正确性证明，不作硬前置）；"5 组件"措辞改"轻量测试基础设施"（列全 7 概念） |
 | v0.3 | 2026-08-23 | v0.2 审查通过（GPT）；补 §3.7 详细设计约束 2 条：状态生命周期（避免全局测试状态）/ RunAllTests = orchestration（平台入口与测试核心分离） |
 | v0.2 | 2026-08-23 | GPT 评审整合：模块入口改名 RegisterXxxTests（D6）；TestCase/TestResult 明确为数据结构；EXPECT 首版范围限定（5 个基础断言，无模板魔法）；断言/异常两层责任分离；MessageBox 仅提醒失败数；新增 §3.6 TestFramework 自测；P0 先确认 Selection 索引单位契约；7.1 回归加"真实 HWND 依赖先证隔离不可行"原则 |
 | v0.1 | 2026-08-23 | 初稿（5 组件方案 + 接入迁移策略 + P0/P1 边界 + 决策点 D1-D5） |
