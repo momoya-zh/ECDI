@@ -52,4 +52,31 @@ size_t ByteOffsetToCodepointIndex(const std::string& text, size_t byteOffset){
 	return cpIndex;
 }
 
+char32_t DecodeFirstCodepoint(const std::string& text){
+	if (text.empty())
+		return 0;
+	// 按前导字节解码（与 SequenceLength 同规则——非法前导按 1 字节 ASCII 处理）
+	const unsigned char lead = static_cast<unsigned char>(text[0]);
+	if ((lead & 0x80) == 0)
+		return static_cast<char32_t>(lead);   // 1 字节 ASCII
+	const size_t len = SequenceLength(lead);
+	if (len == 2 && text.size() >= 2){
+		return static_cast<char32_t>(((lead & 0x1F) << 6) |
+			(static_cast<unsigned char>(text[1]) & 0x3F));
+	}
+	if (len == 3 && text.size() >= 3){
+		return static_cast<char32_t>(((lead & 0x0F) << 12) |
+			((static_cast<unsigned char>(text[1]) & 0x3F) << 6) |
+			(static_cast<unsigned char>(text[2]) & 0x3F));
+	}
+	if (len == 4 && text.size() >= 4){
+		return static_cast<char32_t>(((lead & 0x07) << 18) |
+			((static_cast<unsigned char>(text[1]) & 0x3F) << 12) |
+			((static_cast<unsigned char>(text[2]) & 0x3F) << 6) |
+			(static_cast<unsigned char>(text[3]) & 0x3F));
+	}
+	// 连续字节/非法前导/序列不完整：按 1 字节 ASCII 处理（与 SequenceLength 同语义）
+	return static_cast<char32_t>(lead);
+}
+
 }

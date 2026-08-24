@@ -6,6 +6,8 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace ECDI{
 
@@ -65,6 +67,9 @@ public:
 	/// @brief 光标是否可见（8.5.1；只读查询，无副作用——测试/调试用，同 GetSelection 先例）
 	bool IsCaretVisible() const noexcept{ return m_showCaret; }
 
+	/// @brief 垂直滚动偏移（8.5.2；只读查询，无副作用——测试/调试用，同 GetSelection 先例）
+	float GetScrollOffsetY() const noexcept{ return m_scrollOffsetY; }
+
 	// ── 选择查询（7.2 新增：只读，无副作用——Phase 10 集成测试前置）──────────
 
 	/// @brief 选择区间（start <= end；码点索引，非字节偏移）
@@ -92,10 +97,11 @@ protected:
 
 	void OnFocusGained() override;              // 显示光标
 	void OnFocusLost() override;                // 隐藏光标
-	void OnMouseButtonDown(const MouseButtonDownEvent&) override;   // 点击定位 + 拖选锚点（5.5.1.4/5.5.2）
+	void OnMouseButtonDown(const MouseButtonDownEvent&) override;   // 点击定位 + 拖选锚点（5.5.1.4/5.5.2）+ 双击选词（8.5.2）
 	void OnMouseMove(const MouseMoveEvent&) override;               // 拖选扩展 active 端（5.5.2）
+	void OnMouseWheel(const MouseWheelEvent&) override;             // 垂直滚动（8.5.2）
 	void OnMouseButtonUp(const MouseButtonUpEvent&) override;       // 结束拖选（5.5.2）
-	void OnKeyDown(const KeyDownEvent&) override;    // 编辑键映射（5.5.1.3）+ Shift+方向键扩展（5.5.2）+ Ctrl 组合（8.5.1）
+	void OnKeyDown(const KeyDownEvent&) override;    // 编辑键映射（5.5.1.3）+ Shift+方向键（5.5.2）+ Ctrl 组合（8.5.1）+ Enter 换行（8.5.2）
 	void OnCharInput(const CharInputEvent&) override; // 字符插入（5.5.1.3）
 	void OnTimer(const TimerEvent&) override;         // 周期定时器（8.5.1：光标闪烁）
 	void OnPaint(PaintContext& ctx, int x, int y) override;
@@ -134,6 +140,35 @@ protected:
 	/// @details 无副作用（不 Invalidate/不 Sync/不 RaiseTextChanged）——副作用由调用方按语义添加。
 	size_t ReplaceTextRange(size_t startCp, size_t endCp, const std::string& replacement);
 
+	// ── 多行与滚动（8.5.2；B4/B5——测试经 TestableTextBox using 暴露，同 Composition 先例；
+	//    外部 API 面不变（protected 外部不可见））──
+
+	/// @brief 重算行起始缓存（扫描 \n；仅 m_needsLineRecalc 时调用——惰性；码点级解码）
+	void RecalculateLines();
+
+	/// @brief 行号 → 该行码点区间 [start, end)（end 不含行尾 \n）
+	/// @details 尾部空行契约：以 \n 结尾存在空的最后一行（"ab\n" → line1=[3,3]）
+	std::pair<size_t, size_t> LineRange(size_t lineIndex) const;
+
+	/// @brief 文本内位置 → 最近码点索引（多行：Y 定行（含 scrollOffset）→ 行起始 → X 定行内 → 全局；
+	/// 替代 8.5.1 单行 CaretIndexFromX——B9）
+	/// @param localPos 相对控件原点的坐标（OnMouseButtonDown/OnMouseMove 经 GetAbsolutePosition 换算）
+	/// @note 非 const：测量经 GetWindow()->GetTextMeasurer()（非 const 接口——同 GetCaretClientGeometry 性质）
+	size_t CaretIndexFromPosition(Point localPos);
+
+	/// @brief 行内 X 定位 → 全局码点索引（CaretIndexFromPosition 与 Up/Down 跨行共用——防漂移）
+	/// @param lineIndex 目标行号（调用方保证有效）
+	/// @param innerX 相对文本起点的 X（像素；负值/超行尾 → clamp 到行首/行尾）
+	/// @details 行内线性扫描 + 前缀测量（O(行长²) 短行够用）；无窗口（GetWindow()==nullptr）跳过测量返回行起始
+	size_t CaretIndexFromLineX(size_t lineIndex, float innerX) const;
+
+	/// @brief 重置目标列 = 当前光标 X（非跨行移动后调用——Up/Down 保持列的基础）
+	/// @details 无窗口（测试）兜底 0.0f；Left/Right/Home/End/点击/编辑后重置，Up/Down 不重置
+	void ResetPreferredColumn();
+
+	/// @brief 双击位置 → 选中范围 [start, end)（C5：code point 级——word 整词 / non-word 单码点）
+	std::pair<size_t, size_t> GetWordBounds(size_t clickIndex) const;
+
 private:
 
 	/// @brief 文本变化通知入口（非虚，内部唯一入口——D9 契约）
@@ -151,9 +186,34 @@ private:
 	/// @brief 码点总数（私有辅助——消除 DeleteForward/MoveCaret/MoveCaretToEnd 多处重复统计）
 	size_t GetCodepointCount() const;
 
-	/// @brief 文本内 x 偏移 → 最近码点索引（点击定位算法——5.5.2 Selection 拖选/双击/Shift+单击复用）
-	/// @param innerX 相对文本起点的 x（与绘制同源：OnMouseButtonDown 经 CalculateTextPosition 计算）
-	size_t CaretIndexFromX(TextMeasurer& measurer, float innerX) const;
+	// ── 多行与滚动（8.5.2；B4/B5——行缓存 + 滚动偏移 + 坐标定位）──
+
+	// ── 多行与滚动数据（8.5.2；B4/B5——方法在 protected 区，数据私有）──
+
+	/// @brief 码点索引 → 行号（0-based；二分 m_lineStarts）
+	size_t LineIndexFromCodepoint(size_t cp) const;
+
+	/// @brief 单行行高（全系统唯一行高来源——OnPaint/CaretIndexFromPosition/CalculateCaretPosition/EnsureCaretVisible/Scroll 共用；
+	/// 8.5.2 固定行高——不支持逐行字体，Y/lineH 成立）
+	float GetLineHeight() const;
+
+	/// @brief 文本实际绘制起点相对 TextBox client origin 的 X 坐标（单一来源——
+	/// OnPaint textX / CaretIndexFromPosition innerX = localX - textX 同源防漂移）
+	float GetTextLeftInset() const;
+
+	/// @brief 垂直可视文本区高度（与 GetTextAreaWidth 对称——含焦点框内缩）
+	float GetTextAreaHeight() const;
+
+	/// @brief 最大滚动偏移（内容总高 - 可视高；负值 → 0；含最后一行完整行高）
+	float GetMaxScrollOffset() const;
+
+	/// @brief 滚动使光标可见（上边界：滚到光标顶；下边界：滚到光标底；统一 clamp）
+	void EnsureCaretVisible();
+
+	std::vector<size_t> m_lineStarts;      ///< 每行起始码点索引缓存（m_lineStarts[0]=0；行数 = size()-1）
+	bool m_needsLineRecalc = true;         ///< 编辑后标记需重算行信息（失效责任见 B4）
+	float m_scrollOffsetY = 0.0f;          ///< 垂直滚动偏移（像素；clamp [0, GetMaxScrollOffset()]）
+	float m_preferredColumn = 0.0f;        ///< 目标列（像素宽——Up/Down 跨行保持的 X；Left/Right/Home/End/点击/编辑后重置）
 
 	// ── Selection 辅助（5.5.2；全 private——内部算法不暴露，Phase 7 测试体系补测）──
 
@@ -168,9 +228,9 @@ private:
 	/// @brief 可视文本宽度（控件宽 − 焦点框内缩 2px×2）——文本裁切/Selection 高亮/光标 共用
 	float GetTextAreaWidth() const noexcept;
 
-	/// @brief 光标像素位置（光标**顶部**：textPos.y；相对文本框左上角——不含绝对窗口偏移；含可视钳制）
+	/// @brief 光标像素位置（光标**顶部**：相对文本框左上角——含 scrollOffsetY 与可视钳制；8.5.2 多行版）
 	/// @param measurer 测量器——调用方决定来源（OnPaint 经 GetWindow()->GetTextMeasurer()，
-	/// PaintContext 封装不暴露 measurer；与点击定位 CaretIndexFromX 同源但不合并——方向相反）
+	/// PaintContext 封装不暴露 measurer；与点击定位 CaretIndexFromPosition 同源但不合并——方向相反）
 	/// @details v1.0.3：统一顶部锚点（系统 caret 语义=caret 左上角；OnPaint 竖线直接用它）
 	Point CalculateCaretPosition(TextMeasurer& measurer) const;
 

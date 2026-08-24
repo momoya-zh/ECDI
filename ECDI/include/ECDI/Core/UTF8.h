@@ -23,4 +23,10 @@ size_t CodepointIndexToByteOffset(const std::string& text, size_t codepointIndex
 ///      —— 鼠标点击定位可能产生非边界偏移，调用方需自行钳制
 size_t ByteOffsetToCodepointIndex(const std::string& text, size_t byteOffset);
 
+/// @brief 解码 UTF-8 首码点（8.5.2：RecalculateLines 行扫描 / GetWordBounds 分词共用——
+/// 第二个消费者出现，YAGNI 解除正式加回；5.5.1.1 删 DecodeUTF8 时零消费者）
+/// @param text 待解码字符串（空串 → 返回 0——调用方需先判空）
+/// @return 首码点（按前导字节解码 1-4 字节；非法前导按 1 字节 ASCII 处理——与 SequenceLength 同语义）
+char32_t DecodeFirstCodepoint(const std::string& text);
+
 }

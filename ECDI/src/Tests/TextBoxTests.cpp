@@ -4,6 +4,7 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyModifier.h"
 #include "ECDI/EventSystem/Window/TimerEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
 
 using namespace ECDI;
 
@@ -21,6 +22,11 @@ public:
     using TextBox::UpdateComposition;   ///< 8.5.1：Composition 状态机（protected——Window 转发入口）
     using TextBox::CommitComposition;
     using TextBox::CancelComposition;
+    using TextBox::RecalculateLines;   ///< 8.5.2：行缓存重算（private——测试经 using 暴露）
+    using TextBox::LineRange;          ///< 8.5.2：行区间查询（private——推断行分割）
+    using TextBox::CaretIndexFromPosition;   ///< 8.5.2：多行坐标定位（private——Y 定行无窗口可测）
+    using TextBox::GetWordBounds;      ///< 8.5.2：双击选词（private——纯码点逻辑）
+    using TextBox::OnMouseWheel;       ///< 8.5.2：滚轮（protected override）
 };
 
 void TestTextBoxInsertDelete()
@@ -744,6 +750,182 @@ void TestTextBoxTextSystem2()
     }
 }
 
+// ── 8.5.2：多行与滚动测试（F16-F30）──────────────────────────
+// 覆盖：行分割（LineRange 推断——空尾行/连续换行/UTF-8 多字节）/ Enter 换行 / 跨行光标 /
+// 坐标定位 Y 定行（无窗口 GetLineHeight=16 兜底）/ 滚动 clamp / 双击选词（word/non-word/中文/emoji）。
+
+void TestTextBoxMultiline()
+{
+    // F16: RecalculateLines 行分割（"ab\ncd\ne" → 行起始 {0,3,6}——经 LineRange 推断）
+    {
+        TestableTextBox box("ab\ncd\ne");
+        box.RecalculateLines();
+        auto r0 = box.LineRange(0);
+        auto r1 = box.LineRange(1);
+        auto r2 = box.LineRange(2);
+        EXPECT_EQ(r0.first, 0);  EXPECT_EQ(r0.second, 2);
+        EXPECT_EQ(r1.first, 3);  EXPECT_EQ(r1.second, 5);
+        EXPECT_EQ(r2.first, 6);  EXPECT_EQ(r2.second, 7);
+    }
+    // F17: Enter 插入换行（OnKeyDown 键盘路径）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Enter, KeyModifier::None));
+        EXPECT_EQ(box.GetText(), "abc\n");
+        EXPECT_EQ(box.GetCaret(), 4);
+    }
+    // F18: 跨行光标移动（越过 \n）
+    {
+        TestableTextBox box("a\nb");   // 码点 a(0) \n(1) b(2)
+        box.MoveCaretToStart();
+        box.MoveCaret(TextBox::CaretDirection::Right);   // 1（\n 处）
+        EXPECT_EQ(box.GetCaret(), 1);
+        box.MoveCaret(TextBox::CaretDirection::Right);   // 2（跨到第二行 b）
+        EXPECT_EQ(box.GetCaret(), 2);
+    }
+    // F19a: CaretIndexFromPosition Y 定行（无窗口 GetLineHeight=16 兜底——第一行）
+    {
+        TestableTextBox box("ab\ncd");
+        box.RecalculateLines();
+        EXPECT_EQ(box.CaretIndexFromPosition(Point{ 5.0f, 0.0f }), 0);     // 第一行 → 行起始 0
+        EXPECT_EQ(box.CaretIndexFromPosition(Point{ 5.0f, 10.0f }), 0);    // 第一行内
+    }
+    // F20a: CaretIndexFromPosition 跨行（第二行）
+    {
+        TestableTextBox box("ab\ncd");
+        box.RecalculateLines();
+        EXPECT_EQ(box.CaretIndexFromPosition(Point{ 5.0f, 16.0f }), 3);    // y=16 → 第二行起始 3
+        EXPECT_EQ(box.CaretIndexFromPosition(Point{ 5.0f, 30.0f }), 3);    // 第二行内
+    }
+    // F21: OnMouseWheel 滚动（向上减小 / 向下增加 + clamp [0, max]）
+    {
+        TestableTextBox box("a\nb\nc\nd\ne");   // 5 行 × 16 = 80 内容高
+        box.SetSize(200, 40);                  // 可视 40 → maxScroll = 80-40 = 40
+        box.MoveCaretToEnd();                  // EnsureCaretVisible → 已滚到 40（max）
+        EXPECT_EQ(box.GetScrollOffsetY(), 40.0f);
+        box.OnMouseWheel(MouseWheelEvent(nullptr, 0, 0, 120));    // 向上滚一行 → 40-16 = 24
+        EXPECT_EQ(box.GetScrollOffsetY(), 24.0f);
+        box.OnMouseWheel(MouseWheelEvent(nullptr, 0, 0, -1200));  // 向下狂滚 → 24+160 = 184 → clamp 40
+        EXPECT_EQ(box.GetScrollOffsetY(), 40.0f);
+        box.OnMouseWheel(MouseWheelEvent(nullptr, 0, 0, 12000));  // 向上狂滚 → clamp 0
+        EXPECT_EQ(box.GetScrollOffsetY(), 0.0f);
+    }
+    // F22: 双击英文选词（"hello world" 点 world 中）
+    {
+        TestableTextBox box("hello world");
+        auto w = box.GetWordBounds(8);   // "world" 的 o（码点 8）
+        EXPECT_EQ(w.first, 6);
+        EXPECT_EQ(w.second, 11);
+    }
+    // F23: 双击中文选词（单码点独立）
+    {
+        TestableTextBox box("你好世界");
+        auto w = box.GetWordBounds(1);   // 第 2 个码点（好）
+        EXPECT_EQ(w.first, 1);
+        EXPECT_EQ(w.second, 2);
+    }
+    // F24: 双击 emoji UTF-8 code point 完整选择（😀 = 4 字节 1 码点）
+    {
+        TestableTextBox box("a😀b");
+        auto w = box.GetWordBounds(1);   // 😀
+        EXPECT_EQ(w.first, 1);
+        EXPECT_EQ(w.second, 2);
+    }
+    // F25: EnsureCaretVisible 光标跟随（末尾超出可视 → 滚动）
+    {
+        TestableTextBox box("a\nb\nc\nd\ne");   // 5 行 × 16 = 80
+        box.SetSize(200, 40);                  // 可视 40 → maxScroll 40
+        box.MoveCaretToEnd();                  // caret 第 5 行 top=64 → 滚到 64+16-40=40
+        EXPECT_EQ(box.GetScrollOffsetY(), 40.0f);
+    }
+    // F26: 尾部换行空行（"ab\n" → line1=[3,3]）
+    {
+        TestableTextBox box("ab\n");
+        box.RecalculateLines();
+        auto r0 = box.LineRange(0);
+        auto r1 = box.LineRange(1);
+        EXPECT_EQ(r0.first, 0);  EXPECT_EQ(r0.second, 2);
+        EXPECT_EQ(r1.first, 3);  EXPECT_EQ(r1.second, 3);   // 空尾行
+    }
+    // F27: 空文本（"" → 单行 [0,0]）
+    {
+        TestableTextBox box("");
+        box.RecalculateLines();
+        auto r0 = box.LineRange(0);
+        EXPECT_EQ(r0.first, 0);  EXPECT_EQ(r0.second, 0);
+    }
+    // F28: 连续换行（"a\n\nb" → line0=[0,1] line1=[2,2] line2=[3,4]）
+    {
+        TestableTextBox box("a\n\nb");
+        box.RecalculateLines();
+        auto r0 = box.LineRange(0);
+        auto r1 = box.LineRange(1);
+        auto r2 = box.LineRange(2);
+        EXPECT_EQ(r0.first, 0);  EXPECT_EQ(r0.second, 1);   // "a"
+        EXPECT_EQ(r1.first, 2);  EXPECT_EQ(r1.second, 2);   // ""（空行）
+        EXPECT_EQ(r2.first, 3);  EXPECT_EQ(r2.second, 4);   // "b"
+    }
+    // F29: 双击标点/空格（non-word → 单码点）
+    {
+        TestableTextBox box("hello, world");
+        auto comma = box.GetWordBounds(5);   // 逗号（码点 5）
+        EXPECT_EQ(comma.first, 5);  EXPECT_EQ(comma.second, 6);
+        auto space = box.GetWordBounds(6);   // 空格（码点 6）
+        EXPECT_EQ(space.first, 6);  EXPECT_EQ(space.second, 7);
+        auto hello = box.GetWordBounds(1);   // "hello" 中
+        EXPECT_EQ(hello.first, 0);  EXPECT_EQ(hello.second, 5);
+    }
+    // F30: UTF-8 多字节换行索引（"你\n好" → 行起始 {0,2}——"你" 3 字节但 1 码点）
+    {
+        TestableTextBox box("你\n好");
+        box.RecalculateLines();
+        auto r0 = box.LineRange(0);
+        auto r1 = box.LineRange(1);
+        EXPECT_EQ(r0.first, 0);  EXPECT_EQ(r0.second, 1);   // "你"（码点 0，3 字节）
+        EXPECT_EQ(r1.first, 2);  EXPECT_EQ(r1.second, 3);   // "好"（码点 2）
+    }
+    // F31: Up/Down 基本跨行（无窗口：preferred column=0 → 行起始）
+    {
+        TestableTextBox box("ab\ncd");
+        box.MoveCaretToStart();                                  // caret=0（第一行）
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Down, KeyModifier::None));
+        EXPECT_EQ(box.GetCaret(), 3);                            // → 第二行起始（码点 3）
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Up, KeyModifier::None));
+        EXPECT_EQ(box.GetCaret(), 0);                            // → 回第一行起始
+    }
+    // F32: 边界 no-op（第一行 Up / 最后一行 Down 不动）
+    {
+        TestableTextBox box("ab\ncd");
+        box.MoveCaretToStart();                                  // caret=0（第一行）
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Up, KeyModifier::None));
+        EXPECT_EQ(box.GetCaret(), 0);                            // 第一行 Up → no-op
+        box.MoveCaretToEnd();                                    // caret=5（末尾——"ab\ncd" 共 5 码点）
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Down, KeyModifier::None));
+        EXPECT_EQ(box.GetCaret(), 5);                            // 最后一行 Down → no-op
+    }
+    // F33: Shift+Down 扩展选择（anchor 保留、caret 到下一行）
+    {
+        TestableTextBox box("ab\ncd");
+        box.MoveCaretToStart();                                  // caret=0
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Down, KeyModifier::Shift));
+        EXPECT_EQ(box.GetCaret(), 3);                            // caret → 第二行起始
+        auto sel = box.GetSelection();
+        EXPECT_TRUE(sel.has_value());
+        EXPECT_EQ(sel->start, 0);  EXPECT_EQ(sel->end, 3);       // anchor=0 保留 → {0,3}
+    }
+    // F34: Down→Up 往返（preferred column 跨行不重置——无窗口恒 0，验证机制往返）
+    {
+        TestableTextBox box("abc\ndef");
+        box.MoveCaretToEnd();                                    // caret=6（第二行末尾）
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Up, KeyModifier::None));
+        EXPECT_EQ(box.GetCaret(), 0);                            // → 第一行起始（preferred=0）
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Down, KeyModifier::None));
+        EXPECT_EQ(box.GetCaret(), 4);                            // → 回第二行起始
+        EXPECT_FALSE(box.GetSelection().has_value());            // 无 Shift → 无选择残留
+    }
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterTextBoxTests()
@@ -756,4 +938,5 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SelectionKeyboard", &TestTextBoxSelectionKeyboard);
     GetTestRegistry().Add("TextBox.SelectionEdit", &TestTextBoxSelectionEdit);
     GetTestRegistry().Add("TextBox.TextSystem2", &TestTextBoxTextSystem2);   // 8.5.1：F1-F15
+    GetTestRegistry().Add("TextBox.Multiline", &TestTextBoxMultiline);       // 8.5.2：F16-F30
 }

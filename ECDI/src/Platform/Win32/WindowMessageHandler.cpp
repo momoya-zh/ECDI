@@ -123,6 +123,23 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		return std::nullopt;
 	}
 
+	// 8.5.2：系统双击（WM_LBUTTONDBLCLK——需窗口类 CS_DBLCLKS 样式）
+	// "双击"是平台已判定的事实（系统双击时间语义）——翻译层如实上报，语义判断归消费者（TextBox 选词）
+	case WM_LBUTTONDBLCLK: {
+
+		MouseButtonDownEvent event(
+			window,
+			GET_X_LPARAM(lParam),
+			GET_Y_LPARAM(lParam),
+			MouseButton::Left,
+			true   // isDoubleClick——平台层事实
+		);
+
+		m_host.OnEvent(event);
+
+		return std::nullopt;
+	}
+
 	// 鼠标按键释放
 	case WM_LBUTTONUP:
 	case WM_RBUTTONUP:

@@ -29,6 +29,8 @@ WindowClass::WindowClass(const std::string& className, WNDPROC windowProc):
 	// 填充 WNDCLASSW 结构体
 	WNDCLASSW wc{};
 
+	wc.style = CS_DBLCLKS;   // 8.5.2：支持双击消息（WM_LBUTTONDBLCLK——TextBox 双击选词前置；不加收不到）
+
 	wc.lpfnWndProc = m_windowProc;   // 消息回调
 
 	wc.hInstance = m_instance;

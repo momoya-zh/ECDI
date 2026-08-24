@@ -9,6 +9,7 @@
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
 #include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/Platform/PlatformWindow.h"
 
@@ -25,6 +26,12 @@ namespace{   // 匿名 namespace：TextBox 内部常量（不暴露）
 	/// @brief 光标竖线宽（7.1.3 GPT 二轮：OnPaint 绘制与 CaretGeometry 输出同源——
 	/// 不散落魔法数字；未来 Theme/Style/Accessibility 可改）
 	constexpr float kCaretWidth = 2.0f;
+
+	/// @brief 滚轮单行滚动量（8.5.2；WHEEL_DELTA=120 滚一行——16px ≈ 一行行高）
+	constexpr float kScrollLinePx = 16.0f;
+
+	/// @brief 组合串下划线色（8.5.2 补欠账——组合串视觉区分：临时编辑提示；主题友好未来 ThemeSystem 替换）
+	const Color kCompositionUnderline = Color::FromRGBA8(80, 120, 220);
 
 }
 
@@ -66,8 +73,10 @@ void TextBox::InsertCodepoint(char32_t codepoint){
 	m_text.insert(byte, EncodeUTF8(codepoint));
 	++m_caret;
 	ClearSelection();   // 5.5.2：插入后同步 anchor——否则产生幽灵选择（anchor=插入前caret, caret=+1）
+	m_needsLineRecalc = true;   // 8.5.2：文本变化 → 行缓存失效
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 	RaiseTextChanged();     // 7.5：编辑操作实际改文本 → 通知回调（D7：仅编辑操作触发）
 }
 
@@ -82,8 +91,10 @@ void TextBox::InsertText(const std::string& text){
 		DeleteSelection();   // 内部已同步 m_caret + anchor（min 处）
 	m_caret = ReplaceTextRange(insertAt, insertAt, text);   // 纯模型操作（无副作用）
 	ClearSelection();
+	m_needsLineRecalc = true;   // 8.5.2：文本变化（可能含 \n——粘贴多行）→ 行缓存失效
 	Invalidate();
 	SyncTextInputCaret();
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 	RaiseTextChanged();
 }
 
@@ -103,8 +114,10 @@ void TextBox::DeleteBackward(){
 	// 5.5.2：有 Selection 删整个选中区（一次，非单字符）
 	if (HasSelection()){
 		m_caret = DeleteSelection();
+		m_needsLineRecalc = true;   // 8.5.2：文本变化 → 行缓存失效
 		Invalidate();
 		SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+		EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 		RaiseTextChanged();     // 7.5：删选中区 → 文本变化 → 通知
 		return;
 	}
@@ -115,8 +128,10 @@ void TextBox::DeleteBackward(){
 	m_text.erase(prev, cur - prev);               // 删前一个码点的字节区间
 	--m_caret;
 	ClearSelection();   // 5.5.2：删除后同步 anchor（防之前残留幽灵选择）
+	m_needsLineRecalc = true;   // 8.5.2：文本变化（可能删 \n——行合并）→ 行缓存失效
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 	RaiseTextChanged();     // 7.5：实际删字符 → 通知
 }
 
@@ -124,8 +139,10 @@ void TextBox::DeleteForward(){
 	// 5.5.2：有 Selection 删整个选中区
 	if (HasSelection()){
 		m_caret = DeleteSelection();
+		m_needsLineRecalc = true;   // 8.5.2：文本变化 → 行缓存失效
 		Invalidate();
 		SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
+		EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 		RaiseTextChanged();     // 7.5：删选中区 → 通知
 		return;
 	}
@@ -135,8 +152,10 @@ void TextBox::DeleteForward(){
 	const size_t next = CodepointIndexToByteOffset(m_text, m_caret + 1);
 	m_text.erase(cur, next - cur);
 	ClearSelection();   // 5.5.2：DeleteForward 光标不动但同步 anchor（防之前残留）
+	m_needsLineRecalc = true;   // 8.5.2：文本变化（可能删 \n——行合并）→ 行缓存失效
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：文本变化（光标可能越界）→ 更新插入点
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 	RaiseTextChanged();     // 7.5：实际删字符 → 通知
 }
 
@@ -151,6 +170,7 @@ void TextBox::MoveCaret(CaretDirection direction){
 	ClearSelection();   // 5.5.2：先动 caret 再同步 anchor——顺序反了会产生"幽灵选择"（anchor=旧caret）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标移动 → 更新插入点
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动（跨行移动）
 }
 
 void TextBox::MoveCaretToStart(){
@@ -158,6 +178,7 @@ void TextBox::MoveCaretToStart(){
 	ClearSelection();   // 5.5.2：同上（先动后清）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标移动 → 更新插入点
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 }
 
 void TextBox::MoveCaretToEnd(){
@@ -165,10 +186,112 @@ void TextBox::MoveCaretToEnd(){
 	ClearSelection();   // 5.5.2：同上（先动后清）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标移动 → 更新插入点
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动（跳到末尾可能超出可视区）
 }
 
 size_t TextBox::GetCodepointCount() const{
 	return ByteOffsetToCodepointIndex(m_text, m_text.size());
+}
+
+// ── 多行与滚动辅助（8.5.2；B4/B5——行缓存 + 滚动偏移 + 坐标定位）──
+
+void TextBox::RecalculateLines(){
+	// 码点级扫描（DecodeFirstCodepoint——B10 索引单位契约；不直接 m_text[i] 判断）
+	m_lineStarts.clear();
+	m_lineStarts.push_back(0);   // 首行恒从 0 开始
+	const size_t count = GetCodepointCount();
+	for (size_t i = 0; i < count; ++i){
+		const size_t byte = CodepointIndexToByteOffset(m_text, i);
+		const size_t nextByte = CodepointIndexToByteOffset(m_text, i + 1);
+		const char32_t cp = DecodeFirstCodepoint(m_text.substr(byte, nextByte - byte));
+		if (cp == U'\n')
+			m_lineStarts.push_back(i + 1);   // 换行符归属行尾，下一行起始 = i+1
+	}
+	m_needsLineRecalc = false;
+}
+
+size_t TextBox::LineIndexFromCodepoint(size_t cp) const{
+	if (m_lineStarts.empty())
+		return 0;
+	// 线性/二分：找最后一个 m_lineStarts[i] <= cp（行起始 ≤ 光标）
+	size_t lo = 0;
+	size_t hi = m_lineStarts.size() - 1;
+	while (lo < hi){
+		const size_t mid = lo + (hi - lo + 1) / 2;   // 上取整——偏向右侧
+		if (m_lineStarts[mid] <= cp)
+			lo = mid;
+		else
+			hi = mid - 1;
+	}
+	return lo;
+}
+
+std::pair<size_t, size_t> TextBox::LineRange(size_t lineIndex) const{
+	// 非最后一行：下一行起始 - 1 = 本行行尾 \n 的位置（lineStarts 只由 \n 产生，-1 恒排除换行符）
+	// 最后一行：行尾 = 文本末尾（无 \n 可排）
+	const size_t start = m_lineStarts[lineIndex];
+	const size_t end = (lineIndex + 1 < m_lineStarts.size())
+		? m_lineStarts[lineIndex + 1] - 1
+		: GetCodepointCount();
+	return { start, end };
+}
+
+float TextBox::GetLineHeight() const{
+	// 全系统唯一行高来源（8.5.2 固定行高契约——不支持逐行字体，Y/lineH 成立）
+	// 空文本兜底：MeasureText("") 返回 {0,0}，LineHeight 提供精确行高
+	// const 方法内 GetWindow() 返回 const Window*——GetTextMeasurer 非 const，只读测量经 const_cast
+	if (Window* window = const_cast<Window*>(GetWindow()))
+		return window->GetTextMeasurer().LineHeight(m_font);
+	return 16.0f;   // 无窗口（测试环境）兜底固定行高
+}
+
+float TextBox::GetTextLeftInset() const{
+	// 文本实际绘制起点 X（单一来源——OnPaint textX / CaretIndexFromPosition innerX 同源防漂移）
+	// 焦点框内缩 2px + 文本起点（水平左对齐 → 内缩即起点）
+	const float padding = HasFocus() ? 2.0f : 0.0f;
+	return padding;
+}
+
+float TextBox::GetTextAreaHeight() const{
+	// 垂直可视文本区 = 控件高 − 焦点框内缩（与 GetTextAreaWidth 对称）
+	const float padding = HasFocus() ? 2.0f : 0.0f;
+	return static_cast<float>(GetHeight()) - padding * 2.0f;
+}
+
+float TextBox::GetMaxScrollOffset() const{
+	// 内容总高 = 行数 × 固定行高（含最后一行完整行高——最后一行可恰好滚到可视区底部）
+	const float contentHeight = static_cast<float>(m_lineStarts.size()) * GetLineHeight();
+	const float viewportHeight = GetTextAreaHeight();
+	return (std::max)(0.0f, contentHeight - viewportHeight);
+}
+
+void TextBox::EnsureCaretVisible(){
+	// 惰性重算（行信息消费者——EnsureCaretVisible 经 LineIndexFromCodepoint/GetMaxScrollOffset
+	// 依赖 m_lineStarts；编辑操作置 m_needsLineRecalc 后首个消费点在此，须先重算否则 maxScroll=0）
+	if (m_needsLineRecalc)
+		RecalculateLines();
+	// 光标跟随滚动（上/下边界语义——8.5.2 基础设施，编辑/光标移动统一调用）
+	const float lineH = GetLineHeight();
+	const float caretTop = static_cast<float>(LineIndexFromCodepoint(m_caret)) * lineH;
+	const float caretBottom = caretTop + lineH;
+	const float viewportTop = m_scrollOffsetY;
+	const float viewportBottom = m_scrollOffsetY + GetTextAreaHeight();
+	if (caretTop < viewportTop)
+		m_scrollOffsetY = caretTop;   // 上边界：滚到光标顶
+	else if (caretBottom > viewportBottom)
+		m_scrollOffsetY = caretBottom - GetTextAreaHeight();   // 下边界：滚到光标底
+	m_scrollOffsetY = (std::clamp)(m_scrollOffsetY, 0.0f, GetMaxScrollOffset());
+}
+
+void TextBox::OnMouseWheel(const MouseWheelEvent& event){
+	// 惰性重算（GetMaxScrollOffset 依赖 m_lineStarts——首个消费点自保证缓存，同 EnsureCaretVisible 契约）
+	if (m_needsLineRecalc)
+		RecalculateLines();
+	// 滚轮：向上（delta>0）内容上移（scrollOffsetY 减小）——自然方向
+	m_scrollOffsetY -= static_cast<float>(event.GetDelta()) / 120.0f * kScrollLinePx;
+	m_scrollOffsetY = (std::clamp)(m_scrollOffsetY, 0.0f, GetMaxScrollOffset());
+	Invalidate();
+	SyncTextInputCaret();   // 5.6 债务兑现：候选窗位置与滚动联动
 }
 
 // ── 光标几何（5.6 提取：与点击定位同源——CalculateTextPosition 单一入口）──
@@ -181,18 +304,21 @@ float TextBox::GetTextAreaWidth() const noexcept{
 }
 
 Point TextBox::CalculateCaretPosition(TextMeasurer& measurer) const{
-	// 与 OnPaint 光标绘制完全同源：一次全文测量 → CalculateTextPosition → 前缀宽 → 可视钳制
-	const Size textSize = measurer.MeasureText(m_font, m_text);
-	// 空串高度兜底（同 OnPaint 296 行）：GDIBackend::MeasureText("") 返回 {0,0}，垂直定位需行高
-	const float lineH = (textSize.height > 0.0f) ? textSize.height : measurer.LineHeight(m_font);
-	const Point textPos = CalculateTextPosition(0, 0, textSize.width, lineH);   // 相对控件原点
-	const size_t byteOffset = CodepointIndexToByteOffset(m_text, m_caret);
-	const Size prefixSize = measurer.MeasureText(m_font, m_text.substr(0, byteOffset));
-	// 可视钳制：光标超出可视区钉在右缘（示意"后面还有"；自动水平滚动归 Phase 6）
+	// 8.5.2 多行版：行号定 y（- scrollOffsetY），行内前缀定 x——与绘制/点击定位同源
+	// 全系统统一 GetLineHeight()（不用整段文本 MeasureText 高度——那是多行总高非行高，GPT 修正）
+	if (m_needsLineRecalc)
+		const_cast<TextBox*>(this)->RecalculateLines();   // 惰性重算（缓存 mutable 语义）
+	const size_t lineIndex = LineIndexFromCodepoint(m_caret);
+	const size_t startByte = CodepointIndexToByteOffset(m_text, m_lineStarts[lineIndex]);
+	const size_t caretByte = CodepointIndexToByteOffset(m_text, m_caret);
+	const float lineH = GetLineHeight();
+	const Size prefixSize = measurer.MeasureText(m_font, m_text.substr(startByte, caretByte - startByte));
+	// 可视钳制：光标超出可视区钉在右缘（水平溢出契约——无水平滚动，右边界 clamp）
 	const float caretX = (std::min)(prefixSize.width, GetTextAreaWidth());
-	// v1.0.3：返回光标顶部（textPos.y，无 +lineH）——系统 caret 语义 = caret 左上角；
-	// float 直传（Point 成员 float——转 int 列表初始化触发 C2397 narrowing，且丢精度）
-	return Point{ textPos.x + caretX, textPos.y };
+	const float caretY = static_cast<float>(lineIndex) * lineH - m_scrollOffsetY;
+	// 返回光标顶部（系统 caret 语义 = caret 左上角）；float 直传（Point 成员 float——narrowing 隐患）
+	// Y 与 X 同源加内缩——光标与文本第一行顶部对齐（绘制 textY = fy + inset 同一几何）
+	return Point{ GetTextLeftInset() + caretX, GetTextLeftInset() + caretY };
 }
 
 CaretGeometry TextBox::GetCaretClientGeometry(){
@@ -200,11 +326,9 @@ CaretGeometry TextBox::GetCaretClientGeometry(){
 	const Point abs = GetAbsolutePosition();
 	TextMeasurer& measurer = GetWindow()->GetTextMeasurer();
 	const Point local = CalculateCaretPosition(measurer);
-	// 光标尺寸：宽 kCaretWidth（与 OnPaint 竖线同源——F2）+ 高 lineH（与 CalculateCaretPosition 同源测量）
-	const Size textSize = measurer.MeasureText(m_font, m_text);
-	const float lineH = (textSize.height > 0.0f) ? textSize.height : measurer.LineHeight(m_font);
+	// 光标尺寸：宽 kCaretWidth（与 OnPaint 竖线同源）+ 高 GetLineHeight()（8.5.2 统一行高来源）
 	return CaretGeometry{
-		Rect{ abs.x + local.x, abs.y + local.y, kCaretWidth, lineH },
+		Rect{ abs.x + local.x, abs.y + local.y, kCaretWidth, GetLineHeight() },
 		m_showCaret   // 逻辑可见性：焦点显示 / 失焦隐藏（false → 平台层 HideCaret）
 	};
 }
@@ -260,25 +384,97 @@ std::optional<TextBox::SelectionRange> TextBox::GetSelection() const {
 	};
 }
 
-// ── 点击定位算法（5.5.1.4；5.5.2 Selection 拖选/双击/Shift+单击复用）──
+// ── 点击定位算法（8.5.2 多行版：替代 5.5.1.4 单行 CaretIndexFromX——B9）──
 
-size_t TextBox::CaretIndexFromX(TextMeasurer& measurer, float innerX) const{
-	if (m_text.empty()) return 0;
-	const size_t count = GetCodepointCount();
-	// MVP：线性扫描 + 前缀测量（O(n²)——单行短文本够用）；
-	// 未来长文本/多行/滚动：缓存码点边界或二分查找（性能注释）
-	for (size_t i = 0; i < count; ++i){
-		const size_t byte = CodepointIndexToByteOffset(m_text, i + 1);
-		const Size prefix = measurer.MeasureText(m_font, m_text.substr(0, byte));
-		if (innerX <= prefix.width){
-			// 落在第 i 个码点区间：中点判断四舍五入（左半 → i，右半 → i+1）
-			const Size prevPrefix = (i == 0) ? Size{}
-				: measurer.MeasureText(m_font, m_text.substr(0, CodepointIndexToByteOffset(m_text, i)));
-			const float charWidth = prefix.width - prevPrefix.width;
-			return (innerX >= prevPrefix.width + charWidth / 2.0f) ? i + 1 : i;
+size_t TextBox::CaretIndexFromPosition(Point localPos){
+	if (m_text.empty())
+		return 0;
+	if (m_needsLineRecalc)
+		RecalculateLines();   // 惰性重算（非 const——直接调）
+	// 1. Y 定行：可视 Y − 文本区原点（内缩） + scrollOffsetY → 逻辑 Y → 行号
+	//（Y 映射契约：任意 Y → 最近有效文本行；与 X 的 innerX = localPos.x − inset 同源对称）
+	const float lineH = GetLineHeight();
+	const int logicalLine = (std::max)(0,
+		static_cast<int>((localPos.y - GetTextLeftInset() + m_scrollOffsetY) / lineH));
+	const size_t lineIndex = (std::min)(static_cast<size_t>(logicalLine), m_lineStarts.size() - 1);
+	// 2. X 定行内（提取的辅助——CaretIndexFromLineX 与 Up/Down 跨行共用，防漂移）
+	const float innerX = localPos.x - GetTextLeftInset();
+	return CaretIndexFromLineX(lineIndex, innerX);
+}
+
+size_t TextBox::CaretIndexFromLineX(size_t lineIndex, float innerX) const{
+	// 行内线性扫描 + 前缀测量（O(行长²) 短行够用——同 8.5.1 单行 CaretIndexFromX 逻辑按行）
+	const auto [lineStartCp, lineEndCp] = LineRange(lineIndex);
+	const size_t startByte = CodepointIndexToByteOffset(m_text, lineStartCp);
+	const size_t endByte   = CodepointIndexToByteOffset(m_text, lineEndCp);
+	const std::string lineText = m_text.substr(startByte, endByte - startByte);
+	size_t lineInnerCp = 0;
+	const size_t lineCpCount = ByteOffsetToCodepointIndex(lineText, lineText.size());
+	// 无窗口（测试环境）跳过测量 → 返回行起始（行内 X 定位需最小窗口集成测试——同 F19b/F20b 债务）
+	if (!lineText.empty() && GetWindow() != nullptr){
+		// const 方法内 GetWindow() 返回 const Window*——GetTextMeasurer 非 const，只读测量经 const_cast（同 GetLineHeight）
+		TextMeasurer& measurer = const_cast<Window*>(GetWindow())->GetTextMeasurer();
+		for (size_t i = 0; i < lineCpCount; ++i){
+			const size_t byte = CodepointIndexToByteOffset(lineText, i + 1);
+			const Size prefix = measurer.MeasureText(m_font, lineText.substr(0, byte));
+			if (innerX <= prefix.width){
+				// 落在第 i 个码点区间：中点判断四舍五入（左半 → i，右半 → i+1）
+				const Size prevPrefix = (i == 0) ? Size{}
+					: measurer.MeasureText(m_font, lineText.substr(0, CodepointIndexToByteOffset(lineText, i)));
+				const float charWidth = prefix.width - prevPrefix.width;
+				lineInnerCp = (innerX >= prevPrefix.width + charWidth / 2.0f) ? i + 1 : i;
+				break;
+			}
+			lineInnerCp = i + 1;   // 未 break → 点在行尾
 		}
 	}
-	return count;   // 点在末尾之后
+	return lineStartCp + lineInnerCp;   // 全局码点索引 = 行起始 + 行内
+}
+
+void TextBox::ResetPreferredColumn(){
+	// 目标列 = 当前光标 X（Up/Down 跨行保持的基准；非跨行移动后重置）
+	if (Window* window = GetWindow())
+		m_preferredColumn = CalculateCaretPosition(window->GetTextMeasurer()).x;
+	else
+		m_preferredColumn = 0.0f;   // 无窗口（测试）兜底
+}
+
+// ── 双击选词（8.5.2；B7/C5——code point 级：word 整词 / non-word 单码点）──
+
+std::pair<size_t, size_t> TextBox::GetWordBounds(size_t clickIndex) const{
+	const size_t count = GetCodepointCount();
+	if (count == 0)
+		return { 0, 0 };
+	if (clickIndex >= count)
+		clickIndex = count - 1;   // 点击末尾 → clamp 到最后一个字符
+	const auto IsWordChar = [](char32_t cp){
+		// 英文词字符 = ASCII 字母/数字；其余（空格/标点/中文/Emoji/\n）→ non-word
+		return (cp >= U'a' && cp <= U'z') || (cp >= U'A' && cp <= U'Z') || (cp >= U'0' && cp <= U'9');
+	};
+	// 点击字符本身是否 word——决定扩展方向（non-word → 单码点，行为锁死 GPT）
+	const size_t clickByte = CodepointIndexToByteOffset(m_text, clickIndex);
+	const size_t clickNextByte = CodepointIndexToByteOffset(m_text, clickIndex + 1);
+	const char32_t clickCp = DecodeFirstCodepoint(m_text.substr(clickByte, clickNextByte - clickByte));
+	if (!IsWordChar(clickCp))
+		return { clickIndex, clickIndex + 1 };   // non-word → 选中该单个 code point
+	// word 字符：向前/向后扩展到 word 边界
+	size_t start = clickIndex;
+	while (start > 0){
+		const size_t prevByte = CodepointIndexToByteOffset(m_text, start - 1);
+		const size_t curByte  = CodepointIndexToByteOffset(m_text, start);
+		const char32_t prevCp = DecodeFirstCodepoint(m_text.substr(prevByte, curByte - prevByte));
+		if (!IsWordChar(prevCp)) break;
+		--start;
+	}
+	size_t end = clickIndex;
+	while (end < count){
+		const size_t curByte  = CodepointIndexToByteOffset(m_text, end);
+		const size_t nextByte = CodepointIndexToByteOffset(m_text, end + 1);
+		const char32_t curCp = DecodeFirstCodepoint(m_text.substr(curByte, nextByte - curByte));
+		if (!IsWordChar(curCp)) break;
+		++end;
+	}
+	return { start, end };
 }
 
 // ── 纯数据访问 ──
@@ -323,8 +519,10 @@ void TextBox::UpdateComposition(const std::string& compositionText){
 	m_compositionText = compositionText;
 	m_compositionCaret = m_compositionLength;   // C9：8.5.1 固定组合末尾
 	ClearSelection();
+	m_needsLineRecalc = true;   // 8.5.2：组合串替换 m_text（可能含 \n）→ 行缓存失效
 	Invalidate();              // 视觉更新（临时编辑也需重绘）
 	SyncTextInputCaret();
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 	// ⚠️ 不 RaiseTextChanged（C8：Composition Update ≠ 正式编辑；空串 = 组合中无内容，组合仍在）
 }
 
@@ -341,8 +539,10 @@ void TextBox::CommitComposition(const std::string& resultText){
 	m_compositionStart = m_caret;   // 组合结束光标 = 结果末尾
 	m_compositionCaret = 0;
 	ClearSelection();
+	m_needsLineRecalc = true;   // 8.5.2：组合结果可能含 \n → 行缓存失效
 	Invalidate();
 	SyncTextInputCaret();
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 	RaiseTextChanged();   // ✅ Commit = 正式编辑（C3：进 Undo 历史——快照在组合开始时已 Push）
 	// ⚠️ 不 PushUndoSnapshot——组合开始前已 Push（Ctrl+Z 一次撤销整个组合，C3）
 }
@@ -359,8 +559,10 @@ void TextBox::CancelComposition(){
 	m_compositionLength = 0;
 	m_compositionCaret = 0;
 	ClearSelection();
+	m_needsLineRecalc = true;   // 8.5.2：组合占位擦除 → 行缓存失效
 	Invalidate();
 	SyncTextInputCaret();
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 }
 
 // ── 8.5.1：剪贴板（C1——Ctrl 组合是 KeyDown 语义动作，剪贴板是 Platform capability）──
@@ -385,8 +587,10 @@ void TextBox::CutSelectionToClipboard(){
 	// 删选中区（正式编辑语义——DeleteSelection 内部同步 caret/anchor）
 	m_caret = DeleteSelection();
 	ClearSelection();
+	m_needsLineRecalc = true;   // 8.5.2：剪切可能含 \n → 行缓存失效
 	Invalidate();
 	SyncTextInputCaret();
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
 	RaiseTextChanged();
 }
 
@@ -404,6 +608,7 @@ void TextBox::SelectAll(){
 	m_selectionAnchor = 0;
 	Invalidate();
 	SyncTextInputCaret();
+	EnsureCaretVisible();   // 8.5.2：光标跳到末尾（可能超出可视区）
 }
 
 // ── 8.5.1：光标闪烁（C2——平台产生 Timer，TextBox 消费事实）──
@@ -427,33 +632,39 @@ void TextBox::OnMouseButtonDown(const MouseButtonDownEvent& event){
 	// 焦点获取由 Application 前置处理（5.4.2：CanFocus → SetFocusedWidget）
 	// 坐标系：事件 GetMouseX = 窗口客户区绝对；GetAbsolutePosition = 客户区绝对
 	const Point abs = GetAbsolutePosition();
-	TextMeasurer& measurer = GetWindow()->GetTextMeasurer();   // T1 首个消费者——非 Paint 时刻测量
-	const Size textSize = measurer.MeasureText(m_font, m_text);
-	// 与 OnPaint 完全同源：同一个 CalculateTextPosition → 同一个文本起点
-	// （点击定位与绘制共享同一坐标系——未来改居中/内边距/滚动不偏）
-	const Point textPos = CalculateTextPosition(
-		static_cast<int>(abs.x), static_cast<int>(abs.y),
-		textSize.width, textSize.height);
-	const float innerX = static_cast<float>(event.GetMouseX()) - textPos.x;   // 相对文本起点
-	m_caret = CaretIndexFromX(measurer, innerX);
+	// 8.5.2：双击（平台层系统判定——WM_LBUTTONDBLCLK）→ 选词（GetWordBounds）
+	if (event.IsDoubleClick()){
+		const size_t clickIndex = CaretIndexFromPosition(
+			Point{ static_cast<float>(event.GetMouseX()) - abs.x,
+			       static_cast<float>(event.GetMouseY()) - abs.y });
+		const auto [startCp, endCp] = GetWordBounds(clickIndex);
+		m_selectionAnchor = startCp;
+		m_caret = endCp;
+		m_mouseDown = false;   // 双击选词后不进入拖选（拖选由后续单 Down 重新触发）
+		Invalidate();
+		SyncTextInputCaret();
+		ResetPreferredColumn();   // 8.5.2 补全：双击定位后重置目标列（点击类操作）
+		return;
+	}
+	// 8.5.2：多行坐标定位（CaretIndexFromPosition——Y 定行 + X 定行内 + 全局索引；替代单行 CaretIndexFromX）
+	m_caret = CaretIndexFromPosition(
+		Point{ static_cast<float>(event.GetMouseX()) - abs.x,
+		       static_cast<float>(event.GetMouseY()) - abs.y });
 	m_selectionAnchor = m_caret;   // 5.5.2：锚点 = 点击处（准备拖选）
 	m_mouseDown = true;            // 5.5.2：拖选进行中（Capture ≠ 拖选中，TextBox 内部状态）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：点击定位 → 更新插入点
+	ResetPreferredColumn();   // 8.5.2 补全：点击定位后重置目标列（Up/Down 的基准 = 点击处）
 }
 
 void TextBox::OnMouseMove(const MouseMoveEvent& event){
 	if (!m_mouseDown)
 		return;   // 非拖选中：普通移动忽略（避免误扩展选择）
-	// 拖选：同源定位（与 OnMouseButtonDown 同款坐标计算）——active 端跟随鼠标
+	// 拖选：同源定位（与 OnMouseButtonDown 同款——8.5.2 多行坐标）——active 端跟随鼠标
 	const Point abs = GetAbsolutePosition();
-	TextMeasurer& measurer = GetWindow()->GetTextMeasurer();
-	const Size textSize = measurer.MeasureText(m_font, m_text);
-	const Point textPos = CalculateTextPosition(
-		static_cast<int>(abs.x), static_cast<int>(abs.y),
-		textSize.width, textSize.height);
-	const float innerX = static_cast<float>(event.GetMouseX()) - textPos.x;
-	m_caret = CaretIndexFromX(measurer, innerX);
+	m_caret = CaretIndexFromPosition(
+		Point{ static_cast<float>(event.GetMouseX()) - abs.x,
+		       static_cast<float>(event.GetMouseY()) - abs.y });
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：拖选中 active 端跟随 → 更新插入点
 }
@@ -466,17 +677,25 @@ void TextBox::OnKeyDown(const KeyDownEvent& event){
 	// 8.5.1：Ctrl 组合优先（剪贴板/全选）——KeyDown 是事实，Copy/Paste 是 TextBox 的语义解释（C1）；
 	// 无 Ctrl 时继续原有编辑键映射（8.5.3 加 Ctrl+Z/Y）
 	if (event.IsCtrlDown()){
+		// Ctrl 组合 = KeyDown 语义（C1）——break 走公共尾部（SyncTextInputCaret/EnsureCaretVisible/
+		// ResetPreferredColumn 统一执行：Ctrl+V 粘贴多行后光标需滚动可见，Ctrl+X/V 编辑后需重置目标列）
 		switch (event.GetKeyCode()){
-		case KeyCode::C:    CopySelectionToClipboard();  SyncTextInputCaret(); return;
-		case KeyCode::V:    PasteFromClipboard();        SyncTextInputCaret(); return;
-		case KeyCode::X:    CutSelectionToClipboard();   SyncTextInputCaret(); return;
-		case KeyCode::A:    SelectAll();                 SyncTextInputCaret(); return;
+		case KeyCode::C:    CopySelectionToClipboard(); break;
+		case KeyCode::V:    PasteFromClipboard();        break;
+		case KeyCode::X:    CutSelectionToClipboard();   break;
+		case KeyCode::A:    SelectAll();                 break;
 		default: break;   // 其余 Ctrl 组合交默认（无动作）
 		}
+		SyncTextInputCaret();
+		EnsureCaretVisible();
+		if (!(event.GetKeyCode() == KeyCode::Up || event.GetKeyCode() == KeyCode::Down))
+			ResetPreferredColumn();
+		return;
 	}
 	switch (event.GetKeyCode()){
 	case KeyCode::Backspace: DeleteBackward(); break;
 	case KeyCode::Delete:    DeleteForward();  break;
+	case KeyCode::Enter:     InsertText("\n"); break;   // 8.5.2：显式换行（多行）
 	case KeyCode::Left:
 		// 5.5.2：Shift+← 扩展选择（anchor 固定、active=caret 移动）；无 Shift 清选择再移动
 		if (event.IsShiftDown()){
@@ -518,11 +737,35 @@ void TextBox::OnKeyDown(const KeyDownEvent& event){
 		}
 		Invalidate();
 		break;
+	case KeyCode::Up:
+	case KeyCode::Down: {
+		// 8.5.2 补全：上下跨行（m_preferredColumn 保持目标列——标准编辑器行为）
+		if (m_needsLineRecalc)
+			RecalculateLines();
+		const size_t curLine = LineIndexFromCodepoint(m_caret);
+		const bool goingUp = (event.GetKeyCode() == KeyCode::Up);
+		// 边界：第一行 Up / 最后一行 Down → 不移动（no-op）
+		if ((goingUp && curLine == 0) || (!goingUp && curLine + 1 >= m_lineStarts.size()))
+			break;
+		const size_t targetLine = goingUp ? curLine - 1 : curLine + 1;
+		// 行内 X 定位（preferred column——跨行保持列；目标行较短自动 clamp 行尾）
+		m_caret = CaretIndexFromLineX(targetLine, m_preferredColumn);
+		// Shift+↑/↓ 扩展选择（anchor 固定、active=caret 移动——同 Left/Right 模式）
+		if (!event.IsShiftDown())
+			ClearSelection();
+		Invalidate();
+		break;
+	}
 	default: break;   // 其他键（含 Tab——被 Window::HandleKeyDown 拦截，到不了这里）
 	}
 
+	// 8.5.2 补全：非跨行键 → 重置目标列 = 当前光标 X（Up/Down 不重置——保持列跨行）
+	if (!(event.GetKeyCode() == KeyCode::Up || event.GetKeyCode() == KeyCode::Down))
+		ResetPreferredColumn();
+
 	// 5.6 v1.0.3：方向键/Home/End 分支都改过 caret——switch 后统一同步插入点
 	SyncTextInputCaret();
+	EnsureCaretVisible();   // 8.5.2：光标跟随滚动（跨行移动/Home/End 可能超出可视区）
 }
 
 void TextBox::OnCharInput(const CharInputEvent& event){
@@ -552,57 +795,93 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 		ctx.DrawRect(Rect{ fx, fy, fw, fh }, Color::White());
 	}
 
-	// 2. 文本 + 光标（同源：一次 MeasureText 宽高 → CalculateTextPosition 起点）
-	// ⚠️ 不用 DrawTextContent——TextBox 需要文本起点/尺寸（光标计算），DrawTextContent 不返回中间值
+	// 2. 文本（8.5.2 多行逐行版：行缓存 → 可视行裁剪 → 每行 Selection 求交 + 绘制 + 组合串下划线）
 	if (m_text.empty() && !m_showCaret)
 		return;   // 空文本且无光标：省测量（光杆背景已画）
 
-	const Size textSize = ctx.MeasureText(m_font, m_text);
-	// ⚠️ 空串高度兜底：GDIBackend::MeasureText("") 返回 {0,0}（GetTextExtentPoint32W 空串 cy=0）
-	// → CalculateTextPosition 的 offsetY=(fh-0)/2 垂直定位偏下——空文本+焦点时光标竖线用行高
-	const float lineH = (textSize.height > 0.0f) ? textSize.height : ctx.LineHeight(m_font);
-	const Point textPos = CalculateTextPosition(x, y, textSize.width, lineH);   // 同源（左对齐+垂直居中）
+	if (m_needsLineRecalc)
+		RecalculateLines();   // 惰性重算（绘制首次触发）
+	const float lineH = GetLineHeight();
+	// 文本区原点 = 控件客户区绝对位置 + 内缩（焦点态 2px / 非焦点 0）——与 8.5.1 单行版
+	// CalculateTextPosition(x, y, ...) 同构（控件位置 + 相对偏移），多行改为顶部对齐
+	const float inset = GetTextLeftInset();
+	const float textX = fx + inset;   // 客户区绝对 X（绘制/Selection/下划线同源）
+	const float textY = fy + inset;   // 客户区绝对 Y（顶部对齐 + 焦点框内缩——与 X 同值内缩）
+	const size_t lineCount = m_lineStarts.size();
+	// 可视行范围（滚动裁剪——不画屏幕外的行）
+	const int firstVisible = (std::max)(0, static_cast<int>(m_scrollOffsetY / lineH));
+	const int lastVisible  = (std::min)(static_cast<int>(lineCount) - 1,
+		static_cast<int>((m_scrollOffsetY + fh) / lineH) + 1);
+	const float maxTextWidth = GetTextAreaWidth();   // 可视宽（裁切 clamp）
 
-	// 可视宽度（5.6：GetTextAreaWidth 共享——裁切/Selection/光标 改一处不漂移）
-	const float maxTextWidth = GetTextAreaWidth();
+	for (int li = firstVisible; li <= lastVisible; ++li){
+		const size_t lineIndex = static_cast<size_t>(li);
+		const auto [startCp, endCp] = LineRange(lineIndex);
+		const size_t startByte = CodepointIndexToByteOffset(m_text, startCp);
+		const size_t endByte   = CodepointIndexToByteOffset(m_text, endCp);
+		const std::string lineText = m_text.substr(startByte, endByte - startByte);
+		const float lineY = textY + static_cast<float>(li) * lineH - m_scrollOffsetY;
 
-	// 2.5 Selection 高亮（白底后、文本前——高亮不盖字；与裁切共享 maxTextWidth 钳制不溢出）
-	if (HasSelection()){
-		const size_t minByte = CodepointIndexToByteOffset(m_text, GetSelectionMin());
-		const size_t maxByte = CodepointIndexToByteOffset(m_text, GetSelectionMax());
-		const Size minSize = ctx.MeasureText(m_font, m_text.substr(0, minByte));
-		const Size maxSize = ctx.MeasureText(m_font, m_text.substr(0, maxByte));
-		const float hlMin = (std::min)(minSize.width, maxTextWidth);
-		const float hlMax = (std::min)(maxSize.width, maxTextWidth);
-		ctx.DrawRect(Rect{ textPos.x + hlMin, textPos.y, hlMax - hlMin, lineH }, kSelectionColor);
-	}
-
-	if (textSize.width <= maxTextWidth){
-		// 不超宽：全画（零开销）
-		ctx.DrawText(textPos, m_text, m_textColor, m_font);
-	}
-	else{
-		// 超宽：逐码点累计找能放下的最大前缀（MVP 临时方案）
-		// TODO(Phase 8): 用裁剪区域（PushClip/clipRect，RenderCommand 层）代替字符串截断——
-		// 当前截断 O(n²) 且绘制/数据耦合，MVP 短文本可接受
-		size_t visibleCps = 0;
-		const size_t count = GetCodepointCount();
-		for (size_t i = 0; i < count; ++i){
-			const size_t byte = CodepointIndexToByteOffset(m_text, i + 1);
-			if (ctx.MeasureText(m_font, m_text.substr(0, byte)).width > maxTextWidth)
-				break;
-			visibleCps = i + 1;
+		// ① 行内 Selection 高亮（[selMin, selMax] ∩ [startCp, endCp) 求交——逐行）
+		if (HasSelection()){
+			const size_t selMin = GetSelectionMin();
+			const size_t selMax = GetSelectionMax();
+			if (selMin < endCp && selMax > startCp){   // 有交集
+				const size_t hlStartCp = (std::max)(selMin, startCp);
+				const size_t hlEndCp   = (std::min)(selMax, endCp);
+				const size_t hlStartByte = CodepointIndexToByteOffset(m_text, hlStartCp);
+				const size_t hlEndByte   = CodepointIndexToByteOffset(m_text, hlEndCp);
+				const Size hlMinSize = ctx.MeasureText(m_font, m_text.substr(startByte, hlStartByte - startByte));
+				const Size hlMaxSize = ctx.MeasureText(m_font, m_text.substr(startByte, hlEndByte - startByte));
+				const float hlMin = (std::min)(hlMinSize.width, maxTextWidth);
+				const float hlMax = (std::min)(hlMaxSize.width, maxTextWidth);
+				ctx.DrawRect(Rect{ textX + hlMin, lineY, hlMax - hlMin, lineH }, kSelectionColor);
+			}
 		}
-		if (visibleCps > 0)
-			ctx.DrawText(textPos, m_text.substr(0, CodepointIndexToByteOffset(m_text, visibleCps)),
-			             m_textColor, m_font);
+
+		// ② 行文本绘制（超宽逐码点裁切——MVP 同 8.5.1 单行逻辑，按行）
+		if (!lineText.empty()){
+			const Size lineSize = ctx.MeasureText(m_font, lineText);
+			if (lineSize.width <= maxTextWidth){
+				ctx.DrawText(Point{ textX, lineY }, lineText, m_textColor, m_font);
+			}
+			else{
+				size_t visibleCps = 0;
+				const size_t lineCpCount = ByteOffsetToCodepointIndex(lineText, lineText.size());
+				for (size_t i = 0; i < lineCpCount; ++i){
+					const size_t byte = CodepointIndexToByteOffset(lineText, i + 1);
+					if (ctx.MeasureText(m_font, lineText.substr(0, byte)).width > maxTextWidth)
+						break;
+					visibleCps = i + 1;
+				}
+				if (visibleCps > 0)
+					ctx.DrawText(Point{ textX, lineY },
+						lineText.substr(0, CodepointIndexToByteOffset(lineText, visibleCps)),
+						m_textColor, m_font);
+			}
+		}
+
+		// ③ 组合串下划线（8.5.1 设计承诺 §4.4 补欠账——组合区间在本行时画底线）
+		if (m_isComposing && m_compositionLength > 0){
+			const size_t compStartCp = m_compositionStart;
+			const size_t compEndCp = m_compositionStart + m_compositionLength;
+			if (compStartCp < endCp && compEndCp > startCp){   // 组合区间 ∩ 本行
+				const size_t ulStartCp = (std::max)(compStartCp, startCp);
+				const size_t ulEndCp   = (std::min)(compEndCp, endCp);
+				const size_t ulStartByte = CodepointIndexToByteOffset(m_text, ulStartCp);
+				const size_t ulEndByte   = CodepointIndexToByteOffset(m_text, ulEndCp);
+				const Size ulStartSize = ctx.MeasureText(m_font, m_text.substr(startByte, ulStartByte - startByte));
+				const Size ulEndSize   = ctx.MeasureText(m_font, m_text.substr(startByte, ulEndByte - startByte));
+				ctx.DrawRect(Rect{ textX + ulStartSize.width, lineY + lineH - 1.0f,
+					ulEndSize.width - ulStartSize.width, 1.0f }, kCompositionUnderline);
+			}
+		}
 	}
 
-	// 3. 光标竖线（5.6 改 CalculateCaretPosition：点击定位/光标绘制/IME 同一变换链）
+	// 3. 光标竖线（8.5.2 多行 CalculateCaretPosition——行号定 y + scrollOffsetY + GetTextLeftInset）
 	if (m_showCaret){
-		// 测量经 Window：PaintContext 封装不暴露 measurer（决策 8）——
-		// 与 PaintFrame 注入为同一 TextMeasurer 实例（*m_textMeasurer——7.1.4 拆类后独立测量器），结果一致
-		// v1.0.3：CalculateCaretPosition 返回光标顶部——竖线直接用它（系统 caret 同锚点）
+		// 测量经 Window：PaintContext 封装不暴露 measurer（决策 8）——结果一致
+		// CalculateCaretPosition 返回相对控件原点（含 GetTextLeftInset + scrollOffsetY）
 		const Point caretLocal = CalculateCaretPosition(GetWindow()->GetTextMeasurer());
 		// 7.1.3：宽度用 kCaretWidth（与 CaretGeometry 输出同源——F2，不散落魔法数字）
 		ctx.DrawRect(Rect{ fx + caretLocal.x, fy + caretLocal.y, kCaretWidth, lineH }, Color::Black());

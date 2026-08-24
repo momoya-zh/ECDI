@@ -1,20 +1,19 @@
-﻿# Phase 8.5 文本系统 2.0 详细设计
+﻿
+# Phase 8.5.1 文本系统 2.0 详细设计（核心升级：IME 组合串内嵌 + 剪贴板 + Timer + SetFont）
 
-> 状态：v1.2（2026-08-24）｜8.5.1 定稿（GPT 三轮评审通过，可进入实现），8.5.2/8.5.3 草案待实施前补充
+> 状态：v1.3（2026-08-24）｜已实现 + 验证通过（commit 8ab8300）
 > 前序：Phase 8.5 职责确认 v1.1 / 初步设计 v1.2（GPT 两轮评审通过）
-> 相关：phase8.5-text-system2.0-preliminary-design.md（初步设计 v1.2）/ phase5-textbox-detailed-design.md（5.5）/ phase5-ime-detailed-design.md（5.6）
+> 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase8.5-text-system2.0-preliminary-design.md（初步设计 v1.2）/ phase5-textbox-detailed-design.md（5.5）/ phase5-ime-detailed-design.md（5.6）
+> 拆分说明：8.5.2 → phase8.5.2-text-system2.0-detailed-design.md / 8.5.3 → phase8.5.3-text-system2.0-detailed-design.md
 
-## 1. 实施结构（3 个 commit 块，每块"设计→实现→TestCase→VS 验证"循环）
+## 1. 范围（8.5.1）
 
 ```
-8.5.1  核心升级：IME Composition（模型 B）+ 剪贴板 + Timer/Caret Blink + SetFont  ← 本篇定稿
-8.5.2  多行与滚动：Multiline + Vertical Scroll + Double-click Selection（草案）
-8.5.3  高级功能：Undo/Redo（草案）
+8.5.1 核心升级：IME Composition（模型 B）+ 剪贴板 + Timer/Caret Blink + SetFont
+实现 + TestCase F1-F15 + 视觉验证 —— 已完结（commit 8ab8300）
 ```
 
 ---
-
-# 8.5.1 核心升级（定稿）
 
 ## 2. 文件改动清单（8.5.1）
 
@@ -640,31 +639,6 @@ void TextWidget::SetFont(const Font& font){
 
 ---
 
-# 8.5.2 多行与滚动（草案，实施前定稿）
-
-## 9. 核心设计方向（草案）
-
-- **换行模型（B4）**：显式 `\n`；`m_lineStarts` 缓存（每行起始码点索引）+ `m_needsLineRecalc`；失效责任见初步设计 B4
-- **行高**：`lineH = TextMeasurer::LineHeight(m_font)`；行数 = m_lineStarts.size() - 1
-- **滚动（B5）**：`m_scrollOffsetY`（像素）；`OnMouseWheel` 消费 MouseWheelEvent（**已存在**——WM_MOUSEWHEEL 翻译就绪）；光标跟随滚动
-- **坐标→Caret（B9）**：`CaretIndexFromX` → `CaretIndexFromPosition(Point)`：Y 定行（含 scrollOffset）→ 行起始索引 → X 定行内 → 全局索引
-- **双击选词（B7/C5）**：`GetWordBounds(clickIndex)`（英文空格/标点分词，中文/Emoji 按 code point）；双击检测 = MouseButtonDown 两次间隔判定（框架内状态，不依赖 WM_LBUTTONDBLCLK 样式）
-- **绘制**：OnPaint 逐行循环（每行 `m_text.substr(lineStartByte, lineEndByte - lineStartByte)` + 行内偏移）；Selection 高亮逐行
-- **IME 组合位置**：组合串 + 滚动偏移联动（5.6 债务表已记账）
-
-# 8.5.3 Undo/Redo（草案，实施前定稿）
-
-## 10. 核心设计方向（草案）
-
-- **Snapshot（B6）**：`struct UndoSnapshot { std::string text; size_t caret; SelectionRange selection; float scrollOffsetY; }`
-- **Push 时机（C4）**：编辑操作**前** push 当前状态 → 执行修改 → clear redo；仅文本内容改变产生（输入/删除/粘贴/剪切/IME Commit）；纯光标/Selection/Scroll 不产生
-- **Composition（C3）**：首次 UpdateComposition（组合开始）push 一次；过程不 push；Commit 自然并入该快照（Ctrl+Z 一次撤销整个组合输入）
-- **栈**：m_undoStack/m_redoStack + m_maxUndoDepth=100
-- **快捷键**：Ctrl+Z Undo / Ctrl+Y Redo（OnKeyDown Ctrl 分支扩展）
-- **边界**：空栈 no-op；Undo 后 m_text/caret/selection/scroll 全部恢复 + Invalidate + SyncTextInputCaret + RaiseTextChanged
-
----
-
 ## 11. GPT 评审回应（v1.1，C7-C10 契约）
 
 > GPT 评审时间：2026-08-24 21:00
@@ -718,6 +692,7 @@ void TextWidget::SetFont(const Font& font){
 
 ## 14. 修订记录
 
+- v1.3（2026-08-24）8.5.1 完结（commit 8ab8300）+ **8.5.2 定稿**（§9 v1.0：多行 RecalculateLines/LineRange、滚动 OnMouseWheel/EnsureCaretVisible、CaretIndexFromPosition（B9）、双击选词平台层 WM_LBUTTONDBLCLK 翻译 + WindowClass CS_DBLCLKS、多行绘制 + 组合串下划线补欠账、F16-F25）。
 - v1.2（2026-08-24）GPT 第三轮评审整合（"设计可以冻结，进入实现"）：§4.1 ImmGetCompositionStringW 改 LONG 判负；**C12 Commit("") 合法/取消走 Cancel**；**§5.4 Timer 派发链修正**（Application::OnTimer → FindFocusedWidget，代码事实核实——同 OnCharInput 模式，非 Window::DispatchTimerEvent）；§5.6 OnTimer 加 HasFocus 防御（Focus 顺序已核实 Window.cpp:152）；TestCase 补 F14（中间替换）/F15（code point）；新增 §12 实施前检查点核实（GPT 5 项全处理）。
 - v1.1（2026-08-24）GPT 评审整合（C7-C10）：IME **Update/Commit 分离**（GCS_COMPSTR/GCS_RESULTSTR + CommitComposition）；**ReplaceTextRange 抽取**（C8——UpdateComposition 不再调 InsertText，消除 TextChanged 副作用矛盾）；**C9 composition caret 明确**（8.5.1 固定组合末尾）；**C10 剪贴板失败释放 + ClipboardGuard RAII**；TestCase 重排 F3-F13（新增 Commit no-op/Cancel/空串不结束）；新增 §11 GPT 评审回应。
 - v1.0（2026-08-24）8.5.1 定稿：剪贴板（3 方法）/IME Composition 模型 B/Timer+闪烁/SetFont/TestCase/视觉验证；8.5.2/8.5.3 草案。
