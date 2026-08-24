@@ -1,6 +1,6 @@
 ﻿# Phase 7.2 测试体系补强 详细设计
 
-> 状态：v0.1（2026-08-23）｜详细设计待审
+> 状态：v0.2（2026-08-24）｜详细设计待审（GPT 评审整合）
 > 前序：职责确认 v1.1 ✅ / 初步设计 v0.4 ✅（`phase7.2-test-system-requirements.md` / `phase7.2-test-system-preliminary.md`）
 > 依据：调研实态（TextBox Selection 码点契约 / WindowMessageHandler 翻译形态 / PlatformWindowHost 接口 / vcxproj 组织）——本稿全部设计基于实际代码事实
 
@@ -45,10 +45,10 @@ struct TestCase {
 
 /// @brief 单条断言失败记录（无 pretty-print——只记表达式文本 + 位置）
 struct FailureRecord {
-    const char* expression;  ///< 失败表达式文本（#lhs " == " #rhs 等）
-    const char* file;        ///< __FILE__
-    int line;                ///< __LINE__
-    const char* function;    ///< __func__
+    const char* expression;  ///< 失败表达式文本（#lhs " == " #rhs 等），或 "unhandled exception"
+    const char* file;        ///< __FILE__；异常记录时置空（非异常发生处）
+    int line;                ///< __LINE__；异常记录时为 0
+    const char* function;    ///< __func__ 或测试名（异常时）
 };
 
 /// @brief 单个测试用例的结果（统计单位 = TestCase，非断言）
@@ -118,14 +118,17 @@ namespace Detail {
 
 #define EXPECT_NEAR(lhs, rhs, eps) \
     do { \
-        const auto _v1 = (lhs); const auto _v2 = (rhs); const auto _e = (eps); \
-        if (!((_v1) - (_v2) <= (_e) && (_v2) - (_v1) <= (_e))) \
+        const double _v1 = static_cast<double>(lhs); \
+        const double _v2 = static_cast<double>(rhs); \
+        const double _e  = static_cast<double>(eps); \
+        if (std::abs(_v1 - _v2) > _e) \
             ECDI::Test::Detail::ReportFailure(#lhs " ≈ " #rhs, __FILE__, __LINE__, __func__); \
     } while (false)
 ```
 
 - 失败行为：**记录 + 继续**（不弹框、不终止）；位置信息自动捕获
 - 浮点迁移：现有 `FloatEq(a, b)`（kEpsilon=0.001）→ `EXPECT_NEAR(a, b, kEpsilon)`
+- **实现语义（GPT 修正）**：`EXPECT_NEAR` 用 `static_cast<double>` 收窄到 double 再 `std::abs`——避免无符号类型 `a - b` 下溢出错误（如 `unsigned(1) - unsigned(2)`）；首版**仅用于浮点场景**（`TestFramework.h` 需 `#include <cmath>`）
 - 双轨语义（职责确认 G）：`FRAMEWORK_ASSERT` = 框架运行时不变量（终止）；`EXPECT_*` = 测试期望值（记录继续）
 
 ### 2.5 TestRunner
@@ -158,7 +161,8 @@ void TestRunner::RunOne(const TestCase& testCase) {
         testCase.function();                       // 断言失败 → 记录，不抛
     } catch (...) {
         result.passed = false;                     // 标准 C++ 异常 → FAIL + 继续
-        result.failures.push_back(FailureRecord{ "unhandled exception", __FILE__, __LINE__, testCase.name });
+        // file/line 置空（非异常发生处，避免冒充 TestRunner 位置）；Summary 特判输出
+        result.failures.push_back(FailureRecord{ "unhandled exception", nullptr, 0, testCase.name });
     }
     slot = previous;                               // 恢复（防御性）
     if (!result.failures.empty()) result.passed = false;
@@ -178,6 +182,7 @@ void PrintSummary(const std::vector<TestResult>& results);
 //   [FAIL] Widget.WidgetTree
 //       WidgetTests.cpp:123  EXPECT_EQ(commands.size(), 1)
 //       WidgetTests.cpp:130  EXPECT_TRUE(widget->IsVisible())
+//       unhandled exception                   （file==nullptr 时特判，不显示文件/行）
 //   ─────────────────────────
 //   Tests: 20  Passed: 18  Failed: 2
 // 有失败 → MessageBoxW 仅提醒："Tests failed: 2"（完整报告在 Debug Output）
@@ -199,7 +204,7 @@ void PrintSummary(const std::vector<TestResult>& results);
 
 | 文件 | 改动 |
 |---|---|
-| `RunAllTests.h` | 声明 `RegisterXxxTests()`（6 个）；移除 `RunXxxTests` 声明 |
+| `RunAllTests.h` | 声明 `RegisterXxxTests()`（6 个注册入口——其中 `TestFrameworkTests` 为基础设施自测，其余 5 个为业务测试）；移除 `RunXxxTests` 声明 |
 | `WidgetTests.cpp` 等 4 模块 | 入口 `RunXxxTests` → `RegisterXxxTests`，内部改为 `GetTestRegistry().Add("模块.测试名", &TestXxx)` |
 | 新 `EventTests.cpp` | 兑现 `RunEventTests` 挂起（P1，§5） |
 | `RunAllTests.cpp` | 重构为 orchestration（§1.1 图） |
@@ -263,7 +268,8 @@ public:
 ```cpp
 class FakeHost : public ECDI::PlatformWindowHost {
 public:
-    std::vector<const ECDI::Event*> events;   ///< OnEvent 收到的（指针指向翻译器局部对象——测试内立即断言）
+    std::vector<const ECDI::Event*> events;   ///< OnEvent 收到的（指针指向 Translator 局部 Event 对象）
+    /// 生命周期约束：仅用于事件到达期间的即时断言；不得在事件生命周期结束后继续使用该指针
     void OnPaint() override {}
     void OnResized(int, int) override {}
     void OnExitSizeMove() override {}
@@ -296,6 +302,32 @@ public:
 | Window::Host 回调边界 | ⚠️ `GetWindow()` 返回 nullptr 的 FakeHost 可测 OnEvent 契约；Host 真实实现（Window）留集成 |
 | CaretGeometry → PlatformWindow | ⚠️ 几何纯计算部分可测（构造 TextBox+测量 → 断言 CaretGeometry 字段）；平台消费留集成 |
 | IME composition → Framework | ⚠️ 仅测 `OnIMEComposition` 契约（FakeHost 记录）；Win32 IMM 状态同步留集成 |
+
+### 5.5 现有视觉验证资产（历史记账——不框架化）
+
+> Phase 8 渲染增强收尾阶段（2026-08-21）已完成**实际渲染视觉验证**（`AlphaDemoPanel`：半透明红叠蓝底，视觉确认叠置区呈紫色），用于确认新增渲染能力在真实 GDI 渲染路径上的最终视觉表现。
+>
+> 该验证属**真实渲染结果的人工确认**，不扩展为通用 UI 自动化测试，也不要求 Phase 7.2 将视觉验证框架化。
+
+ECDI 测试/验证体系最终三层结构：
+
+```
+                  ECDI 测试/验证体系
+                         │
+        ┌────────────────┼────────────────┐
+        ↓                ↓                ↓
+   契约自动测试       真实后端测试       视觉验证
+        │                │                │
+ RecordingBackend     GDIBackend       实际渲染结果
+ RendererTests        AlphaBlend       人工确认/视觉检查
+ Widget/Layout/...    (像素断言)
+        │
+        └─────────── 无窗口优先
+```
+
+- **契约自动测试**：RecordingBackend/RendererTests/Widget/Layout/TextBox/Event（自动）
+- **真实后端测试**：`TestGDIBackendAlphaBlend` 像素断言（自动，少量兜底）
+- **视觉验证**：真实 GDI 渲染结果人工确认（非自动化，Phase 8 已做）
 
 ## 6. TestFramework 自测（§3.6 落地——`TestFrameworkTests`）
 
@@ -336,4 +368,5 @@ public:
 
 | 版本 | 日期 | 内容 |
 |---|---|---|
+| v0.2 | 2026-08-24 | GPT 评审整合：EXPECT_NEAR 改 double+std::abs（修无符号减法下溢）；异常 FailureRecord 置空 file/line（不冒充 TestRunner 位置，Summary 特判）；新增 §5.5 现有视觉验证资产记账；FakeHost 事件指针加"仅即时断言"生命周期约束；6 注册入口注明含 TestFrameworkTests |
 | v0.1 | 2026-08-23 | 初稿（基于实现事实调研：TextBox 码点契约 / WindowMessageHandler 形态 / FakeHost 方案 / P0 范围修正 Ctrl+A+双击=新功能排除） |
