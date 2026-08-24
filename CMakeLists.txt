@@ -41,5 +41,7 @@ if(MSVC)
 endif()
 
 if(WIN32)
-    target_link_libraries(ECDI PRIVATE user32 imm32)
+    # msimg32：Phase 8 AlphaBlend（DrawImage 的 AC_SRC_ALPHA 混合）——2026-08-24 补
+    # （Phase 8 当时只同步了 ECDI.vcxproj，CLion/CMake 构建缺此库 → LNK2019 __imp_AlphaBlend）
+    target_link_libraries(ECDI PRIVATE user32 imm32 msimg32)
 endif()
