@@ -1,5 +1,5 @@
-#include "RunAllTests.h"
-#include "ECDI/Core/ECDIAssert.h"
+﻿#include "RunAllTests.h"
+#include "TestFramework.h"
 #include "ECDI/Widget/Panel.h"
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Layout/HorizontalLayout.h"
@@ -36,13 +36,18 @@ void TestHorizontalLayout()
         panel.AddChild(std::move(box3));
         panel.Arrange();
 
-        FRAMEWORK_ASSERT(b1->GetX() == 0    && b1->GetY() == 0);
-        FRAMEWORK_ASSERT(b2->GetX() == 100  && b2->GetY() == 0);
-        FRAMEWORK_ASSERT(b3->GetX() == 180  && b3->GetY() == 0);
+        EXPECT_EQ(b1->GetX(), 0);
+        EXPECT_EQ(b1->GetY(), 0);
+        EXPECT_EQ(b2->GetX(), 100);
+        EXPECT_EQ(b2->GetY(), 0);
+        EXPECT_EQ(b3->GetX(), 180);
+        EXPECT_EQ(b3->GetY(), 0);
 
         // 幂等
         panel.Arrange();
-        FRAMEWORK_ASSERT(b1->GetX() == 0 && b2->GetX() == 100 && b3->GetX() == 180);
+        EXPECT_EQ(b1->GetX(), 0);
+        EXPECT_EQ(b2->GetX(), 100);
+        EXPECT_EQ(b3->GetX(), 180);
     }
 
     // 测试 2：超出父容器
@@ -64,7 +69,7 @@ void TestHorizontalLayout()
         panel.AddChild(std::move(box3));
         panel.Arrange();
 
-        FRAMEWORK_ASSERT(b3->GetX() == 200);
+        EXPECT_EQ(b3->GetX(), 200);
     }
 
     // 测试 3：边界——0 子控件 / 1 子控件
@@ -82,7 +87,8 @@ void TestHorizontalLayout()
         auto* b = box.get();
         single.AddChild(std::move(box));
         single.Arrange();
-        FRAMEWORK_ASSERT(b->GetX() == 0 && b->GetY() == 0);
+        EXPECT_EQ(b->GetX(), 0);
+        EXPECT_EQ(b->GetY(), 0);
     }
 }
 
@@ -107,8 +113,10 @@ void TestVerticalLayout()
         panel.AddChild(std::move(box2));
         panel.Arrange();
 
-        FRAMEWORK_ASSERT(b1->GetX() == 0 && b1->GetY() == 0);
-        FRAMEWORK_ASSERT(b2->GetX() == 0 && b2->GetY() == 30);
+        EXPECT_EQ(b1->GetX(), 0);
+        EXPECT_EQ(b1->GetY(), 0);
+        EXPECT_EQ(b2->GetX(), 0);
+        EXPECT_EQ(b2->GetY(), 30);
     }
 
     // 幂等性
@@ -129,8 +137,8 @@ void TestVerticalLayout()
         panel.Arrange();
         panel.Arrange();
 
-        FRAMEWORK_ASSERT(b1->GetY() == 0);
-        FRAMEWORK_ASSERT(b2->GetY() == 30);
+        EXPECT_EQ(b1->GetY(), 0);
+        EXPECT_EQ(b2->GetY(), 30);
     }
 
     // 0 子节点
@@ -151,7 +159,8 @@ void TestVerticalLayout()
         auto* b = box.get();
         single.AddChild(std::move(box));
         single.Arrange();
-        FRAMEWORK_ASSERT(b->GetX() == 0 && b->GetY() == 0);
+        EXPECT_EQ(b->GetX(), 0);
+        EXPECT_EQ(b->GetY(), 0);
     }
 
     // 不同高度累加
@@ -175,16 +184,16 @@ void TestVerticalLayout()
         panel.AddChild(std::move(box3));
         panel.Arrange();
 
-        FRAMEWORK_ASSERT(b1->GetY() == 0);
-        FRAMEWORK_ASSERT(b2->GetY() == 20);
-        FRAMEWORK_ASSERT(b3->GetY() == 70);
+        EXPECT_EQ(b1->GetY(), 0);
+        EXPECT_EQ(b2->GetY(), 20);
+        EXPECT_EQ(b3->GetY(), 70);
     }
 }
 
 } // anonymous namespace
 
-void ECDI::Test::RunLayoutTests()
+void ECDI::Test::RegisterLayoutTests()
 {
-    TestHorizontalLayout();
-    TestVerticalLayout();
+    GetTestRegistry().Add("Layout.HorizontalLayout", &TestHorizontalLayout);
+    GetTestRegistry().Add("Layout.VerticalLayout", &TestVerticalLayout);
 }

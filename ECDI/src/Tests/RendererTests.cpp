@@ -1,11 +1,11 @@
 ﻿#include "RunAllTests.h"
+#include "TestFramework.h"
 
 #include <Windows.h>
 #ifdef DrawText
 #undef DrawText   // 防御性 undef（规范 10）：本文件含 Windows.h——防 DrawTextW 宏污染 ECDI 头声明
 #endif
 
-#include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Render/GDIBackend.h"
 #include "ECDI/Render/Renderer.h"
 #include "ECDI/Render/RecordingBackend.h"
@@ -22,9 +22,8 @@
 
 using namespace ECDI;
 
-// 浮点比较辅助（GPT 建议：避免浮点 == 直接比较）
+// 浮点近似统一用 EXPECT_NEAR（TestFramework.h）——kEpsilon 为本模块容差基准
 constexpr float kEpsilon = 0.001f;
-inline bool FloatEq(float a, float b) { return std::abs(a - b) < kEpsilon; }
 
 namespace {
 
@@ -40,27 +39,30 @@ void TestRendererForwarding()
 
     renderer.Execute(commands);
 
-    FRAMEWORK_ASSERT(backend.draws.size() == 2);
-    FRAMEWORK_ASSERT(FloatEq(backend.draws[0].rect.x, 0.0f) && FloatEq(backend.draws[0].rect.width, 100.0f));
-    FRAMEWORK_ASSERT(FloatEq(backend.draws[0].color.r, 1.0f) && FloatEq(backend.draws[0].color.a, 1.0f));
-    FRAMEWORK_ASSERT(FloatEq(backend.draws[1].rect.x, 10.0f) && FloatEq(backend.draws[1].rect.y, 20.0f));
-    FRAMEWORK_ASSERT(FloatEq(backend.draws[1].color.g, 0.5f));
+    EXPECT_EQ(backend.draws.size(), 2);
+    EXPECT_NEAR(backend.draws[0].rect.x, 0.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.width, 100.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].color.r, 1.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].color.a, 1.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[1].rect.x, 10.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[1].rect.y, 20.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[1].color.g, 0.5f, kEpsilon);
 }
 
 void TestUTF8Utility()
 {
     // ── 5.5.1.1 原 #6：UTF-8 工具自测 ──
-    FRAMEWORK_ASSERT(EncodeUTF8(U'A') == "A");
-    FRAMEWORK_ASSERT(EncodeUTF8(U'中') == "\xE4\xB8\xAD");
-    FRAMEWORK_ASSERT(EncodeUTF8(U'😀') == "\xF0\x9F\x98\x80");
+    EXPECT_EQ(EncodeUTF8(U'A'), "A");
+    EXPECT_EQ(EncodeUTF8(U'中'), "\xE4\xB8\xAD");
+    EXPECT_EQ(EncodeUTF8(U'😀'), "\xF0\x9F\x98\x80");
 
     const std::string s = "a中😀";
-    FRAMEWORK_ASSERT(CodepointIndexToByteOffset(s, 0) == 0);
-    FRAMEWORK_ASSERT(CodepointIndexToByteOffset(s, 1) == 1);
-    FRAMEWORK_ASSERT(CodepointIndexToByteOffset(s, 2) == 4);
-    FRAMEWORK_ASSERT(CodepointIndexToByteOffset(s, 3) == 8);
-    FRAMEWORK_ASSERT(ByteOffsetToCodepointIndex(s, 4) == 2);
-    FRAMEWORK_ASSERT(ByteOffsetToCodepointIndex(s, 8) == 3);
+    EXPECT_EQ(CodepointIndexToByteOffset(s, 0), 0);
+    EXPECT_EQ(CodepointIndexToByteOffset(s, 1), 1);
+    EXPECT_EQ(CodepointIndexToByteOffset(s, 2), 4);
+    EXPECT_EQ(CodepointIndexToByteOffset(s, 3), 8);
+    EXPECT_EQ(ByteOffsetToCodepointIndex(s, 4), 2);
+    EXPECT_EQ(ByteOffsetToCodepointIndex(s, 8), 3);
 }
 
 void TestRendererNewCommands()
@@ -89,32 +91,35 @@ void TestRendererNewCommands()
     renderer.Execute(commands);
 
     // DrawLine：宽度 float 原样转发（不预取整——取整是 GDI 后端细节）
-    FRAMEWORK_ASSERT(backend.lineCalls.size() == 1);
-    FRAMEWORK_ASSERT(FloatEq(backend.lineCalls[0].start.x, 1.0f) && FloatEq(backend.lineCalls[0].end.y, 40.0f));
-    FRAMEWORK_ASSERT(FloatEq(backend.lineCalls[0].width, 2.5f));
-    FRAMEWORK_ASSERT(FloatEq(backend.lineCalls[0].color.b, 1.0f));   // Blue
+    EXPECT_EQ(backend.lineCalls.size(), 1);
+    EXPECT_NEAR(backend.lineCalls[0].start.x, 1.0f, kEpsilon);
+    EXPECT_NEAR(backend.lineCalls[0].end.y, 40.0f, kEpsilon);
+    EXPECT_NEAR(backend.lineCalls[0].width, 2.5f, kEpsilon);
+    EXPECT_NEAR(backend.lineCalls[0].color.b, 1.0f, kEpsilon);   // Blue
 
     // DrawRoundedRect
-    FRAMEWORK_ASSERT(backend.roundedRectCalls.size() == 1);
-    FRAMEWORK_ASSERT(FloatEq(backend.roundedRectCalls[0].rect.width, 50.0f));
-    FRAMEWORK_ASSERT(FloatEq(backend.roundedRectCalls[0].cornerRadius, 4.0f));
-    FRAMEWORK_ASSERT(FloatEq(backend.roundedRectCalls[0].color.g, 1.0f));   // Green
+    EXPECT_EQ(backend.roundedRectCalls.size(), 1);
+    EXPECT_NEAR(backend.roundedRectCalls[0].rect.width, 50.0f, kEpsilon);
+    EXPECT_NEAR(backend.roundedRectCalls[0].cornerRadius, 4.0f, kEpsilon);
+    EXPECT_NEAR(backend.roundedRectCalls[0].color.g, 1.0f, kEpsilon);   // Green
 
     // DrawImage（Image 值拷贝转发）
-    FRAMEWORK_ASSERT(backend.imageCalls.size() == 1);
-    FRAMEWORK_ASSERT(FloatEq(backend.imageCalls[0].dest.width, 20.0f));
-    FRAMEWORK_ASSERT(backend.imageCalls[0].image.width == 2 && backend.imageCalls[0].image.height == 1);
+    EXPECT_EQ(backend.imageCalls.size(), 1);
+    EXPECT_NEAR(backend.imageCalls[0].dest.width, 20.0f, kEpsilon);
+    EXPECT_EQ(backend.imageCalls[0].image.width, 2);
+    EXPECT_EQ(backend.imageCalls[0].image.height, 1);
 
     // Push/Pop 共列保序：Push(100x100) → (DrawRect) → Pop
-    FRAMEWORK_ASSERT(backend.clipOps.size() == 2);
-    FRAMEWORK_ASSERT(backend.clipOps[0].isPush && FloatEq(backend.clipOps[0].rect.width, 100.0f));
-    FRAMEWORK_ASSERT(!backend.clipOps[1].isPush);
+    EXPECT_EQ(backend.clipOps.size(), 2);
+    EXPECT_TRUE(backend.clipOps[0].isPush);
+    EXPECT_NEAR(backend.clipOps[0].rect.width, 100.0f, kEpsilon);
+    EXPECT_FALSE(backend.clipOps[1].isPush);
     // 裁剪内 DrawRect 照常转发（状态命令不影响其他转发）
-    FRAMEWORK_ASSERT(backend.draws.size() == 1);
+    EXPECT_EQ(backend.draws.size(), 1);
 
     // DrawFocusRect
-    FRAMEWORK_ASSERT(backend.focusRectCalls.size() == 1);
-    FRAMEWORK_ASSERT(FloatEq(backend.focusRectCalls[0].rect.x, 2.0f));
+    EXPECT_EQ(backend.focusRectCalls.size(), 1);
+    EXPECT_NEAR(backend.focusRectCalls[0].rect.x, 2.0f, kEpsilon);
 }
 
 void TestPaintContextNewCommands()
@@ -132,17 +137,18 @@ void TestPaintContextNewCommands()
     pc.DrawImage(Rect{ 0, 0, 8, 8 }, Image{});   // 空图像也产生命令（no-op 判定在后端）
 
     // 顺序断言：Push → DrawLine → DrawRoundedRect → Pop → DrawFocusRect → DrawImage
-    FRAMEWORK_ASSERT(commands.size() == 6);
-    FRAMEWORK_ASSERT(std::holds_alternative<PushClipCommand>(commands[0]));
-    FRAMEWORK_ASSERT(std::holds_alternative<DrawLineCommand>(commands[1]));
-    FRAMEWORK_ASSERT(std::holds_alternative<DrawRoundedRectCommand>(commands[2]));
-    FRAMEWORK_ASSERT(std::holds_alternative<PopClipCommand>(commands[3]));
-    FRAMEWORK_ASSERT(std::holds_alternative<DrawFocusRectCommand>(commands[4]));
-    FRAMEWORK_ASSERT(std::holds_alternative<DrawImageCommand>(commands[5]));
+    EXPECT_EQ(commands.size(), 6);
+    EXPECT_TRUE(std::holds_alternative<PushClipCommand>(commands[0]));
+    EXPECT_TRUE(std::holds_alternative<DrawLineCommand>(commands[1]));
+    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[2]));
+    EXPECT_TRUE(std::holds_alternative<PopClipCommand>(commands[3]));
+    EXPECT_TRUE(std::holds_alternative<DrawFocusRectCommand>(commands[4]));
+    EXPECT_TRUE(std::holds_alternative<DrawImageCommand>(commands[5]));
 
     // 字段抽查：DrawLine 宽度原样进命令
     const auto& line = std::get<DrawLineCommand>(commands[1]);
-    FRAMEWORK_ASSERT(FloatEq(line.width, 1.0f) && FloatEq(line.start.x, 0.0f));
+    EXPECT_NEAR(line.width, 1.0f, kEpsilon);
+    EXPECT_NEAR(line.start.x, 0.0f, kEpsilon);
 }
 
 void TestImageValueSemantic()
@@ -165,8 +171,10 @@ void TestImageValueSemantic()
     img.pixels[2] = 0;     // 像素 0 的 R 通道清零（原 255）
 
     const auto& cmd = std::get<DrawImageCommand>(commands[0]);
-    FRAMEWORK_ASSERT(cmd.image.pixels[0] == 0 && cmd.image.pixels[2] == 255);   // 像素 0 红未变
-    FRAMEWORK_ASSERT(cmd.image.pixels[4] == 0 && cmd.image.pixels[5] == 255);   // 像素 1 绿未变
+    EXPECT_EQ(cmd.image.pixels[0], 0);     // 像素 0 的 B 未变
+    EXPECT_EQ(cmd.image.pixels[2], 255);   // 像素 0 的 R 未变（红未变）
+    EXPECT_EQ(cmd.image.pixels[4], 0);     // 像素 1 的 B 未变
+    EXPECT_EQ(cmd.image.pixels[5], 255);   // 像素 1 的 G 未变（绿未变）
 }
 
 void TestGDIBackendAlphaBlend()
@@ -188,13 +196,13 @@ void TestGDIBackendAlphaBlend()
     wc.lpszClassName = kClassName;
     if (!RegisterClassW(&wc))
     {
-        FRAMEWORK_ASSERT(GetLastError() == ERROR_CLASS_ALREADY_EXISTS);   // 重复运行忽略
+        EXPECT_EQ(GetLastError(), ERROR_CLASS_ALREADY_EXISTS);   // 重复运行忽略
     }
 
     HWND hwnd = CreateWindowExW(0, kClassName, L"ECDI_PixelTest", WS_POPUP,
                                 screenW - 210, screenH - 210, 200, 200,
                                 nullptr, nullptr, wc.hInstance, nullptr);
-    FRAMEWORK_ASSERT(hwnd != nullptr);
+    EXPECT_TRUE(hwnd != nullptr);
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
     {
@@ -225,11 +233,12 @@ void TestGDIBackendAlphaBlend()
 
         // 4. 断言（±3 容差——AlphaBlend 内部取整）
         //    out = src + dst*(1-A/255)：R = 128 + 0*0.5 = 128；B = 255*(127/255) ≈ 127
-        FRAMEWORK_ASSERT(corner != CLR_INVALID && center != CLR_INVALID);
-        FRAMEWORK_ASSERT(GetRValue(corner) <= 3 && GetGValue(corner) <= 3 && GetBValue(corner) >= 252);
-        FRAMEWORK_ASSERT(std::abs(GetRValue(center) - 128) <= 3);
-        FRAMEWORK_ASSERT(GetGValue(center) <= 3);
-        FRAMEWORK_ASSERT(std::abs(GetBValue(center) - 127) <= 3);
+        EXPECT_TRUE(corner != CLR_INVALID);
+        EXPECT_TRUE(center != CLR_INVALID);
+        EXPECT_TRUE(GetRValue(corner) <= 3 && GetGValue(corner) <= 3 && GetBValue(corner) >= 252);
+        EXPECT_TRUE(std::abs(GetRValue(center) - 128) <= 3);
+        EXPECT_TRUE(GetGValue(center) <= 3);
+        EXPECT_TRUE(std::abs(GetBValue(center) - 127) <= 3);
     }
 
     DestroyWindow(hwnd);
@@ -237,12 +246,12 @@ void TestGDIBackendAlphaBlend()
 
 } // anonymous namespace
 
-void ECDI::Test::RunRendererTests()
+void ECDI::Test::RegisterRendererTests()
 {
-    TestRendererForwarding();
-    TestUTF8Utility();
-    TestRendererNewCommands();
-    TestPaintContextNewCommands();
-    TestImageValueSemantic();
-    TestGDIBackendAlphaBlend();
+    GetTestRegistry().Add("Renderer.Forwarding", &TestRendererForwarding);
+    GetTestRegistry().Add("Renderer.UTF8Utility", &TestUTF8Utility);
+    GetTestRegistry().Add("Renderer.NewCommands", &TestRendererNewCommands);
+    GetTestRegistry().Add("Renderer.PaintContextNewCommands", &TestPaintContextNewCommands);
+    GetTestRegistry().Add("Renderer.ImageValueSemantic", &TestImageValueSemantic);
+    GetTestRegistry().Add("Renderer.GDIBackendAlphaBlend", &TestGDIBackendAlphaBlend);
 }

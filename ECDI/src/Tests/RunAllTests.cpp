@@ -1,13 +1,17 @@
-#include "RunAllTests.h"
-#include "ECDI/Core/ECDIAssert.h"
-
-using namespace ECDI::Test;
+﻿#include "RunAllTests.h"
+#include "TestFramework.h"
 
 void ECDI::Test::RunAllTests()
 {
-    RunRendererTests();
-    RunWidgetTests();
-    RunLayoutTests();
-    RunTextBoxTests();
-    // RunEventTests();  // P2
+    // orchestration：Register all → Run → Report（无业务逻辑——不做第二个 Runner）
+    RegisterWidgetTests();
+    RegisterLayoutTests();
+    RegisterTextBoxTests();
+    RegisterRendererTests();
+    RegisterEventTests();
+    RegisterTestFrameworkTests();
+
+    TestRunner runner;
+    runner.Run(GetTestRegistry());
+    PrintSummary(runner.GetResults());
 }
