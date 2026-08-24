@@ -12,6 +12,7 @@ namespace ECDI{
 
 // 前向声明：避免头文件循环依赖
 class Window;
+class TimerEvent;
 class MouseMoveEvent;
 class MouseButtonUpEvent;
 class MouseButtonDownEvent;
@@ -123,6 +124,11 @@ public:
 
 	/// @brief 字符输入
 	virtual void OnCharInput(const CharInputEvent& event);
+
+	/// @brief 周期定时器触发（8.5.1；焦点控件可 override——TextBox 光标闪烁）
+	/// @details 空实现——无定时器需求的控件不感知；Event 原则"语义由消费者解释"
+	virtual void OnTimer(const TimerEvent& event);
+
 	// ── Focus ──────────────────────────────────────
 
 	/// @brief 是否可以获得键盘焦点

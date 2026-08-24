@@ -15,6 +15,7 @@ class WindowCloseRequestedEvent;
 class WindowCreatedEvent;
 class WindowDestroyedEvent;
 class WindowResizedEvent;
+class TimerEvent;
 class Event;
 class MouseMoveEvent;
 class MouseButtonDownEvent;
@@ -73,6 +74,10 @@ protected:
 		const WindowResizedEvent& event) override;
 
 	void OnWindowCloseRequested(const WindowCloseRequestedEvent& event) override;
+
+	/// @brief 定时器触发（8.5.1；派发给焦点控件——与 OnCharInput 同路径，非坐标事件）
+	/// @details TimerEvent 无 HitTest——FindFocusedWidget → target->OnTimer
+	void OnTimer(const TimerEvent& event) override;
 
 	// ── 鼠标事件处理（HitTest → Target Dispatch → Bubbling）──
 

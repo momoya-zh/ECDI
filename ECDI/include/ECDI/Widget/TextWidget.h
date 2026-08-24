@@ -34,6 +34,11 @@ public:
 
 	const Color& GetTextColor() const noexcept;
 
+	/// @brief 设置字体（8.5.1；Font 是纯数据值语义——m_font = font 值拷贝）
+	/// @details m_font 原为"预留"成员（Phase 5.5 注释：未来 SetFont 一行接入，OnPaint 零改动）——
+	/// 8.5.1 兑现：赋值 + Invalidate。Label/Button 同享基类能力。
+	void SetFont(const Font& font);
+
 protected:
 
 	/// @brief 文本绘制位置（B3：对齐策略虚方法，不写死）

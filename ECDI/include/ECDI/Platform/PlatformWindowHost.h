@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <string>
+
 namespace ECDI{
 
 class Window;   // 前置声明——GetWindow 返回框架窗口（平台层不 include Window.h，只认此契约）
@@ -36,6 +38,18 @@ public:
 	/// @brief IME 组合发生（WM_IME_START/COMPOSITION；7.1.2 方案 B——IME 属输入法子系统，
 	/// 由平台层状态同步区上报，非事件系统成员）→ Window::NotifyIMEComposition
 	virtual void OnIMEComposition() = 0;
+
+	/// @brief IME 组合串内容更新（8.5.1：平台层状态上报——非 Event 系统成员，同 OnIMEComposition）
+	/// @param compositionText 当前组合串（UTF-8；空串 = 组合中无内容——组合仍在，非 Commit）
+	/// @details 平台实现（Win32）在 WM_IME_COMPOSITION 且 lParam & GCS_COMPSTR 时提取上报；
+	/// 框架层 Window 转发焦点控件更新 Composition 状态（临时编辑，不触发正式编辑语义）。
+	virtual void OnIMECompositionUpdate(const std::string& compositionText) = 0;
+
+	/// @brief IME 组合提交（8.5.1：C7 契约——Commit 的唯一可靠来源）
+	/// @param resultText 最终结果文本（UTF-8）
+	/// @details 平台实现（Win32）在 WM_IME_COMPOSITION 且 lParam & GCS_RESULTSTR 时提取上报；
+	/// 框架层 Window 转发焦点控件——组合区间转正式文本（进 Undo 历史）。
+	virtual void OnIMECompositionCommit(const std::string& resultText) = 0;
 };
 
 }

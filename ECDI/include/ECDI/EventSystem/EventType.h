@@ -14,6 +14,7 @@ enum class EventType{
 	WindowDestroyed,		///< 窗口销毁
 	WindowCloseRequested,	///< 用户请求关闭窗口（点击关闭按钮 / Alt+F4）
 	WindowResized,			///< 窗口大小变化
+	Timer,					///< 周期定时器触发（8.5.1；WM_TIMER 翻译，带 timerId）
 
 	// ── 鼠标事件 ────────────────────────────────────
 	MouseMove,				///< 鼠标移动

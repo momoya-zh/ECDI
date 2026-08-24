@@ -45,6 +45,15 @@ const Color& TextWidget::GetTextColor() const noexcept{
 
 }
 
+void TextWidget::SetFont(const Font& font){
+
+	// 8.5.1：值拷贝 + 触发重绘（Font 纯数据值语义——Core/Font.h 已确认"零平台资源、可值拷贝"）
+	m_font = font;
+
+	Invalidate();
+
+}
+
 // ── 文本绘制（B3：对齐策略虚方法 + 统一绘制入口）────────────
 
 Point TextWidget::CalculateTextPosition(int x, int y, float textWidth, float lineHeight) const{

@@ -9,6 +9,7 @@
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
+#include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/Layout/Layout.h"
 #include "ECDI/Window/Window.h"
 
@@ -223,6 +224,8 @@ void Widget::OnKeyDown(const KeyDownEvent&) {}
 void Widget::OnKeyUp(const KeyUpEvent&) {}
 
 void Widget::OnCharInput(const CharInputEvent&) {}
+
+void Widget::OnTimer(const TimerEvent&) {}
 
 // ── 交互/重绘（5.4.1）───────────────────────────────
 

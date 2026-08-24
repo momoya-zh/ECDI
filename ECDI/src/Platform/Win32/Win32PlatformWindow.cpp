@@ -6,10 +6,29 @@
 #include <Windows.h>
 #include <imm.h>
 
+#include <cstring>
 #include <string>
 #include <system_error>
 
 namespace ECDI{
+
+namespace{   // 匿名 namespace：Win32PlatformWindow 内部辅助（不暴露）
+
+/// @brief 剪贴板打开守卫（8.5.1 C10：OpenClipboard/CloseClipboard 资源配对——局部 RAII）
+/// @details 仅封装资源配对，不做任何业务逻辑（YAGNI——非 ClipboardManager）；
+/// 失败（其他应用占用）时 IsOpen() 为 false，调用方安全跳过。
+class ClipboardGuard{
+public:
+	explicit ClipboardGuard(HWND hwnd): m_opened(OpenClipboard(hwnd) != FALSE){}
+	~ClipboardGuard(){ if (m_opened) CloseClipboard(); }
+	ClipboardGuard(const ClipboardGuard&) = delete;
+	ClipboardGuard& operator=(const ClipboardGuard&) = delete;
+	bool IsOpen() const noexcept{ return m_opened; }
+private:
+	bool m_opened;
+};
+
+}
 
 Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
 		const std::string& title, int width, int height)
@@ -172,15 +191,77 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		return 0;
 
 	case WM_IME_STARTCOMPOSITION:
+		// 8.5.1 内嵌模式：阻止系统创建/显示默认组合窗（return 0 不调 DefWindowProc）——
+		// 组合串由 TextBox 自绘（模型 B：m_text 含组合串 + 下划线），系统组合窗若显示会叠加重复。
+		// 5.6 时代"IME 消息必须走 DefWindowProc"论证基于无内嵌需求；内嵌后 START 阻止组合窗
+		// 是 Windows 标准模式（Notepad 等文本编辑器同款——组合数据仍经 ImmGetCompositionString 可读，
+		// 不破坏 IME 状态机）；候选窗定位不受影响（走 ② 通道/系统 caret）。
+		// 风险（实测验证）：若输入法组合 UI 整体依赖组合窗（TSF 独立 UI），候选窗可能受影响——
+		// 回退 = 恢复 break 走 DefWindowProc。
+		m_host.OnIMEComposition();   // → Window::NotifyIMEComposition（候选窗定位）
+		return 0;   // ⚠️ 内嵌模式关键：阻止默认组合窗显示
+
 	case WM_IME_COMPOSITION:
 		// 7.1.2 方案 B（GPT 三轮）：IME 属输入法子系统（TSF/IMM/候选窗/系统 caret——
 		// 独立状态机，非事件系统成员），平台层状态同步区上报，不再经翻译器
 		// （翻译器职责纯粹化：Translate → Event → Host）
 		m_host.OnIMEComposition();   // → Window::NotifyIMEComposition（候选窗定位）
+		// 8.5.1：组合串内容上报（C7 契约——GCS_COMPSTR=Update，GCS_RESULTSTR=Commit）
+		if (lParam & GCS_COMPSTR){
+			// ① 组合串更新（正在组合的内容——临时编辑，不触发正式编辑语义）
+			if (HIMC imc = ImmGetContext(m_hwnd)){
+				// ⚠️ ImmGetCompositionStringW 返回 LONG（字节数）非 DWORD——负值 = 失败/无数据
+				const LONG len = ImmGetCompositionStringW(imc, GCS_COMPSTR, nullptr, 0);
+				if (len > 0){
+					std::wstring composition(static_cast<size_t>(len) / sizeof(wchar_t), L'\0');
+					ImmGetCompositionStringW(imc, GCS_COMPSTR,
+						composition.data(), static_cast<DWORD>(len));
+					m_host.OnIMECompositionUpdate(WideToUTF8(composition));
+				}
+				else{
+					m_host.OnIMECompositionUpdate({});   // 组合串清空（组合仍在——非 Commit）
+				}
+				ImmReleaseContext(m_hwnd, imc);
+			}
+		}
+		if (lParam & GCS_RESULTSTR){
+			// ② 组合提交（最终结果——Commit 的唯一可靠来源，C7）
+			if (HIMC imc = ImmGetContext(m_hwnd)){
+				const LONG len = ImmGetCompositionStringW(imc, GCS_RESULTSTR, nullptr, 0);
+				if (len > 0){
+					std::wstring result(static_cast<size_t>(len) / sizeof(wchar_t), L'\0');
+					ImmGetCompositionStringW(imc, GCS_RESULTSTR,
+						result.data(), static_cast<DWORD>(len));
+					m_host.OnIMECompositionCommit(WideToUTF8(result));
+					// 8.5.1 双写修复：结果已经 GCS_RESULTSTR 提交给框架（TextBox 已写入 m_text），
+					// 但系统随后仍会发结果 WM_CHAR 序列（DefWindowProc 通道）——
+					// 记下待吞计数（UTF-16 码元数 = WM_CHAR 消息数），HandleMessage 前置拦截。
+					m_imeResultPendingChars = static_cast<int>(result.size());
+				}
+				else{
+					m_host.OnIMECompositionCommit({});   // 空结果 Commit（合法——C12）
+				}
+				ImmReleaseContext(m_hwnd, imc);
+			}
+		}
 		break;   // 走翻译器（无 WM_IME case）→ nullopt → DefWindowProcW（IME 内部状态机必需）
 
 	case WM_IME_ENDCOMPOSITION:
-		break;   // 预留通道（未来组合串内嵌用——8.5）；同样走 DefWindowProcW
+		// 8.5.1：组合结束（含取消/ESC）——无 GCS_RESULTSTR 时占位拼音会残留 m_text。
+		// 用 Commit("")（空结果提交）统一收尾：正常路径（已 Commit）→ no-op 安全；
+		// 取消路径（未 Commit）→ 擦除占位 + 清组合标记（TextBox::CommitComposition 语义闭合）。
+		m_host.OnIMECompositionCommit({});
+		break;   // 继续 DefWindowProcW（IME 内部状态机必需）
+
+	}
+
+	// 8.5.1 双写修复：IME 结果 WM_CHAR 拦截（GCS_RESULTSTR 已提交框架——系统随后重复发送
+	// 结果字符 WM_CHAR，若放行会经 CharInputEvent → InsertCodepoint 二次插入，产生"你好你好"）
+	if (msg == WM_CHAR && m_imeResultPendingChars > 0){
+
+		--m_imeResultPendingChars;
+
+		return 0;   // 吞掉（不翻译——结果已由 CommitComposition 写入）
 
 	}
 
@@ -237,8 +318,8 @@ void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
 	// 光标竖线由控件 OnPaint 自画）。visible=true 不做 ShowCaret（GPT 三轮认同——分歧消解）。
 	HideCaret(m_hwnd);
 
-	// ② ImmSetCompositionWindow（IMM 保底通道——GPT 双保险：兼容性最广）
-	// ⚠️ 关键修正（2026-08-15 用户洞察）：实测微软拼音（TSF）把 ptCurrentPos 当**客户区坐标**解释！
+	// ② IMM 通道（GPT 双保险——兼容性最广；8.5.1 拆分：组合窗口隐藏 + 候选窗口跟随）
+	// ⚠️ 坐标系修正（2026-08-15 用户洞察）：实测微软拼音（TSF）把 ptCurrentPos 当**客户区坐标**解释！
 	// 证据：最小实验 SetCaretPos(300,200) 时候选框出现在窗口内 (300,200)（客户区）而非屏幕 (300,200)。
 	// 若按 IMM 文档"屏幕坐标"传 ClientToScreen 后的值，候选框落在窗口内"屏幕坐标值"处（远离光标），
 	// 窗口移动时还叠加窗口偏移（"像素过多"）。故**不再 ClientToScreen，直接传客户区坐标**。
@@ -250,16 +331,29 @@ void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
 
 	};
 
-	// Imm 三件套：取上下文 → 设置组合窗口 → 释放（HIMC 判空：失败静默，交默认行为）
 	if (HIMC imc = ImmGetContext(m_hwnd)){
 
-		COMPOSITIONFORM cf{};
+		// ②a 组合窗口（ImmSetCompositionWindow）：**CFS_POINT 钉光标**——组合窗显示已由
+		// WM_IME_STARTCOMPOSITION return 0 阻止（内嵌模式），此处位置设置仅作候选窗锚点参考
+		// （微软拼音把 ptCurrentPos 当客户区坐标解释——5.6 v1.0.4 用户洞察；候选窗参考此位置）。
+		// ⚠️ 不能用 CFS_RECT（实测微软拼音忽略，组合串回原生层）；不能移出屏幕（候选窗跟着飘走）。
+		COMPOSITIONFORM cfComposition{};
 
-		cf.dwStyle = CFS_POINT;         // 候选窗左上角对准 ptCurrentPos（客户区坐标——实测语义）
+		cfComposition.dwStyle = CFS_POINT;
 
-		cf.ptCurrentPos = pt;
+		cfComposition.ptCurrentPos = pt;
 
-		ImmSetCompositionWindow(imc, &cf);
+		ImmSetCompositionWindow(imc, &cfComposition);
+
+		// ②b 候选窗口（ImmSetCandidateWindow）：**跟随光标**——IMM 老输入法候选窗保底；
+		// TSF（Win11 微软拼音）候选窗走 ②a 组合窗锚点 + 系统 caret（①），本通道兼容 IMM 输入法。
+		CANDIDATEFORM cfCandidate{};
+
+		cfCandidate.dwStyle = CFS_POINT;
+
+		cfCandidate.ptCurrentPos = pt;
+
+		ImmSetCandidateWindow(imc, &cfCandidate);
 
 		ImmReleaseContext(m_hwnd, imc);
 
@@ -276,6 +370,96 @@ void Win32PlatformWindow::DestroyTextInputCaret(){
 		m_caretCreated = false;
 
 	}
+
+}
+
+std::string Win32PlatformWindow::GetClipboardText() const{
+
+	// 8.5.1 C10：RAII 守卫——任何路径自动 CloseClipboard；失败（占用）→ 空串（下个机会重试）
+	ClipboardGuard guard(m_hwnd);
+
+	if (!guard.IsOpen())
+
+		return {};
+
+	HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+
+	if (hData == nullptr)
+
+		return {};
+
+	const wchar_t* wide = static_cast<const wchar_t*>(GlobalLock(hData));
+
+	if (wide == nullptr)
+
+		return {};
+
+	// 公共 API UTF-8——Win32 边界 WideToUTF8 转换（字符串边界划分，skill 11）
+	const std::string utf8 = WideToUTF8(wide);
+
+	GlobalUnlock(hData);
+
+	return utf8;
+
+}
+
+void Win32PlatformWindow::SetClipboardText(const std::string& text){
+
+	ClipboardGuard guard(m_hwnd);
+
+	if (!guard.IsOpen())
+
+		return;
+
+	EmptyClipboard();   // 标准流程：先清空再设置
+
+	const std::wstring wide = UTF8ToWide(text);
+
+	// 含终止符（剪贴板以 null 结尾的 wchar 串）
+	const size_t bytes = (wide.size() + 1) * sizeof(wchar_t);
+
+	HGLOBAL hData = GlobalAlloc(GMEM_MOVEABLE, bytes);
+
+	if (hData == nullptr)
+
+		return;
+
+	void* dest = GlobalLock(hData);
+
+	if (dest == nullptr){
+
+		GlobalFree(hData);   // 锁定失败 → 释放（未被剪贴板接管）
+
+		return;
+
+	}
+
+	memcpy(dest, wide.c_str(), bytes);
+
+	GlobalUnlock(hData);
+
+	// ⚠️ C10 契约：SetClipboardData 失败必须释放 hData（成功才由剪贴板接管）
+	if (SetClipboardData(CF_UNICODETEXT, hData) == nullptr)
+
+		GlobalFree(hData);
+
+}
+
+void Win32PlatformWindow::StartTimer(int timerId, unsigned int intervalMs){
+
+	// 8.5.1：通用定时器（C2——平台不知道 timerId 的业务语义；Win32 定时器 ID 即 wParam）
+	if (m_hwnd)
+
+		SetTimer(m_hwnd, timerId, intervalMs, nullptr);
+
+}
+
+void Win32PlatformWindow::StopTimer(int timerId){
+
+	// 幂等：KillTimer 对不存在/已停止的定时器返回 FALSE（无害）
+	if (m_hwnd)
+
+		KillTimer(m_hwnd, timerId);
 
 }
 

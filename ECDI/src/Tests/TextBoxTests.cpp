@@ -3,6 +3,7 @@
 #include "ECDI/Widget/TextBox.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyModifier.h"
+#include "ECDI/EventSystem/Window/TimerEvent.h"
 
 using namespace ECDI;
 
@@ -16,6 +17,10 @@ class TestableTextBox : public TextBox
 public:
     using TextBox::TextBox;
     using TextBox::OnKeyDown;   ///< 暴露键盘选择路径（Shift+方向/Home/End）
+    using TextBox::OnTimer;     ///< 8.5.1：光标闪烁（protected override——无窗口环境允许验证翻转逻辑）
+    using TextBox::UpdateComposition;   ///< 8.5.1：Composition 状态机（protected——Window 转发入口）
+    using TextBox::CommitComposition;
+    using TextBox::CancelComposition;
 };
 
 void TestTextBoxInsertDelete()
@@ -576,6 +581,169 @@ void TestTextBoxSelectionEdit()
     }
 }
 
+// ── 8.5.1：文本系统 2.0 测试（F1-F15）──────────────────────────
+// 覆盖：InsertText 多码点 / Composition 模型 B 状态机（C7/C8/C12）/ Ctrl 组合（C1）/
+// OnTimer 闪烁（C2）/ 中间替换（F14）/ code point 索引（F15）。
+
+void TestTextBoxTextSystem2()
+{
+    // F1: InsertText 多码点插入 + 空串 no-op
+    {
+        TextBox box("abc");
+        box.MoveCaretToEnd();
+        box.InsertText("def");
+        EXPECT_EQ(box.GetText(), "abcdef");
+        EXPECT_EQ(box.GetCaret(), 6);
+    }
+    {
+        TextBox box("abc");
+        int count = 0;
+        box.SetOnTextChanged([&count](const std::string&){ ++count; });
+        box.MoveCaretToEnd();
+        box.InsertText("");
+        EXPECT_EQ(box.GetText(), "abc");
+        EXPECT_EQ(count, 0);   // 空串 no-op（D7 边界语义）
+    }
+    // F2: InsertText 有 Selection 先删（粘贴覆盖选中区）
+    {
+        TestableTextBox box("abcd");
+        box.MoveCaretToEnd();
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Left, KeyModifier::Shift));    // 3
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Left, KeyModifier::Shift));    // 2 → {2,4}
+        box.InsertText("XY");
+        EXPECT_EQ(box.GetText(), "abXY");
+        EXPECT_EQ(box.GetCaret(), 4);
+        EXPECT_FALSE(box.GetSelection().has_value());
+    }
+    // F3: Composition 首帧占位（模型 B 起始）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();   // caret=3
+        box.UpdateComposition("nihao");
+        EXPECT_EQ(box.GetText(), "abcnihao");
+        EXPECT_EQ(box.GetCaret(), 8);   // 3 + 5 码点
+        // m_isComposing 无法直接断言（private）——经 F5/F7 行为验证
+    }
+    // F4: Composition 更新替换区间（非追加）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.UpdateComposition("nihao");
+        box.UpdateComposition("nihao2");
+        EXPECT_EQ(box.GetText(), "abcnihao2");   // 区间替换非追加
+        EXPECT_EQ(box.GetCaret(), 9);
+    }
+    // F5: Composition 空串不结束（C7——空串 ≠ Commit）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.UpdateComposition("nihao");
+        box.UpdateComposition("");   // 组合中无内容——组合仍在
+        EXPECT_EQ(box.GetText(), "abc");   // 区间被清空（临时）
+        box.UpdateComposition("nih");      // 组合继续 → 区间恢复
+        EXPECT_EQ(box.GetText(), "abcnih");
+    }
+    // F6: Composition 期间不触发 TextChanged（C8——经 ReplaceTextRange 非 InsertText）
+    {
+        TestableTextBox box("abc");
+        int count = 0;
+        box.SetOnTextChanged([&count](const std::string&){ ++count; });
+        box.MoveCaretToEnd();
+        box.UpdateComposition("n");
+        box.UpdateComposition("ni");
+        box.UpdateComposition("nihao");
+        EXPECT_EQ(count, 0);   // 组合过程零回调
+        box.CommitComposition("你好");
+        EXPECT_EQ(count, 1);   // Commit = 正式编辑 → 一次回调
+    }
+    // F7: CommitComposition 正式生效（C7/C3）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.UpdateComposition("nihao");
+        box.CommitComposition("你好");
+        EXPECT_EQ(box.GetText(), "abc你好");
+        EXPECT_EQ(box.GetCaret(), 5);
+        box.UpdateComposition("zz");   // 组合已结束——下次 Update 视为新组合开始
+        EXPECT_EQ(box.GetText(), "abc你好zz");
+    }
+    // F8: Commit 无组合 no-op（fail-safe）
+    {
+        TestableTextBox box("abc");
+        box.CommitComposition("xyz");
+        EXPECT_EQ(box.GetText(), "abc");   // 不变
+        EXPECT_EQ(box.GetCaret(), 0);
+    }
+    // F9: CancelComposition 擦除区间
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.UpdateComposition("nihao");
+        box.CancelComposition();
+        EXPECT_EQ(box.GetText(), "abc");
+        EXPECT_EQ(box.GetCaret(), 3);   // 光标回组合起点
+    }
+    // F10: Ctrl+A 全选（C1 键盘路径）
+    {
+        TestableTextBox box("hello");
+        box.MoveCaretToStart();
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::A, KeyModifier::Ctrl));
+        auto sel = box.GetSelection();
+        EXPECT_TRUE(sel.has_value());
+        EXPECT_EQ(sel->start, 0);
+        EXPECT_EQ(sel->end, 5);
+    }
+    // F11: Ctrl+C 无选区 no-op（无窗口 GetWindow()==nullptr → 静默跳过，不崩）
+    {
+        TestableTextBox box("hello");
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::C, KeyModifier::Ctrl));
+        EXPECT_EQ(box.GetText(), "hello");
+    }
+    // F12: OnTimer 切换光标（无窗口环境允许验证翻转逻辑）
+    {
+        TestableTextBox box("abc");
+        EXPECT_FALSE(box.IsCaretVisible());
+        box.OnTimer(TimerEvent(nullptr, TextBox::kCaretBlinkTimer));
+        EXPECT_TRUE(box.IsCaretVisible());
+        box.OnTimer(TimerEvent(nullptr, TextBox::kCaretBlinkTimer));
+        EXPECT_FALSE(box.IsCaretVisible());
+    }
+    // F13: OnTimer 非本 id 忽略（多 timer 隔离）
+    {
+        TestableTextBox box("abc");
+        box.OnTimer(TimerEvent(nullptr, TextBox::kCaretBlinkTimer));   // true
+        box.OnTimer(TimerEvent(nullptr, 999));
+        EXPECT_TRUE(box.IsCaretVisible());   // 非本 id 不翻转
+    }
+    // F14: Composition 中间替换（GPT 检查点 4——不破坏前后文本）
+    {
+        TestableTextBox box("abcDEF");
+        box.MoveCaretToEnd();                                    // caret=6
+        box.MoveCaret(TextBox::CaretDirection::Left);            // 5
+        box.MoveCaret(TextBox::CaretDirection::Left);            // 4
+        box.MoveCaret(TextBox::CaretDirection::Left);            // 3（'c' 后）
+        box.UpdateComposition("nihao");
+        EXPECT_EQ(box.GetText(), "abcnihaoDEF");
+        box.UpdateComposition("你好");
+        EXPECT_EQ(box.GetText(), "abc你好DEF");
+        box.CommitComposition("你好");
+        EXPECT_EQ(box.GetText(), "abc你好DEF");
+        EXPECT_EQ(box.GetCaret(), 5);
+    }
+    // F15: Composition code point 索引（GPT 检查点 5——中文不按 UTF-8 byte 切）
+    {
+        TestableTextBox box("你ABC好");   // 码点：你(0) A(1) B(2) C(3) 好(4)
+        box.MoveCaretToStart();
+        box.MoveCaret(TextBox::CaretDirection::Right);   // caret=1（'你' 后——非 byte 3）
+        box.UpdateComposition("中文");
+        EXPECT_EQ(box.GetText(), "你中文ABC好");
+        EXPECT_EQ(box.GetCaret(), 3);   // 1 + 2 码点
+        box.CommitComposition("中文");
+        EXPECT_EQ(box.GetText(), "你中文ABC好");
+        EXPECT_EQ(box.GetCaret(), 3);
+    }
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterTextBoxTests()
@@ -587,4 +755,5 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.Callback", &TestTextBoxCallback);
     GetTestRegistry().Add("TextBox.SelectionKeyboard", &TestTextBoxSelectionKeyboard);
     GetTestRegistry().Add("TextBox.SelectionEdit", &TestTextBoxSelectionEdit);
+    GetTestRegistry().Add("TextBox.TextSystem2", &TestTextBoxTextSystem2);   // 8.5.1：F1-F15
 }

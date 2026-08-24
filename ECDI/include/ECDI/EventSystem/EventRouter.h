@@ -8,6 +8,7 @@ class WindowCreatedEvent;
 class WindowDestroyedEvent;
 class WindowResizedEvent;
 class WindowCloseRequestedEvent;
+class TimerEvent;
 class MouseMoveEvent;
 class MouseButtonUpEvent;
 class MouseButtonDownEvent;
@@ -48,6 +49,10 @@ protected:
 
 	virtual void OnWindowCloseRequested(
 		const WindowCloseRequestedEvent&evennt
+	){}
+
+	virtual void OnTimer(
+		const TimerEvent& event
 	){}
 
 	// ── 鼠标事件 ────────────────────────────────────

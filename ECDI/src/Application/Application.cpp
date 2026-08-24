@@ -6,6 +6,7 @@
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
 #include "ECDI/EventSystem/Window/WindowCreatedEvent.h"
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
+#include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
@@ -121,6 +122,21 @@ void Application::OnWindowCloseRequested(
 {
 	// 用户请求关闭 → 销毁底层 HWND
 	event.GetWindow()->Release();
+}
+
+void Application::OnTimer(const TimerEvent& event){
+
+	// 8.5.1：定时器触发 → 派发给焦点控件（与 OnCharInput 同路径——非坐标事件，无 HitTest）
+	Widget* target = FindFocusedWidget(*event.GetWindow());
+
+	if (target == nullptr){
+
+		return;
+
+	}
+
+	target->OnTimer(event);
+
 }
 
 Widget* Application::FindTargetWidget(

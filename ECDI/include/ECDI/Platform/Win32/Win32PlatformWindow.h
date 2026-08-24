@@ -39,6 +39,10 @@ public:
 	const PlatformRenderContext& GetRenderContext() const override;   ///< 7.1.4：后端经此拿平台句柄
 	void UpdateTextInputCaret(const CaretGeometry& geometry) override;
 	void DestroyTextInputCaret() override;
+	std::string GetClipboardText() const override;   ///< 8.5.1：剪贴板 capability（CF_UNICODETEXT + 转换封装）
+	void SetClipboardText(const std::string& text) override;
+	void StartTimer(int timerId, unsigned int intervalMs) override;   ///< 8.5.1：通用定时器（SetTimer）
+	void StopTimer(int timerId) override;   ///< 8.5.1：StopTimer（KillTimer，幂等）
 
 	/// @brief 静态窗口过程（应用层注册 WindowClass 用；GWLP_USERDATA 绑定本实例）
 	static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -53,6 +57,9 @@ private:
 	HWND m_hwnd = nullptr;	///< 窗口句柄（原 Window::m_handle）
 	bool m_caretCreated = false;	///< 系统 caret 是否已创建（5.6 v1.0.3 懒创建标记）
 	Win32RenderContext m_renderContext;	///< 渲染上下文（7.1.4：构造体 CreateWindowExW 成功后 SetHandle）
+
+	int m_imeResultPendingChars = 0;	///< 待吞掉的 IME 结果 WM_CHAR 数（8.5.1：GCS_RESULTSTR 已提交框架——
+	///< 系统随后仍发结果 WM_CHAR（DefWindowProc 通道），吞掉防双写；UTF-16 码元计数 = WM_CHAR 消息数）
 
 };
 

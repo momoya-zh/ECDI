@@ -94,6 +94,9 @@ public:
     }
 
     void OnIMEComposition() override {}
+
+    void OnIMECompositionUpdate(const std::string&) override {}   ///< 8.5.1：Host 契约新增（测试不消费）
+    void OnIMECompositionCommit(const std::string&) override {}   ///< 8.5.1：Host 契约新增（测试不消费）
 };
 
 // ── T1: TranslateKeyCode（private static——经 Handle + FakeHost 间接测）──

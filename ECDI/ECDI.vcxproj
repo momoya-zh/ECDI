@@ -228,6 +228,7 @@
     <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseMoveEvent.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Input\Mouse\MouseWheelEvent.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowCloseRequsted.h" />
+    <ClInclude Include="Include\ECDI\EventSystem\Window\TimerEvent.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowCreatedEvent.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowDestroyEvent.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Event.h" />

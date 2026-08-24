@@ -136,6 +136,13 @@ TextMeasurer& Window::GetTextMeasurer() noexcept{
 
 }
 
+PlatformWindow& Window::GetPlatformWindow() noexcept{
+
+	// 8.5.1：平台能力入口（剪贴板/Timer 等）——薄返回抽象接口，实现是 Win32PlatformWindow
+	return *m_platformWindow;
+
+}
+
 void Window::SetCaptureWidget(Widget* widget){
 
 	// 5.4.2：隐式捕获——Down 命中设置、Up 后释放；非拥有指针（生命周期随 Widget 树）
@@ -228,6 +235,28 @@ void Window::NotifyIMEComposition(){
 
 }
 
+void Window::NotifyIMECompositionUpdate(const std::string& compositionText){
+
+	// 8.5.1：转发焦点 TextBox——更新组合状态（模型 B：覆盖 m_text 临时区间）
+	if (auto* textBox = dynamic_cast<TextBox*>(m_focusedWidget)){
+
+		textBox->UpdateComposition(compositionText);
+
+	}
+
+}
+
+void Window::NotifyIMECompositionCommit(const std::string& resultText){
+
+	// 8.5.1：转发焦点 TextBox——组合区间转正式文本（C7：GCS_RESULTSTR 唯一来源）
+	if (auto* textBox = dynamic_cast<TextBox*>(m_focusedWidget)){
+
+		textBox->CommitComposition(resultText);
+
+	}
+
+}
+
 void Window::UpdateTextInputCaret(const CaretGeometry& geometry){
 
 	// 7.1.1 薄转发：平台实现（SetCaretPos + ImmSetCompositionWindow 双通道）在 Win32PlatformWindow
@@ -299,6 +328,20 @@ void Window::OnIMEComposition(){
 
 	// 7.1.2 方案 B：平台层状态同步区上报 → 转发既有框架逻辑（候选窗定位）
 	NotifyIMEComposition();
+
+}
+
+void Window::OnIMECompositionUpdate(const std::string& compositionText){
+
+	// 8.5.1：Host 契约——平台层 GCS_COMPSTR 上报 → 转发焦点控件（组合串更新）
+	NotifyIMECompositionUpdate(compositionText);
+
+}
+
+void Window::OnIMECompositionCommit(const std::string& resultText){
+
+	// 8.5.1：Host 契约——平台层 GCS_RESULTSTR 上报 → 转发焦点控件（组合提交）
+	NotifyIMECompositionCommit(resultText);
 
 }
 

@@ -3,6 +3,7 @@
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
+#include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
@@ -220,6 +221,13 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 	// ⚠️ WM_IME_* 已移出（7.1.2 方案 B）：IME 属输入法子系统（TSF/IMM/候选窗），
 	// 由 Win32PlatformWindow::HandleMessage 状态同步区处理（host.OnIMEComposition()）
 	// ——翻译器职责纯粹化（Translate → Event → Host）
+
+	// ── 定时器（8.5.1：WM_TIMER → TimerEvent；timerId 直传 wParam——平台不知道业务语义）──
+	case WM_TIMER:{
+		TimerEvent event(window, static_cast<int>(wParam));
+		m_host.OnEvent(event);
+		return 0;   // 已处理（无需 DefWindowProc）
+	}
 
 	}
 

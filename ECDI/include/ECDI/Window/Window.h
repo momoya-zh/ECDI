@@ -77,6 +77,11 @@ class Window : public PlatformWindowHost {
 		/// @details 控件经 protected GetWindow() 获取——非 Paint 时刻测量（点击定位光标等）
 		TextMeasurer& GetTextMeasurer() noexcept;
 
+		/// @brief 获取平台窗口（8.5.1；控件经 protected GetWindow() 获取——平台能力入口）
+		/// @details 剪贴板/Timer 等平台能力经此访问（与 GetTextMeasurer 同模式；
+		/// 返回抽象接口——实现是 Win32PlatformWindow，框架层零 Win32 类型）
+		PlatformWindow& GetPlatformWindow() noexcept;
+
 		/// @brief 设置鼠标捕获控件（5.4.2 隐式捕获：Down 命中即捕获；Up 后释放）
 		/// @param widget 捕获目标（后续 MouseMove/Up 直接派发给它，跳过 HitTest）；nullptr 释放
 		void SetCaptureWidget(Widget* widget);
@@ -94,6 +99,15 @@ class Window : public PlatformWindowHost {
 		/// 非 TextBox 焦点直接返回（fail-safe：IME 交系统默认行为，不写错位置）。
 		/// dynamic_cast<TextBox*> 为 Phase 5 遗留债务（7.1.1 不处理——EditableTextWidget 以后做）。
 		void NotifyIMEComposition();
+
+		/// @brief IME 组合串内容更新（8.5.1；平台层 OnIMECompositionUpdate 回调转发）
+		/// @details 转发焦点 TextBox：更新组合状态（模型 B——覆盖 m_text 临时区间）。
+		/// dynamic_cast<TextBox*> 为既有债务（同 NotifyIMEComposition——EditableTextWidget 以后做）。
+		void NotifyIMECompositionUpdate(const std::string& compositionText);
+
+		/// @brief IME 组合提交（8.5.1；平台层 OnIMECompositionCommit 回调转发）
+		/// @details 转发焦点 TextBox：组合区间转正式文本 + 进 Undo（C3/C7 契约）。
+		void NotifyIMECompositionCommit(const std::string& resultText);
 
 		/// @brief 更新文本输入插入点位置（5.6 v1.0.3：系统 caret + IMM 双通道；7.1.3 参数升级 CaretGeometry）
 		/// @details TextBox 光标变动/IME 组合时调用——薄转发 m_platformWindow
@@ -129,6 +143,14 @@ class Window : public PlatformWindowHost {
 		/// @brief IME 组合发生（7.1.2 方案 B：平台层状态同步区上报，非事件系统成员）
 		/// @details 转发既有框架逻辑 NotifyIMEComposition（候选窗定位）
 		void OnIMEComposition() override;
+
+		/// @brief IME 组合串更新（8.5.1：Host 契约——平台层 GCS_COMPSTR 上报）
+		/// @details 转发 NotifyIMECompositionUpdate（焦点 TextBox 更新组合状态）
+		void OnIMECompositionUpdate(const std::string& compositionText) override;
+
+		/// @brief IME 组合提交（8.5.1：Host 契约——平台层 GCS_RESULTSTR 上报）
+		/// @details 转发 NotifyIMECompositionCommit（焦点 TextBox 组合转正式文本）
+		void OnIMECompositionCommit(const std::string& resultText) override;
 
 		/// @brief 帧编排（决策 41 改名，原 OnPaint）：clear→Paint→BeginFrame→Execute→EndFrame
 		void PaintFrame();

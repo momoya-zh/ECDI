@@ -9,6 +9,8 @@
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
+#include "ECDI/EventSystem/Window/TimerEvent.h"
+#include "ECDI/Platform/PlatformWindow.h"
 
 #include <algorithm>
 #include <utility>
@@ -35,6 +37,10 @@ void TextBox::OnFocusGained(){
 	m_showCaret = true;
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：获焦 → 懒创建系统 caret + 初始位置（双通道）
+	// 8.5.1：获焦 → 启动光标闪烁定时器（平台层产生——TextBox 只提供 id/周期，不碰平台细节）
+	if (Window* window = GetWindow()){
+		window->GetPlatformWindow().StartTimer(kCaretBlinkTimer, kCaretBlinkMs);
+	}
 }
 
 void TextBox::OnFocusLost(){
@@ -43,6 +49,8 @@ void TextBox::OnFocusLost(){
 	// 5.6 v1.0.3：失焦 → 销毁系统 caret（IME 候选窗回默认——fail-safe）
 	if (Window* window = GetWindow()){
 		window->DestroyTextInputCaret();
+		// 8.5.1：失焦 → 停止光标闪烁定时器（顺序 = 旧 OnFocusLost → 新 OnFocusGained，已核实 Window.cpp）
+		window->GetPlatformWindow().StopTimer(kCaretBlinkTimer);
 	}
 }
 
@@ -61,6 +69,34 @@ void TextBox::InsertCodepoint(char32_t codepoint){
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
 	RaiseTextChanged();     // 7.5：编辑操作实际改文本 → 通知回调（D7：仅编辑操作触发）
+}
+
+// ── 8.5.1：多码点插入（粘贴/IME Commit/程序调用共用——正式编辑语义）──
+
+void TextBox::InsertText(const std::string& text){
+	if (text.empty())
+		return;   // 空串粘贴 = 空操作（不触发回调——D7 边界语义）
+	// 有 Selection 先删选中区（与 InsertCodepoint 同构——粘贴覆盖选中区）
+	const size_t insertAt = HasSelection() ? GetSelectionMin() : m_caret;
+	if (HasSelection())
+		DeleteSelection();   // 内部已同步 m_caret + anchor（min 处）
+	m_caret = ReplaceTextRange(insertAt, insertAt, text);   // 纯模型操作（无副作用）
+	ClearSelection();
+	Invalidate();
+	SyncTextInputCaret();
+	RaiseTextChanged();
+}
+
+// ── 8.5.1：纯文本模型区间替换（C8——InsertText 与 UpdateComposition 共享的底层操作）──
+
+size_t TextBox::ReplaceTextRange(size_t startCp, size_t endCp, const std::string& replacement){
+	// 无副作用：不 Invalidate/不 Sync/不 RaiseTextChanged——副作用由调用方按语义添加
+	const size_t startByte = CodepointIndexToByteOffset(m_text, startCp);
+	const size_t endByte   = CodepointIndexToByteOffset(m_text, endCp);
+	m_text.erase(startByte, endByte - startByte);
+	if (!replacement.empty())
+		m_text.insert(startByte, replacement);
+	return startCp + ByteOffsetToCodepointIndex(replacement, replacement.size());
 }
 
 void TextBox::DeleteBackward(){
@@ -271,6 +307,120 @@ void TextBox::SetOnTextChanged(TextChangedCallback callback){
 
 }
 
+// ── 8.5.1：IME Composition（模型 B——覆盖 m_text 临时区间；C7：Update ≠ Commit）──
+
+void TextBox::UpdateComposition(const std::string& compositionText){
+
+	if (!m_isComposing){
+		// 首次：组合开始——标记起点（Undo 快照 8.5.3 落地，此处留调用点）
+		m_isComposing = true;
+		m_compositionStart = m_caret;
+	}
+	// 替换组合区间（模型 B：m_text 含组合串；ReplaceTextRange 无副作用——不触发 TextChanged）
+	m_caret = ReplaceTextRange(
+		m_compositionStart, m_compositionStart + m_compositionLength, compositionText);
+	m_compositionLength = ByteOffsetToCodepointIndex(compositionText, compositionText.size());
+	m_compositionText = compositionText;
+	m_compositionCaret = m_compositionLength;   // C9：8.5.1 固定组合末尾
+	ClearSelection();
+	Invalidate();              // 视觉更新（临时编辑也需重绘）
+	SyncTextInputCaret();
+	// ⚠️ 不 RaiseTextChanged（C8：Composition Update ≠ 正式编辑；空串 = 组合中无内容，组合仍在）
+}
+
+void TextBox::CommitComposition(const std::string& resultText){
+
+	if (!m_isComposing)
+		return;   // 无组合中 → no-op（fail-safe）
+	// 组合区间 → resultText（正式文本）；清组合标记（C12：空串 = 合法空结果提交）
+	m_caret = ReplaceTextRange(
+		m_compositionStart, m_compositionStart + m_compositionLength, resultText);
+	m_isComposing = false;
+	m_compositionText.clear();
+	m_compositionLength = 0;
+	m_compositionStart = m_caret;   // 组合结束光标 = 结果末尾
+	m_compositionCaret = 0;
+	ClearSelection();
+	Invalidate();
+	SyncTextInputCaret();
+	RaiseTextChanged();   // ✅ Commit = 正式编辑（C3：进 Undo 历史——快照在组合开始时已 Push）
+	// ⚠️ 不 PushUndoSnapshot——组合开始前已 Push（Ctrl+Z 一次撤销整个组合，C3）
+}
+
+void TextBox::CancelComposition(){
+
+	if (!m_isComposing)
+		return;
+	// 擦除组合区间（恢复组合开始前状态——该快照已在 UndoStack 顶，8.5.3 无需额外处理）
+	m_caret = m_compositionStart;
+	ReplaceTextRange(m_compositionStart, m_compositionStart + m_compositionLength, {});
+	m_isComposing = false;
+	m_compositionText.clear();
+	m_compositionLength = 0;
+	m_compositionCaret = 0;
+	ClearSelection();
+	Invalidate();
+	SyncTextInputCaret();
+}
+
+// ── 8.5.1：剪贴板（C1——Ctrl 组合是 KeyDown 语义动作，剪贴板是 Platform capability）──
+
+void TextBox::CopySelectionToClipboard(){
+
+	if (!HasSelection())
+		return;   // 无选区 = 空操作（不写剪贴板——避免误清，C10 语义闭合）
+	Window* window = GetWindow();
+	if (window == nullptr)
+		return;   // 无窗口（测试环境）→ 静默跳过（不崩）
+	const size_t minByte = CodepointIndexToByteOffset(m_text, GetSelectionMin());
+	const size_t maxByte = CodepointIndexToByteOffset(m_text, GetSelectionMax());
+	window->GetPlatformWindow().SetClipboardText(m_text.substr(minByte, maxByte - minByte));
+}
+
+void TextBox::CutSelectionToClipboard(){
+
+	if (!HasSelection())
+		return;
+	CopySelectionToClipboard();
+	// 删选中区（正式编辑语义——DeleteSelection 内部同步 caret/anchor）
+	m_caret = DeleteSelection();
+	ClearSelection();
+	Invalidate();
+	SyncTextInputCaret();
+	RaiseTextChanged();
+}
+
+void TextBox::PasteFromClipboard(){
+
+	Window* window = GetWindow();
+	if (window == nullptr)
+		return;   // 无窗口（测试环境）→ 静默跳过
+	InsertText(window->GetPlatformWindow().GetClipboardText());
+}
+
+void TextBox::SelectAll(){
+
+	m_caret = GetCodepointCount();
+	m_selectionAnchor = 0;
+	Invalidate();
+	SyncTextInputCaret();
+}
+
+// ── 8.5.1：光标闪烁（C2——平台产生 Timer，TextBox 消费事实）──
+
+void TextBox::OnTimer(const TimerEvent& event){
+
+	if (event.GetTimerId() == kCaretBlinkTimer){
+		// 焦点防御（GPT 检查点 2）：失焦→获焦切换瞬间，旧控件可能收到排队中的
+		// 最后一次 TimerEvent（SetFocusedWidget 顺序 = 旧 OnFocusLost → 新 OnFocusGained）。
+		// 仅"有窗口且无焦点"时忽略（防排队消息翻转头像）；无窗口（测试环境）允许验证翻转逻辑。
+		if (GetWindow() != nullptr && !HasFocus())
+			return;   // 已失焦 → 忽略（不闪）
+		m_showCaret = !m_showCaret;   // 切换可见性（视觉闪烁）
+		Invalidate();
+	}
+}
+
 // ── 事件映射（事件 → 编辑操作，薄薄一层；逻辑集中在上面）──
 
 void TextBox::OnMouseButtonDown(const MouseButtonDownEvent& event){
@@ -313,6 +463,17 @@ void TextBox::OnMouseButtonUp(const MouseButtonUpEvent&){
 }
 
 void TextBox::OnKeyDown(const KeyDownEvent& event){
+	// 8.5.1：Ctrl 组合优先（剪贴板/全选）——KeyDown 是事实，Copy/Paste 是 TextBox 的语义解释（C1）；
+	// 无 Ctrl 时继续原有编辑键映射（8.5.3 加 Ctrl+Z/Y）
+	if (event.IsCtrlDown()){
+		switch (event.GetKeyCode()){
+		case KeyCode::C:    CopySelectionToClipboard();  SyncTextInputCaret(); return;
+		case KeyCode::V:    PasteFromClipboard();        SyncTextInputCaret(); return;
+		case KeyCode::X:    CutSelectionToClipboard();   SyncTextInputCaret(); return;
+		case KeyCode::A:    SelectAll();                 SyncTextInputCaret(); return;
+		default: break;   // 其余 Ctrl 组合交默认（无动作）
+		}
+	}
 	switch (event.GetKeyCode()){
 	case KeyCode::Backspace: DeleteBackward(); break;
 	case KeyCode::Delete:    DeleteForward();  break;

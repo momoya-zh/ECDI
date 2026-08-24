@@ -5,6 +5,7 @@
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
+#include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
@@ -44,6 +45,12 @@ void EventRouter::OnEvent(const Event& event){
 	dispatcher.Dispatch<WindowCloseRequestedEvent>([this](const WindowCloseRequestedEvent& e){
 
 			OnWindowCloseRequested(e);
+
+		});
+
+	dispatcher.Dispatch<TimerEvent>([this](const TimerEvent& e){
+
+			OnTimer(e);
 
 		});
 
