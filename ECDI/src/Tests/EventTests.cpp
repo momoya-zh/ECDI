@@ -149,9 +149,11 @@ void TestTranslatorMouseButton()
     handler.Handle(nullptr, nullptr, WM_RBUTTONDOWN, 0, 0);
     EXPECT_EQ(host.received[1].button, MouseButton::Right);
 
-    handler.Handle(nullptr, nullptr, WM_XBUTTONDOWN, MAKEWPARAM(XBUTTON1, 0), 0);
+    // WM_XBUTTONDOWN：wParam 高 16 位（HIWORD）= 按键标识 XBUTTON1/2，低 16 位 = MK_ 修饰标志
+    // （GET_XBUTTON_WPARAM = HIWORD——按键必须放高位；放低位会命中 assert 兜底）
+    handler.Handle(nullptr, nullptr, WM_XBUTTONDOWN, MAKEWPARAM(MK_XBUTTON1, XBUTTON1), 0);
     EXPECT_EQ(host.received[2].button, MouseButton::X1);
-    handler.Handle(nullptr, nullptr, WM_XBUTTONDOWN, MAKEWPARAM(XBUTTON2, 0), 0);
+    handler.Handle(nullptr, nullptr, WM_XBUTTONDOWN, MAKEWPARAM(MK_XBUTTON2, XBUTTON2), 0);
     EXPECT_EQ(host.received[3].button, MouseButton::X2);
 }
 
