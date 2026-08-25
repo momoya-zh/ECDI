@@ -14,5 +14,6 @@ void RegisterTextBoxTests();
 void RegisterRendererTests();
 void RegisterEventTests();
 void RegisterTestFrameworkTests();
+void RegisterThemeTests();
 
 } // namespace ECDI::Test

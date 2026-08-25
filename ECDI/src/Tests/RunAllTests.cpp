@@ -10,6 +10,7 @@ void ECDI::Test::RunAllTests()
     RegisterRendererTests();
     RegisterEventTests();
     RegisterTestFrameworkTests();
+    RegisterThemeTests();
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

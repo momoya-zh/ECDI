@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -182,6 +182,8 @@
     <ClCompile Include="src\Tests\RendererTests.cpp" />
     <ClCompile Include="src\Tests\RunAllTests.cpp" />
     <ClCompile Include="src\Tests\TestFramework.cpp" />
+    <ClCompile Include="src\Tests\ThemeTests.cpp" />
+    <ClCompile Include="src\Theme\DefaultTheme.cpp" />
     <ClCompile Include="src\Tests\TextBoxTests.cpp" />
     <ClCompile Include="src\Tests\WidgetTests.cpp" />
   </ItemGroup>
@@ -252,6 +254,13 @@
     <ClInclude Include="Include\ECDI\Platform\Win32\WindowMessageHandler.h" />
     <ClInclude Include="Include\ECDI\Window\Window.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowEvent.h" />
+    <ClInclude Include="Include\ECDI\Theme\StyleField.h" />
+    <ClInclude Include="Include\ECDI\Theme\TextStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\ButtonStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\TextBoxStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\PanelStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\Theme.h" />
+    <ClInclude Include="Include\ECDI\Theme\DefaultTheme.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ECDI开发规范.md" />

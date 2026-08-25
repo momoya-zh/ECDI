@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "ECDI/Theme/TextBoxStyle.h"
 #include "ECDI/Widget/TextWidget.h"
 #include "ECDI/Widget/CaretGeometry.h"
 
@@ -23,11 +24,20 @@ class TextBox: public TextWidget{
 
 public:
 
-	TextBox() = default;
+	TextBox();   // 默认构造——构造体注入 TextBoxStyle（TextStyle 已由 TextWidget 构造注入）
 
 	explicit TextBox(const std::string& text);
 
 	bool CanFocus() const noexcept override { return true; }
+
+	// ── Phase 9：主题与样式（using 防名字隐藏——保留基类 SetStyle(TextStyleOverride)，可分别设置两 Style）──
+
+	using TextWidget::SetStyle;
+
+	void ApplyTheme(const Theme& theme) override;   // 扩展：先 TextStyle（基类）再 TextBoxStyle
+
+	/// @brief TextBox 专属样式覆盖（文字颜色/字体经 TextWidget::SetStyle(TextStyleOverride)）
+	void SetStyle(TextBoxStyleOverride override);
 
 	// ── 回调注册（7.5 新增：表单/数据绑定核心需求）──────────
 
@@ -126,6 +136,10 @@ protected:
 	void OnCharInput(const CharInputEvent&) override; // 字符插入（5.5.1.3）
 	void OnTimer(const TimerEvent&) override;         // 周期定时器（8.5.1：光标闪烁）
 	void OnPaint(PaintContext& ctx, int x, int y) override;
+
+	/// @brief TextBox 专属样式（protected——测试派生类可访问；不含 foreground——TextStyle 是文字唯一来源）
+	/// @details 注意：隐藏 TextWidget::m_style（TextStyle）——本类内访问文字样式需显式 `TextWidget::m_style`
+	TextBoxStyle m_style;
 
 	/// @brief 文本变化虚方法（子类可 override 扩展行为；空实现）
 	/// @details 调用链：编辑操作 → RaiseTextChanged → OnTextChanged() + m_onTextChanged()
