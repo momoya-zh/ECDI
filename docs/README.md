@@ -1,4 +1,4 @@
-# ECDI 设计文档索引
+﻿# ECDI 设计文档索引
 
 > 本文档是 `docs/` 的索引。设计文档随代码提交 git，从 Phase4 起为强制约定（职责确认 / 初步设计 / 详细设计 各阶段文档正常写入本目录）。
 
@@ -32,7 +32,7 @@
 
 ### 🔲 未来
 
-- **Phase 6.2 CheckBox/Radio（延期 Phase 8 后，2026-08-15 决策）**：状态控件 + RadioGroup 同父互斥；勾/圆依赖 Phase 8 渲染能力，不做填充版——设计已定稿存档（phase6-checkboxradio-*.md）
+- **Phase 6.2 CheckBox/Radio（延期 Phase 8 后，2026-08-15 决策）**：状态控件 + RadioGroup 同父互斥；勾/圆依赖 Phase 8 渲染能力，不做填充版——设计已定稿存档（phase6.2-checkboxradio-*.md）
 - **Phase 7** 平台抽象 + 测试体系（**7.1 PlatformWindow + Backend 注入**，输入层抽象 TextInputInterface 随本阶段；**7.2 测试体系**——补 Selection 等历史单元测试欠账）——**v1.0 转库前必须完成**
 - **Phase 7.5 事件回调（2026-08-15 用户定：插 7-8 之间）**：std::function 回调注册 API（Button::SetOnClick / CheckBox::SetOnCheckedChanged 等），继承 override 基座 + 回调便利层两套并存——**Phase 7 解耦后做**（回调 API 依赖稳定接口）
 - **Phase 8** 渲染增强（能力层：AlphaBlend + DrawRoundedRect + DrawLine + DrawImage）——**6.2 CheckBox/Radio 消费其勾/圆能力**
@@ -79,21 +79,21 @@
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase5-text-requirements.md](phase5-text-requirements.md) / [preliminary](phase5-text-preliminary-design.md) / [detailed](phase5-text-detailed-design.md) | 5.1 文本系统三件套（Font 纯描述 / TextMeasurer 独立接口 / DrawText 命令管线） | ✅ 已实现（2026-08-12） |
-| [phase5-label-requirements.md](phase5-label-requirements.md) / [preliminary](phase5-label-preliminary-design.md) / [detailed](phase5-label-detailed-design.md) | 5.2 Label 三件套（第一个文本消费者） | ✅ 已实现（2026-08-13） |
-| [phase5-button-requirements.md](phase5-button-requirements.md) / [preliminary](phase5-button-preliminary-design.md) / [detailed](phase5-button-detailed-design.md) | 5.3 Button 三件套（TextWidget 抽取 + 居中文本） | ✅ 已实现（2026-08-13） |
-| [phase5-interaction-requirements.md](phase5-interaction-requirements.md) / [preliminary](phase5-interaction-preliminary-design.md) / [detailed](phase5-interaction-detailed-design.md) | 5.4 交互基础设施三件套（Invalidate/Capture/Focus/Tab/按下态） | ✅ 已实现（2026-08-13） |
-| [phase5-textbox-requirements.md](phase5-textbox-requirements.md) / [preliminary](phase5-textbox-preliminary-design.md) / [detailed](phase5-textbox-detailed-design.md) | 5.5 TextBox 三件套（码点编辑/光标/点击定位/裁切） | ✅ 5.5.1 MVP 已实现（2026-08-13） |
-| [phase5-selection-requirements.md](phase5-selection-requirements.md) / [preliminary](phase5-selection-preliminary-design.md) / [detailed](phase5-selection-detailed-design.md) | 5.5.2 Selection + 修饰键三件套 | ✅ 已实现（2026-08-14） |
-| [phase5-ime-requirements.md](phase5-ime-requirements.md) / [preliminary](phase5-ime-preliminary-design.md) / [detailed](phase5-ime-detailed-design.md) | 5.6 IME 候选窗跟随三件套（I1-I5 / P1-P5 / v1.0.4：系统 caret + IMM 双通道，客户区坐标语义） | ✅ 已实现（2026-08-15） |
+| [phase5.1-text-requirements.md](phase5.1-text-requirements.md) / [preliminary](phase5.1-text-preliminary-design.md) / [detailed](phase5.1-text-detailed-design.md) | 5.1 文本系统三件套（Font 纯描述 / TextMeasurer 独立接口 / DrawText 命令管线） | ✅ 已实现（2026-08-12） |
+| [phase5.2-label-requirements.md](phase5.2-label-requirements.md) / [preliminary](phase5.2-label-preliminary-design.md) / [detailed](phase5.2-label-detailed-design.md) | 5.2 Label 三件套（第一个文本消费者） | ✅ 已实现（2026-08-13） |
+| [phase5.3-button-requirements.md](phase5.3-button-requirements.md) / [preliminary](phase5.3-button-preliminary-design.md) / [detailed](phase5.3-button-detailed-design.md) | 5.3 Button 三件套（TextWidget 抽取 + 居中文本） | ✅ 已实现（2026-08-13） |
+| [phase5.4-interaction-requirements.md](phase5.4-interaction-requirements.md) / [preliminary](phase5.4-interaction-preliminary-design.md) / [detailed](phase5.4-interaction-detailed-design.md) | 5.4 交互基础设施三件套（Invalidate/Capture/Focus/Tab/按下态） | ✅ 已实现（2026-08-13） |
+| [phase5.5-textbox-requirements.md](phase5.5-textbox-requirements.md) / [preliminary](phase5.5-textbox-preliminary-design.md) / [detailed](phase5.5-textbox-detailed-design.md) | 5.5 TextBox 三件套（码点编辑/光标/点击定位/裁切） | ✅ 5.5.1 MVP 已实现（2026-08-13） |
+| [phase5.5.2-selection-requirements.md](phase5.5.2-selection-requirements.md) / [preliminary](phase5.5.2-selection-preliminary-design.md) / [detailed](phase5.5.2-selection-detailed-design.md) | 5.5.2 Selection + 修饰键三件套 | ✅ 已实现（2026-08-14） |
+| [phase5.6-ime-requirements.md](phase5.6-ime-requirements.md) / [preliminary](phase5.6-ime-preliminary-design.md) / [detailed](phase5.6-ime-detailed-design.md) | 5.6 IME 候选窗跟随三件套（I1-I5 / P1-P5 / v1.0.4：系统 caret + IMM 双通道，客户区坐标语义） | ✅ 已实现（2026-08-15） |
 | [phase5-architecture-review.md](phase5-architecture-review.md) | Phase 5 收尾架构回顾（输入责任分布 + InputManager YAGNI 评估 + R1 冗余修复/R2-R4 记账） | ✅ 已实现（2026-08-15） |
 
 ## Phase6 布局系统完善（✅ 6.1 完成，2026-08-15；6.2 延期 Phase 8 后）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase6-horizontallayout-requirements.md](phase6-horizontallayout-requirements.md) / [preliminary](phase6-horizontallayout-preliminary-design.md) / [detailed](phase6-horizontallayout-detailed-design.md) | 6.1 HorizontalLayout 三件套（Layout 边界原则 / 4 决策点 / diff 同构 + 10 条设计契约） | ✅ 已实现（2026-08-15） |
-| [phase6-checkboxradio-requirements.md](phase6-checkboxradio-requirements.md) / [preliminary](phase6-checkboxradio-preliminary-design.md) | 6.2 CheckBox/Radio（StateWidget 契约 6 条 + 勾/圆渲染约束） | ⏸️ 延期 Phase 8 后（2026-08-15 决策，设计定稿存档） |
+| [phase6.1-horizontallayout-requirements.md](phase6.1-horizontallayout-requirements.md) / [preliminary](phase6.1-horizontallayout-preliminary-design.md) / [detailed](phase6.1-horizontallayout-detailed-design.md) | 6.1 HorizontalLayout 三件套（Layout 边界原则 / 4 决策点 / diff 同构 + 10 条设计契约） | ✅ 已实现（2026-08-15） |
+| [phase6.2-checkboxradio-requirements.md](phase6.2-checkboxradio-requirements.md) / [preliminary](phase6.2-checkboxradio-preliminary-design.md) | 6.2 CheckBox/Radio（StateWidget 契约 6 条 + 勾/圆渲染约束） | ⏸️ 延期 Phase 8 后（2026-08-15 决策，设计定稿存档） |
 
 ## 文档约定
 

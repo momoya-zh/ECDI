@@ -1,7 +1,7 @@
-# Phase 5.6 IME 职责确认
+﻿# Phase 5.6 IME 职责确认
 
 > 状态：v1.0（2026-08-14）｜职责确认完成，待初步设计
-> 相关：phase5-textbox-requirements.md（5.5）/ phase5-selection-requirements.md（5.5.2）
+> 相关：phase5.5-textbox-requirements.md（5.5）/ phase5.5.2-selection-requirements.md（5.5.2）
 
 ## 1. 代码事实（5.6 起点）
 

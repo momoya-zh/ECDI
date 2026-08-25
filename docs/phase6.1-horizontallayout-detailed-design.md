@@ -1,7 +1,7 @@
-# Phase 6 布局系统完善 — HorizontalLayout 详细设计
+﻿# Phase 6 布局系统完善 — HorizontalLayout 详细设计
 
 > 状态：v1.0（2026-08-15）｜实现蓝图（待用户确认后实现）
-> 相关：phase6-horizontallayout-requirements.md（职责确认 v1.0）/ phase6-horizontallayout-preliminary-design.md（初步设计 v1.1）
+> 相关：phase6.1-horizontallayout-requirements.md（职责确认 v1.0）/ phase6.1-horizontallayout-preliminary-design.md（初步设计 v1.1）
 
 ## 1. 文件改动清单
 
@@ -26,7 +26,7 @@ namespace ECDI{
 
 /// @brief 水平布局（Phase 6：VerticalLayout 的水平镜像）
 /// @details 子控件顶部对齐 + 水平流：y=0，x 从左到右累加宽度。
-/// 不处理换行/溢出/spacing——Layout 只负责坐标计算（phase6-horizontallayout-requirements.md 边界原则）。
+/// 不处理换行/溢出/spacing——Layout 只负责坐标计算（phase6.1-horizontallayout-requirements.md 边界原则）。
 class HorizontalLayout : public Layout{
 
 public:

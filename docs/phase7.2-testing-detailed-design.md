@@ -1,8 +1,8 @@
-# Phase 7.2 无窗口单元测试体系 详细设计
+﻿# Phase 7.2 无窗口单元测试体系 详细设计
 
 > 状态：v1.2（2026-08-17）｜详细设计（已实现，测试通过）
 > 前序：初步设计（v1.0）、职责确认（v1.1）
-> 相关文档：phase7-testing-preliminary-design.md、phase7-testing-requirements.md
+> 相关文档：phase7.2-testing-preliminary-design.md、phase7.2-testing-requirements.md
 
 ---
 

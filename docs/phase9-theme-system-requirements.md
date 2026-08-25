@@ -2,7 +2,7 @@
 
 > 状态：v1.1（2026-08-25）｜职责确认待审（GPT 评审整合）
 > 前序：Phase 8 渲染能力 ✅（Alpha 混合 + 顶降 DIB + PushClip/PopClip）/ Phase 8.5 文本系统 2.0 ✅
-> 相关：phase8-rendering-enhancement-requirements.md（Phase 8 能力层）/ phase5-button-requirements.md（Button 样式硬编码先例）
+> 相关：phase8-rendering-enhancement-requirements.md（Phase 8 能力层）/ phase5.3-button-requirements.md（Button 样式硬编码先例）
 
 ## 1. 范围（5 项）
 

@@ -2,7 +2,7 @@
 
 > 状态：v1.2（2026-08-24）｜初步设计待审（GPT 两轮评审整合）
 > 前序：Phase 8.5 职责确认 v1.1（GPT 评审整合）/ Phase 7.2 测试体系补强 ✅
-> 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase5-textbox-detailed-design.md（5.5）/ phase5-ime-detailed-design.md（5.6）
+> 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase5.5-textbox-detailed-design.md（5.5）/ phase5.6-ime-detailed-design.md（5.6）
 
 ## 1. 设计目标
 

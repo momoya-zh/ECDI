@@ -1,9 +1,9 @@
-# Phase 8 渲染增强（能力层）详细设计
+﻿# Phase 8 渲染增强（能力层）详细设计
 
 > 状态：v1.4（2026-08-21）｜详细设计已确认，进入实现  
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / Phase 7.5 事件回调 ✅  
 > 职责确认：phase8-rendering-enhancement-requirements.md v1.1  
-> 初步设计：phase8-rendering-enhancement-preliminary.md v1.0
+> 初步设计：phase8-rendering-enhancement-preliminary-design.md v1.0
 >
 > **术语映射**：职责确认文档中的 `DrawingContext` 概念由现有代码中的 **`PaintContext`**（`Render/PaintContext.h`）承担；本文档统一使用 `PaintContext`。AlphaBlend 在本设计中定义为 DrawImage 的内部逐像素混合能力（非独立 RenderingBackend API），因此最终新增 Backend 虚函数为 **6 个**。
 

@@ -1,7 +1,7 @@
-# Phase 6.2 CheckBox / Radio 初步设计
+﻿# Phase 6.2 CheckBox / Radio 初步设计
 
 > 状态：v1.0（2026-08-15）｜初步设计（待用户确认后实现）
-> 相关：phase6-checkboxradio-requirements.md（职责确认 v1.0：StateWidget 契约 6 条 + C1-C8）
+> 相关：phase6.2-checkboxradio-requirements.md（职责确认 v1.0：StateWidget 契约 6 条 + C1-C8）
 
 ## 1. 定稿决策（P1-P8）
 

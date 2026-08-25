@@ -2,7 +2,7 @@
 
 > 状态：v1.0（2026-08-21）｜职责确认待审
 > 前序：Phase 8 渲染增强 ✅ / Phase 5.6 IME 候选跟随 ✅
-> 相关：phase5-textbox-requirements.md（5.5）/ phase5-ime-requirements.md（5.6）
+> 相关：phase5.5-textbox-requirements.md（5.5）/ phase5.6-ime-requirements.md（5.6）
 
 ## 1. 动机
 

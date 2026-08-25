@@ -1,7 +1,7 @@
-# Phase 5.6 IME（候选窗口跟随）详细设计
+﻿# Phase 5.6 IME（候选窗口跟随）详细设计
 
 > 状态：v1.0.4（2026-08-15）｜已实现 + 验证通过（系统 caret 双通道 + 客户区坐标语义）
-> 相关：phase5-ime-requirements.md（职责确认 I1-I5）/ phase5-ime-preliminary-design.md（初步设计 P1-P5）
+> 相关：phase5.6-ime-requirements.md（职责确认 I1-I5）/ phase5.6-ime-preliminary-design.md（初步设计 P1-P5）
 
 ## 1. 文件改动清单
 
@@ -14,7 +14,7 @@
 | `ECDI/src/Widget/TextBox.cpp` | 实现三辅助；OnPaint 两处改造 | 修改 |
 | `ECDI/ECDI.vcxproj` | 4 个 Link 段加 imm32.lib | 修改 |
 | `CMakeLists.txt` | user32 → user32 imm32 | 修改 |
-| `docs/phase5-ime-detailed-design.md` | 本文档 | 新增 |
+| `docs/phase5.6-ime-detailed-design.md` | 本文档 | 新增 |
 
 `main.cpp` 不动（skill 2）；无新文件 .h/.cpp（全部现有文件内改动）。
 

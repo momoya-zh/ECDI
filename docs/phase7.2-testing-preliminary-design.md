@@ -1,8 +1,8 @@
-# Phase 7.2 无窗口单元测试体系 初步设计
+﻿# Phase 7.2 无窗口单元测试体系 初步设计
 
 > 状态：v1.0（2026-08-17）｜初步设计
 > 前序：职责确认（v1.1，2026-08-17，采纳 GPT 评审）
-> 相关文档：phase7-testing-requirements.md（职责确认）、phase5-selection-detailed-design.md（P8 承诺）
+> 相关文档：phase7.2-testing-requirements.md（职责确认）、phase5.5.2-selection-detailed-design.md（P8 承诺）
 
 ## 1. 架构总览
 

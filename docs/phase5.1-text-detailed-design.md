@@ -1,6 +1,6 @@
-# Phase5 文本系统详细设计（phase5-text-detailed-design.md）
+﻿# Phase5 文本系统详细设计（phase5.1-text-detailed-design.md）
 
-> 前置：`phase5-text-requirements.md` v1.0（职责确认 D1-D9）+ `phase5-text-preliminary-design.md` v1.0（初步设计 P1-P9）
+> 前置：`phase5.1-text-requirements.md` v1.0（职责确认 D1-D9）+ `phase5.1-text-preliminary-design.md` v1.0（初步设计 P1-P9）
 > 本文档：完整接口/签名/实现细节 + D1-D7 详细设计决策记录
 > 修订记录：v1.0（2026-08-12）
 

@@ -2,7 +2,7 @@
 
 > 状态：v1.2（2026-08-19）｜初步设计待审（GPT 二轮评审修复）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / 职责确认 v1.2 ✅
-> 相关文档：phase7-callback-requirements.md（职责确认）/ phase7-testing-requirements.md（测试边界）/ phase6-checkboxradio-requirements.md（C4 契约）
+> 相关文档：phase7.5-callback-requirements.md（职责确认）/ phase7.2-testing-requirements.md（测试边界）/ phase6.2-checkboxradio-requirements.md（C4 契约）
 
 ---
 

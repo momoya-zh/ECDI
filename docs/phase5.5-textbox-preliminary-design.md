@@ -1,7 +1,7 @@
-# Phase 5.5 TextBox 初步设计
+﻿# Phase 5.5 TextBox 初步设计
 
 > 状态：v1.0（2026-08-13）｜初步设计完成，待详细设计
-> 相关：phase5-textbox-requirements.md（职责确认 v1.0）/ phase5-text-*.md（5.1 文本系统）
+> 相关：phase5.5-textbox-requirements.md（职责确认 v1.0）/ phase5.1-text-*.md（5.1 文本系统）
 
 ## 1. 定稿决策（P1-P7 + GPT 修正）
 

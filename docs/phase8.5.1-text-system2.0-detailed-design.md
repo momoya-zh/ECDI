@@ -3,7 +3,7 @@
 
 > 状态：v1.3（2026-08-24）｜已实现 + 验证通过（commit 8ab8300）
 > 前序：Phase 8.5 职责确认 v1.1 / 初步设计 v1.2（GPT 两轮评审通过）
-> 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase8.5-text-system2.0-preliminary-design.md（初步设计 v1.2）/ phase5-textbox-detailed-design.md（5.5）/ phase5-ime-detailed-design.md（5.6）
+> 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase8.5-text-system2.0-preliminary-design.md（初步设计 v1.2）/ phase5.5-textbox-detailed-design.md（5.5）/ phase5.6-ime-detailed-design.md（5.6）
 > 拆分说明：8.5.2 → phase8.5.2-text-system2.0-detailed-design.md / 8.5.3 → phase8.5.3-text-system2.0-detailed-design.md
 
 ## 1. 范围（8.5.1）

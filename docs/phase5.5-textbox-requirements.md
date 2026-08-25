@@ -1,7 +1,7 @@
-# Phase 5.5 TextBox 职责确认
+﻿# Phase 5.5 TextBox 职责确认
 
 > 状态：v1.0（2026-08-13）｜职责确认完成，待初步设计
-> 相关：phase5-text-requirements（5.1）/ phase5-label-requirements（5.2）/ phase5-button-requirements（5.3）/ phase5-interaction-requirements（5.4）
+> 相关：phase5.1-text-requirements（5.1）/ phase5.2-label-requirements（5.2）/ phase5.3-button-requirements（5.3）/ phase5.4-interaction-requirements（5.4）
 
 ## 1. 代码事实（5.5 起点）
 

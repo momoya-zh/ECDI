@@ -1,7 +1,7 @@
-# Phase 5.5.2 Selection + 修饰键 初步设计
+﻿# Phase 5.5.2 Selection + 修饰键 初步设计
 
 > 状态：v1.0（2026-08-14）｜初步设计完成，待详细设计
-> 相关：phase5-selection-requirements.md（职责确认 v1.0）/ phase5-textbox-*.md（5.5）
+> 相关：phase5.5.2-selection-requirements.md（职责确认 v1.0）/ phase5.5-textbox-*.md（5.5）
 
 ## 1. 定稿决策（P1-P8 + GPT 修正）
 

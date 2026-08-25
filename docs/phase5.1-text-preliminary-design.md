@@ -1,6 +1,6 @@
-# Phase5 文本系统初步设计（phase5-text-preliminary-design.md）
+﻿# Phase5 文本系统初步设计（phase5.1-text-preliminary-design.md）
 
-> 前置：`docs/phase5-text-requirements.md` v1.0（职责确认，D1-D9）
+> 前置：`docs/phase5.1-text-requirements.md` v1.0（职责确认，D1-D9）
 > 本文档：接口草稿 + 架构决策（路线 X 定案）+ 影响面
 > 修订记录：v1.0（2026-08-12）
 

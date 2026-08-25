@@ -1,7 +1,7 @@
-# Phase 5 架构回顾：输入责任分布评估
+﻿# Phase 5 架构回顾：输入责任分布评估
 
 > 状态：v1.0（2026-08-15）｜结论定稿（用户确认）
-> 相关：phase3-focus-design.md（5.4 焦点设计）/ phase5-ime-*（5.6 引入 caret 中介）
+> 相关：phase3-focus-design.md（5.4 焦点设计）/ phase5.6-ime-*（5.6 引入 caret 中介）
 > 背景：技术债"5.4 架构回顾（Mouse/Keyboard/Focus/Capture 责任交叉，评估 InputManager/FocusManager）"在 Phase 5 结束后到期
 
 ## 1. 现状责任分布（代码核实）

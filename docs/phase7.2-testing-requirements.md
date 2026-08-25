@@ -1,9 +1,9 @@
-# Phase 7.2 无窗口单元测试体系 职责确认
+﻿# Phase 7.2 无窗口单元测试体系 职责确认
 
 > 状态：v1.1（2026-08-17）｜职责确认
 > 前序：Phase 7.1 平台抽象全部完成（7.1.1-7.1.5，2026-08-16）
 > 来源：roadmap-deferred.md §1.2 + 5.5.2 详细设计 P8（GPT 要求②"不彻底放弃断言"）
-> 相关文档：phase5-selection-detailed-design.md（P8 承诺）、phase5-textbox-detailed-design.md（5.5.1.3 测试块）、README.md
+> 相关文档：phase5.5.2-selection-detailed-design.md（P8 承诺）、phase5.5-textbox-detailed-design.md（5.5.1.3 测试块）、README.md
 > GPT 评审：2026-08-17 在线评价（核心洞察：Selection 不可测试暴露的是模型缺失，不是接口缺失）
 
 ## 1. 背景

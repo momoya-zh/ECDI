@@ -1,4 +1,4 @@
-# Phase5 文本系统职责确认（phase5-text-requirements.md）
+﻿# Phase5 文本系统职责确认（phase5.1-text-requirements.md）
 
 > 阶段：Phase 5（文本与控件可用性，v0.1 → v1.0 的核心构成）
 > 文档类型：职责确认（只记边界与决策点，不展开接口设计——接口在初步设计固化）

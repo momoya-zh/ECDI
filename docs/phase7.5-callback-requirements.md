@@ -2,7 +2,7 @@
 
 > 状态：v1.2（2026-08-19）｜职责确认待审（GPT 二轮评审整合）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅
-> 相关文档：phase6-checkboxradio-requirements.md（C4 契约）/ phase7-testing-requirements.md（测试边界）/ roadmap-deferred.md（#9）
+> 相关文档：phase6.2-checkboxradio-requirements.md（C4 契约）/ phase7.2-testing-requirements.md（测试边界）/ roadmap-deferred.md（#9）
 
 ## 1. 目标与动机
 

@@ -1,7 +1,7 @@
-# Phase 5.6 IME（候选窗口跟随）初步设计
+﻿# Phase 5.6 IME（候选窗口跟随）初步设计
 
 > 状态：v1.0（2026-08-14）｜初步设计定稿（两轮评审 + 用户确认），待详细设计
-> 相关：phase5-ime-requirements.md（职责确认 v1.0：I1-I5）/ phase5-selection-*.md（5.5.2 同源模式）
+> 相关：phase5.6-ime-requirements.md（职责确认 v1.0：I1-I5）/ phase5.5.2-selection-*.md（5.5.2 同源模式）
 
 ## 1. 定稿决策（P1-P5 + 两轮评审修正）
 

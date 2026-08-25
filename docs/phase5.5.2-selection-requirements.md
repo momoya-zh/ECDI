@@ -1,7 +1,7 @@
-# Phase 5.5.2 TextBox Selection + 修饰键 职责确认
+﻿# Phase 5.5.2 TextBox Selection + 修饰键 职责确认
 
 > 状态：v1.0（2026-08-14）｜职责确认完成，待初步设计
-> 相关：phase5-textbox-requirements.md（5.5 总）/ phase5-interaction-requirements.md（5.4 交互）
+> 相关：phase5.5-textbox-requirements.md（5.5 总）/ phase5.4-interaction-requirements.md（5.4 交互）
 
 ## 1. 代码事实（5.5.2 起点）
 

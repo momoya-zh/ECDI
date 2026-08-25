@@ -1,7 +1,7 @@
-# Phase 5.5.2 Selection + 修饰键 详细设计
+﻿# Phase 5.5.2 Selection + 修饰键 详细设计
 
 > 状态：v1.0（2026-08-14）｜详细设计完成，进入实现
-> 相关：phase5-selection-requirements.md（职责确认 v1.0）/ phase5-selection-preliminary-design.md（初步设计 v1.0）
+> 相关：phase5.5.2-selection-requirements.md（职责确认 v1.0）/ phase5.5.2-selection-preliminary-design.md（初步设计 v1.0）
 
 ## 1. 改动清单（9 文件）
 

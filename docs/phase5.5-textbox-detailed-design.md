@@ -1,7 +1,7 @@
-# Phase 5.5 TextBox 详细设计
+﻿# Phase 5.5 TextBox 详细设计
 
 > 状态：v1.0（2026-08-13）｜5.5.1.1 部分定稿，5.5.1.2-5.5.1.4 随进度补充
-> 相关：phase5-textbox-requirements.md（职责确认 v1.0）/ phase5-textbox-preliminary-design.md（初步设计 v1.0）
+> 相关：phase5.5-textbox-requirements.md（职责确认 v1.0）/ phase5.5-textbox-preliminary-design.md（初步设计 v1.0）
 
 ## 1. 实施结构（4 个 commit）
 

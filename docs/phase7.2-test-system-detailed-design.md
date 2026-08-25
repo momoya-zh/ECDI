@@ -1,7 +1,7 @@
 ﻿# Phase 7.2 测试体系补强 详细设计
 
 > 状态：v0.2（2026-08-24）｜详细设计待审（GPT 评审整合）
-> 前序：职责确认 v1.1 ✅ / 初步设计 v0.4 ✅（`phase7.2-test-system-requirements.md` / `phase7.2-test-system-preliminary.md`）
+> 前序：职责确认 v1.1 ✅ / 初步设计 v0.4 ✅（`phase7.2-test-system-requirements.md` / `phase7.2-test-system-preliminary-design.md`）
 > 依据：调研实态（TextBox Selection 码点契约 / WindowMessageHandler 翻译形态 / PlatformWindowHost 接口 / vcxproj 组织）——本稿全部设计基于实际代码事实
 
 ## 1. 设计契约总览

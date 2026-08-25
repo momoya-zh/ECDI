@@ -2,7 +2,7 @@
 
 > 状态：v1.1（2026-08-20）｜职责确认待审（GPT 评审整合）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / Phase 7.5 事件回调 ✅
-> 相关：phase6-checkboxradio-requirements.md（6.2 消费 DrawLine/DrawRoundedRect）/ roadmap-deferred.md（Phase 8 延期项）/ MEMORY.md（Alpha 归属决策）
+> 相关：phase6.2-checkboxradio-requirements.md（6.2 消费 DrawLine/DrawRoundedRect）/ roadmap-deferred.md（Phase 8 延期项）/ MEMORY.md（Alpha 归属决策）
 
 ## 1. 动机
 
@@ -83,7 +83,7 @@ Phase 7 完成平台抽象与测试体系后，Framework 层接口已稳定。Ph
 
 ### D9 CheckBox/Radio 勾/圆绘制归属？
 
-- phase6-checkboxradio-requirements.md 延期到 Phase 8 后，消费 DrawLine/DrawRoundedRect
+- phase6.2-checkboxradio-requirements.md 延期到 Phase 8 后，消费 DrawLine/DrawRoundedRect
 - **倾向**：**Phase 8 不实现 CheckBox/Radio 控件**——只提供能力；控件实现是独立阶段（可能在 Phase 8 之后、Phase 8.5 之前）
 - 理由：能力层与控件层分离；CheckBox/Radio 实现需要组合多个能力（圆角+线条+填充+回调），应单独设计
 

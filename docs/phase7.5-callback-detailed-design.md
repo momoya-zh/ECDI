@@ -2,7 +2,7 @@
 
 > 状态：v1.0（2026-08-20）｜详细设计待审
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / 职责确认 v1.2 ✅ / 初步设计 v1.2 ✅
-> 相关文档：phase7-callback-requirements.md（职责确认）/ phase7-callback-preliminary.md（初步设计）/ phase6-checkboxradio-requirements.md（C4 契约）
+> 相关文档：phase7.5-callback-requirements.md（职责确认）/ phase7.5-callback-preliminary.md（初步设计）/ phase6.2-checkboxradio-requirements.md（C4 契约）
 
 ---
 
