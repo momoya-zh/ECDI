@@ -59,6 +59,16 @@ public:
 	/// 清 Selection → Invalidate + SyncTextInputCaret + RaiseTextChanged（正式编辑语义）
 	void InsertText(const std::string& text);
 
+	// ── Undo/Redo（8.5.3；快照模式 B6——编辑前 Push，C4 契约）──
+
+	/// @brief 撤销（Ctrl+Z）：栈空 no-op；当前状态 → redo 栈 → 恢复栈顶快照 → 弹栈
+	/// @details C3b：组合态（IME Composition 进行中）直接忽略（不中断组合）
+	void Undo();
+
+	/// @brief 重做（Ctrl+Y）：栈空 no-op；当前状态 → undo 栈 → 恢复栈顶快照 → 弹栈
+	/// @details C3b：组合态直接忽略
+	void Redo();
+
 	// ── 光标闪烁常量 + 只读查询（8.5.1；C2——TextBox 拥有 TimerId 语义，平台不知道"Caret Blink"）──
 
 	static constexpr int kCaretBlinkTimer = 1;             ///< 光标闪烁定时器 ID（Window 级唯一）
@@ -82,6 +92,17 @@ public:
 	/// @return 无选中区 → nullopt；有选中区 → SelectionRange{min, anchor}
 	/// @details 只读查询——不修改内部状态；供调试/测试/序列化使用。
 	std::optional<SelectionRange> GetSelection() const;
+
+	// ── Undo/Redo 快照（8.5.3；B6——Selection 依赖上方 SelectionRange 定义）──
+
+	/// @brief 编辑状态快照（B6：快照 = 文本 + 光标 + 选区 + 滚动偏移——C4 编辑前 Push）
+	/// @details Selection 存 {min, max}——恢复固定正向（D9：方向信息 MVP 不存）
+	struct UndoSnapshot{
+		std::string text;                          ///< 文本（UTF-8）
+		size_t caret = 0;                          ///< 光标（码点索引）
+		std::optional<SelectionRange> selection;   ///< 选区（nullopt = 无选择）
+		float scrollOffsetY = 0.0f;                ///< 垂直滚动偏移（像素）
+	};
 
 	// ── IME 位置（5.6；7.1.3 升级 CaretGeometry）────────────────
 	/// @brief 光标客户区几何（文本输入插入点——系统 caret/IME 候选窗锚点）
@@ -253,6 +274,25 @@ private:
 
 	/// @brief 全选（Ctrl+A；anchor=0, caret=末尾）
 	void SelectAll();
+
+	// ── Undo/Redo（8.5.3；方法 private——外部只经 Undo()/Redo() public 入口；测试经行为断言）──
+
+	/// @brief Push 当前状态到 undo 栈（编辑操作修改文本**前**调用；超限丢最旧；清空 redo 栈——C4b）
+	/// @details 调用点（C4）：InsertCodepoint/InsertText/DeleteBackward/DeleteForward/Cut/组合首次非空
+	void PushUndoSnapshot();
+
+	/// @brief 捕获当前编辑状态（B6 快照：文本/光标/选区/滚动偏移）
+	UndoSnapshot CaptureCurrentState() const;
+
+	/// @brief 恢复快照（编辑状态整体回滚——文本/光标/选区/滚动 + 行缓存失效 + EnsureCaretVisible clamp）
+	/// @details D4：触发 RaiseTextChanged（文本实际变化——外部观察者感知）
+	void RestoreSnapshot(const UndoSnapshot& snapshot);
+
+	static constexpr size_t kMaxUndoDepth = 100;   ///< undo 栈上限（超限丢最旧；redo 天然 ≤100 无需单独限制）
+
+	std::vector<UndoSnapshot> m_undoStack;         ///< 撤销栈（栈顶 = 最近一次编辑前状态）
+	std::vector<UndoSnapshot> m_redoStack;         ///< 重做栈（新编辑 Push 时清空——C4b 作废旧分支）
+	bool m_compositionPushedUndo = false;          ///< 当前组合是否已 Push 一次快照（C3——避免重复 Push/Cancel 误弹）
 
 	// ── IME Composition 数据（8.5.1；模型 B——覆盖 m_text 临时区间；方法在 protected 区）──
 

@@ -926,6 +926,132 @@ void TestTextBoxMultiline()
     }
 }
 
+// ── 8.5.3：Undo/Redo（快照模式 B6 + C3/C4/D4/D7/D9 契约）──
+void TestTextBoxUndoRedo()
+{
+    // F35：基本撤销（InsertCodepoint）
+    {
+        TextBox box("abc");
+        box.MoveCaretToEnd();
+        box.InsertCodepoint(U'd');
+        EXPECT_EQ(box.GetText(), "abcd");
+        box.Undo();
+        EXPECT_EQ(box.GetText(), "abc");
+        EXPECT_EQ(box.GetCaret(), 3);
+    }
+    // F36：逐级撤销 + redo（InsertText 多步）
+    {
+        TextBox box("abc");
+        box.MoveCaretToEnd();
+        box.InsertText("de");                                     // "abcde"
+        box.InsertText("f");                                      // "abcdef"
+        EXPECT_EQ(box.GetText(), "abcdef");
+        box.Undo();                                               // 撤销 "f" → "abcde"
+        EXPECT_EQ(box.GetText(), "abcde");
+        box.Redo();                                               // 重做 "f" → "abcdef"
+        EXPECT_EQ(box.GetText(), "abcdef");
+    }
+    // F37：新编辑清空 redo 栈（C4b——作废旧分支）
+    {
+        TextBox box("abc");
+        box.MoveCaretToEnd();
+        box.InsertText("d");                                      // "abcd"
+        box.Undo();                                               // → "abc"
+        box.InsertText("x");                                      // 新编辑 → "abcx"（清 redo）
+        EXPECT_EQ(box.GetText(), "abcx");
+        box.Redo();                                               // redo 已清空 → no-op
+        EXPECT_EQ(box.GetText(), "abcx");
+    }
+    // F38：空栈 no-op（Undo/Redo 各试）
+    {
+        TextBox box("abc");
+        box.Undo();                                               // undo 栈空
+        EXPECT_EQ(box.GetText(), "abc");
+        box.Redo();                                               // redo 栈空
+        EXPECT_EQ(box.GetText(), "abc");
+    }
+    // F39：空操作不 Push（DeleteBackward 头边界 no-op 后 Undo 无操作——D7）
+    {
+        TextBox box("abc");                                       // caret=0（构造默认）
+        box.DeleteBackward();                                     // 头边界 → no-op（不 Push）
+        EXPECT_EQ(box.GetText(), "abc");
+        box.Undo();                                               // 栈空 → no-op
+        EXPECT_EQ(box.GetText(), "abc");
+    }
+    // F40：Composition 一次撤销（C3——组合本身是一个 Undo 单元）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.UpdateComposition("nihao");                           // 首次 Push "abc" + 占位
+        box.CommitComposition("你好");                             // 正式文本（不再 Push）
+        EXPECT_EQ(box.GetText(), "abc你好");
+        box.Undo();                                               // 一次撤销整个组合 → "abc"
+        EXPECT_EQ(box.GetText(), "abc");
+    }
+    // F41：快照含多行文本与光标（Undo 恢复完整编辑状态）
+    {
+        TextBox box("a\nb");
+        box.MoveCaretToEnd();                                     // caret=3
+        box.InsertText("\nc");                                    // "a\nb\nc"
+        EXPECT_EQ(box.GetText(), "a\nb\nc");
+        box.Undo();
+        EXPECT_EQ(box.GetText(), "a\nb");
+    }
+    // F42：InsertText Undo（粘贴/Enter 路径）
+    {
+        TextBox box("ab");
+        box.MoveCaretToEnd();
+        box.InsertText("cd");                                     // "abcd"
+        box.Undo();
+        EXPECT_EQ(box.GetText(), "ab");
+    }
+    // F43：Cut Undo（剪切 = 复制 + 删选中区，一次编辑一次快照——走 Ctrl+X 键盘路径）
+    {
+        TestableTextBox box("hello world");
+        box.MoveCaretToStart();
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Right, KeyModifier::Shift));
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Right, KeyModifier::Shift));   // 选区 {0,2}
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::X, KeyModifier::Ctrl));        // 剪 "he"（无窗口剪贴板静默跳过复制，删除生效）
+        EXPECT_EQ(box.GetText(), "llo world");
+        box.Undo();
+        EXPECT_EQ(box.GetText(), "hello world");
+    }
+    // F44：Composition Cancel（恢复快照 + 不留历史 + 后续 Undo no-op——GPT 🔴）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.UpdateComposition("nihao");                           // → "abcnihao"，Push "abc"
+        EXPECT_EQ(box.GetText(), "abcnihao");
+        box.CancelComposition();                                  // RestoreSnapshot → "abc"，弹栈
+        EXPECT_EQ(box.GetText(), "abc");
+        box.Undo();                                               // 栈空（快照已弹）→ no-op
+        EXPECT_EQ(box.GetText(), "abc");                          // Cancel 不是编辑，不留历史
+    }
+    // F45：连续 Redo（Undo↔Redo 双向流转完整链）
+    {
+        TextBox box("abc");
+        box.MoveCaretToEnd();
+        box.InsertText("d");                                      // "abcd"
+        box.InsertText("e");                                      // "abcde"
+        box.Undo();                                               // → "abcd"
+        box.Undo();                                               // → "abc"
+        EXPECT_EQ(box.GetText(), "abc");
+        box.Redo();                                               // → "abcd"
+        box.Redo();                                               // → "abcde"
+        EXPECT_EQ(box.GetText(), "abcde");
+    }
+    // F45b：Ctrl+Z/Y 键盘路径（走 OnKeyDown Ctrl 分支）
+    {
+        TestableTextBox box("abc");
+        box.MoveCaretToEnd();
+        box.InsertText("xyz");                                    // "abcxyz"
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Z, KeyModifier::Ctrl));
+        EXPECT_EQ(box.GetText(), "abc");
+        box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Y, KeyModifier::Ctrl));
+        EXPECT_EQ(box.GetText(), "abcxyz");
+    }
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterTextBoxTests()
@@ -939,4 +1065,5 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SelectionEdit", &TestTextBoxSelectionEdit);
     GetTestRegistry().Add("TextBox.TextSystem2", &TestTextBoxTextSystem2);   // 8.5.1：F1-F15
     GetTestRegistry().Add("TextBox.Multiline", &TestTextBoxMultiline);       // 8.5.2：F16-F30
+    GetTestRegistry().Add("TextBox.UndoRedo", &TestTextBoxUndoRedo);         // 8.5.3：F35-F45
 }

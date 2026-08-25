@@ -66,6 +66,7 @@ void TextBox::OnFocusLost(){
 // 不依赖平台重绘合并；批量编辑解耦归 Phase 7 两层结构）
 
 void TextBox::InsertCodepoint(char32_t codepoint){
+	PushUndoSnapshot();   // 8.5.3（C4）：一次用户可感知编辑 = 一次 Push（操作前完整状态）
 	// 5.5.2：编辑操作自包含——有 Selection 先删选中区（IME 上屏/Ctrl+V/程序/脚本 全走这里）
 	if (HasSelection())
 		m_caret = DeleteSelection();   // DeleteSelection 内部已同步 m_caret + anchor
@@ -84,7 +85,8 @@ void TextBox::InsertCodepoint(char32_t codepoint){
 
 void TextBox::InsertText(const std::string& text){
 	if (text.empty())
-		return;   // 空串粘贴 = 空操作（不触发回调——D7 边界语义）
+		return;   // 空串粘贴 = 空操作（不触发回调——D7 边界语义；也不产生 Undo 快照）
+	PushUndoSnapshot();   // 8.5.3（C4）：粘贴/Enter 换行/程序插入——操作前状态
 	// 有 Selection 先删选中区（与 InsertCodepoint 同构——粘贴覆盖选中区）
 	const size_t insertAt = HasSelection() ? GetSelectionMin() : m_caret;
 	if (HasSelection())
@@ -111,6 +113,10 @@ size_t TextBox::ReplaceTextRange(size_t startCp, size_t endCp, const std::string
 }
 
 void TextBox::DeleteBackward(){
+	// 8.5.3 重构（C4/D7）：空操作检查**前置**——无选区且头边界 = no-op（不产生无意义快照）
+	if (!HasSelection() && m_caret == 0)
+		return;
+	PushUndoSnapshot();   // 8.5.3（C4）：删选中区或单字符——操作前状态
 	// 5.5.2：有 Selection 删整个选中区（一次，非单字符）
 	if (HasSelection()){
 		m_caret = DeleteSelection();
@@ -121,8 +127,6 @@ void TextBox::DeleteBackward(){
 		RaiseTextChanged();     // 7.5：删选中区 → 文本变化 → 通知
 		return;
 	}
-	if (m_caret == 0)
-		return;                                   // 头边界：空操作 → 不触发（D7 边界语义）
 	const size_t cur = CodepointIndexToByteOffset(m_text, m_caret);
 	const size_t prev = CodepointIndexToByteOffset(m_text, m_caret - 1);
 	m_text.erase(prev, cur - prev);               // 删前一个码点的字节区间
@@ -136,6 +140,10 @@ void TextBox::DeleteBackward(){
 }
 
 void TextBox::DeleteForward(){
+	// 8.5.3 重构（C4/D7）：空操作检查**前置**——无选区且尾边界 = no-op（不产生无意义快照）
+	if (!HasSelection() && m_caret >= GetCodepointCount())
+		return;
+	PushUndoSnapshot();   // 8.5.3（C4）：删选中区或单字符——操作前状态
 	// 5.5.2：有 Selection 删整个选中区
 	if (HasSelection()){
 		m_caret = DeleteSelection();
@@ -146,8 +154,6 @@ void TextBox::DeleteForward(){
 		RaiseTextChanged();     // 7.5：删选中区 → 通知
 		return;
 	}
-	if (m_caret >= GetCodepointCount())
-		return;                                   // 尾边界：空操作 → 不触发（D7 边界语义）
 	const size_t cur = CodepointIndexToByteOffset(m_text, m_caret);
 	const size_t next = CodepointIndexToByteOffset(m_text, m_caret + 1);
 	m_text.erase(cur, next - cur);
@@ -508,9 +514,13 @@ void TextBox::SetOnTextChanged(TextChangedCallback callback){
 void TextBox::UpdateComposition(const std::string& compositionText){
 
 	if (!m_isComposing){
-		// 首次：组合开始——标记起点（Undo 快照 8.5.3 落地，此处留调用点）
+		// 首次：组合开始——标记起点 + Push 一次快照（C3：一次组合 = 一次 Undo 单元）
 		m_isComposing = true;
 		m_compositionStart = m_caret;
+		if (!compositionText.empty()){
+			PushUndoSnapshot();   // 组合开始前状态（Ctrl+Z 一次撤销整个组合；Commit 不再 Push）
+			m_compositionPushedUndo = true;
+		}
 	}
 	// 替换组合区间（模型 B：m_text 含组合串；ReplaceTextRange 无副作用——不触发 TextChanged）
 	m_caret = ReplaceTextRange(
@@ -551,7 +561,21 @@ void TextBox::CancelComposition(){
 
 	if (!m_isComposing)
 		return;
-	// 擦除组合区间（恢复组合开始前状态——该快照已在 UndoStack 顶，8.5.3 无需额外处理）
+	if (m_compositionPushedUndo && !m_undoStack.empty()){
+		// 🔴 v1.1（GPT）：组合串已内嵌 m_text（模型 B）——仅弹栈会残留拼音占位。
+		// 正确语义 = 恢复组合开始前快照（正文/光标/选区/滚动整体回滚），且不产生 redo 条目。
+		// Cancel vs Undo：恢复✅ / 移除快照✅ / 进 Redo❌（取消不是编辑操作）。
+		const UndoSnapshot snapshot = m_undoStack.back();
+		m_undoStack.pop_back();
+		RestoreSnapshot(snapshot);
+		m_compositionPushedUndo = false;
+		m_isComposing = false;
+		m_compositionText.clear();
+		m_compositionLength = 0;
+		m_compositionCaret = 0;
+		return;   // 状态已完全恢复——跳过原擦除逻辑
+	}
+	// 未 Push 过的组合（首帧即空串组合——无实际文本变化）：走原擦除占位兜底
 	m_caret = m_compositionStart;
 	ReplaceTextRange(m_compositionStart, m_compositionStart + m_compositionLength, {});
 	m_isComposing = false;
@@ -582,7 +606,8 @@ void TextBox::CopySelectionToClipboard(){
 void TextBox::CutSelectionToClipboard(){
 
 	if (!HasSelection())
-		return;
+		return;   // 无选区 = 空操作（D7——不 Push）
+	PushUndoSnapshot();   // 8.5.3（C4）：剪切 = 复制 + 删选中区（一次编辑，一次快照）
 	CopySelectionToClipboard();
 	// 删选中区（正式编辑语义——DeleteSelection 内部同步 caret/anchor）
 	m_caret = DeleteSelection();
@@ -609,6 +634,72 @@ void TextBox::SelectAll(){
 	Invalidate();
 	SyncTextInputCaret();
 	EnsureCaretVisible();   // 8.5.2：光标跳到末尾（可能超出可视区）
+}
+
+// ── 8.5.3：Undo/Redo（快照模式 B6——编辑前 Push，C4 契约；GPT 评审整合 v1.1）──
+
+void TextBox::Undo(){
+
+	// C3b（GPT 🟡）：组合态忽略——IME 占用输入通道，键盘撤销不中断组合（fail-safe 不崩）
+	if (m_isComposing)
+		return;
+	if (m_undoStack.empty())
+		return;   // 空栈 no-op（F38）
+	m_redoStack.push_back(CaptureCurrentState());   // C4：当前状态 → redo 栈（Undo 可逆）
+	RestoreSnapshot(m_undoStack.back());
+	m_undoStack.pop_back();
+}
+
+void TextBox::Redo(){
+
+	if (m_isComposing)
+		return;   // C3b
+	if (m_redoStack.empty())
+		return;   // 空栈 no-op
+	m_undoStack.push_back(CaptureCurrentState());   // 对称：当前状态 → undo 栈
+	RestoreSnapshot(m_redoStack.back());
+	m_redoStack.pop_back();
+}
+
+void TextBox::PushUndoSnapshot(){
+
+	m_undoStack.push_back(CaptureCurrentState());   // 编辑前状态
+	if (m_undoStack.size() > kMaxUndoDepth)
+		m_undoStack.erase(m_undoStack.begin());     // 超限丢最旧（深度契约）
+	m_redoStack.clear();                            // C4b：新编辑作废旧分支
+}
+
+TextBox::UndoSnapshot TextBox::CaptureCurrentState() const{
+
+	UndoSnapshot snapshot;
+	snapshot.text = m_text;
+	snapshot.caret = m_caret;
+	if (HasSelection()){
+		// D9：存 {min, max} 固定正向——恢复时 anchor=start、caret=end（方向信息 MVP 不存）
+		snapshot.selection = SelectionRange{ GetSelectionMin(), GetSelectionMax() };
+	}
+	snapshot.scrollOffsetY = m_scrollOffsetY;
+	return snapshot;
+}
+
+void TextBox::RestoreSnapshot(const UndoSnapshot& snapshot){
+
+	m_text = snapshot.text;
+	m_caret = snapshot.caret;
+	if (snapshot.selection.has_value()){
+		m_selectionAnchor = snapshot.selection->start;   // D9：anchor=min
+		m_caret = snapshot.selection->end;               // caret=max
+	}
+	else{
+		ClearSelection();
+	}
+	m_scrollOffsetY = snapshot.scrollOffsetY;
+	m_needsLineRecalc = true;      // 文本恢复 → 行缓存失效（EnsureCaretVisible 内部惰性重算）
+	// 顺序（GPT 第 7 点）：恢复文本 → 修正滚动 → 更新视觉 → 更新 IME caret → 通知外部
+	EnsureCaretVisible();          // 文本高度变化后的 scroll clamp（依赖新行结构）
+	Invalidate();
+	SyncTextInputCaret();
+	RaiseTextChanged();            // D4：文本实际变化 → 外部观察者感知
 }
 
 // ── 8.5.1：光标闪烁（C2——平台产生 Timer，TextBox 消费事实）──
@@ -684,6 +775,8 @@ void TextBox::OnKeyDown(const KeyDownEvent& event){
 		case KeyCode::V:    PasteFromClipboard();        break;
 		case KeyCode::X:    CutSelectionToClipboard();   break;
 		case KeyCode::A:    SelectAll();                 break;
+		case KeyCode::Z:    Undo();                      break;   // 8.5.3
+		case KeyCode::Y:    Redo();                      break;   // 8.5.3
 		default: break;   // 其余 Ctrl 组合交默认（无动作）
 		}
 		SyncTextInputCaret();
