@@ -20,6 +20,7 @@
 | Phase 5.5.2 | TextBox Selection + 修饰键（拖选/Shift+方向键/KeyModifier/Shift+Tab 反向） | ✅ 2026-08-14 |
 | Phase 5.6 | IME 候选窗跟随光标（系统 caret + ImmSetCompositionWindow 双通道；微软拼音实测 ptCurrentPos 按客户区解释） | ✅ 2026-08-15 |
 | Phase 6.1 | HorizontalLayout（布局系统完善——VerticalLayout 水平镜像，diff 同构 + 10 条设计契约） | ✅ 2026-08-15 |
+| Phase 6.2 | CheckBox/Radio（StateWidget 行为基类 + 真实勾/圆绘制 + 同父互斥 + CheckBoxStyle/RadioStyle 进 Theme） | ✅ 2026-08-25 |
 | Phase 7.1.1 | PlatformWindow 骨架（Window 零 Win32：PlatformWindow/PlatformWindowHost 契约 + Win32PlatformWindow 实现；翻译器/IME 平台代码下沉） | ✅ 2026-08-15 |
 | Phase 7.1.2 | 翻译器契约改造（翻译器迁 Platform/Win32/ + 构造 Host& 派发；WM_IME 移出方案 B——翻译器纯翻译；Platform 零 Application/零 Window.h） | ✅ 2026-08-15 |
 | Phase 7.1.3 | 输入层抽象（CaretGeometry{ rect, visible } 文本插入点模型升级——光标不是点是矩形；kCaretWidth 同源；CreateCaret 尺寸来自 rect） | ✅ 2026-08-16 |
@@ -35,7 +36,7 @@
 
 ### 🔄 当前
 
-- **Phase 6.2 CheckBox/Radio**——详细设计 v1.1 定稿（GPT 评审整合完成）：StateWidget 行为复用基类 + CheckBoxStyle/RadioStyle 进 Theme（Phase 9 机制直接消费）+ 真实勾/圆绘制（Phase 8 能力）+ 同父互斥。待确认后实现（原子授权 15 文件）
+- 无进行中阶段（Phase 6.2 已收尾提交；下一阶段 Phase 9.5 收尾补充——职责确认待启动）
 
 ### 🔲 未来
 
@@ -90,12 +91,12 @@
 | [phase5.6-ime-requirements.md](phase5.6-ime-requirements.md) / [preliminary](phase5.6-ime-preliminary-design.md) / [detailed](phase5.6-ime-detailed-design.md) | 5.6 IME 候选窗跟随三件套（I1-I5 / P1-P5 / v1.0.4：系统 caret + IMM 双通道，客户区坐标语义） | ✅ 已实现（2026-08-15） |
 | [phase5-architecture-review.md](phase5-architecture-review.md) | Phase 5 收尾架构回顾（输入责任分布 + InputManager YAGNI 评估 + R1 冗余修复/R2-R4 记账） | ✅ 已实现（2026-08-15） |
 
-## Phase6 布局与状态控件（✅ 6.1 完成，2026-08-15；6.2 详细设计 v1.1 待实现）
+## Phase6 布局与状态控件（✅ 6.1/6.2 完成，2026-08-15/25）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [phase6.1-horizontallayout-requirements.md](phase6.1-horizontallayout-requirements.md) / [preliminary](phase6.1-horizontallayout-preliminary-design.md) / [detailed](phase6.1-horizontallayout-detailed-design.md) | 6.1 HorizontalLayout 三件套（Layout 边界原则 / 4 决策点 / diff 同构 + 10 条设计契约） | ✅ 已实现（2026-08-15） |
-| [phase6.2-checkboxradio-requirements.md](phase6.2-checkboxradio-requirements.md) / [preliminary](phase6.2-checkboxradio-preliminary-design.md) / [detailed](phase6.2-checkboxradio-detailed-design.md) | 6.2 CheckBox/Radio 三件套（StateWidget 契约 6 条 + 勾/圆渲染 Phase 8 消解 + CheckBoxStyle/RadioStyle 进 Theme + 同父互斥） | 🔄 详细设计 v1.1 定稿（GPT 评审整合），待实现 |
+| [phase6.2-checkboxradio-requirements.md](phase6.2-checkboxradio-requirements.md) / [preliminary](phase6.2-checkboxradio-preliminary-design.md) / [detailed](phase6.2-checkboxradio-detailed-design.md) | 6.2 CheckBox/Radio 三件套（StateWidget 契约 6 条 + 勾/圆渲染 Phase 8 消解 + CheckBoxStyle/RadioStyle 进 Theme + 同父互斥） | ✅ 已实现（2026-08-25，含绘制断言 S11-S14） |
 
 ## Phase7 平台抽象（✅ 7.1/7.2/7.5 完成，2026-08-16/24/19）
 

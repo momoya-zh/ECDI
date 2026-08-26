@@ -162,6 +162,9 @@
     <ClCompile Include="src\Render\GDIBackend.cpp" />
     <ClCompile Include="src\Render\GDITextMeasurer.cpp" />
     <ClCompile Include="src\Widget\Button.cpp" />
+    <ClCompile Include="src\Widget\CheckBox.cpp" />
+    <ClCompile Include="src\Widget\Radio.cpp" />
+    <ClCompile Include="src\Widget\StateWidget.cpp" />
     <ClCompile Include="src\Core\ECDI.cpp" />
     <ClCompile Include="src\Core\Logger.cpp" />
     <ClCompile Include="src\Core\String.cpp" />
@@ -183,6 +186,7 @@
     <ClCompile Include="src\Tests\RunAllTests.cpp" />
     <ClCompile Include="src\Tests\TestFramework.cpp" />
     <ClCompile Include="src\Tests\ThemeTests.cpp" />
+    <ClCompile Include="src\Tests\CheckBoxTests.cpp" />
     <ClCompile Include="src\Theme\DefaultTheme.cpp" />
     <ClCompile Include="src\Tests\TextBoxTests.cpp" />
     <ClCompile Include="src\Tests\WidgetTests.cpp" />
@@ -211,6 +215,9 @@
     <ClInclude Include="include\ECDI\Render\BackendFactory.h" />
     <ClInclude Include="include\ECDI\Render\TextMeasurer.h" />
     <ClInclude Include="Include\ECDI\Widget\Button.h" />
+    <ClInclude Include="Include\ECDI\Widget\CheckBox.h" />
+    <ClInclude Include="Include\ECDI\Widget\Radio.h" />
+    <ClInclude Include="Include\ECDI\Widget\StateWidget.h" />
     <ClInclude Include="Include\ECDI\Widget\CaretGeometry.h" />
     <ClInclude Include="Include\ECDI\Core\ECDIAssert.h" />
     <ClInclude Include="Include\ECDI\EventSystem\EventRouter.h" />
@@ -259,6 +266,8 @@
     <ClInclude Include="Include\ECDI\Theme\ButtonStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\TextBoxStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\PanelStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\CheckBoxStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\RadioStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\Theme.h" />
     <ClInclude Include="Include\ECDI\Theme\DefaultTheme.h" />
   </ItemGroup>

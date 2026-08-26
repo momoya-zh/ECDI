@@ -15,6 +15,8 @@ public:
 	ButtonStyle  GetButtonStyle() const override;
 	TextBoxStyle GetTextBoxStyle() const override;
 	PanelStyle   GetPanelStyle() const override;
+	CheckBoxStyle GetCheckBoxStyle() const override;   ///< 6.2
+	RadioStyle    GetRadioStyle() const override;      ///< 6.2
 };
 
 /// @brief 获取当前默认主题实例（static local = 首次调用构造，非程序启动）

@@ -15,5 +15,6 @@ void RegisterRendererTests();
 void RegisterEventTests();
 void RegisterTestFrameworkTests();
 void RegisterThemeTests();
+void RegisterCheckBoxTests();
 
 } // namespace ECDI::Test

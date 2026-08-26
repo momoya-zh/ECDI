@@ -11,6 +11,7 @@ void ECDI::Test::RunAllTests()
     RegisterEventTests();
     RegisterTestFrameworkTests();
     RegisterThemeTests();
+    RegisterCheckBoxTests();
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

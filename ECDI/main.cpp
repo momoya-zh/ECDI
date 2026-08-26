@@ -10,6 +10,8 @@
 #include "ECDI/Widget/Label.h"
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Widget/TextBox.h"
+#include "ECDI/Widget/CheckBox.h"
+#include "ECDI/Widget/Radio.h"
 #include "ECDI/Layout/VerticalLayout.h"
 #include "ECDI/Layout/HorizontalLayout.h"
 #include "ECDI/Core/String.h"
@@ -83,6 +85,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
 	auto btn1 = std::make_unique<DemoButton>("Click Me");
 	btn1->SetSize(200, 50);
+	btn1->SetStyle(ECDI::ButtonStyleOverride{ .cornerRadius = 8.0f });  // 圆角 demo：8px 圆角半径
 
 	// 5.5.1-5.5.2：TextBox（预填 20-30 字符——验证拖选/裁切/Selection 交互）
 	auto textBox1 = std::make_unique<ECDI::TextBox>("Hello World, this is a very long text.");
@@ -95,6 +98,27 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	panel1->AddChild(std::move(textBox1));
 	panel1->AddChild(std::move(btn1));
 	panel1->AddChild(std::move(btn2));
+
+	// ── 6.2 demo：CheckBox 组 + Radio 组（同父互斥）──
+	// 验证：勾（DrawLine）/圆（DrawRoundedRect）/焦点蓝框/点击与 Space 切换/Radio 互斥
+	// ⚠️ 必须显式 SetSize——VerticalLayout 只排位置不覆盖尺寸，无 SetSize 高度 0 会叠在 y=0
+	auto cb1 = std::make_unique<ECDI::CheckBox>("Check Option A");
+	cb1->SetSize(200, 28);
+	auto cb2 = std::make_unique<ECDI::CheckBox>("Check Option B");
+	cb2->SetSize(200, 28);
+	auto radio1 = std::make_unique<ECDI::Radio>("Choice 1");
+	radio1->SetSize(200, 28);
+	auto radio2 = std::make_unique<ECDI::Radio>("Choice 2");
+	radio2->SetSize(200, 28);
+	auto radio3 = std::make_unique<ECDI::Radio>("Choice 3");
+	radio3->SetSize(200, 28);
+	radio1->SetChecked(true);   // 初始选中 Choice 1（AddChild 前——此后 radio1 unique_ptr 被 move 走）
+	panel1->AddChild(std::move(cb1));
+	panel1->AddChild(std::move(cb2));
+	panel1->AddChild(std::move(radio1));
+	panel1->AddChild(std::move(radio2));
+	panel1->AddChild(std::move(radio3));
+	// 后续点击 Choice 2/3 自动取消 Choice 1（同父互斥——AddChild 后 GetParent 就位）
 
 	win1.GetRootWidget().AddChild(std::move(panel1));
 

@@ -39,6 +39,32 @@ PanelStyle DefaultTheme::GetPanelStyle() const{
 	return s;
 }
 
+CheckBoxStyle DefaultTheme::GetCheckBoxStyle() const{
+	// 6.2 v0.1 默认视觉：黑框白底黑勾，焦点蓝框（与 Button/TextBox 焦点色一致）
+	CheckBoxStyle s;
+	s.border.value            = Color::Black();
+	s.borderWidth.value       = 1.0f;
+	s.cornerRadius.value      = 0.0f;
+	s.background.value        = Color::White();
+	s.checkedBackground.value = Color::White();
+	s.checkmark.value         = Color::Black();
+	s.focusBorder.value       = Color::FromRGBA8(80, 120, 220);
+	s.boxSize.value           = 16.0f;
+	return s;
+}
+
+RadioStyle DefaultTheme::GetRadioStyle() const{
+	// 6.2 v0.1 默认视觉：黑圈白底黑点，焦点蓝框；内点 = 40% 比例（非独立参数——YAGNI）
+	RadioStyle s;
+	s.border.value       = Color::Black();
+	s.borderWidth.value  = 1.0f;
+	s.background.value   = Color::White();
+	s.dot.value          = Color::Black();
+	s.focusBorder.value  = Color::FromRGBA8(80, 120, 220);
+	s.circleSize.value   = 16.0f;
+	return s;
+}
+
 const DefaultTheme& GetDefaultTheme(){
 	static DefaultTheme instance;   // static local = 首次调用构造，非程序启动
 	return instance;
