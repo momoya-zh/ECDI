@@ -129,6 +129,18 @@ public:
 	/// @details 空实现——无定时器需求的控件不感知；Event 原则"语义由消费者解释"
 	virtual void OnTimer(const TimerEvent& event);
 
+	// ── Hover（9.5 R4：Hover 状态变化事实——9.6 动画前置）────────
+	// 职责：只产生"已发生的事实"（进入/离开），不负责视觉过渡/动画/Hover Style（语义推迟消费者）
+	// 契约：脱树导致的失效目标不派发 OnMouseLeave（Application::IsWidgetInTree 验证）
+
+	/// @brief 鼠标移入通知（Hover 状态变化事实——9.6 动画前置）
+	/// @details 默认空实现——无 hover 需求的控件零感知；事件驱动语义：进入 = 状态变化事实，非坐标事实
+	virtual void OnMouseEnter();
+
+	/// @brief 鼠标移出通知（Hover 状态变化事实）
+	/// @details 默认空实现；契约：脱树导致的失效不派发此方法（Application 验证）
+	virtual void OnMouseLeave();
+
 	// ── Focus ──────────────────────────────────────
 
 	/// @brief 是否可以获得键盘焦点

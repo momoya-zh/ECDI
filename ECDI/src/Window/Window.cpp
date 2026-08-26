@@ -156,6 +156,60 @@ Widget* Window::GetCaptureWidget() const noexcept{
 
 }
 
+bool Window::IsWidgetInTree(Widget* widget) const noexcept{
+
+	// 9.5 R4：沿 Parent 链上溯，只有最终可达当前 Window 的 RootWidget 才视为属于当前 Window
+	if (widget == nullptr){
+
+		return false;
+
+	}
+
+	Widget* current = widget;
+
+	while (current != nullptr){
+
+		if (current == m_rootWidget.get()){
+
+			return true;   // 到达 RootWidget = 仍在树
+
+		}
+
+		current = current->GetParent();
+
+	}
+
+	return false;   // 上溯到 null 仍未到 RootWidget = 已脱树
+
+}
+
+void Window::UpdateHoverState(Widget* newTarget){
+
+	// 9.5 R4：同目标不重复通知
+	if (m_hoverWidget == newTarget){
+
+		return;
+
+	}
+
+	Widget* oldHover = m_hoverWidget;
+	m_hoverWidget = newTarget;   // 先更新（回调内部可能查 hover 状态）
+
+	// 契约 D：Leave → Enter 严格顺序
+	if (oldHover != nullptr && IsWidgetInTree(oldHover)){
+
+		oldHover->OnMouseLeave();   // 正常离开派发
+
+	}
+
+	if (newTarget != nullptr){
+
+		newTarget->OnMouseEnter();   // 进入派发
+
+	}
+
+}
+
 void Window::SetFocusedWidget(Widget* widget){
 
 	// 5.4.3：同控件短路——避免重复设置触发 Lost+Gained 空转

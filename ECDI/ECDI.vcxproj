@@ -190,6 +190,7 @@
     <ClCompile Include="src\Theme\DefaultTheme.cpp" />
     <ClCompile Include="src\Tests\TextBoxTests.cpp" />
     <ClCompile Include="src\Tests\WidgetTests.cpp" />
+    <ClCompile Include="src\Tests\HoverTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\ECDI\Application\Application.h" />

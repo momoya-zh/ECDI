@@ -227,6 +227,10 @@ void Widget::OnCharInput(const CharInputEvent&) {}
 
 void Widget::OnTimer(const TimerEvent&) {}
 
+void Widget::OnMouseEnter() {}
+
+void Widget::OnMouseLeave() {}
+
 // ── 交互/重绘（5.4.1）───────────────────────────────
 
 Window* Widget::GetWindow() noexcept{

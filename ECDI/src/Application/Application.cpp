@@ -158,33 +158,50 @@ Widget* Application::FindFocusedWidget(Window& window)const noexcept {
 
 void Application::OnMouseMove(const MouseMoveEvent& event){
 
-	// 5.4.2：有 capture 直接派发（跳过 HitTest——按下后移出控件仍收 Move）
 	Window& window = *event.GetWindow();
 
-	Widget* target = window.GetCaptureWidget();
+	// 9.5 R4 契约 A：Capture 存在 → hover 状态机完全冻结（MouseMove 直派捕获者）
+	Widget* captureTarget = window.GetCaptureWidget();
 
-	if (target == nullptr) {
+	if (captureTarget != nullptr){
 
-		// 1. HitTest：通过坐标找到目标 Widget
-		target = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
+		Widget* current = captureTarget;
 
+		while (current != nullptr){
+
+			current->OnMouseMove(event);
+
+			current = current->GetParent();
+
+		}
+
+		return;   // 冻结：不进入 hover 状态机
 	}
 
-	// 2. 无目标则忽略事件
-	if (target == nullptr) {
+	// 1. HitTest：通过坐标找到目标 Widget
+	Widget* newTarget = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
+
+	// 9.5 R4：更新 Hover 状态机（唯一入口）
+	// 不改变既有 MouseMove 语义：现有代码在 target==nullptr 时直接 return（不派发）
+	// R4 保持这一行为——仅追加 hover 状态机更新，不引入新的 MouseMove 接收者
+	window.UpdateHoverState(newTarget);
+
+	// 2. 无目标则忽略事件（不派发——与既有语义一致）
+	if (newTarget == nullptr){
 
 		return;
 
 	}
 
 	// 3. Bubbling：沿 Parent 链逐级调用 OnMouseMove
-	Widget* current = target;
+	Widget* current = newTarget;
 
-	while (current != nullptr) {
+	while (current != nullptr){
 
 		current->OnMouseMove(event);
 
 		current = current->GetParent();
+
 	}
 
 }
