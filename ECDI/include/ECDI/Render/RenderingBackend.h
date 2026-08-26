@@ -80,10 +80,11 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		/// @details 恢复上一层裁剪区；栈为空时跳过（防御，契约层允许无损）。
 		virtual void PopClip() = 0;
 
-		/// @brief 绘制焦点框（Phase 8，详细设计 §8.4）
-		/// @param rect  焦点框边界（最终坐标）
-		/// @param color 点线颜色（主题层赋值——Phase 9）
-		virtual void DrawFocusRect(const Rect& rect, const Color& color) = 0;
+		/// @brief 绘制焦点框（Phase 8，详细设计 §8.4；9.5 R4 加圆角）
+		/// @param rect         焦点框边界（最终坐标）
+		/// @param cornerRadius 圆角半径（0 = 直角；>0 = 圆角点线框——Button 圆角焦点消费）
+		/// @param color        点线颜色（主题层赋值——Phase 9）
+		virtual void DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color) = 0;
 
 		/// @brief 帧结束（后端提交绘制结果：BitBlt/换缓冲）
 		virtual void EndFrame() = 0;

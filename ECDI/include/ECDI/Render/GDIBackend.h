@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // ⚠️ Win32 宏防护必须先于任何 ECDI 头：Windows.h 可能已通过其他路径（如 WindowMessageHandler.h）
 // 先被展开，`#define DrawText DrawTextW` 已生效——若不在 RenderingBackend.h 之前 #undef，
@@ -45,7 +45,7 @@ public:
 	void DrawImage(const Rect& dest, const Image& image) override;  ///< Phase 8 §8.3：DIB + AlphaBlend
 	void PushClip(const Rect& rect) override;                       ///< Phase 8 §8.5：SaveDC + IntersectClipRect
 	void PopClip() override;                                        ///< Phase 8 §8.5：栈空防御 + RestoreDC
-	void DrawFocusRect(const Rect& rect, const Color& color) override;  ///< Phase 8 §8.4：PS_DOT + NULL_BRUSH
+	void DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color) override;  ///< Phase 8 §8.4 + 9.5 R4 圆角：PS_DOT + NULL_BRUSH（RoundRect 圆角）
 	void EndFrame() override;              ///< 决策 17 EndPaint + 27/29 GetClientRect + BitBlt
 
 private:

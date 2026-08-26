@@ -86,7 +86,7 @@ void TestRendererNewCommands()
     commands.emplace_back(PushClipCommand{ Rect{ 0, 0, 100, 100 } });
     commands.emplace_back(DrawRectCommand{ Rect{ 0, 0, 50, 50 }, Color::Red() });
     commands.emplace_back(PopClipCommand{});
-    commands.emplace_back(DrawFocusRectCommand{ Rect{ 2, 3, 10, 10 }, Color::Black() });
+    commands.emplace_back(DrawFocusRectCommand{ Rect{ 2, 3, 10, 10 }, 4.0f, Color::Black() });
 
     renderer.Execute(commands);
 
@@ -117,9 +117,10 @@ void TestRendererNewCommands()
     // 裁剪内 DrawRect 照常转发（状态命令不影响其他转发）
     EXPECT_EQ(backend.draws.size(), 1);
 
-    // DrawFocusRect
+    // DrawFocusRect（9.5 R4：cornerRadius 转发）
     EXPECT_EQ(backend.focusRectCalls.size(), 1);
     EXPECT_NEAR(backend.focusRectCalls[0].rect.x, 2.0f, kEpsilon);
+    EXPECT_NEAR(backend.focusRectCalls[0].cornerRadius, 4.0f, kEpsilon);
 }
 
 void TestPaintContextNewCommands()
@@ -133,7 +134,7 @@ void TestPaintContextNewCommands()
     pc.DrawLine(Point{ 0, 0 }, Point{ 10, 10 }, 1.0f, Color::Black());
     pc.DrawRoundedRect(Rect{ 1, 1, 20, 20 }, 3.0f, Color::Gray());
     pc.PopClip();
-    pc.DrawFocusRect(Rect{ 5, 5, 12, 12 }, Color::Blue());
+    pc.DrawFocusRect(Rect{ 5, 5, 12, 12 }, 2.0f, Color::Blue());
     pc.DrawImage(Rect{ 0, 0, 8, 8 }, Image{});   // 空图像也产生命令（no-op 判定在后端）
 
     // 顺序断言：Push → DrawLine → DrawRoundedRect → Pop → DrawFocusRect → DrawImage
@@ -149,6 +150,10 @@ void TestPaintContextNewCommands()
     const auto& line = std::get<DrawLineCommand>(commands[1]);
     EXPECT_NEAR(line.width, 1.0f, kEpsilon);
     EXPECT_NEAR(line.start.x, 0.0f, kEpsilon);
+
+    // 9.5 R4 字段抽查：DrawFocusRect 圆角半径进命令
+    const auto& focus = std::get<DrawFocusRectCommand>(commands[4]);
+    EXPECT_NEAR(focus.cornerRadius, 2.0f, kEpsilon);
 }
 
 void TestImageValueSemantic()
@@ -244,6 +249,57 @@ void TestGDIBackendAlphaBlend()
     DestroyWindow(hwnd);
 }
 
+// ── 9.5 Alpha Primitive 补强：DrawRect 半透明（Color.a < 1 → 预乘 DIB + AlphaBlend）──
+void TestDrawRectAlpha()
+{
+    // 无窗口契约测试验证"命令转发"，本测试验证"渲染结果"：
+    // 50% 透明红（Color.a = 0.5，未预乘输入）叠纯蓝底 → 期望 RGB(128, 0, 127)（±3 容差）。
+    // 同时隐式验证：a == 1 走原 FillRect 路径不回归（角落纯蓝）。
+
+    const int screenW = GetSystemMetrics(SM_CXSCREEN);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    const wchar_t* kClassName = L"ECDI_TestGDIAlphaRect";
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kClassName;
+    if (!RegisterClassW(&wc))
+    {
+        EXPECT_EQ(GetLastError(), ERROR_CLASS_ALREADY_EXISTS);
+    }
+
+    HWND hwnd = CreateWindowExW(0, kClassName, L"ECDI_AlphaRectTest", WS_POPUP,
+                                screenW - 210, screenH - 210, 200, 200,
+                                nullptr, nullptr, wc.hInstance, nullptr);
+    EXPECT_TRUE(hwnd != nullptr);
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+    {
+        GDIBackend backend;
+        backend.Initialize(Win32RenderContext(hwnd));
+        backend.BeginFrame();
+        backend.DrawRect(Rect{ 0, 0, 200, 200 }, Color::Blue());
+        // 50% 半透明红（Color.a = 0.5——未预乘输入，GDIBackend 内部预乘）
+        backend.DrawRect(Rect{ 50, 50, 100, 100 }, Color::FromRGBA8(255, 0, 0, 128));
+        backend.EndFrame();
+
+        HDC dc = GetDC(hwnd);
+        const COLORREF corner = GetPixel(dc, 5, 5);        // 角落：纯蓝底（a==1 快速路径）
+        const COLORREF center = GetPixel(dc, 100, 100);    // 中央：混合结果
+        ReleaseDC(hwnd, dc);
+
+        // out = src + dst*(1-A/255)：R = 128 + 0*0.5 = 128；B = 255*(127/255) ≈ 127
+        EXPECT_TRUE(corner != CLR_INVALID);
+        EXPECT_TRUE(center != CLR_INVALID);
+        EXPECT_TRUE(GetRValue(corner) <= 3 && GetGValue(corner) <= 3 && GetBValue(corner) >= 252);
+        EXPECT_TRUE(std::abs(GetRValue(center) - 128) <= 3);
+        EXPECT_TRUE(GetGValue(center) <= 3);
+        EXPECT_TRUE(std::abs(GetBValue(center) - 127) <= 3);
+    }
+
+    DestroyWindow(hwnd);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterRendererTests()
@@ -254,4 +310,5 @@ void ECDI::Test::RegisterRendererTests()
     GetTestRegistry().Add("Renderer.PaintContextNewCommands", &TestPaintContextNewCommands);
     GetTestRegistry().Add("Renderer.ImageValueSemantic", &TestImageValueSemantic);
     GetTestRegistry().Add("Renderer.GDIBackendAlphaBlend", &TestGDIBackendAlphaBlend);
+    GetTestRegistry().Add("Renderer.DrawRectAlpha", &TestDrawRectAlpha);
 }

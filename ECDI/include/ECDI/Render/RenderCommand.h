@@ -75,13 +75,15 @@ namespace ECDI {
 	{
 	};
 
-	/// @brief 绘制焦点框命令（纯数据，Phase 8）
-	/// @details 死数据：边界矩形 + 颜色。框架级"指定颜色点线框"能力——
+	/// @brief 绘制焦点框命令（纯数据，Phase 8；9.5 R4 后带圆角）
+	/// @details 死数据：边界矩形 + 圆角半径 + 颜色。框架级"指定颜色点线框"能力——
 	/// 不依赖系统 DrawFocusRect（双缓冲 + 系统样式问题），颜色由主题层控制（Phase 9）。
+	/// cornerRadius > 0 时后端画圆角点线框（RoundRect + PS_DOT）——Button 圆角焦点框消费（9.5）。
 	struct DrawFocusRectCommand
 	{
-		Rect rect;   ///< 焦点框边界（最终坐标）
-		Color color; ///< 点线颜色（主题层赋值）
+		Rect rect;          ///< 焦点框边界（最终坐标）
+		float cornerRadius; ///< 圆角半径（0 = 直角；>0 = 圆角——9.5 R4 焦点框跟随控件圆角）
+		Color color;        ///< 点线颜色（主题层赋值）
 	};
 
 	/// @brief 渲染命令 = 类型安全的 variant 多类型表示（决策 3）

@@ -85,7 +85,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
 	auto btn1 = std::make_unique<DemoButton>("Click Me");
 	btn1->SetSize(200, 50);
-	btn1->SetStyle(ECDI::ButtonStyleOverride{ .cornerRadius = 8.0f });  // 圆角 demo：8px 圆角半径
+	btn1->SetStyle(ECDI::ButtonStyleOverride{ .cornerRadius = 80.0f });  // 圆角 demo：8px 圆角半径
+	btn1->SetStyle(ECDI::ButtonStyleOverride{
+	.background = ECDI::Color::FromRGBA8(0, 255, 220, 60),  // ← 半透明蓝
+		});
 
 	// 5.5.1-5.5.2：TextBox（预填 20-30 字符——验证拖选/裁切/Selection 交互）
 	auto textBox1 = std::make_unique<ECDI::TextBox>("Hello World, this is a very long text.");

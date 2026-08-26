@@ -136,52 +136,35 @@ void Button::OnPaint(PaintContext& ctx,int x,int y){
 	// （不允许 StyleField 存在但不被 Renderer 消费——"存了但没用"的字段会误导 SetStyle 用户）
 	const float radius = m_style.cornerRadius.value;
 
-	// 内框尺寸几何防御——borderWidth 是用户可改值（SetStyle），尺寸 - 2×borderWidth 可能为负
-	// （如 width=3, borderWidth=2 → -1 无效 Rect）。不做复杂 Clamp 工具（YAGNI），局部 max 保护。
-	const float borderWidth = m_style.borderWidth.value;
-	const float innerWidth  = (std::max)(0.0f, static_cast<float>(GetWidth()) - 2.0f * borderWidth);
-	const float innerHeight = (std::max)(0.0f, static_cast<float>(GetHeight()) - 2.0f * borderWidth);
-	const float innerRadius = (std::max)(0.0f, radius - borderWidth);   // 内框圆角随内缩缩小
+	// 9.5 方案 A 修正（2026-08-26）：焦点框不再"整块铺 border 色"——
+	// 旧实现"先画边框色全块 + 内缩画背景"在背景透明/半透明时会把 border 色（默认白）整块露出来
+	// （alpha 补全后暴露：background.a == 0 → 背景 no-op，只剩白块 = 整个按钮变白）。
+	// 新实现：① 先画背景全块（透明就透明，语义正确）② 聚焦时再画焦点框描边（DrawFocusRect 点线，
+	// 只描边缘不占背景层——Phase 8 焦点框能力接入，替代旧"整块填充"式边框）。
+	// 内框尺寸/borderWidth 逻辑随旧实现移除（焦点框不再需要内缩计算——YAGNI）。
 
+	// ① 背景全块（透明/半透明正常合成——DrawRect/DrawRoundedRect 的 a<1 走 AlphaBlend）
+	if (radius > 0.0f){
+		ctx.DrawRoundedRect(
+			Rect{ static_cast<float>(x), static_cast<float>(y),
+			      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
+			radius, background);
+	}
+	else{
+		ctx.DrawRect(
+			Rect{ static_cast<float>(x), static_cast<float>(y),
+			      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
+			background);
+	}
+
+	// ② 焦点框描边（点线框——边缘标记，不覆盖背景；颜色来自 Style.border 单一真相）
+	// 圆角跟随控件 radius（9.5 R4：DrawFocusRect 支持 cornerRadius——圆角按钮焦点框贴圆角）
 	if (HasFocus()){
 
-		// 焦点边框：外框 border 色（圆角随 radius），内缩 borderWidth——先画边框色全块，再画背景内缩
-		// （不越界、不覆盖相邻控件）
-		if (radius > 0.0f){
-			ctx.DrawRoundedRect(
-				Rect{ static_cast<float>(x), static_cast<float>(y),
-				      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
-				radius, m_style.border.value);
-			ctx.DrawRoundedRect(
-				Rect{ static_cast<float>(x) + borderWidth, static_cast<float>(y) + borderWidth,
-				      innerWidth, innerHeight },
-				innerRadius, background);
-		}
-		else{
-			ctx.DrawRect(
-				Rect{ static_cast<float>(x), static_cast<float>(y),
-				      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
-				m_style.border.value);
-			ctx.DrawRect(
-				Rect{ static_cast<float>(x) + borderWidth, static_cast<float>(y) + borderWidth,
-				      innerWidth, innerHeight },
-				background);
-		}
-
-	} else {
-
-		if (radius > 0.0f){
-			ctx.DrawRoundedRect(
-				Rect{ static_cast<float>(x), static_cast<float>(y),
-				      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
-				radius, background);
-		}
-		else{
-			ctx.DrawRect(
-				Rect{ static_cast<float>(x), static_cast<float>(y),
-				      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
-				background);
-		}
+		ctx.DrawFocusRect(
+			Rect{ static_cast<float>(x), static_cast<float>(y),
+			      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
+			radius, m_style.border.value);
 
 	}
 

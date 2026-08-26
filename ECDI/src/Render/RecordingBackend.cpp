@@ -1,4 +1,4 @@
-#include "ECDI/Render/RecordingBackend.h"
+﻿#include "ECDI/Render/RecordingBackend.h"
 
 namespace ECDI {
 
@@ -43,9 +43,9 @@ namespace ECDI {
 		clipOps.emplace_back(ClipOp{ Rect{}, false });
 	}
 
-	void RecordingBackend::DrawFocusRect(const Rect& rect, const Color& color)
+	void RecordingBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color)
 	{
-		focusRectCalls.emplace_back(FocusRectDraw{ rect, color });
+		focusRectCalls.emplace_back(FocusRectDraw{ rect, cornerRadius, color });
 	}
 
 }

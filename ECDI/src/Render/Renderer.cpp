@@ -1,4 +1,4 @@
-#include "ECDI/Render/Renderer.h"
+﻿#include "ECDI/Render/Renderer.h"
 
 #include "ECDI/Render/RenderingBackend.h"
 
@@ -63,7 +63,7 @@ namespace ECDI {
 
 	void Renderer::ExecuteCommand(const DrawFocusRectCommand& cmd)
 	{
-		m_backend.DrawFocusRect(cmd.rect, cmd.color);
+		m_backend.DrawFocusRect(cmd.rect, cmd.cornerRadius, cmd.color);
 	}
 
 }

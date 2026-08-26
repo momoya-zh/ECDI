@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifdef DrawText
 #undef DrawText   // 防御性 undef（2026-08-16）：本头声明 DrawText override——自包含防护
@@ -69,6 +69,7 @@ namespace ECDI {
 		struct FocusRectDraw
 		{
 			Rect rect;
+			float cornerRadius = 0.0f;   ///< 圆角半径（9.5 R4：焦点框跟随控件圆角）
 			Color color;
 		};
 
@@ -101,7 +102,7 @@ namespace ECDI {
 
 		void PopClip() override;                                         // Phase 8（isPush=false）
 
-		void DrawFocusRect(const Rect& rect, const Color& color) override;   // Phase 8
+		void DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color) override;   // Phase 8 + 9.5 R4 圆角
 
 		void EndFrame() override {}
 

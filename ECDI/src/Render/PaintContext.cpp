@@ -1,4 +1,4 @@
-// PaintContext.cpp
+﻿// PaintContext.cpp
 
 #include "ECDI/Render/PaintContext.h"
 
@@ -61,9 +61,9 @@ namespace ECDI {
 
 	}
 
-	void PaintContext::DrawFocusRect(const Rect& rect, const Color& color){
+	void PaintContext::DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color){
 
-		m_commands.emplace_back(DrawFocusRectCommand{ rect, color });
+		m_commands.emplace_back(DrawFocusRectCommand{ rect, cornerRadius, color });
 
 	}
 

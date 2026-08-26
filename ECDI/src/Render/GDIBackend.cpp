@@ -1,4 +1,4 @@
-#include "ECDI/Render/GDIBackend.h"
+﻿#include "ECDI/Render/GDIBackend.h"
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Core/String.h"
@@ -9,6 +9,173 @@
 #include <cstring>
 
 namespace ECDI {
+
+namespace{
+
+// ── 9.5 Alpha Primitive 补强：半透明实心合成（约束 1：预乘 BGRA + AC_SRC_ALPHA）──
+// 复用 Phase 8 DrawImage §8.3 已验证链路（32bpp 顶降 DIB + AlphaBlend）。
+// 只合成颜色 alpha（约束 2：不引入几何抗锯齿）；alpha == 1 的调用不进入此路径（原 GDI 快速路径）。
+
+/// @brief 半透明实心绘制（矩形 / 圆角矩形共用）
+/// @param target 目标 DC（内存缓冲）
+/// @param rect   目标矩形（最终坐标）
+/// @param color  填充色（RGB 任意，alpha < 1 触发——本函数假定调用方已判 a < 1）
+/// @param cornerRadius 圆角半径（0 = 矩形；>0 = 圆角矩形）
+/// @details 创建临时 32bpp 预乘 DIB → 逐像素填充 → AlphaBlend(AC_SRC_ALPHA) → 释放。
+/// 每次调用创建/销毁 DIB（低频场景可接受，YAGNI 不做缓存池）。
+void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cornerRadius)
+{
+	// 空矩形 no-op（契约层确定边界——与 DrawRect 一致）
+	if (rect.width <= 0.0f || rect.height <= 0.0f)
+	{
+		return;
+	}
+
+	const int width = std::lround(rect.width);
+	const int height = std::lround(rect.height);
+	if (width <= 0 || height <= 0)
+	{
+		return;
+	}
+
+	// 约束 1：预乘 BGRA（AC_SRC_ALPHA 要求 RGB 已乘 alpha——与 §8.3 同规则）
+	const auto ToByte = [](float v)
+	{
+		const float clamped = std::clamp(v, 0.0f, 1.0f);
+		return static_cast<BYTE>(clamped * 255.0f + 0.5f);
+	};
+	const BYTE alphaByte = ToByte(color.a);
+	if (alphaByte == 0)
+	{
+		return;   // 全透明 no-op
+	}
+	const BYTE b = ToByte(color.b * color.a);
+	const BYTE g = ToByte(color.g * color.a);
+	const BYTE r = ToByte(color.r * color.a);
+
+	// 32bpp 顶降 DIB（负 biHeight → 行序顶向下，与 §8.3 一致）
+	BITMAPINFO bmi{};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = width;
+	bmi.bmiHeader.biHeight = -height;
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	HDC dibDC = CreateCompatibleDC(target);
+	if (!dibDC)
+	{
+		return;
+	}
+	void* dibBits = nullptr;
+	HBITMAP dibBitmap = CreateDIBSection(dibDC, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+	if (!dibBitmap || !dibBits)
+	{
+		if (dibBitmap) DeleteObject(dibBitmap);
+		DeleteDC(dibDC);
+		return;
+	}
+
+	// 逐像素填充（BGRA 内存序：字节序 = B,G,R,A）
+	BYTE* dst = static_cast<BYTE*>(dibBits);
+	const int dibStride = width * 4;
+
+	if (cornerRadius <= 0.0f)
+	{
+		// 矩形：整块填充预乘色
+		for (int row = 0; row < height; ++row)
+		{
+			BYTE* line = dst + static_cast<size_t>(row) * dibStride;
+			for (int col = 0; col < width; ++col)
+			{
+				line[col * 4 + 0] = b;
+				line[col * 4 + 1] = g;
+				line[col * 4 + 2] = r;
+				line[col * 4 + 3] = alphaByte;
+			}
+		}
+	}
+	else
+	{
+		// 圆角矩形（约束 2：不引入抗锯齿——GDI RoundRect 同款实心语义）
+		// 四角裁剪：以圆角圆心为中心，半径内保留、外透明（像素中心判定）
+		const float radius = (std::min)(cornerRadius, (std::min)(static_cast<float>(width), static_cast<float>(height)) / 2.0f);
+		const float radiusSq = radius * radius;
+
+		for (int row = 0; row < height; ++row)
+		{
+			BYTE* line = dst + static_cast<size_t>(row) * dibStride;
+			for (int col = 0; col < width; ++col)
+			{
+				bool inside = true;
+				// 像素中心坐标（半像素偏移——避免边缘整像素误判）
+				const float cx = static_cast<float>(col) + 0.5f;
+				const float cy = static_cast<float>(row) + 0.5f;
+
+				// 左上角
+				if (cx < radius && cy < radius)
+				{
+					const float dx = cx - radius;
+					const float dy = cy - radius;
+					inside = (dx * dx + dy * dy) <= radiusSq;
+				}
+				// 右上角
+				else if (cx > static_cast<float>(width) - radius && cy < radius)
+				{
+					const float dx = cx - (static_cast<float>(width) - radius);
+					const float dy = cy - radius;
+					inside = (dx * dx + dy * dy) <= radiusSq;
+				}
+				// 左下角
+				else if (cx < radius && cy > static_cast<float>(height) - radius)
+				{
+					const float dx = cx - radius;
+					const float dy = cy - (static_cast<float>(height) - radius);
+					inside = (dx * dx + dy * dy) <= radiusSq;
+				}
+				// 右下角
+				else if (cx > static_cast<float>(width) - radius && cy > static_cast<float>(height) - radius)
+				{
+					const float dx = cx - (static_cast<float>(width) - radius);
+					const float dy = cy - (static_cast<float>(height) - radius);
+					inside = (dx * dx + dy * dy) <= radiusSq;
+				}
+
+				if (inside)
+				{
+					line[col * 4 + 0] = b;
+					line[col * 4 + 1] = g;
+					line[col * 4 + 2] = r;
+					line[col * 4 + 3] = alphaByte;
+				}
+				else
+				{
+					line[col * 4 + 0] = 0;
+					line[col * 4 + 1] = 0;
+					line[col * 4 + 2] = 0;
+					line[col * 4 + 3] = 0;   // 圆角外透明
+				}
+			}
+		}
+	}
+
+	// AlphaBlend（AC_SRC_ALPHA：源含预乘 alpha——§8.3 同款）
+	HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(dibDC, dibBitmap));
+	BLENDFUNCTION blend{};
+	blend.BlendOp = AC_SRC_OVER;
+	blend.SourceConstantAlpha = 255;
+	blend.AlphaFormat = AC_SRC_ALPHA;
+	AlphaBlend(target,
+	           std::lround(rect.x), std::lround(rect.y),
+	           width, height,
+	           dibDC, 0, 0, width, height, blend);
+
+	SelectObject(dibDC, oldBitmap);
+	DeleteObject(dibBitmap);
+	DeleteDC(dibDC);
+}
+
+} // namespace
 
 GDIBackend::GDIBackend() = default;
 
@@ -114,6 +281,13 @@ void GDIBackend::ReleaseBackBuffer()
 
 void GDIBackend::DrawRect(const Rect& rect, const Color& color)
 {
+	// 9.5 Alpha 补强：a < 1 → 半透明合成（预乘 DIB + AlphaBlend）；a == 1 → 原 GDI 快速路径（零开销不回归）
+	if (color.a < 1.0f)
+	{
+		BlendAlphaSolid(m_memoryDC, rect, color, 0.0f);
+		return;
+	}
+
 	// 决策 21/23：Color→COLORREF 转换封闭在此（ToByte Clamp 在消费边界，DrawText 共用）
 	const COLORREF colorRef = ToColorRef(color);
 
@@ -210,6 +384,13 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	const LONG clampedRadius = std::clamp(std::lround(cornerRadius),
 	                                      0L, (std::min)(w, h) / 2);
 
+	// 9.5 Alpha 补强：a < 1 → 半透明合成（圆角同款实心语义，约束 2 无抗锯齿）；a == 1 → 原 GDI 快速路径
+	if (color.a < 1.0f)
+	{
+		BlendAlphaSolid(m_memoryDC, rect, color, static_cast<float>(clampedRadius));
+		return;
+	}
+
 	// 实心填充：NULL_PEN 无边框 + 实心画刷 + RoundRect
 	HPEN nullPen = CreatePen(PS_NULL, 0, 0);
 	HBRUSH brush = CreateSolidBrush(ToColorRef(color));
@@ -229,8 +410,12 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	rc.top = static_cast<LONG>(rect.y);
 	rc.right = static_cast<LONG>(rect.x + rect.width);
 	rc.bottom = static_cast<LONG>(rect.y + rect.height);
+
+	// GDI RoundRect 参数语义 = 圆角椭圆直径（非半径）——cornerRadius 契约是"半径"，
+	// 必须转直径传入（×2），否则实际圆角只有设定值一半（历史 bug，2026-08-26 修复：
+	// 与 BlendAlphaSolid 数学裁剪路径 radius 语义对齐）
 	RoundRect(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom,
-	          clampedRadius, clampedRadius);
+	          clampedRadius * 2, clampedRadius * 2);
 
 	SelectObject(m_memoryDC, oldPen);
 	SelectObject(m_memoryDC, oldBrush);
@@ -341,10 +526,11 @@ void GDIBackend::PopClip()
 	}
 }
 
-void GDIBackend::DrawFocusRect(const Rect& rect, const Color& color)
+void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color)
 {
 	// Phase 8 §8.4：框架级"指定颜色点线框"——CreatePen(PS_DOT) + NULL_BRUSH + Rectangle。
 	// 不用系统 DrawFocusRect（User32 XOR 绘制与双缓冲/自绘样式冲突；颜色由主题层控制）
+	// 9.5 R4：cornerRadius > 0 走 RoundRect（圆角点线框——Button 圆角焦点框跟随控件圆角）
 	HPEN pen = CreatePen(PS_DOT, 1, ToColorRef(color));
 	if (!pen)
 	{
@@ -359,7 +545,21 @@ void GDIBackend::DrawFocusRect(const Rect& rect, const Color& color)
 	rc.top = std::lround(rect.y);
 	rc.right = std::lround(rect.x + rect.width);
 	rc.bottom = std::lround(rect.y + rect.height);
-	Rectangle(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom);
+
+	if (cornerRadius > 0.0f)
+	{
+		// 圆角点线框：半径钳制到 [0, min(w,h)/2]（与 DrawRoundedRect 同契约）
+		const LONG w = rc.right - rc.left;
+		const LONG h = rc.bottom - rc.top;
+		const LONG radius = std::clamp(std::lround(cornerRadius),
+		                               0L, (std::min)(w, h) / 2);
+		// GDI RoundRect 参数 = 椭圆直径（非半径）——×2 转直径（与 DrawRoundedRect 同规则）
+		RoundRect(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom, radius * 2, radius * 2);
+	}
+	else
+	{
+		Rectangle(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom);
+	}
 
 	SelectObject(m_memoryDC, oldPen);
 	SelectObject(m_memoryDC, oldBrush);
