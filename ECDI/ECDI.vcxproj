@@ -165,6 +165,7 @@
     <ClCompile Include="src\Widget\CheckBox.cpp" />
     <ClCompile Include="src\Widget\Radio.cpp" />
     <ClCompile Include="src\Widget\StateWidget.cpp" />
+    <ClCompile Include="src\Widget\HoverTracker.cpp" />
     <ClCompile Include="src\Core\ECDI.cpp" />
     <ClCompile Include="src\Core\Logger.cpp" />
     <ClCompile Include="src\Core\String.cpp" />
@@ -219,6 +220,7 @@
     <ClInclude Include="Include\ECDI\Widget\CheckBox.h" />
     <ClInclude Include="Include\ECDI\Widget\Radio.h" />
     <ClInclude Include="Include\ECDI\Widget\StateWidget.h" />
+    <ClInclude Include="Include\ECDI\Widget\HoverTracker.h" />
     <ClInclude Include="Include\ECDI\Widget\CaretGeometry.h" />
     <ClInclude Include="Include\ECDI\Core\ECDIAssert.h" />
     <ClInclude Include="Include\ECDI\EventSystem\EventRouter.h" />

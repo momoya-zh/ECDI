@@ -3,6 +3,7 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
 #include "ECDI/Widget/CaretGeometry.h"
+#include "ECDI/Widget/HoverTracker.h"
 #include "ECDI/Render/RenderServices.h"
 #include "ECDI/Render/BackendFactory.h"
 #include "ECDI/Render/RenderingBackend.h"
@@ -121,15 +122,10 @@ class Window : public PlatformWindowHost {
 
 		// ── Hover 状态机（9.5 R4）────────────────────────
 
-		/// @brief 验证 Widget 是否仍属于当前 Window 的树（派发前调用——契约 C 验证）
-		/// @details 沿 Parent 链上溯，只有最终可达当前 Window 的 RootWidget 才视为属于当前 Window
-		/// @param widget 待验证目标
-		/// @return true=仍在树；false=已脱树
-		bool IsWidgetInTree(Widget* widget) const noexcept;
-
 		/// @brief 更新 Hover 状态机（Application::OnMouseMove 调用——唯一入口）
 		/// @param newTarget HitTest 命中的新目标（nullable）
 		/// @pre newTarget == nullptr 或 IsWidgetInTree(newTarget) == true（调用方保证——HitTest 结果必然属于当前 Window Tree）
+		/// @details 委托 m_hoverTracker（纯逻辑单元——方案 A 提取，Window 零平台依赖）
 		void UpdateHoverState(Widget* newTarget);
 
 	private:
@@ -182,7 +178,7 @@ class Window : public PlatformWindowHost {
 
 		Widget* m_captureWidget = nullptr;	///< 当前鼠标捕获控件（5.4.2，非拥有指针）
 
-		Widget* m_hoverWidget = nullptr;		///< 当前 Hover 目标（9.5 R4，非拥有指针——与 m_focusedWidget/m_captureWidget 同族）
+		HoverTracker m_hoverTracker;			///< Hover 状态机（9.5 R4 方案 A：纯逻辑单元——构造后 SetTreeRoot(m_rootWidget.get())）
 
 		// 7.1.4：能力接口分离（用户决策）——绘制/测量各自独立对象（unique_ptr）；
 		// ⚠️ m_renderBackend 必须声明在 m_renderer 前（Renderer 持 RenderingBackend&，初始化列表绑定）

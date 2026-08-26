@@ -56,6 +56,9 @@ Window::Window(Application* app,const std::string& title, int width, int height,
 	// 5.4.1：根与 Window 建立关联（Widget::Invalidate/HasFocus 上溯到根后走它）
 	m_rootWidget->SetWindow(this);
 
+	// 9.5 R4：Hover 状态机注入树根（契约 C 验证锚点——m_rootWidget 就绪后设置）
+	m_hoverTracker.SetTreeRoot(m_rootWidget.get());
+
 	FRAMEWORK_ASSERT(m_rootWidget != nullptr);
 
 	// 初始客户区尺寸（平台窗口构造后查询——GetClientSize 返回框架层 Size；
@@ -156,57 +159,10 @@ Widget* Window::GetCaptureWidget() const noexcept{
 
 }
 
-bool Window::IsWidgetInTree(Widget* widget) const noexcept{
-
-	// 9.5 R4：沿 Parent 链上溯，只有最终可达当前 Window 的 RootWidget 才视为属于当前 Window
-	if (widget == nullptr){
-
-		return false;
-
-	}
-
-	Widget* current = widget;
-
-	while (current != nullptr){
-
-		if (current == m_rootWidget.get()){
-
-			return true;   // 到达 RootWidget = 仍在树
-
-		}
-
-		current = current->GetParent();
-
-	}
-
-	return false;   // 上溯到 null 仍未到 RootWidget = 已脱树
-
-}
-
 void Window::UpdateHoverState(Widget* newTarget){
 
-	// 9.5 R4：同目标不重复通知
-	if (m_hoverWidget == newTarget){
-
-		return;
-
-	}
-
-	Widget* oldHover = m_hoverWidget;
-	m_hoverWidget = newTarget;   // 先更新（回调内部可能查 hover 状态）
-
-	// 契约 D：Leave → Enter 严格顺序
-	if (oldHover != nullptr && IsWidgetInTree(oldHover)){
-
-		oldHover->OnMouseLeave();   // 正常离开派发
-
-	}
-
-	if (newTarget != nullptr){
-
-		newTarget->OnMouseEnter();   // 进入派发
-
-	}
+	// 9.5 R4 方案 A：委托纯逻辑单元（HoverTracker——不依赖 Window 平台细节）
+	m_hoverTracker.Update(newTarget);
 
 }
 
