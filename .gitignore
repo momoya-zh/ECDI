@@ -33,6 +33,7 @@ ECDI/Release/
 __pycache__/
 dist/
 .venv/
+model-probe-gui/
 
 # ===== 编译器中间产物 =====
 *.obj
@@ -82,4 +83,4 @@ error.txt
 Thumbs.db
 Desktop.ini
 ecdi_test_log.txt
-
+model-probe-gui
