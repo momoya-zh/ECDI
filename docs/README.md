@@ -2,7 +2,7 @@
 
 > 本文档是 `docs/` 的索引。设计文档随代码提交 git，从 Phase4 起为强制约定（职责确认 / 初步设计 / 详细设计 各阶段文档正常写入本目录）。
 
-## 开发进度（2026-08-25 更新）
+## 开发进度（2026-09-04 更新）
 
 ### ✅ 已完成
 
@@ -33,15 +33,20 @@
 | Phase 8.5.2 | 多行与滚动（行缓存 + 垂直滚动 + 双击选词 + Up/Down 跨行 preferred column；文本区原点统一三路） | ✅ 2026-08-24 |
 | Phase 8.5.3 | Undo/Redo（快照模式 + 编辑前 Push + Composition 一次撤销 + Cancel 恢复） | ✅ 2026-08-25 |
 | Phase 9 | 主题系统（**决策层落地**：StyleField\<T\> D7 契约 + Theme/DefaultTheme + TextStyle 单一视觉真相 + Button/TextBox/Panel 迁移 + cornerRadius 消费） | ✅ 2026-08-25 |
+| Phase 9.5 | 收尾补充（R1 Clip 管线 + TextBox 横向滚动 / R4 Hover 状态机；R2 LinearLayout、R3 WM_MOVE、R5 Shortcut 关闭记账） | ✅ 2026-08-28 |
+| Phase 9.6 | 动画系统（per-Window AnimationManager + 插值/Easing 四种 + CollapsiblePanel 四向折叠 + ProgressBar + Button S1 色过渡） | ✅ 2026-08-30 |
+| Phase 9.7 | 自适应布局（SetStretch 权重分配 + spacing + fillCrossAxis + OnResized→Arrange 触发链；契约 10 修订） | ✅ 2026-09-02 |
+| Phase 9.8 | AutoSize（GetPreferredSize/AutoSize + ResolveMeasurer 接缝 + 尺寸意图三分「后调用者赢」+ §3.5 交互冻结） | ✅ 2026-09-02 |
 
 ### 🔄 当前
 
-- 无进行中阶段（Phase 6.2 已收尾提交；下一阶段 Phase 9.5 收尾补充——职责确认待启动）
+- **Phase 10 库化（ECDI 0.1.0）**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；待初步设计
 
 ### 🔲 未来
 
-- **Phase 9.5 收尾补充**：局部更新/裁剪系统（Clip/Dirty Region）+ LinearLayout 抽象 + WM_MOVE 场景 + Hover/MouseEnter/Leave + Shortcut System/键盘入口统一/InputManager（v1.0 前择机完成，详见 roadmap-deferred.md）
-- **Phase 10** v1.0 收尾（转库静态库化 + API 审查；开源待定）
+- **Phase 9.5 收尾补充**：~~局部更新/裁剪系统 + Hover/MouseEnter/Leave~~（✅ R1/R4 已落地 2026-08-28）；~~LinearLayout 抽象、WM_MOVE 场景、Shortcut System~~（✅ 关闭记账——二次用例未出现）；详见 roadmap-deferred.md
+- **Phase 10**：库化 ECDI 0.1.0（公共 API 边界 + install/export + 外部消费者验收——进行中）
+- Phase 10 后能力路线：WindowChrome / 基础控件补充 / 渲染能力增强 / 跨平台（Linux/Android 远期）→ 接近 1.0
 
 ### 📋 技术债务（记账）
 
@@ -50,7 +55,7 @@
 | 债务 | 位置 | 解决时机 |
 |------|------|---------|
 | Invalidate 解耦（两层结构 Internal+API） | TextBox 编辑操作 | Phase 7 API 审查 |
-| 文本裁切用字符串截断（O(n²)）——8.5.2 多行版仍逐行截断 | TextBox::OnPaint | Phase 9.5 局部更新/裁剪系统（PushClip，代码 TODO 已标） |
+| ~~文本裁切用字符串截断（O(n²)）~~ | TextBox::OnPaint | ✅ 已解决——Phase 9.5 R1 Clip 管线落地（PushClip/PopClip），替换逐行截断 |
 | **输入层抽象（TextInputInterface/TextInputContext）**——5.6/7.1.3 的 UpdateTextInputCaret + CaretGeometry 是半抽象（Window 中介），完整契约层 + 跨平台 adapter 待转库前 | Window::UpdateTextInputCaret | Phase 10 转库前评估 |
 | **DPI 感知**——框架当前无 DPI 缩放，IME 坐标用逻辑像素 | 全局 | Phase 10 评估 |
 | 键盘入口不对称（OnKeyDown 走 Window / OnKeyUp+CharInput 直派，3 入口）——已回顾保持现状（Tab 拦截必需 Window），未来全局快捷键时统一 | Application | 未来全局输入需求出现时（详见 phase5-architecture-review.md） |
@@ -131,6 +136,41 @@
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [phase9-theme-system-requirements.md](phase9-theme-system-requirements.md) / [preliminary](phase9-theme-system-preliminary-design.md) / [detailed](phase9-theme-system-detailed-design.md) | Phase 9 三件套（StyleField D7 契约 + Theme/DefaultTheme + TextStyle 单一真相 + 控件迁移 + cornerRadius 消费） | ✅ 已实现（2026-08-25，v1.0-v1.4 四轮 GPT 评审收敛） |
+
+## Phase9.5 收尾补充（✅ 2026-08-28）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase9.5-wrapup-requirements.md](phase9.5-wrapup-requirements.md) | 收尾需求总纲（R1-R5 立项 + 关闭记账裁决） | ✅ 完成态 |
+| [phase9.5-r1-clip-preliminary-design.md](phase9.5-r1-clip-preliminary-design.md) / [detailed](phase9.5-r1-clip-detailed-design.md) | R1 Clip 管线（PushClip/PopClip + TextBox 横向滚动——替换逐行截断） | ✅ 已实现（2026-08-28） |
+
+## Phase9.6 动画系统（✅ 2026-08-30）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase9.6-animation-requirements.md](phase9.6-animation-requirements.md) / [preliminary](phase9.6-animation-preliminary-design.md) / [detailed](phase9.6-animation-detailed-design.md) | 动画系统三件套（per-Window AnimationManager + 插值/Easing + 时钟与脏标记契约） | ✅ 已实现（2026-08-30） |
+| [phase9.6-progressbar-requirements.md](phase9.6-progressbar-requirements.md) / [preliminary](phase9.6-progressbar-preliminary-design.md) / [detailed](phase9.6-progressbar-detailed-design.md) | ProgressBar 三件套（ResolveAnimationManager 接缝 + 主题化） | ✅ 已实现（2026-08-29） |
+| [phase9.6-collapsiblepanel-requirements.md](phase9.6-collapsiblepanel-requirements.md) / [preliminary](phase9.6-collapsiblepanel-preliminary-design.md) / [detailed](phase9.6-collapsiblepanel-detailed-design.md) | CollapsiblePanel 三件套（四向折叠 + 单动画值驱动） | ✅ 已实现（2026-08-30） |
+| [phase9.6-panel-container-semantics-detailed-design.md](phase9.6-panel-container-semantics-detailed-design.md) | Panel 容器语义详设（背景透明契约变更） | ✅ 已实现（v1.1） |
+
+## Phase9.7 自适应布局（✅ 2026-09-02）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase9.7-adaptive-layout-requirements.md](phase9.7-adaptive-layout-requirements.md) / [preliminary](phase9.7-adaptive-layout-preliminary-design.md) / [detailed](phase9.7-adaptive-layout-detailed-design.md) | 窗口→尺寸分配三件套（SetStretch/spacing/fillCrossAxis/触发链；契约 10 修订） | ✅ 已实现（v1.2 详设同步实现状态；ModelProbe 消费验证） |
+
+## Phase9.8 AutoSize（✅ 2026-09-02）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase9.8-autosize-requirements.md](phase9.8-autosize-requirements.md) | 需求确认（尺寸意图三分「后调用者赢」/ §3.5 交互冻结 / §3.6 垂直居中验证项 / §3.7 副作用边界） | ✅ v1.5 定稿（GPT 两轮评审） |
+| [phase9.8-autosize-preliminary-design.md](phase9.8-autosize-preliminary-design.md) / [detailed](phase9.8-autosize-detailed-design.md) | 初设 + 详设（GetPreferredSize/AutoSize 签名与 4 行冻结实现 + ResolveMeasurer 接缝 + FakeTextMeasurer） | ✅ 已实现（2026-09-02，151 测试全绿） |
+
+## Phase10 库化（🚧 进行中，目标 0.1.0）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase10-library-requirements.md](phase10-library-requirements.md) | 需求确认（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install-export / 自包含测试 / 外部消费者验收） | ✅ v1.1（GPT 评审 7 项采纳）——待初步设计 |
 
 ## 文档约定
 

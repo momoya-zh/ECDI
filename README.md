@@ -87,6 +87,8 @@ probe-go/             Go backend embedded into ModelProbe as an RC resource
 docs/                 design documents (requirements → preliminary → detailed, per phase)
 ```
 
+📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
+
 ## Status
 
 | Phase | Scope | Status |
