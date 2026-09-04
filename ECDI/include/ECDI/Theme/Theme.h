@@ -6,6 +6,7 @@
 #include "ECDI/Theme/PanelStyle.h"
 #include "ECDI/Theme/CheckBoxStyle.h"
 #include "ECDI/Theme/RadioStyle.h"
+#include "ECDI/Theme/ProgressBarStyle.h"
 
 namespace ECDI{
 
@@ -23,6 +24,7 @@ public:
 	virtual PanelStyle   GetPanelStyle() const = 0;
 	virtual CheckBoxStyle GetCheckBoxStyle() const = 0;   ///< 6.2 CheckBox 专属样式
 	virtual RadioStyle    GetRadioStyle() const = 0;      ///< 6.2 Radio 专属样式
+	virtual ProgressBarStyle GetProgressBarStyle() const = 0;   ///< 9.6 ProgressBar 专属样式
 };
 
 }

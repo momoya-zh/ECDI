@@ -3,6 +3,7 @@
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Font.h"
 #include "ECDI/Core/Point.h"
+#include "ECDI/Core/Size.h"
 #include "ECDI/Theme/TextStyle.h"
 #include "ECDI/Widget/Widget.h"
 
@@ -11,6 +12,7 @@
 namespace ECDI{
 
 class PaintContext;
+class TextMeasurer;
 class Theme;
 
 /// @brief 文本控件基类（B1：第二个文本控件出现时抽取）
@@ -27,9 +29,10 @@ public:
 
 	explicit TextWidget(std::string&& text);
 
-	void SetText(const std::string& text);
+	/// @brief 设置文本（9.7 修：升格 virtual——TextBox override 置行缓存失效；外部替换文本绕过编辑操作路径）
+	virtual void SetText(const std::string& text);
 
-	void SetText(std::string&& text);
+	virtual void SetText(std::string&& text);
 
 	const std::string& GetText() const noexcept;
 
@@ -49,6 +52,10 @@ public:
 	/// @brief 运行时文本样式覆盖（D7：Set() 标记 Override，后续 ApplyTheme 不覆盖）
 	void SetStyle(TextStyleOverride override);
 
+	/// @brief 内容测量 preferred（9.8 override——单行文本宽 + 行高；经 ResolveMeasurer 拿测量器）
+	/// @details 有测量器 → 内容测量；无（运行时 fallback——无窗口且未注入）→ Widget 默认当前尺寸
+	[[nodiscard]] Size GetPreferredSize() const override;
+
 protected:
 
 	/// @brief 文本绘制位置（B3：对齐策略虚方法，不写死）
@@ -57,6 +64,11 @@ protected:
 	/// @return 默认：水平左对齐 + 垂直居中（P7 定案）
 	virtual Point CalculateTextPosition(int x, int y, float textWidth, float lineHeight) const;
 
+	/// @brief 测量器解析接缝（9.8——ProgressBar ResolveAnimationManager 同构；仅服务 preferred 测量，不扩散）
+	/// @details 正常运行 = Window 的 TextMeasurer（const 方法内 const_cast——GetLineHeight 先例）；
+	/// 测试派生类 override 返回 FakeTextMeasurer；nullptr = 无窗口且未注入 → 调用方走 Widget 默认
+	[[nodiscard]] virtual TextMeasurer* ResolveMeasurer() const;
+
 	/// @brief 绘制文本（空文本跳过 → MeasureText 宽高 → CalculateTextPosition → DrawText）
 	void DrawTextContent(PaintContext& ctx, int x, int y);
 
@@ -64,6 +76,12 @@ protected:
 
 	/// @brief 文本样式（foreground + font）——所有文本控件的文字视觉唯一来源（Phase 9）
 	TextStyle m_style;
+
+private:
+
+	/// @brief preferred 内容测量实现（9.8——private：TextWidget 语义组成部分，非 cpp 匿名辅助）
+	/// @details Label/Button 0 inset（§3.2 冻结）：{文本测量宽, 行高}——空文本 MeasureText 返回 {0,0} → 宽 0 诚实
+	[[nodiscard]] Size DoMeasureText(TextMeasurer& measurer) const;
 
 };
 

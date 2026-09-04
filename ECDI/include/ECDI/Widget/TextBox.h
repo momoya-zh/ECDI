@@ -30,6 +30,35 @@ public:
 
 	bool CanFocus() const noexcept override { return true; }
 
+	// ── P1：echo 掩码（Key 输入打点；显示层打点、数据层不变——GetText 永远真实值）──
+
+	enum class EchoMode{ Normal, Password };
+
+	/// @brief 设置回显模式（Password = 绘制/测量用掩码串 U+2022 `•`，每码点一个）
+	/// @details 显示层打点、数据层不变：m_text/GetText/编辑操作全在真实文本上；
+	/// IME 组合期显示原文（组合串不打点），提交后打点。切换后 Invalidate。
+	void SetEchoMode(EchoMode mode);
+
+	EchoMode GetEchoMode() const noexcept { return m_echoMode; }
+
+	// ── P1：只读（JSON 预览防误改；只禁编辑、不禁导航/选择/复制/程序 SetText）──
+
+	/// @brief 设置只读（true = 编辑操作/IME 组合 no-op；方向键/选区/Ctrl+A/C/SetText 照常）
+	void SetReadOnly(bool readOnly);
+
+	bool IsReadOnly() const noexcept { return m_readOnly; }
+
+	// ── P1：单行模式（BaseURL/API Key 等单行输入——Enter 不再换行）──
+
+	/// @brief 设置单行（true = Enter/NumpadEnter no-op，不插入 `\n`；粘贴含换行仍按多行渲染——单行是键盘语义非数据约束）
+	void SetSingleLine(bool singleLine);
+
+	bool IsSingleLine() const noexcept { return m_singleLine; }
+
+	/// @brief 内容测量 preferred（9.8 override）——多行（含 \n）→ Widget 默认当前尺寸（§3.4 挂账，v1 手工 SetSize）；
+	/// 单行 → TextWidget 内容测量 + padding×2（§3.6 验证项：height = lineH + padding×2 → 自然垂直居中）
+	[[nodiscard]] Size GetPreferredSize() const override;
+
 	// ── Phase 9：主题与样式（using 防名字隐藏——保留基类 SetStyle(TextStyleOverride)，可分别设置两 Style）──
 
 	using TextWidget::SetStyle;
@@ -38,6 +67,17 @@ public:
 
 	/// @brief TextBox 专属样式覆盖（文字颜色/字体经 TextWidget::SetStyle(TextStyleOverride)）
 	void SetStyle(TextBoxStyleOverride override);
+
+	/// @brief 设置宽高（9.5 R1 override：基类改几何后 EnsureCaretVisible + Invalidate——
+	/// 缩窗后光标越出可视区立即滚回；Layout 只 SetPosition 不碰尺寸，SetSize 是尺寸唯一入口）
+	void SetSize(int w, int h) override;
+
+	// ── SetText override（9.7 修：外部替换文本绕过编辑操作路径，必须置行缓存失效）──
+	/// @details TextWidget::SetText 直接改 m_text——多行内容（\n）不失效 m_lineStarts 会按旧缓存画成
+	/// 单行。override 只做缓存失效 + Invalidate，**不触发 RaiseTextChanged/callback**（D7 契约保持）。
+	void SetText(const std::string& text) override;
+
+	void SetText(std::string&& text) override;
 
 	// ── 回调注册（7.5 新增：表单/数据绑定核心需求）──────────
 
@@ -89,6 +129,9 @@ public:
 
 	/// @brief 垂直滚动偏移（8.5.2；只读查询，无副作用——测试/调试用，同 GetSelection 先例）
 	float GetScrollOffsetY() const noexcept{ return m_scrollOffsetY; }
+
+	/// @brief 水平滚动偏移（9.5 R1；只读查询，无副作用——测试/调试用，同 GetScrollOffsetY 先例）
+	float GetScrollOffsetX() const noexcept{ return m_scrollOffsetX; }
 
 	// ── 选择查询（7.2 新增：只读，无副作用——Phase 10 集成测试前置）──────────
 
@@ -204,11 +247,26 @@ protected:
 	/// @brief 双击位置 → 选中范围 [start, end)（C5：code point 级——word 整词 / non-word 单码点）
 	std::pair<size_t, size_t> GetWordBounds(size_t clickIndex) const;
 
+	/// @brief 横向滚动偏移纯规则（9.5 R1；跟手模式——光标越右缘滚到光标右、越左缘滚到光标左、clamp ≥ 0）
+	/// @details 纯数学无测量（caretX 由调用方测量传入）——无窗口测试可直测（ClipTests S7/S8）；EnsureCaretVisible 调用
+	static float ClampScrollOffsetX(float current, float caretX, float viewWidth);
+
 private:
 
 	/// @brief 文本变化通知入口（非虚，内部唯一入口——D9 契约）
 	/// @details 先调 OnTextChanged() 虚方法，再调 m_onTextChanged() 回调——彼此独立
 	void RaiseTextChanged();
+
+	// ── P1：echo 掩码 / 只读（显示层打点、数据层不变；门禁在编辑操作/IME 入口）──
+
+	EchoMode m_echoMode = EchoMode::Normal;   ///< 回显模式（Password = 掩码绘制/测量）
+	bool m_readOnly = false;                  ///< 只读（编辑/IME no-op；导航/选择/复制/SetText 照常）
+	bool m_singleLine = false;                ///< 单行（Enter 不换行——BaseURL/Key 等单行输入）
+
+	/// @brief 构建显示串（echo Password 时每码点 → U+2022 `•`；IME 组合区间保留原文）
+	/// @details 显示串与真实串**码点 1:1**（仅字节不同）——OnPaint/光标/选区/点击测量全用 display，
+	/// 码点索引映射安全；GetText/编辑操作仍用 m_text（真实值）。O(n) 每帧构建，短输入可接受（YAGNI 不缓存）。
+	std::string BuildDisplayText() const;
 
 	size_t m_caret = 0;          ///< 光标位置（码点索引；构造后默认文本起始，不自动跳末尾——标准行为）
 	bool m_showCaret = false;    ///< 是否显示光标（焦点时 true；闪烁状态未来另立）
@@ -248,6 +306,7 @@ private:
 	std::vector<size_t> m_lineStarts;      ///< 每行起始码点索引缓存（m_lineStarts[0]=0；行数 = size()-1）
 	bool m_needsLineRecalc = true;         ///< 编辑后标记需重算行信息（失效责任见 B4）
 	float m_scrollOffsetY = 0.0f;          ///< 垂直滚动偏移（像素；clamp [0, GetMaxScrollOffset()]）
+	float m_scrollOffsetX = 0.0f;          ///< 水平滚动偏移（像素；跟手模式——光标边界推导，clamp ≥ 0，无上限）
 	float m_preferredColumn = 0.0f;        ///< 目标列（像素宽——Up/Down 跨行保持的 X；Left/Right/Home/End/点击/编辑后重置）
 
 	// ── Selection 辅助（5.5.2；全 private——内部算法不暴露，Phase 7 测试体系补测）──

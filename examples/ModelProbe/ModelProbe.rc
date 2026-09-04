@@ -1,0 +1,9 @@
+﻿// ECDI 资源脚本（P2——ModelProbe 后端嵌入 + 应用图标，release 单 exe 分发；examples/ModelProbe/ 独立）
+// 路径基准 = vcxproj 目录（ECDI\ECDI\——rc.exe 的 CWD）：probe ..\probe-go（仓库根）、ico ..\examples\ModelProbe\
+// RCDATA 101 = probe.exe 后端（与 ModelProbe.cpp `kProbeResourceId` 对齐）
+// ICON  102 = app.ico 应用图标（与 ModelProbe.rc.in 同步——改一侧必须同步另一侧）
+#define IDR_PROBE_BIN 101
+#define IDI_APP 102
+
+IDR_PROBE_BIN RCDATA "..\\probe-go\\probe.exe"
+IDI_APP        ICON    "..\\examples\\ModelProbe\\app.ico"

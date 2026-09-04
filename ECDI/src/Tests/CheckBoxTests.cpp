@@ -169,6 +169,7 @@ void TestCheckBoxTheme()
 }
 
 // S11: CheckBox 未选中绘制命令（框 + 背景 + 文本——勾线不出现）
+// 9.5 R1：命令流 = PushClip(控件边界) → 外框 → 内背景 → 文本 → PopClip
 void TestCheckBoxPaintUnchecked()
 {
     RecordingBackend backend;
@@ -179,13 +180,16 @@ void TestCheckBoxPaintUnchecked()
     box.SetSize(100, 24);
     box.Paint(ctx, 0, 0);
 
-    EXPECT_EQ(commands.size(), 3);
-    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[0]));   // 外框
-    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[1]));   // 内背景
-    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[2]));   // 文本
+    EXPECT_EQ(commands.size(), 5);
+    EXPECT_TRUE(std::holds_alternative<PushClipCommand>(commands[0]));   // 控件边界
+    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[1]));   // 外框
+    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[2]));   // 内背景
+    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[3]));   // 文本
+    EXPECT_TRUE(std::holds_alternative<PopClipCommand>(commands[4]));   // 严格配对
 }
 
 // S12: CheckBox 选中绘制命令（勾 = 两条 DrawLine 折线——勾几何 25%→45%→78%）
+// 9.5 R1：命令流 = PushClip → 外框 → 内背景 → 勾段1 → 勾段2 → 文本 → PopClip
 void TestCheckBoxPaintChecked()
 {
     RecordingBackend backend;
@@ -197,23 +201,26 @@ void TestCheckBoxPaintChecked()
     box.SetChecked(true);
     box.Paint(ctx, 0, 0);
 
-    EXPECT_EQ(commands.size(), 5);
-    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[0]));         // 外框
-    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[1]));         // 内背景
-    EXPECT_TRUE(std::holds_alternative<DrawLineCommand>(commands[2]));         // 勾段 1（左下→中）
-    EXPECT_TRUE(std::holds_alternative<DrawLineCommand>(commands[3]));         // 勾段 2（中→右上）
-    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[4]));         // 文本
+    EXPECT_EQ(commands.size(), 7);
+    EXPECT_TRUE(std::holds_alternative<PushClipCommand>(commands[0]));         // 控件边界
+    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[1]));         // 外框
+    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[2]));         // 内背景
+    EXPECT_TRUE(std::holds_alternative<DrawLineCommand>(commands[3]));         // 勾段 1（左下→中）
+    EXPECT_TRUE(std::holds_alternative<DrawLineCommand>(commands[4]));         // 勾段 2（中→右上）
+    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[5]));         // 文本
+    EXPECT_TRUE(std::holds_alternative<PopClipCommand>(commands[6]));          // 严格配对
 
     // 勾几何验证（boxSize=16：25%/55% → 45%/75% → 78%/28%）
-    const auto& l1 = std::get<DrawLineCommand>(commands[2]);
+    const auto& l1 = std::get<DrawLineCommand>(commands[3]);
     EXPECT_NEAR(l1.start.x, 16.0f * 0.25f, 0.01f);
     EXPECT_NEAR(l1.end.x,   16.0f * 0.45f, 0.01f);
-    const auto& l2 = std::get<DrawLineCommand>(commands[3]);
+    const auto& l2 = std::get<DrawLineCommand>(commands[4]);
     EXPECT_NEAR(l2.start.x, 16.0f * 0.45f, 0.01f);
     EXPECT_NEAR(l2.end.x,   16.0f * 0.78f, 0.01f);
 }
 
 // S13: Radio 未选中绘制命令（外圆 + 内背景 + 文本）
+// 9.5 R1：命令流 = PushClip → 外圆 → 内背景 → 文本 → PopClip
 void TestRadioPaintUnchecked()
 {
     RecordingBackend backend;
@@ -224,13 +231,16 @@ void TestRadioPaintUnchecked()
     radio.SetSize(100, 24);
     radio.Paint(ctx, 0, 0);
 
-    EXPECT_EQ(commands.size(), 3);
-    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[0]));  // 外圆
-    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[1]));  // 内背景
-    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[2]));         // 文本
+    EXPECT_EQ(commands.size(), 5);
+    EXPECT_TRUE(std::holds_alternative<PushClipCommand>(commands[0]));         // 控件边界
+    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[1]));  // 外圆
+    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[2]));  // 内背景
+    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[3]));         // 文本
+    EXPECT_TRUE(std::holds_alternative<PopClipCommand>(commands[4]));          // 严格配对
 }
 
 // S14: Radio 选中绘制命令（外圆 + 内背景 + 圆点——圆点 = circleSize*40%）
+// 9.5 R1：命令流 = PushClip → 外圆 → 内背景 → 圆点 → 文本 → PopClip
 void TestRadioPaintChecked()
 {
     RecordingBackend backend;
@@ -242,14 +252,16 @@ void TestRadioPaintChecked()
     radio.SetChecked(true);
     radio.Paint(ctx, 0, 0);
 
-    EXPECT_EQ(commands.size(), 4);
-    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[0]));  // 外圆
-    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[1]));  // 内背景
-    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[2]));  // 圆点
-    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[3]));         // 文本
+    EXPECT_EQ(commands.size(), 6);
+    EXPECT_TRUE(std::holds_alternative<PushClipCommand>(commands[0]));         // 控件边界
+    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[1]));  // 外圆
+    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[2]));  // 内背景
+    EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[3]));  // 圆点
+    EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[4]));         // 文本
+    EXPECT_TRUE(std::holds_alternative<PopClipCommand>(commands[5]));          // 严格配对
 
     // 圆点几何验证（circleSize=16 → dot=6.4, offset=4.8）
-    const auto& dot = std::get<DrawRoundedRectCommand>(commands[2]);
+    const auto& dot = std::get<DrawRoundedRectCommand>(commands[3]);
     EXPECT_NEAR(dot.rect.x, 4.8f, 0.01f);
     EXPECT_NEAR(dot.rect.width, 6.4f, 0.01f);
     EXPECT_NEAR(dot.cornerRadius, 3.2f, 0.01f);

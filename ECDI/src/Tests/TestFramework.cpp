@@ -151,8 +151,8 @@ void PrintSummary(const std::vector<TestResult>& results)
         }
     }
 
-    const int passed = std::count_if(results.begin(), results.end(),
-        [](const TestResult& r) { return r.passed; });
+    const int passed = static_cast<int>(std::count_if(results.begin(), results.end(),
+        [](const TestResult& r) { return r.passed; }));
     const int failed = static_cast<int>(results.size()) - passed;
     Logger::Log(LogLevel::Info, ToWide(std::string("----------------------------------\nTests: ") +
         std::to_string(results.size()) + "  Passed: " + std::to_string(passed) +

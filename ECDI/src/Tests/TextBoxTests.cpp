@@ -5,14 +5,33 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyModifier.h"
 #include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
+#include "ECDI/Render/PaintContext.h"
+#include "ECDI/Render/RecordingBackend.h"
+#include "ECDI/Render/RenderCommand.h"
+#include "ECDI/Render/TextMeasurer.h"
 
 using namespace ECDI;
 
 namespace {
 
+constexpr float kEps = 0.001f;   // EXPECT_NEAR 精度（同 WidgetTests/ProgressBarTests）
+
 /// @brief 可测 TextBox：暴露 protected 键盘选择路径（无窗口安全——SyncTextInputCaret 有 Window 防御）
 /// @note CaretIndexFromX 为 private（点击定位算法），派生类不可访问——算法直测
 /// 留待最小窗口集成测试（与拖选事件流同归；不为此改框架可见性——P0 边界修正，v0.2 实现记录）。
+class FakeTextMeasurer : public TextMeasurer   // 9.8：确定性测量（每码点 8 宽/行高 16——与 WidgetTests 同构）
+{
+public:
+	Size MeasureText(const Font&, const std::string& text) override{
+		size_t count = 0;
+		for (size_t i = 0; i < text.size(); ++i)
+			if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+				++count;
+		return Size{ static_cast<float>(count) * 8.0f, 16.0f };
+	}
+	float LineHeight(const Font&) override{ return 16.0f; }
+};
+
 class TestableTextBox : public TextBox
 {
 public:
@@ -27,7 +46,13 @@ public:
     using TextBox::CaretIndexFromPosition;   ///< 8.5.2：多行坐标定位（private——Y 定行无窗口可测）
     using TextBox::GetWordBounds;      ///< 8.5.2：双击选词（private——纯码点逻辑）
     using TextBox::OnMouseWheel;       ///< 8.5.2：滚轮（protected override）
+protected:
+    TextMeasurer* ResolveMeasurer() const override{ return &ms_fake; }   // 9.8：preferred 测量接缝
+private:
+    static FakeTextMeasurer ms_fake;
 };
+
+FakeTextMeasurer TestableTextBox::ms_fake;
 
 void TestTextBoxInsertDelete()
 {
@@ -1052,6 +1077,161 @@ void TestTextBoxUndoRedo()
     }
 }
 
+// ── P1：echo 掩码 / 只读 / 形态（modelprobe-p1-detailed-design §3/§8）──
+
+void TestTextBoxEchoMasked()
+{
+	// PaintMasked：Password 绘制串 = 每码点一个 •（U+2022，UTF-8 3 字节）
+	TextBox box("abc");
+	box.SetEchoMode(TextBox::EchoMode::Password);
+	box.SetSize(200, 30);
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	box.Paint(ctx, 10, 20);
+	bool foundMasked = false;
+	for (const auto& cmd : commands){
+		if (const auto* text = std::get_if<DrawTextCommand>(&cmd)){
+			EXPECT_EQ(text->text, "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2");   // •••
+			foundMasked = true;
+		}
+	}
+	EXPECT_TRUE(foundMasked);
+}
+
+void TestTextBoxEchoGetTextReal()
+{
+	// GetTextReal：数据层不变（显示层打点）——编辑作用于真实文本
+	TextBox box("sk-abc");
+	box.SetEchoMode(TextBox::EchoMode::Password);
+	EXPECT_EQ(box.GetText(), "sk-abc");
+	box.MoveCaretToEnd();
+	box.InsertCodepoint(U'X');
+	EXPECT_EQ(box.GetText(), "sk-abcX");
+	EXPECT_EQ(box.GetCaret(), 7);
+}
+
+void TestTextBoxReadOnlyEditNoOp()
+{
+	TextBox box("abc");
+	box.SetReadOnly(true);
+	box.MoveCaretToEnd();
+	box.InsertCodepoint(U'X');
+	box.DeleteBackward();
+	box.InsertText("YY");
+	box.Undo();
+	box.Redo();
+	EXPECT_EQ(box.GetText(), "abc");   // 编辑全 no-op
+	EXPECT_EQ(box.GetCaret(), 3);
+	// SetText 仍可程序写入（预览刷新）
+	box.SetText("{\"k\":1}");
+	EXPECT_EQ(box.GetText(), "{\"k\":1}");
+	// 关闭只读恢复编辑
+	box.SetReadOnly(false);
+	box.MoveCaretToEnd();
+	box.InsertCodepoint(U'Z');
+	EXPECT_EQ(box.GetText(), "{\"k\":1}Z");
+}
+
+void TestTextBoxReadOnlyCompositionRefuse()
+{
+	TestableTextBox box("abc");   // TestableTextBox：UpdateComposition/CommitComposition 经 using 暴露（protected）
+	box.SetReadOnly(true);
+	box.MoveCaretToEnd();
+	box.UpdateComposition("ni");   // 只读 → no-op（不进入组合）
+	EXPECT_EQ(box.GetText(), "abc");
+	box.CommitComposition("你好");
+	EXPECT_EQ(box.GetText(), "abc");   // 未组合 → no-op
+}
+
+void TestTextBoxSingleLineEnterNoOp()
+{
+	// 单行：Enter 不插入 \n（多行默认 Enter 换行——8.5.2 行为不变）
+	TestableTextBox box("abc");
+	box.MoveCaretToEnd();
+	box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Enter, KeyModifier::None));
+	EXPECT_EQ(box.GetText(), "abc\n");   // 默认多行：Enter 换行
+	EXPECT_EQ(box.GetCaret(), 4);
+
+	box.SetSingleLine(true);
+	box.MoveCaretToEnd();
+	box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Enter, KeyModifier::None));
+	EXPECT_EQ(box.GetText(), "abc\n");   // 单行：Enter no-op
+	EXPECT_EQ(box.GetCaret(), 4);
+
+	// 单行开关幂等
+	box.SetSingleLine(true);
+	EXPECT_TRUE(box.IsSingleLine());
+}
+
+void TestTextBoxPreferredMultilineNotParticipating()
+{
+	// §3.4：多行（含 \n）→ preferred = 当前尺寸（v1 不参与 AutoSize——高度仍手工 SetSize）
+	TestableTextBox box("ab\ncd");
+	box.SetSize(100, 30);
+	const Size preferred = box.GetPreferredSize();
+	EXPECT_NEAR(preferred.width, 100.0f, kEps);
+	EXPECT_NEAR(preferred.height, 30.0f, kEps);
+}
+
+void TestTextBoxPreferredSingleLine()
+{
+	// §3.6 验证项：单行 "Hi"（2 码点 × 8 = 16 宽）+ padding 4 → {16+8, 16+8} = {24, 24}——
+	// height == lineH + padding×2 → AutoSize 后上下对称自然垂直居中（不做 VerticalCentered API）
+	TestableTextBox box("Hi");
+	box.SetSize(999, 999);
+	box.SetStyle(TextBoxStyleOverride{ .padding = 4.0f });
+	const Size preferred = box.GetPreferredSize();
+	EXPECT_NEAR(preferred.width, 24.0f, kEps);
+	EXPECT_NEAR(preferred.height, 24.0f, kEps);
+	EXPECT_TRUE(box.AutoSize());
+	EXPECT_EQ(box.GetWidth(), 24);
+	EXPECT_EQ(box.GetHeight(), 24);
+}
+
+void TestTextBoxShapeRounded()
+{
+	TextBox box;
+	box.SetSize(100, 30);
+	box.SetStyle(TextBoxStyleOverride{
+		.background = Color::White(),
+		.cornerRadius = 6.0f,
+	});
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	box.Paint(ctx, 0, 0);
+	// 背景命令 = DrawRoundedRectCommand（radius 6）——命令流 = PushClip → 背景 → PopClip
+	EXPECT_EQ(commands.size(), 3);
+	EXPECT_TRUE(std::holds_alternative<DrawRoundedRectCommand>(commands[1]));
+	const auto& rr = std::get<DrawRoundedRectCommand>(commands[1]);
+	EXPECT_NEAR(rr.cornerRadius, 6.0f, kEps);
+}
+
+void TestTextBoxShapeBorderRing()
+{
+	TextBox box;
+	box.SetSize(100, 30);
+	box.SetStyle(TextBoxStyleOverride{
+		.background = Color::FromRGBA8(28, 33, 43, 255),
+		.cornerRadius = 6.0f,
+		.borderWidth = 1.0f,
+		.borderColor = Color::FromRGBA8(42, 49, 64, 255),
+	});
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	box.Paint(ctx, 0, 0);
+	// 双矩形序：PushClip → ① 外层 borderColor（radius 6）② 内层背景（内缩 1，radius 5）→ PopClip
+	EXPECT_EQ(commands.size(), 4);
+	const auto& outer = std::get<DrawRoundedRectCommand>(commands[1]);
+	EXPECT_EQ(outer.color, Color::FromRGBA8(42, 49, 64, 255));
+	EXPECT_NEAR(outer.cornerRadius, 6.0f, kEps);
+	const auto& inner = std::get<DrawRoundedRectCommand>(commands[2]);
+	EXPECT_EQ(inner.color, Color::FromRGBA8(28, 33, 43, 255));
+	EXPECT_NEAR(inner.cornerRadius, 5.0f, kEps);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterTextBoxTests()
@@ -1066,4 +1246,13 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.TextSystem2", &TestTextBoxTextSystem2);   // 8.5.1：F1-F15
     GetTestRegistry().Add("TextBox.Multiline", &TestTextBoxMultiline);       // 8.5.2：F16-F30
     GetTestRegistry().Add("TextBox.UndoRedo", &TestTextBoxUndoRedo);         // 8.5.3：F35-F45
+    GetTestRegistry().Add("TextBox.EchoMasked", &TestTextBoxEchoMasked);     // P1：掩码绘制
+    GetTestRegistry().Add("TextBox.EchoGetTextReal", &TestTextBoxEchoGetTextReal);  // P1：数据层真实值
+    GetTestRegistry().Add("TextBox.ReadOnlyEditNoOp", &TestTextBoxReadOnlyEditNoOp);  // P1：只读门禁
+    GetTestRegistry().Add("TextBox.ReadOnlyCompositionRefuse", &TestTextBoxReadOnlyCompositionRefuse);  // P1：只读拒 IME
+    GetTestRegistry().Add("TextBox.SingleLineEnterNoOp", &TestTextBoxSingleLineEnterNoOp);  // P1：单行 Enter 不换行
+    GetTestRegistry().Add("TextBox.MultilineNotParticipating", &TestTextBoxPreferredMultilineNotParticipating);  // 9.8：多行不参与
+    GetTestRegistry().Add("TextBox.SingleLinePreferred", &TestTextBoxPreferredSingleLine);  // 9.8：padding 修正 + 自然居中验证
+    GetTestRegistry().Add("TextBox.ShapeRounded", &TestTextBoxShapeRounded);  // P1：圆角背景
+    GetTestRegistry().Add("TextBox.ShapeBorderRing", &TestTextBoxShapeBorderRing);  // P1：双矩形描边环
 }

@@ -97,7 +97,8 @@ void Radio::OnPaint(PaintContext& ctx, int x, int y){
 		return;
 	const float radius = size / 2.0f;
 	const float bw = (std::max)(0.0f, m_style.borderWidth.value);
-	const Color border = HasFocus() ? m_style.focusBorder.value : m_style.border.value;
+	// 焦点态边框色（focusBorder）vs 普通（border）；9.6 收尾方案 A：ShowFocusRect 开关（默认 true）
+	const Color border = (HasFocus() && ShowFocusRect()) ? m_style.focusBorder.value : m_style.border.value;
 
 	ctx.DrawRoundedRect(Rect{ (float)x, (float)y, size, size }, radius, border);
 	ctx.DrawRoundedRect(Rect{ (float)x + bw, (float)y + bw, size - 2.0f*bw, size - 2.0f*bw },

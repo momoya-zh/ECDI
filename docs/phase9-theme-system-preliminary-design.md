@@ -260,7 +260,7 @@ include/ECDI/Theme/
 ├── TextBoxStyle.h             ///< TextBoxStyle 结构 + TextBoxStyleOverride
 ├── CheckBoxStyle.h            ///< CheckBoxStyle 结构 + CheckBoxStyleOverride
 ├── RadioStyle.h               ///< RadioStyle 结构 + RadioStyleOverride
-└── PanelStyle.h               ///< PanelStyle 结构（无 Override——Panel 通常不需运行时改样式）
+└── PanelStyle.h               ///< PanelStyle 结构 + PanelStyleOverride（2026-08-29 落地——此前 MVP 主动无 Override，归 YAGNI）
 
 src/ECDI/Theme/
 └── DefaultTheme.cpp           ///< DefaultTheme 实现（填充当前硬编码值为默认值）

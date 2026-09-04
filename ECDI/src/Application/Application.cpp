@@ -2,6 +2,7 @@
 
 #include "ECDI/Platform/Win32/Win32PlatformApplication.h"
 #include "ECDI/Window/Window.h"
+#include "ECDI/Animation/AnimationManager.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
 #include "ECDI/EventSystem/Window/WindowCreatedEvent.h"
@@ -125,6 +126,20 @@ void Application::OnWindowCloseRequested(
 }
 
 void Application::OnTimer(const TimerEvent& event){
+
+	// 9.6：动画统一 tick 路由（d2——保留 timerId 分支，先于焦点派发；
+	// TimerEvent 自带来源窗口 GetWindow()——结构性免查找，不经焦点链）
+	if (event.GetTimerId() == AnimationManager::kAnimationTickTimer){
+
+		if (event.GetWindow() != nullptr){
+
+			event.GetWindow()->OnAnimationTick();
+
+		}
+
+		return;
+
+	}
 
 	// 8.5.1：定时器触发 → 派发给焦点控件（与 OnCharInput 同路径——非坐标事件，无 HitTest）
 	Widget* target = FindFocusedWidget(*event.GetWindow());

@@ -2,6 +2,7 @@
 
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Rect.h"
+#include "ECDI/Core/Size.h"
 #include "ECDI/Render/PaintContext.h"
 #include "ECDI/Widget/WidgetState.h"
 
@@ -81,7 +82,32 @@ public:
 	void SetPosition(int x, int y) { m_geometry.x = static_cast<float>(x); m_geometry.y = static_cast<float>(y); }
 
 	/// @brief 设置宽高
-	void SetSize(int w, int h) { m_geometry.width = static_cast<float>(w); m_geometry.height = static_cast<float>(h); }
+	/// @details 虚函数（9.5 R1：TextBox override 挂 Resize 后 Caret 可见——Layout 只 SetPosition 不碰尺寸，
+	/// SetSize 是尺寸唯一入口）。签名不变、行为兼容；基类实现 = 直接写 m_geometry（移 Widget.cpp）
+	virtual void SetSize(int w, int h);
+
+	// ── Stretch（9.7 自适应布局：剩余空间分配权重）────────
+
+	/// @brief 设置剩余空间分配权重（9.7——0 = 不参与分配，保持当前尺寸；>0 = 主轴尺寸由父 Layout 分配）
+	/// @pre stretch >= 0（debug assert；负值无合理权重语义）
+	void SetStretch(int stretch) noexcept;
+
+	/// @brief 剩余空间分配权重只读查询（默认 0——不参与分配，向后兼容锚点）
+	[[nodiscard]] int GetStretch() const noexcept{ return m_stretch; }
+
+	// ── AutoSize（9.8 内容自适应：GetPreferredSize 查询 + AutoSize 显式动作）────
+
+	/// @brief 控件「希望」的尺寸（内容驱动；未 override = 当前尺寸——零回归；兑现 Size.h 注释）
+	/// @details 9.8：让控件知道自己需要多大。默认返回当前尺寸；TextWidget override 返回内容测量值；
+	/// TextBox override 加 padding。preferred 是查询——尺寸调整走 AutoSize()
+	[[nodiscard]] virtual Size GetPreferredSize() const;
+
+	/// @brief 按 GetPreferredSize() 调整自身尺寸（9.8 显式命令——后调用者赢，需求 R5 v1.5）
+	/// @return true = 实际调用了 SetSize；false = stretch 互斥 no-op 或尺寸未变化
+	/// @note §3.7 纯 geometry operation：内部只调 SetSize（虚分派——TextBox override 既有语义）；
+	///       不 Arrange、不 Invalidate、不挂钩 SetText——布局/重绘由调用方负责。
+	///       float → int 向零截断（v1 不引入 rounding policy）
+	bool AutoSize();
 
 	int GetX() const noexcept { return static_cast<int>(m_geometry.x); }
 
@@ -165,6 +191,18 @@ public:
 	/// @brief 当前 Widget 是否拥有键盘焦点（上溯到根查 Window 的焦点状态）
 	bool HasFocus() const noexcept;
 
+	// ── 聚焦框开关（9.6 收尾，方案 A——行为开关，与 Style 体系正交）──
+
+	/// @brief 设置是否显示聚焦框（视觉开关；默认 true——既有行为不变）
+	/// @details 各控件 OnPaint 的焦点视觉统一走 ShowFocusRect() 门控：
+	/// Button 点线框 / CheckBox·Radio 边框换色 / TextBox 边框环。
+	/// 焦点状态本身（HasFocus / Tab 导航 / 键盘事件）不受影响。
+	/// TextBox 的文本内缩（Caret/Selection/IME 坐标同源）不与视觉框绑定——关闭后仍保留。
+	void SetShowFocusRect(bool show) noexcept{ m_showFocusRect = show; }
+
+	/// @brief 是否显示聚焦框（默认 true）
+	bool ShowFocusRect() const noexcept{ return m_showFocusRect; }
+
 	/// @brief 获取绝对坐标（父链累加；TextBox 光标/ScrollBar/Popup/Tooltip 未来用）
 	Point GetAbsolutePosition() const noexcept;
 
@@ -208,6 +246,10 @@ private:
 	Rect m_geometry;		///< 位置与尺寸（Core 公共类型 Rect(float)，决策 1）
 
 	WidgetState m_state;		///< 可见性与启用状态
+
+	bool m_showFocusRect = true;	///< 聚焦框视觉开关（9.6 收尾方案 A；默认显示）
+
+	int m_stretch = 0;		///< 剩余空间分配权重（9.7；默认 0 = 不参与分配——向后兼容锚点）
 
 	std::unique_ptr<Layout> m_layout;
 

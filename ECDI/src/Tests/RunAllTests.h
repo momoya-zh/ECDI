@@ -17,5 +17,11 @@ void RegisterTestFrameworkTests();
 void RegisterThemeTests();
 void RegisterCheckBoxTests();
 void RegisterHoverTests();
+void RegisterClipTests();
+void RegisterAnimationTests();
+void RegisterCollapsiblePanelTests();
+void RegisterProgressBarTests();
+void RegisterChildProcessTests();
+void RegisterModelProbeTests();
 
 } // namespace ECDI::Test

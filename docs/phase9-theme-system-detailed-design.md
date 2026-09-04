@@ -1,6 +1,6 @@
 ﻿# Phase 9 主题系统 — 详细设计
 
-> 状态：v1.4（2026-08-25）｜详细设计定稿（GPT 评审整合 v1.4——"修掉几何边界问题后即可锁版，不需要再继续设计"）
+> 状态：v1.8（2026-08-31）｜v1.4 定稿后增量修订（v1.5 9.6 收尾回写 / v1.6 Panel 设色 / v1.7 Panel 容器语义变更 / v1.8 ProgressBar 主题接入——修订记录见 §10）
 > 前序：Phase 9 初步设计 v1.1（GPT 评审通过）/ Phase 8 渲染能力 ✅ / Phase 8.5 文本系统 2.0 ✅
 > 相关：phase9-theme-system-preliminary-design.md（初步设计 v1.1）/ Core/Color.h / Core/Font.h / Render/RenderingBackend.h / Widget/Button.cpp / Widget/Panel.cpp / Widget/TextWidget.cpp / Widget/Label.h / Widget/TextBox.cpp
 
@@ -182,10 +182,17 @@ struct TextBoxStyleOverride{
 
 namespace ECDI{
 
-/// @brief Panel 专属样式（无 Override 结构——Phase 9 MVP 主动限制，非 StyleField 不支持；
-/// Panel 背景通常由布局/主题决定，运行时覆盖需求出现时再加 PanelStyleOverride）
+/// @brief Panel 专属样式
+/// @details 样式字段均为 StyleField（含 override 标志位，D7 契约）。
+/// 单实例覆盖经 Panel::SetStyle(PanelStyleOverride)——2026-08-29 需求落地
+/// （此前 MVP 主动限制无 Override，归 Phase 9 范围控制 YAGNI；需求出现即补，与 Button/TextBox 同构）。
 struct PanelStyle{
     StyleField<Color> background;    ///< 背景色
+};
+
+/// @brief Panel 样式运行时覆盖（仅 background——Panel 当前唯一样式字段）
+struct PanelStyleOverride{
+    std::optional<Color> background;
 };
 
 }
@@ -214,7 +221,7 @@ struct PanelStyle{
 **字段分配（组合）**：
 - `TextStyle`：foreground、font——所有文本控件共享（TextWidget 持有）
 - `ButtonStyle`：background、border、borderWidth、cornerRadius、pressedBackground（Button 持有）
-- `TextBoxStyle`：background、border、borderWidth、selection、composition、caretWidth、padding（TextBox 持有）
+- `TextBoxStyle`：background、border、~~borderWidth~~（2026-08-29 删除——见 v1.5）、selection、composition、caretWidth、padding（TextBox 持有）
 - `PanelStyle`：background（Panel 持有）
 
 ## 4. 类接口设计
@@ -318,7 +325,9 @@ TextBoxStyle DefaultTheme::GetTextBoxStyle() const{
 
 PanelStyle DefaultTheme::GetPanelStyle() const{
     PanelStyle s;
-    s.background.value = Color::Gray();   // 当前 Panel 灰底
+    // v1.7（2026-08-30，phase9.6-panel-container-semantics v1.1）：默认透明——镶板 = 隐形布局容器，
+    // 需要底色的实例经 SetStyle 显式设色（原默认 Color::Gray()）
+    s.background.value = Color::FromRGBA8(0, 0, 0, 0);
     return s;
 }
 
@@ -576,7 +585,7 @@ void TextBox::SetStyle(TextBoxStyleOverride override){
 ### 5.5 Panel
 
 ```cpp
-// src/ECDI/Widget/Panel.cpp 改动
+// src/ECDI/Widget/Panel.cpp 改动（v1.7 现状，2026-08-30）
 Panel::Panel(){
     ApplyTheme(GetDefaultTheme());
 }
@@ -587,9 +596,26 @@ void Panel::ApplyTheme(const Theme& theme){
     Invalidate();
 }
 
+void Panel::SetStyle(PanelStyleOverride override){
+    // v1.6（2026-08-29）：单实例覆盖——仅覆盖传入字段，未传字段保持原值/D7 主题值
+    if (override.background) m_style.background.Set(*override.background);
+    Invalidate();
+}
+
+// v1.7（2026-08-30，phase9.6-panel-container-semantics v1.1）：输入透传——
+// 镶板 = 纯容器，自身永不参与命中；鼠标事件只由子控件接收（HitTest 子优先递归）
+bool Panel::ContainsPoint(int x, int y) const noexcept{
+    (void)x; (void)y;
+    return false;
+}
+
 void Panel::OnPaint(PaintContext& ctx, int x, int y){
-    ctx.DrawRect(Rect{ (float)x, (float)y, (float)GetWidth(), (float)GetHeight() },
-                 m_style.background.value);
+    // v1.7：默认透明（a==0）时短路跳过 DrawRect——性能优化；
+    // PushClip/PopClip 仍由 Widget::Paint 基类管线发出（命令流 size 2）
+    if (m_style.background.value.a > 0.0f){
+        ctx.DrawRect(Rect{ (float)x, (float)y, (float)GetWidth(), (float)GetHeight() },
+                     m_style.background.value);
+    }
 }
 ```
 
@@ -814,6 +840,11 @@ Phase 9.3 透明主题值验证（可选——v1.2 改名：Alpha 能力属 Phas
 
 ## 10. 修订记录
 
+- v1.8（2026-08-31）**ProgressBar 主题接入**（详设：phase9.6-progressbar-detailed-design.md v1.1）：`Theme` 抽象基类新增 `virtual ProgressBarStyle GetProgressBarStyle() const = 0;`（+`#include ProgressBarStyle.h`；全仓唯一派生类 `DefaultTheme` 同步实现，闭环）；`DefaultTheme::GetProgressBarStyle()` 返回默认值——trackColor `(220,220,230)` 浅灰轨道 / fillColor `(80,120,220)` 主题蓝填充（同 Button/TextBox 焦点色协调）/ cornerRadius `0.0f`（= 自动圆角 height/2，详设 §2.5 冻结语义）；`ProgressBarStyle{ trackColor, fillColor, cornerRadius }` + `ProgressBarStyleOverride{ optional }` 定义于新增 `ProgressBarStyle.h`（cornerRadius 注释明确"0 = 自动圆角非真实 0 圆角"）。无既有控件测试波及。
+- v1.7（2026-08-30）**Panel 容器语义变更落地**（详设：phase9.6-panel-container-semantics-detailed-design.md v1.1）：**Panel 默认背景透明**（`DefaultTheme::GetPanelStyle` 灰底 → `Color::FromRGBA8(0,0,0,0)`——镶板 = 隐形布局容器，需底色经 `SetStyle` 显式设色）；**Panel 输入透传**（`Panel::ContainsPoint` override 恒 false——镶板自身永不参与命中，鼠标事件只由子控件接收；HitTest 子优先递归天然支持；固定语义无开关——YAGNI）；**OnPaint alpha 短路**（`a==0` 跳过 DrawRect——性能优化，命令流 PushClip→PopClip size 2）；测试更新（`Widget.PanelPaint` 默认透明断言 + 设色场景恢复 / `Widget.PanelSetStyle` 覆盖前断言改透明 / 新增 `Widget.PanelInputPassThrough`）。触发 = demo 美化前置需求（Panel 默认透明 + 默认跳过鼠标 + CollapsiblePanel 默认收起）。
+- v1.6（2026-08-29）**Panel 单实例设色落地**：新增 `PanelStyleOverride{ std::optional<Color> background }`（`PanelStyle.h`，补 `<optional>`）；`Panel` 新增 `public: void SetStyle(PanelStyleOverride)`（`Panel.h` 声明 + `Panel.cpp` 实现——`if (override.background) m_style.background.Set(...); Invalidate();`，与 Button/TextBox 同构）；`PanelStyle.h` / `Panel.h` / `Panel.cpp` 注释同步（删除「MVP 无 Override」旧陈述）；新增测试 `Widget.PanelSetStyle`（`WidgetTests.cpp`：覆盖前灰底 → 覆盖后自定义色生效 → 覆盖后 `ApplyTheme` 不再回退，验证 D7 overridden 契约）。触发 = 用户需求「镶板能否设色」——此前归 Phase 9 YAGNI，需求出现即按既有模式补（非过度设计：Panel 唯一样式字段即 background）。
+- v1.5（2026-08-29）9.6 收尾回写（**TextBox 焦点内缩 bug 修复 · 方案 B**）：**删除 `TextBoxStyle.borderWidth`**（旧语义 = 焦点内缩量，方案 B 改用 `DrawFocusRect` 后无任何消费者——遵守「StyleField 存了但没用会误导 SetStyle 用户」纪律；同步删除 `TextBoxStyleOverride.borderWidth` / `TextBox::ApplyTheme`·`SetStyle` 赋值 / `DefaultTheme` 默认值 / `ThemeTests` 断言，全仓 grep 确认无其他引用）；**`TextBoxStyle.padding` 语义变更**（焦点专用内缩 → 常驻「样式内边距」，默认 2.0→**0.0**；连带 `GetTextLeftInset/GetTextAreaWidth/GetTextAreaHeight` 去掉 `HasFocus()` 判断——修复焦点切换时文本位移 2px、滚动上限跳变、同一像素点击定位随焦点变化三个问题）；**TextBox 焦点视觉改 `DrawFocusRect` 点线框**（与 Button 同构，直角——TextBoxStyle 无 cornerRadius 字段），并纳入 9.6 新增的 `Widget::SetShowFocusRect/ShowFocusRect` 开关门控。
+  - 注：本版**仅标注**历史快照正文（§3 字段列表等）的差异，不改写 v1.4 及其之前的设计正文——字段真相以代码为准。
 - v1.4（2026-08-25）GPT 评审整合 v1.4（"修掉几何边界问题后即可锁版，不需要再继续设计"）：**🔴 Button 内框尺寸几何防御**（borderWidth 是用户可改值——`尺寸 - 2×borderWidth` 可能为负（width=3/borderWidth=2 → -1 无效 Rect）；局部 `innerWidth/innerHeight/innerRadius = max(0, ...)` 保护，不做复杂 Clamp 工具——YAGNI）；**🟠 §3.4 改名"Style 与 Widget 的组合关系"**（明确 has-a 非 is-a——各 Style 是独立值对象无继承关系，图改为组合持有标注）；**🟠 StyleField::Reset() 补契约注释**（Reset 是 StyleField 层原语，不构成 Widget 层运行时样式 API——不要据此推断应提供 ClearStyle()）。
 - v1.3（2026-08-25）GPT 评审整合 v1.3（"修完 3 个明确问题后可锁版进入 Phase 9.1 实现"）：**🔴 Button/TextBox 的 `m_style` 改 protected**（TestableButton 测试派生类可访问——原 private 无法在派生类访问，编译错误）；**🟠 测试编号统一 T-F01-T-F10**（原文档多处仍写 T-F09，实际已 10 个）；**🟠 Theme 头文件 ×6 → ×7**（新增 TextStyle.h 后未更新计数）；**🟢 明确 SetStyle({}) 重载歧义契约**（Button/TextBox 双 Override 重载共存时 `{}` 有歧义——调用方须用明确类型 Override 对象，主动接受不引入额外接口）。
 - v1.2（2026-08-25）GPT 评审整合 v1.2（"修完 2 个 🔴 后可进入实现"）：**🔴 Button/TextBox 补 `using TextWidget::SetStyle`**（防 C++ 名字隐藏——否则 TextStyleOverride 无法从派生控件设置；§5.3/§5.4 + §3.2 锁死规则）；**🔴 Button::OnPaint 真正消费 `cornerRadius`**（radius==0 → DrawRect / radius>0 → DrawRoundedRect——Phase 8 能力接入，禁死字段；焦点内外框圆角随内缩对应缩小）；**🟠 删除不存在的 ClearOverrides() 引用**（统一 Reset()，明确 Phase 9 MVP 不提供 Widget 层 Override 清除 API）；**🟠 新增 T-F10**（TextStyle + ButtonStyle 独立覆盖共存——using SetStyle + D7 联动验证）；**🟢 Phase 9.3 改名**（"Alpha 消费"→"透明主题值验证（可选）"——职责归位：Alpha 能力属 Phase 8，Phase 9 只消费主题值）；单一视觉真相上升为总规则（"任何视觉属性只能存在一个权威 StyleField"）。

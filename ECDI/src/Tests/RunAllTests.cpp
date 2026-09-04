@@ -13,6 +13,12 @@ void ECDI::Test::RunAllTests()
     RegisterThemeTests();
     RegisterCheckBoxTests();
     RegisterHoverTests();
+    RegisterClipTests();
+    RegisterAnimationTests();
+    RegisterCollapsiblePanelTests();
+    RegisterProgressBarTests();
+    RegisterChildProcessTests();
+    RegisterModelProbeTests();
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

@@ -134,15 +134,18 @@
       <WarningLevel>Level3</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
+      <Optimization>MaxSpeed</Optimization>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>imm32.lib;msimg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
@@ -172,8 +175,10 @@
     <ClCompile Include="src\Core\UTF8.cpp" />
     <ClCompile Include="src\EventSystem\EventRouter.cpp" />
     <ClCompile Include="src\Widget\Label.cpp" />
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\examples\ModelProbe\main.cpp" />
     <ClCompile Include="src\Widget\Panel.cpp" />
+    <ClCompile Include="src\Widget\CollapsiblePanel.cpp" />
+    <ClCompile Include="src\Widget\ProgressBar.cpp" />
     <ClCompile Include="src\Widget\TextWidget.cpp" />
     <ClCompile Include="src\Widget\TextBox.cpp" />
     <ClCompile Include="src\Widget\Widget.cpp" />
@@ -192,6 +197,22 @@
     <ClCompile Include="src\Tests\TextBoxTests.cpp" />
     <ClCompile Include="src\Tests\WidgetTests.cpp" />
     <ClCompile Include="src\Tests\HoverTests.cpp" />
+    <ClCompile Include="src\Tests\ClipTests.cpp" />
+    <ClCompile Include="src\Animation\Easing.cpp" />
+    <ClCompile Include="src\Animation\AnimationManager.cpp" />
+    <ClCompile Include="src\Demo\CollapsiblePanelDemo.cpp" />
+    <ClCompile Include="src\Demo\Showcase.cpp" />
+    <ClCompile Include="..\examples\ModelProbe\ModelProbe.cpp" />
+    <ClCompile Include="src\Tests\AnimationTests.cpp" />
+    <ClCompile Include="src\Tests\CollapsiblePanelTests.cpp" />
+    <ClCompile Include="src\Tests\ProgressBarTests.cpp" />
+    <ClCompile Include="src\Tests\ChildProcessTests.cpp" />
+    <ClCompile Include="src\Tests\ModelProbeTests.cpp" />
+    <ClCompile Include="src\Platform\Win32\Win32ChildProcess.cpp" />
+    <ClCompile Include="src\Platform\Win32\ExecutablePath.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\examples\ModelProbe\ModelProbe.rc" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\ECDI\Application\Application.h" />
@@ -201,6 +222,8 @@
     <ClInclude Include="include\ECDI\Platform\PlatformWindow.h" />
     <ClInclude Include="include\ECDI\Platform\PlatformWindowHost.h" />
     <ClInclude Include="include\ECDI\Platform\PlatformRenderContext.h" />
+    <ClInclude Include="include\ECDI\Platform\ChildProcess.h" />
+    <ClInclude Include="include\ECDI\Platform\ExecutablePath.h" />
     <ClInclude Include="include\ECDI\Platform\PlatformApplication.h" />
     <ClInclude Include="include\ECDI\Platform\Win32\Win32PlatformWindow.h" />
     <ClInclude Include="include\ECDI\Platform\Win32\Win32RenderContext.h" />
@@ -257,6 +280,8 @@
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowResizedEvent.h" />
     <ClInclude Include="Include\ECDI\Widget\Label.h" />
     <ClInclude Include="Include\ECDI\Widget\Panel.h" />
+    <ClInclude Include="Include\ECDI\Widget\CollapsiblePanel.h" />
+    <ClInclude Include="Include\ECDI\Widget\ProgressBar.h" />
     <ClInclude Include="Include\ECDI\Widget\TextWidget.h" />
     <ClInclude Include="Include\ECDI\Widget\TextBox.h" />
     <ClInclude Include="Include\ECDI\Widget\Widget.h" />
@@ -271,8 +296,17 @@
     <ClInclude Include="Include\ECDI\Theme\PanelStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\CheckBoxStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\RadioStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\ProgressBarStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\Theme.h" />
     <ClInclude Include="Include\ECDI\Theme\DefaultTheme.h" />
+    <ClInclude Include="include\ECDI\Animation\Easing.h" />
+    <ClInclude Include="include\ECDI\Animation\Animation.h" />
+    <ClInclude Include="include\ECDI\Animation\AnimationToken.h" />
+    <ClInclude Include="include\ECDI\Animation\AnimationManager.h" />
+    <ClInclude Include="src\Demo\CollapsiblePanelDemo.h" />
+    <ClInclude Include="src\Demo\Showcase.h" />
+    <ClInclude Include="..\examples\ModelProbe\ModelProbe.h" />
+    <ClInclude Include="include\ECDI\Platform\Win32\Win32ChildProcess.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ECDI开发规范.md" />

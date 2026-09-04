@@ -1,10 +1,13 @@
 ﻿#include "ECDI/Widget/Button.h"
 
+#include "ECDI/Animation/AnimationManager.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
 #include "ECDI/Theme/DefaultTheme.h"
+#include "ECDI/Window/Window.h"
 
 #include <algorithm>
+#include <chrono>
 #include <utility>
 
 namespace ECDI{
@@ -44,17 +47,42 @@ void Button::ApplyTheme(const Theme& theme){
 	m_style.borderWidth.Apply(defaults.borderWidth.value);
 	m_style.cornerRadius.Apply(defaults.cornerRadius.value);
 	m_style.pressedBackground.Apply(defaults.pressedBackground.value);
+	m_style.hoverBackground.Apply(defaults.hoverBackground.value);
+
+	// 9.6 S1：背景呈现值与主题同步（构造/换主题 = 即时到位；运行期状态变化才走过渡）。
+	// 换主题 = 即时重置语义——若背景动画仍在跑则取消（防旧动画写回旧色）。
+	if (Window* window = GetWindow()){
+
+		window->GetAnimationManager().Cancel(m_backgroundAnimToken);
+
+	}
+
+	m_displayedBackground = m_style.background.value;
+
 	Invalidate();
 
 }
 
 void Button::SetStyle(ButtonStyleOverride override){
 
+	if (override.background)
+	{
+		// 9.6 S1：背景样式覆盖 = 即时重置（同 ApplyTheme——取消在跑动画防旧色写回）
+		if (Window* window = GetWindow()){
+
+			window->GetAnimationManager().Cancel(m_backgroundAnimToken);
+
+		}
+
+		m_displayedBackground = *override.background;
+	}
+
 	if (override.background)         m_style.background.Set(*override.background);
 	if (override.border)             m_style.border.Set(*override.border);
 	if (override.borderWidth)        m_style.borderWidth.Set(*override.borderWidth);
 	if (override.cornerRadius)       m_style.cornerRadius.Set(*override.cornerRadius);
 	if (override.pressedBackground)  m_style.pressedBackground.Set(*override.pressedBackground);
+	if (override.hoverBackground)    m_style.hoverBackground.Set(*override.hoverBackground);
 	Invalidate();
 
 }
@@ -73,7 +101,10 @@ Point Button::CalculateTextPosition(int x, int y, float textWidth, float lineHei
 void Button::OnMouseButtonDown(const MouseButtonDownEvent&){
 
 	// 5.4.5：按下态 + 重绘（Invalidate 机制 5.4.1；Capture 保证 Up 必达 5.4.2）
+	// 9.6 S1：状态翻转（事件驱动）→ 色过渡（表现层）——动画只平滑到达状态、不产生状态
 	m_pressed = true;
+
+	AnimateBackgroundTo(GetTargetBackground());
 
 	Invalidate();
 
@@ -93,7 +124,10 @@ void Button::OnMouseButtonUp(const MouseButtonUpEvent& event){
 		my >= abs.y && my < abs.y + static_cast<float>(GetHeight());
 
 	// D5 GPT 修正：先恢复视觉（m_pressed=false + 重绘）再 OnClick（用户直觉）
+	// 9.6 S1：松开 → 色过渡回正常态（from = 当前呈现色——快速点击无跳变，替换式重启）
 	m_pressed = false;
+
+	AnimateBackgroundTo(GetTargetBackground());
 
 	Invalidate();
 
@@ -119,6 +153,62 @@ void Button::RaiseClick(){
 
 }
 
+// ── 背景色过渡（9.6 S1）────────────────────────────────────────
+
+Color Button::GetTargetBackground() const noexcept{
+
+	// P1 三态优先级：按下 > hover > 正常（QSS `:active` 覆盖 `:hover` 同语义）
+	return m_pressed
+		? m_style.pressedBackground.value
+		: (m_hovered ? m_style.hoverBackground.value : m_style.background.value);
+
+}
+
+void Button::OnMouseEnter(){
+	// P1 hover：进入 → 目标色切 hoverBackground（复用 9.6 S1 过渡——200ms EaseOut 平滑变亮）
+	m_hovered = true;
+	AnimateBackgroundTo(GetTargetBackground());
+	Invalidate();
+}
+
+void Button::OnMouseLeave(){
+	// P1 hover：离开 → 目标色还原 normal（按下中离开：m_pressed 仍优先）
+	m_hovered = false;
+	AnimateBackgroundTo(GetTargetBackground());
+	Invalidate();
+}
+
+void Button::AnimateBackgroundTo(const Color& target){
+
+	// 目标即当前呈现——无过渡需求（同 token 空转无意义）
+	if (target == m_displayedBackground){
+
+		return;
+
+	}
+
+	Window* window = GetWindow();
+
+	if (window == nullptr){
+
+		m_displayedBackground = target;   // 无窗口（测试树/构造期）——即时到位
+
+		return;
+
+	}
+
+	// d6 值回调式 + d7 token：from = 当前呈现值（替换式重启语义兑现点——快速点击无跳变）；
+	// EaseOut 减速收尾（按下/松开手感）
+	window->GetAnimationManager().Start(
+		m_backgroundAnimToken,
+		m_displayedBackground,
+		target,
+		std::chrono::milliseconds(kBackgroundTransitionMs),
+		Easing::EaseOut,
+		[this](const Color& c){ m_displayedBackground = c; });
+
+}
+
 void Button::SetOnClick(ClickCallback callback){
 
 	m_onClick = std::move(callback);
@@ -127,10 +217,8 @@ void Button::SetOnClick(ClickCallback callback){
 
 void Button::OnPaint(PaintContext& ctx,int x,int y){
 
-	// Phase 9：视觉全部来自 Style（5.4.5 按下变深——凹陷直觉）
-	const Color background = m_pressed
-		? m_style.pressedBackground.value
-		: m_style.background.value;
+	// 9.6 S1：视觉全部来自呈现值（m_displayedBackground——动画 onValue 写入的单一视觉真相；
+	// 无动画时 = m_style.background.value 由状态变化即时同步）
 
 	// cornerRadius 真正消费——Phase 8 DrawRoundedRect 能力在此接入
 	// （不允许 StyleField 存在但不被 Renderer 消费——"存了但没用"的字段会误导 SetStyle 用户）
@@ -148,18 +236,19 @@ void Button::OnPaint(PaintContext& ctx,int x,int y){
 		ctx.DrawRoundedRect(
 			Rect{ static_cast<float>(x), static_cast<float>(y),
 			      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
-			radius, background);
+			radius, m_displayedBackground);
 	}
 	else{
 		ctx.DrawRect(
 			Rect{ static_cast<float>(x), static_cast<float>(y),
 			      static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) },
-			background);
+			m_displayedBackground);
 	}
 
 	// ② 焦点框描边（点线框——边缘标记，不覆盖背景；颜色来自 Style.border 单一真相）
 	// 圆角跟随控件 radius（9.5 R4：DrawFocusRect 支持 cornerRadius——圆角按钮焦点框贴圆角）
-	if (HasFocus()){
+	// 9.6 收尾方案 A：ShowFocusRect 视觉开关（默认 true——行为不变；焦点状态本身不受影响）
+	if (HasFocus() && ShowFocusRect()){
 
 		ctx.DrawFocusRect(
 			Rect{ static_cast<float>(x), static_cast<float>(y),

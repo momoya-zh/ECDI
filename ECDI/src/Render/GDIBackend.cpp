@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 namespace ECDI {
 
@@ -528,41 +530,114 @@ void GDIBackend::PopClip()
 
 void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color)
 {
-	// Phase 8 §8.4：框架级"指定颜色点线框"——CreatePen(PS_DOT) + NULL_BRUSH + Rectangle。
-	// 不用系统 DrawFocusRect（User32 XOR 绘制与双缓冲/自绘样式冲突；颜色由主题层控制）
-	// 9.5 R4：cornerRadius > 0 走 RoundRect（圆角点线框——Button 圆角焦点框跟随控件圆角）
-	HPEN pen = CreatePen(PS_DOT, 1, ToColorRef(color));
+	// Phase 8 §8.4：框架级"指定颜色点线框"。2026-08-27 重写：**手动画段状（统一周界段状）**——
+	// PS_DOT 线型在带 clip 的 DC（Widget::Paint PushClip 的 SaveDC/IntersectClipRect 环境）
+	// 下退化变实线（实测复现），改 MoveToEx/LineTo 手动画段，任何 DC 状态稳定段状。
+	// 周界 = 4 直线（直角）或 4 直线 + 4 圆弧（圆角），沿周界连续 3px 实 + 3px 空交替——
+	// 避免"采样段内再段状"导致的实心连串 + 断口（2026-08-27 修复）。
+	// 命令层（RenderCommand/RecordingBackend）语义不变。
+	HPEN pen = CreatePen(PS_SOLID, 1, ToColorRef(color));
 	if (!pen)
 	{
 		return;
 	}
 
 	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, pen));
-	HBRUSH oldBrush = static_cast<HBRUSH>(SelectObject(m_memoryDC, GetStockObject(NULL_BRUSH)));
 
-	RECT rc{};
-	rc.left = std::lround(rect.x);
-	rc.top = std::lround(rect.y);
-	rc.right = std::lround(rect.x + rect.width);
-	rc.bottom = std::lround(rect.y + rect.height);
+	// GDI 开区间约定：有效像素 = [left, right-1] × [top, bottom-1]（right/bottom 列被
+	// PushClip(控件边界 [x,x+w)) 裁掉——手动画段需显式内缩，2026-08-27 修复）
+	const float fLeft = static_cast<float>(std::lround(rect.x));
+	const float fTop = static_cast<float>(std::lround(rect.y));
+	const float fRight = static_cast<float>(std::lround(rect.x + rect.width) - 1);
+	const float fBottom = static_cast<float>(std::lround(rect.y + rect.height) - 1);
+	const float r = (std::min)(cornerRadius, (std::min)((fRight - fLeft), (fBottom - fTop)) * 0.5f);
 
-	if (cornerRadius > 0.0f)
+	// ── 周界子段（按顺序：上 → 右上 → 右 → 右下 → 下 → 左下 → 左 → 左上）──
+	// 每个子段 = 直线（起终点）或圆弧（圆心 + 起止角）。s 为沿周界的弧长参数。
+	struct Seg { int type; float x1, y1, x2, y2; float cx, cy, a1, a2; float len; };
+	std::vector<Seg> segs;
+	const float kPi = 3.14159265f;
+	const auto AddLine = [&](float x1, float y1, float x2, float y2){
+		const float dx = x2 - x1, dy = y2 - y1;
+		segs.push_back(Seg{ 0, x1, y1, x2, y2, 0, 0, 0, 0, std::sqrt(dx * dx + dy * dy) });
+	};
+	const auto AddArc = [&](float cx, float cy, float a1, float a2){
+		segs.push_back(Seg{ 1, 0, 0, 0, 0, cx, cy, a1, a2, r * (a2 - a1) });
+	};
+	if (r <= 0.0f)
 	{
-		// 圆角点线框：半径钳制到 [0, min(w,h)/2]（与 DrawRoundedRect 同契约）
-		const LONG w = rc.right - rc.left;
-		const LONG h = rc.bottom - rc.top;
-		const LONG radius = std::clamp(std::lround(cornerRadius),
-		                               0L, (std::min)(w, h) / 2);
-		// GDI RoundRect 参数 = 椭圆直径（非半径）——×2 转直径（与 DrawRoundedRect 同规则）
-		RoundRect(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom, radius * 2, radius * 2);
+		AddLine(fLeft, fTop, fRight, fTop);       // 上
+		AddLine(fRight, fTop, fRight, fBottom);   // 右
+		AddLine(fRight, fBottom, fLeft, fBottom); // 下
+		AddLine(fLeft, fBottom, fLeft, fTop);     // 左
 	}
 	else
 	{
-		Rectangle(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom);
+		AddLine(fLeft + r, fTop, fRight - r, fTop);          // 上
+		AddArc(fRight - r, fTop + r, -kPi * 0.5f, 0.0f);     // 右上 -90°→0°
+		AddLine(fRight, fTop + r, fRight, fBottom - r);      // 右
+		AddArc(fRight - r, fBottom - r, 0.0f, kPi * 0.5f);   // 右下 0°→90°
+		AddLine(fRight - r, fBottom, fLeft + r, fBottom);    // 下
+		AddArc(fLeft + r, fBottom - r, kPi * 0.5f, kPi);     // 左下 90°→180°
+		AddLine(fLeft, fBottom - r, fLeft, fTop + r);        // 左
+		AddArc(fLeft + r, fTop + r, kPi, kPi * 1.5f);        // 左上 180°→270°
+	}
+
+	// 周界采样：s（沿周界弧长）→ 坐标
+	float total = 0.0f;
+	for (const Seg& s : segs)
+		total += s.len;
+	const auto PointAt = [&](float s){
+		float acc = 0.0f;
+		for (const Seg& seg : segs)
+		{
+			if (s < acc + seg.len + 1e-4f)
+			{
+				const float u = s - acc;
+				if (seg.type == 0)
+				{
+					// 直线线性插值
+					const float tx = (seg.len > 0.0f) ? u / seg.len : 0.0f;
+					return std::pair<float, float>{ seg.x1 + (seg.x2 - seg.x1) * tx,
+					                                seg.y1 + (seg.y2 - seg.y1) * tx };
+				}
+				// 圆弧：弧长 → 角度
+				const float a = seg.a1 + u / r;
+				return std::pair<float, float>{ seg.cx + r * std::cos(a),
+				                                seg.cy + r * std::sin(a) };
+			}
+			acc += seg.len;
+		}
+		return std::pair<float, float>{ fLeft, fTop };   // 兜底（不达）
+	};
+
+	// ── 沿周界连续段状：3px 实 + 3px 空交替，实心段细分画线 ──
+	constexpr float kDash = 3.0f;
+	constexpr float kGap = 3.0f;
+	constexpr int kSub = 8;   // 实心段细分（3px / 8 段 ≈ 0.4px 步长——弧线平滑）
+	float t = 0.0f;
+	bool draw = true;
+	while (t < total)
+	{
+		const float step = draw ? kDash : kGap;
+		const float t2 = (std::min)(t + step, total);
+		if (draw)
+		{
+			auto [px, py] = PointAt(t);
+			for (int i = 1; i <= kSub; ++i)
+			{
+				const auto [x, y] = PointAt(t + (t2 - t) * static_cast<float>(i) / static_cast<float>(kSub));
+				MoveToEx(m_memoryDC, std::lround(px), std::lround(py), nullptr);
+				LineTo(m_memoryDC, std::lround(x), std::lround(y));
+				px = x;
+				py = y;
+			}
+		}
+		t = t2;
+		draw = !draw;
 	}
 
 	SelectObject(m_memoryDC, oldPen);
-	SelectObject(m_memoryDC, oldBrush);
 	DeleteObject(pen);
 }
 

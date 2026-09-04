@@ -70,8 +70,8 @@ void CheckBox::OnPaint(PaintContext& ctx, int x, int y){
 	if (size <= 0.0f)
 		return;   // 0 尺寸直接跳过（不产生 0×0 RenderCommand）
 	const float bw   = (std::max)(0.0f, m_style.borderWidth.value);
-	// 焦点态边框色（focusBorder）vs 普通（border）
-	const Color border = HasFocus() ? m_style.focusBorder.value : m_style.border.value;
+	// 焦点态边框色（focusBorder）vs 普通（border）；9.6 收尾方案 A：ShowFocusRect 开关（默认 true）
+	const Color border = (HasFocus() && ShowFocusRect()) ? m_style.focusBorder.value : m_style.border.value;
 	// 内框几何防御：innerSize 可能为负（borderWidth > size/2）——与 Radio/Button v1.4 同级防御
 	const float innerSize = (std::max)(0.0f, size - 2.0f * bw);
 	const float innerRadius = (std::max)(0.0f, m_style.cornerRadius.value - bw);   // 内框圆角随内缩缩小

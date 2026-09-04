@@ -2,7 +2,9 @@
 
 #include "ECDI/Core/Size.h"
 #include "ECDI/Render/PaintContext.h"
+#include "ECDI/Render/TextMeasurer.h"
 #include "ECDI/Theme/DefaultTheme.h"
+#include "ECDI/Window/Window.h"
 
 #include <utility>
 
@@ -110,6 +112,33 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 		CalculateTextPosition(x, y, textSize.width, textSize.height),
 		m_text, m_style.foreground.value, m_style.font.value
 	);
+
+}
+
+Size TextWidget::GetPreferredSize() const{
+
+	// 9.8：有测量器（正常运行 Window / 测试注入）→ 内容测量；无 → 运行时 fallback 当前尺寸
+	if (TextMeasurer* measurer = ResolveMeasurer())
+		return DoMeasureText(*measurer);
+	return Widget::GetPreferredSize();
+
+}
+
+TextMeasurer* TextWidget::ResolveMeasurer() const{
+
+	// const 方法内 GetWindow() 返回 const Window*——GetTextMeasurer 非 const，只读测量经 const_cast（GetLineHeight 同款先例）
+	if (Window* window = const_cast<Window*>(GetWindow()))
+		return &window->GetTextMeasurer();
+	return nullptr;
+
+}
+
+Size TextWidget::DoMeasureText(TextMeasurer& measurer) const{
+
+	// Label/Button 0 inset（§3.2 冻结）：{文本测量宽, 行高}；空文本 MeasureText 返回 {0,0} → 宽 0 诚实
+	const Size textSize = measurer.MeasureText(m_style.font.value, m_text);
+	const float lineHeight = measurer.LineHeight(m_style.font.value);
+	return Size{ textSize.width, lineHeight };
 
 }
 

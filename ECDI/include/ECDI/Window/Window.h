@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "ECDI/Core/Point.h"
+#include "ECDI/Animation/AnimationManager.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
 #include "ECDI/Widget/CaretGeometry.h"
 #include "ECDI/Widget/HoverTracker.h"
@@ -13,6 +14,7 @@
 
 #include <string>
 #include <memory>
+#include <chrono>
 
 namespace ECDI{
 
@@ -82,6 +84,14 @@ class Window : public PlatformWindowHost {
 		/// @details 剪贴板/Timer 等平台能力经此访问（与 GetTextMeasurer 同模式；
 		/// 返回抽象接口——实现是 Win32PlatformWindow，框架层零 Win32 类型）
 		PlatformWindow& GetPlatformWindow() noexcept;
+
+		/// @brief 动画统一 tick 到达入口（9.6；Application::OnTimer 保留 timerId 分支直调——不经焦点派发链）
+		/// @details 计算 steady_clock 真实 elapsed（d3）转调 m_animationManager.Tick(elapsed)（d9 参数化）；
+		/// Window 纯转发，零动画逻辑
+		void OnAnimationTick();
+
+		/// @brief 获取本窗口动画管理器（9.6；控件经 protected GetWindow() 访问——S1 状态色过渡入口）
+		AnimationManager& GetAnimationManager() noexcept;
 
 		/// @brief 设置鼠标捕获控件（5.4.2 隐式捕获：Down 命中即捕获；Up 后释放）
 		/// @param widget 捕获目标（后续 MouseMove/Up 直接派发给它，跳过 HitTest）；nullptr 释放
@@ -171,6 +181,12 @@ class Window : public PlatformWindowHost {
 		Application* m_application = nullptr;	///< 所属 Application
 
 		std::unique_ptr<PlatformWindow> m_platformWindow;	///< 平台窗口（组合，非拥有创建；7.1.1）
+
+		// 9.6：per-Window 动画管理器（能力接缝——构造注入 *m_platformWindow；
+		// ⚠️ 声明在 m_platformWindow 后：初始化列表引用 *m_platformWindow 需其先构造）
+		AnimationManager m_animationManager;	///< 动画管理器（9.6，表现层基础设施）
+
+		std::chrono::steady_clock::time_point m_lastAnimationTick{};	///< 动画 elapsed 锚点（timer 启动钩子重置）
 
 		std::unique_ptr<Widget> m_rootWidget;	///< Widget 树的根节点（拥有所有权）
 

@@ -76,15 +76,15 @@ void TestDefaultThemeValues()
     auto tb = theme.GetTextBoxStyle();
     EXPECT_EQ(tb.background.value, Color::White());
     EXPECT_EQ(tb.border.value, Color::FromRGBA8(80, 120, 220));
-    EXPECT_EQ(tb.borderWidth.value, 2.0f);
+    // 9.6 收尾：TextBoxStyle.borderWidth 已删除（方案 B 后无消费者——见 TextBoxStyle.h/DefaultTheme）
     EXPECT_EQ(tb.selection.value, Color::FromRGBA8(173, 216, 230));
     EXPECT_EQ(tb.composition.value, Color::FromRGBA8(80, 120, 220));
     EXPECT_EQ(tb.caretWidth.value, 2.0f);
-    EXPECT_EQ(tb.padding.value, 2.0f);
+    EXPECT_EQ(tb.padding.value, 0.0f);   // 9.6 收尾方案 B：常驻内边距默认 0（旧 2.0f = 焦点内缩，焦点切换会位移）
 
-    // PanelStyle
+    // PanelStyle（2026-08-30 v1.7：默认透明——镶板 = 隐形布局容器，phase9.6-panel-container-semantics v1.1）
     auto panel = theme.GetPanelStyle();
-    EXPECT_EQ(panel.background.value, Color::Gray());
+    EXPECT_EQ(panel.background.value, Color::FromRGBA8(0, 0, 0, 0));
 }
 
 // T-F07: Button 构造后样式已注入（真实集成测试——TestableButton 暴露 protected m_style）

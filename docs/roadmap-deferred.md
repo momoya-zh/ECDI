@@ -1,4 +1,4 @@
-# ECDI 延期事项排期总表（roadmap-deferred）
+﻿# ECDI 延期事项排期总表（roadmap-deferred）
 
 > 状态：v1.0（2026-08-15）｜用户确认排期
 > 作用：汇总全部"记账/延期/TODO/推迟"决策 → 对应实现阶段。README 技术债表的完整展开。
@@ -62,11 +62,11 @@
 
 | # | 延期项 | 来源 | 备注 |
 |---|---|---|---|
-| 21 | 局部更新/裁剪系统（Clip/Dirty Region/Partial Redraw） | Phase 4 决策 28 | 原"真实瓶颈出现时"，现排 9.5 |
-| 22 | LinearLayout 抽象 | 6.1 契约 | 原"Wrap/Grid/Flex 出现时"，现排 9.5 |
-| 23 | WM_MOVE 场景（移动中候选窗错位） | 5.6 记账 | 现排 9.5 |
-| 24 | Hover / DoubleClick / MouseEnter / Leave | 5.4 架构债务 | 现排 9.5 |
-| 25 | Shortcut System / 键盘入口统一 / InputManager | 架构回顾 R2 + 触发条件 | 现排 9.5 |
+| 21 | 局部更新/裁剪系统（Clip/Dirty Region/Partial Redraw） | Phase 4 决策 28 | 管线 Clip 已随 R1 落地（2026-08-28 重做）；Dirty Region 仍记账 |
+| 22 | LinearLayout 抽象 | 6.1 契约 | ✅ 评估关闭（2026-08-28）：确认不抽——抽象后代码不减反增、第三用例未出现；第三布局立项时重启 |
+| 23 | WM_MOVE 场景（移动中候选窗错位） | 5.6 记账 | ✅ 评估关闭（2026-08-28）：确认不做——模型 B 已消除主要错位（组合串自绘随窗）、场景极罕见（打字与拖窗互斥）、EXITSIZEMOVE 归位足够 |
+| 24 | Hover / DoubleClick / MouseEnter / Leave | 5.4 架构债务 | ✅ R4 已实现（2026-08-27，commit 7d97d6c/0a11c2d）；DoubleClick 记账 |
+| 25 | Shortcut System / 键盘入口统一 / InputManager | 架构回顾 R2 + 触发条件 | ✅ 评估关闭（2026-08-28）：三子项全部不做——键盘入口不对称=设计决策（Tab 导航只需 KeyDown）；无全局快捷键消费场景；InputManager 收益未证。重启：框架级快捷键消费场景出现 |
 
 ## 7. 修订记录
 

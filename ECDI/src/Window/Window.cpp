@@ -44,7 +44,15 @@ Window::Window(Application* app,const std::string& title, int width, int height,
 	, m_renderBackend(std::move(services.renderer))
 	, m_textMeasurer(std::move(services.measurer))
 	, m_renderer(*m_renderBackend)   // 决策 34：Renderer 持 RenderingBackend&——⚠️ m_renderBackend 声明在 m_renderer 前
-	, m_platformWindow(std::make_unique<Win32PlatformWindow>(*this, title, width, height)){
+	, m_platformWindow(std::make_unique<Win32PlatformWindow>(*this, title, width, height))
+	, m_animationManager(*m_platformWindow){   // 9.6：能力接缝——manager 只持 PlatformWindow&（声明顺序保证 *m_platformWindow 先构造）
+
+	// 9.6：elapsed 锚点重置钩子——timer 启动时刻起算首次 tick 的 elapsed（防 epoch 累积跳变）
+	m_animationManager.SetOnTimerStarted([this]{
+
+		m_lastAnimationTick = std::chrono::steady_clock::now();
+
+	});
 
 	// 7.1.4：句柄注入经 PlatformRenderContext（取代 7.1.1 过渡 SetHwnd(GetHandle())——
 	// Window 不再接触 HWND；识别发生在平台实现内部 static_cast）
@@ -143,6 +151,30 @@ PlatformWindow& Window::GetPlatformWindow() noexcept{
 
 	// 8.5.1：平台能力入口（剪贴板/Timer 等）——薄返回抽象接口，实现是 Win32PlatformWindow
 	return *m_platformWindow;
+
+}
+
+// ── 动画系统（9.6）──────────────────────────────────────────────
+
+void Window::OnAnimationTick(){
+
+	// d3：steady_clock 真实 elapsed——WM_TIMER 无时间戳，固定步进会累积漂移；
+	// 锚点由 timer 启动钩子重置（首次 tick 的 elapsed 从 timer 启动时刻起算）
+	const auto now = std::chrono::steady_clock::now();
+
+	const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+		now - m_lastAnimationTick);
+
+	m_lastAnimationTick = now;
+
+	// d9：Tick(elapsed) 参数化——Window 纯转发，零动画逻辑
+	m_animationManager.Tick(elapsed);
+
+}
+
+AnimationManager& Window::GetAnimationManager() noexcept{
+
+	return m_animationManager;
 
 }
 
@@ -299,10 +331,12 @@ void Window::OnPaint(){
 
 void Window::OnResized(int width, int height){
 
-	// 窗口大小变化时，同步 RootWidget 尺寸到新的客户区大小
+	// 窗口大小变化时，同步 RootWidget 尺寸 + 重排布局链 + 请求重绘（9.7 触发链）
 	if (m_rootWidget){
 
 		m_rootWidget->SetSize(width, height);
+		m_rootWidget->Arrange();   // 9.7：渐进语义——有 Layout 的节点重排 / 无 Layout 的保持手摆
+		Invalidate();              // 9.7：重排后请求重绘（Window 层负责；Arrange 纯布局不 Invalidate）
 
 	}
 

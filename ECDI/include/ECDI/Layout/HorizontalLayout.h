@@ -1,18 +1,26 @@
-#pragma once
+﻿#pragma once
 
 #include "ECDI/Layout/Layout.h"
 
 namespace ECDI{
 
-/// @brief 水平布局（Phase 6：VerticalLayout 的水平镜像）
-/// @details 子控件顶部对齐 + 水平流：y=0，x 从左到右累加宽度。
-/// 不处理换行/溢出/spacing——Layout 只负责坐标计算（phase6-horizontallayout-requirements.md 边界原则）。
-/// 设计契约（详细设计 v1.1）：Arrange 幂等 / 完全接管 Position / 不修改子控件尺寸。
+/// @brief 水平布局（9.7：stretch + spacing + fillCrossAxis——diff 同构约束仅 x→y / width→height）
+/// @details 职责：根据子控件 stretch 权重分配主轴（X）尺寸 + 跨轴（Y）可选填充 + spacing 间隙。
+/// 幂等：每次 Arrange 从头计算，不依赖子控件当前 Position（6.1 契约 1）。
 class HorizontalLayout : public Layout{
 
 public:
 
-    void Arrange(Widget& parent) override;
+	/// @param spacing      主轴相邻子间隙 px（默认 0 = 现状；>= 0 debug assert——负间距无合理语义）
+	/// @param fillCrossAxis 跨轴填充开关（默认 false = 现状；true = 所有子跨轴 = 父跨轴，跨轴坐标恒 0）
+	explicit HorizontalLayout(int spacing = 0, bool fillCrossAxis = false);
+
+	void Arrange(Widget& parent) override;
+
+private:
+
+	int m_spacing = 0;
+	bool m_fillCrossAxis = false;
 
 };
 

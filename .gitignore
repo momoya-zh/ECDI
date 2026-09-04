@@ -26,6 +26,14 @@ ECDI/Release/
 *.ilk
 *.idb
 
+# 例外：probe.exe 是 ModelProbe.rc 的 RCDATA 嵌入依赖（clone 后 rc 构建必需，必须入库）
+!probe-go/probe.exe
+
+# ===== Python（model-probe-gui 构建产物与虚拟环境）=====
+__pycache__/
+dist/
+.venv/
+
 # ===== 编译器中间产物 =====
 *.obj
 *.o

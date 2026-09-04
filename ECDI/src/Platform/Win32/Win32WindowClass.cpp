@@ -5,10 +5,20 @@
 
 #include <system_error>
 
+// Windows.h 宏防护（skill 条 10）——LoadImageW 显式依赖 Windows.h，加防护防 DrawText 宏污染
+#include <Windows.h>
+#ifdef DrawText
+#undef DrawText
+#endif
+
 namespace ECDI{
 
 namespace{   // 匿名 namespace：窗口类内部常量
 const char* kWindowClassName = "ECDI FrameWork";   // 窗口类名（原 Application 构造硬编码，7.1.5 下沉）
+
+/// @brief 应用图标资源 ID（102——与 ECDI.rc / ECDI.rc.in `IDI_APP` 对齐，改一侧必须同步另一侧；
+/// 同 ModelProbe.cpp `kProbeResourceId` 101 先例——.rc 宏对 C++ 编译器不可见，cpp 侧本地常量）
+constexpr int kAppIconId = 102;
 }
 
 WindowClass& WindowClass::Instance(){
@@ -42,6 +52,10 @@ WindowClass::WindowClass(const std::string& className, WNDPROC windowProc):
 	nullptr,
 	IDC_ARROW
 );
+
+	// 设置应用图标（kAppIconId 102 from ECDI.rc——RCDATA 101 probe.exe 同源；LoadImage 失败 NULL 自动降级系统默认）
+	// WNDCLASSW 无 hIconSm 成员（hIconSm 属 WNDCLASSEXW）——设 hIcon 后系统按需取小图标资源（ico 含 16/32 条目）
+	wc.hIcon = (HICON)LoadImageW(m_instance, MAKEINTRESOURCEW(kAppIconId), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
 	// 注册窗口类
 	ATOM atom = RegisterClassW(&wc);
 

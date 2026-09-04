@@ -40,9 +40,41 @@
     <Filter Include="Widget">
       <UniqueIdentifier>{7f00a40a-d4d1-4267-a2bd-6d76677a7b1e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Animation">
+      <UniqueIdentifier>{9a3c5e2f-6b47-4d18-a1c2-53f0a9b7e8d4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Demo">
+      <UniqueIdentifier>{c8d1f7a2-2e59-4b30-9d63-7b4e1c0a5f86}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp">
+    <ClCompile Include="src\Animation\Easing.cpp">
+      <Filter>Animation</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Animation\AnimationManager.cpp">
+      <Filter>Animation</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Demo\CollapsiblePanelDemo.cpp">
+      <Filter>Demo</Filter>
+    </ClCompile>
+    <ClInclude Include="Include\ECDI\Animation\Easing.h">
+      <Filter>Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Animation\Animation.h">
+      <Filter>Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Animation\AnimationToken.h">
+      <Filter>Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Animation\AnimationManager.h">
+      <Filter>Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Demo\CollapsiblePanelDemo.h">
+      <Filter>Demo</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\examples\ModelProbe\main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="src\Window\Window.cpp">
@@ -73,6 +105,9 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="src\Widget\Button.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Widget\ProgressBar.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="src\Layout\Layout.cpp">
@@ -194,6 +229,9 @@
     <ClInclude Include="Include\ECDI\Widget\Button.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Include\ECDI\Widget\ProgressBar.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="include\ECDI\Layout\Layout.h">
       <Filter>头文件</Filter>
     </ClInclude>
@@ -231,6 +269,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="include\ECDI\Render\TextMeasurer.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ECDI\Theme\ProgressBarStyle.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="Include\ECDI\Core\Size.h">

@@ -189,13 +189,56 @@ void Widget::Arrange(){
 
 }
 
+void Widget::SetSize(int w, int h){
+
+	m_geometry.width = static_cast<float>(w);
+	m_geometry.height = static_cast<float>(h);
+
+}
+
+void Widget::SetStretch(int stretch) noexcept{
+
+	FRAMEWORK_ASSERT(stretch >= 0);   // 负值无合理权重语义（详设 §2.1）
+
+	m_stretch = stretch;
+
+}
+
+Size Widget::GetPreferredSize() const{
+
+	return Size{ static_cast<float>(GetWidth()), static_cast<float>(GetHeight()) };
+
+}
+
+bool Widget::AutoSize(){
+
+	if (GetStretch() > 0)
+		return false;                       // §3.5 条 1：stretch 互斥——调用时判断（SetStretch(0) 后重新生效）
+
+	const Size preferred = GetPreferredSize();
+	const int w = static_cast<int>(preferred.width);   // float → int 向零截断（详设 v1.1——v1 无 rounding policy）
+	const int h = static_cast<int>(preferred.height);
+
+	if (w == GetWidth() && h == GetHeight())
+		return false;                       // 同尺寸 no-op
+
+	SetSize(w, h);                          // 虚分派——TextBox::SetSize 的 EnsureCaretVisible+Invalidate 为 SetSize 既有语义
+	return true;
+
+}
+
 void Widget::Paint(PaintContext& ctx,int offsetX,int offsetY){
 	
 	if (!IsVisible())
-		return;
+		return;   // 9.5 R1：唯一例外路径——不 Push 不 Pop（天然平衡）
 
 	int x = offsetX + static_cast<int>(m_geometry.x);
 	int y = offsetY + static_cast<int>(m_geometry.y);
+
+	// 9.5 R1：自身边界入栈（绝对坐标 = Window 客户区；与 OnPaint 的 x/y 同源——不变量 I3）
+	// 嵌套交集：子控件被"父边界 ∩ 自身边界"自动裁剪（后端 IntersectClipRect 天然语义）
+	ctx.PushClip(Rect{ static_cast<float>(x), static_cast<float>(y),
+	                   m_geometry.width, m_geometry.height });
 
 	OnPaint(ctx,x,y);
 
@@ -204,6 +247,8 @@ void Widget::Paint(PaintContext& ctx,int offsetX,int offsetY){
 		child->Paint(ctx,x,y);
 
 	}
+
+	ctx.PopClip();   // 严格配对（不变量 I1：Paint 内无其他 return 路径）
 
 }
 

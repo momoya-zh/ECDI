@@ -1,0 +1,9 @@
+﻿// ModelProbe 资源脚本模板（CMake 构建专用——configure_file 生成到构建目录 examples/ModelProbe/CMakeLists.txt）
+// 差异说明：CMake 的 rc 编译器从【构建目录】运行（vcxproj 从项目目录 ECDI/）——
+// 相对路径会失效，故路径由 CMake configure 替换为绝对路径。
+// vcxproj 用源文件 ModelProbe.rc（CWD=ECDI/ 相对 ../probe-go + examples\ModelProbe\app.ico）——两处 #define 须同步。
+#define IDR_PROBE_BIN 101
+#define IDI_APP 102
+
+IDR_PROBE_BIN RCDATA "@PROBE_EXE_ABSOLUTE@"
+IDI_APP        ICON    "@APP_ICO_ABSOLUTE@"
