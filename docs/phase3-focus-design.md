@@ -1,4 +1,4 @@
-# Focus 详细设计（phase3-focus-design.md）
+﻿# Focus 详细设计（phase3-focus-design.md）
 
 > 阶段：第三阶段 Widget System → Focus 子模块
 > 前置：职责确认 + 初步设计已评审通过（"获取 / 保持 / 释放 / 键盘路由"四件事完整定义）

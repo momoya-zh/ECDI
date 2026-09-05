@@ -700,13 +700,13 @@ void ECDI::Test::RunRendererTests()
 
 ## 15. 修订记录
 
-- **v1.4（2026-08-21）** — GPT 准入审查后最终小修（4 点，架构不变；详细设计已确认，进入实现）
+- **v1.4（2026-08-21）** — 评审 准入审查后最终小修（4 点，架构不变；详细设计已确认，进入实现）
   1. **Image 空图像 no-op**：`width == 0 || height == 0` → DrawImage 不产生绘制（契约层确定边界）
   2. **Image stride 逐行读取明确**：契约补充"逐行读取时按 row*stride 定位（不能整体 memcpy）"
   3. **DrawRoundedRect 空 Rect no-op**：`rect.width <= 0 || rect.height <= 0` → 直接 return
   4. **测试函数数量修正**：文档"新增两个测试函数" → "新增三个测试函数"
   - 状态变更为 **详细设计已确认，进入实现**；文件清单不变：新建 1（Image.h）+ 修改 12（13 个文件）
-- **v1.3（2026-08-21）** — GPT 评审后小修正（6 点修正，架构不变）
+- **v1.3（2026-08-21）** — 外部评审后小修正（6 点修正，架构不变）
   1. **术语映射明确**：职责确认中的 `DrawingContext` 由现有代码 `PaintContext` 承担；AlphaBlend 定义为 DrawImage 内部能力（非独立 API），新增 Backend 虚函数为 6 个
   2. **Image width/height 非负契约**：明确 `width >= 0, height >= 0`
   3. **RenderCommand 分类**：明确 PushClip/PopClip 是"状态命令"（不产生像素绘制，改变后续命令的有效裁剪状态）
@@ -714,7 +714,7 @@ void ECDI::Test::RunRendererTests()
   5. **msimg32 链接定案**：vcxproj `<AdditionalDependencies>` 显式链接（消除待确认项）
   6. **"6 类能力" → "5 类能力 / 6 个接口"**：裁剪 = PushClip + PopClip（2 个接口），其余各 1 个
   - 文件清单不变：新建 1（Image.h）+ 修改 12（13 个文件）
-- **v1.2（2026-08-21）** — GPT 评审后小修订（6 点修正，架构不变）
+- **v1.2（2026-08-21）** — 外部评审后小修订（6 点修正，架构不变）
   1. **DrawLine 线宽下限**：`max(1, lround(width))`；width < 1px 时 clamp 到 1px（GDI width=0 实际=1px cosmetic pen）
   2. **SaveDC 失败防御**：`SaveDC() == 0` 时不入栈；PopClip 前检查 `savedId != 0`
   3. **DrawRoundedRect cornerRadius clamp**：`[0, min(rect.width, rect.height)/2]`；避免 GDI 未定义行为
@@ -722,7 +722,7 @@ void ECDI::Test::RunRendererTests()
   5. **API 依赖描述修正**：`GDI / msimg32 / User32` → `GDI / msimg32`（实际未使用 User32）
   6. **RecordingBackend 字段说明**：明确记录字段为 5 个（Push/Pop 共享 clipOps）
   - 文件清单不变：新建 1（Image.h）+ 修改 12（13 个文件）
-- **v1.1（2026-08-21）** — GPT 评审后小修订（9 点修正，架构不变）
+- **v1.1（2026-08-21）** — 外部评审后小修订（9 点修正，架构不变）
   1. **Image 明确 premultiplied BGRA**：RGB 通道已预乘 Alpha（AC_SRC_ALPHA 硬性要求，否则混合色偏）
   2. **stride 契约**：明确 `>= width*4`
   3. **pixels 契约**：明确 `pixels.size() >= stride*height`

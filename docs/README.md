@@ -135,7 +135,7 @@
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase9-theme-system-requirements.md](phase9-theme-system-requirements.md) / [preliminary](phase9-theme-system-preliminary-design.md) / [detailed](phase9-theme-system-detailed-design.md) | Phase 9 三件套（StyleField D7 契约 + Theme/DefaultTheme + TextStyle 单一真相 + 控件迁移 + cornerRadius 消费） | ✅ 已实现（2026-08-25，v1.0-v1.4 四轮 GPT 评审收敛） |
+| [phase9-theme-system-requirements.md](phase9-theme-system-requirements.md) / [preliminary](phase9-theme-system-preliminary-design.md) / [detailed](phase9-theme-system-detailed-design.md) | Phase 9 三件套（StyleField D7 契约 + Theme/DefaultTheme + TextStyle 单一真相 + 控件迁移 + cornerRadius 消费） | ✅ 已实现（2026-08-25，v1.0-v1.4 四轮 外部评审收敛） |
 
 ## Phase9.5 收尾补充（✅ 2026-08-28）
 
@@ -163,14 +163,14 @@
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase9.8-autosize-requirements.md](phase9.8-autosize-requirements.md) | 需求确认（尺寸意图三分「后调用者赢」/ §3.5 交互冻结 / §3.6 垂直居中验证项 / §3.7 副作用边界） | ✅ v1.5 定稿（GPT 两轮评审） |
+| [phase9.8-autosize-requirements.md](phase9.8-autosize-requirements.md) | 需求确认（尺寸意图三分「后调用者赢」/ §3.5 交互冻结 / §3.6 垂直居中验证项 / §3.7 副作用边界） | ✅ v1.5 定稿（评审 两轮评审） |
 | [phase9.8-autosize-preliminary-design.md](phase9.8-autosize-preliminary-design.md) / [detailed](phase9.8-autosize-detailed-design.md) | 初设 + 详设（GetPreferredSize/AutoSize 签名与 4 行冻结实现 + ResolveMeasurer 接缝 + FakeTextMeasurer） | ✅ 已实现（2026-09-02，151 测试全绿） |
 
 ## Phase10 库化（🚧 进行中，目标 0.1.0）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase10-library-requirements.md](phase10-library-requirements.md) | 需求确认（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install-export / 自包含测试 / 外部消费者验收） | ✅ v1.1（GPT 评审 7 项采纳）——待初步设计 |
+| [phase10-library-requirements.md](phase10-library-requirements.md) | 需求确认（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install-export / 自包含测试 / 外部消费者验收） | ✅ v1.1（外部评审 7 项采纳）——待初步设计 |
 
 ## 文档约定
 

@@ -1,4 +1,4 @@
-# Paint 详细设计（phase3-paint-design.md）
+﻿# Paint 详细设计（phase3-paint-design.md）
 
 > 阶段：第三阶段 Widget System → Paint 子模块
 > 前置：职责确认 + 初步设计 + 详细设计（v1.2）已评审通过

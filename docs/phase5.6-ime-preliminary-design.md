@@ -1,11 +1,11 @@
 ﻿# Phase 5.6 IME（候选窗口跟随）初步设计
 
-> 状态：v1.0（2026-08-14）｜初步设计定稿（两轮评审 + 用户确认），待详细设计
+> 状态：v1.0（2026-08-14）｜初步设计定稿（两轮评审 + 确认），待详细设计
 > 相关：phase5.6-ime-requirements.md（职责确认 v1.0：I1-I5）/ phase5.5.2-selection-*.md（5.5.2 同源模式）
 
 ## 1. 定稿决策（P1-P5 + 两轮评审修正）
 
-### P1 翻译器消息表 —— A ✅（GPT ③ 修正：预留 COMPOSITION 空通道）
+### P1 翻译器消息表 —— A ✅（评审 ③ 修正：预留 COMPOSITION 空通道）
 
 ```cpp
 // WindowMessageHandler.cpp switch 新增（键盘事件之后）：
@@ -26,7 +26,7 @@ case WM_IME_ENDCOMPOSITION:{        // 预留通道：组合结束——MVP 无�
 }
 ```
 
-### P2 Window::NotifyIMEComposition() —— A ✅（GPT ② 修正：dynamic_cast fail-safe）
+### P2 Window::NotifyIMEComposition() —— A ✅（评审 ② 修正：dynamic_cast fail-safe）
 
 ```cpp
 // Window.h public（HandleKeyDown 之后）：
@@ -55,7 +55,7 @@ void Window::NotifyIMEComposition(){
 }
 ```
 
-### P3 TextBox 光标几何共享 —— A ✅（GPT 强推 + DeepSeek 补充 GetTextAreaWidth）
+### P3 TextBox 光标几何共享 —— A ✅（评审 强推 + DeepSeek 补充 GetTextAreaWidth）
 
 ```cpp
 // TextBox.h public（GetCaret 之后）：
@@ -74,7 +74,7 @@ Point TextBox::GetCaretClientPosition(){
 ```
 
 - **消灭三处漂移**：点击定位（x→caret）/ 光标绘制（caret→x）/ IME（caret→x）——后两处共享 `CalculateCaretPosition`，第一处共享同一坐标系（CalculateTextPosition 同源），不合并为同一函数（方向相反）
-- **GetTextAreaWidth 提取**：`控件宽 − 焦点框内缩(2px×2)`——原 maxTextWidth 局部逻辑在裁切/Selection/光标三处内联，改 4px 会漏改（GPT 漂移论据）
+- **GetTextAreaWidth 提取**：`控件宽 − 焦点框内缩(2px×2)`——原 maxTextWidth 局部逻辑在裁切/Selection/光标三处内联，改 4px 会漏改（评审 漂移论据）
 
 ### P4 构建链接 Imm32 —— A ✅
 
@@ -82,7 +82,7 @@ Point TextBox::GetCaretClientPosition(){
 - CMakeLists.txt：`target_link_libraries(ECDI PRIVATE user32 imm32)`
 - RTTI：已核实三工具链默认开启（vcxproj 无 RuntimeTypeInfo 覆盖 / CMake 无 -fno-rtti），`dynamic_cast` 零配置
 
-### P5 验证 —— A ✅（GPT 要求：先跑起来再决定）
+### P5 验证 —— A ✅（评审 要求：先跑起来再决定）
 
 - 人工交互：中文输入候选窗跟随光标（不再飘左上角）+ 中文上屏回归 + 编辑/点击/拖选不回归
 - **输入法矩阵**：搜狗 / 微软拼音 / 中文 / 日文 / 长文本——据实测决定 COMPOSITION 空通道是否升级为"再调 Notify"
@@ -90,11 +90,11 @@ Point TextBox::GetCaretClientPosition(){
 
 ## 2. 评审记录（两轮闭环）
 
-- **第一轮 GPT**：① Window 中介 ✅ ② `GetCaretClientPosition()` 不进 Widget 基类（建议 dynamic_cast）⚠️ ③ 只监听 START 建议先验证 ⚠️
+- **第一轮 评审**：① Window 中介 ✅ ② `GetCaretClientPosition()` 不进 Widget 基类（建议 dynamic_cast）⚠️ ③ 只监听 START 建议先验证 ⚠️
 - **DeepSeek 评审**：② 采纳 + 补强论据——基类虚函数方案在非 TextBox 焦点时用 (0,0) 更新（fail-wrong），dynamic_cast 跳过更新（fail-safe）；③ 采纳 + 指出 IME 消息必须走 DefWindowProc
-- **第二轮 GPT**：全部通过；新建议——Window.cpp 依赖 TextBox 方向略怪，加注释显式化技术债
+- **第二轮 评审**：全部通过；新建议——Window.cpp 依赖 TextBox 方向略怪，加注释显式化技术债
 - **DeepSeek**：注释采纳 + 补"为什么可接受"层（fail-safe 论证 + 演进路径 EditableTextWidget + Phase 7 下沉）
-- **用户确认**（2026-08-14）：方案完全一致
+- **确认**（2026-08-14）：方案完全一致
 
 ## 3. 修订记录
 

@@ -1,6 +1,6 @@
 ﻿# Phase 6.2 CheckBox / Radio 详细设计
 
-> 状态：v1.2（2026-08-25）｜详细设计定稿（GPT 最终审：**✅ APPROVED — 可以进入实现**；无必改项）
+> 状态：v1.2（2026-08-25）｜详细设计定稿（评审 最终审：**✅ APPROVED — 可以进入实现**；无必改项）
 > 前序：Phase 6.2 职责确认 v1.1（D1-D5 架构对齐）/ Phase 8 渲染增强 ✅（DrawLine/DrawRoundedRect）/ Phase 9 主题系统 ✅（StyleField/Theme/DefaultTheme——CheckBoxStyle/RadioStyle 直接纳入）
 > 相关：phase6.2-checkboxradio-requirements.md（职责确认 v1.1）/ phase6.2-checkboxradio-preliminary-design.md（初步设计 v1.0：P1-P8）/ phase9-theme-system-detailed-design.md（Phase 9 主题 v1.4——StyleField/ApplyTheme/SetStyle 机制）
 
@@ -9,11 +9,11 @@
 ```
 6.2 状态控件：StateWidget 基类（行为复用）+ CheckBox + Radio
 实现：状态逻辑（SetChecked/OnCheckedChanged/键鼠共享）+ 互斥（Radio 同父）+ 真实勾/圆绘制（Phase 8 能力）
-+ 主题接入（CheckBoxStyle/RadioStyle 进 Theme——Phase 9 机制直接消费，GPT 路线 B/D1）
++ 主题接入（CheckBoxStyle/RadioStyle 进 Theme——Phase 9 机制直接消费，评审 路线 B/D1）
 + 7.2 TestCase（CheckBoxTests）
 ```
 
-**与 Phase 9 关系（GPT 澄清）**：GPT 评审时假设 Phase 9 未实现（路线 A：6.2 先做控件、Phase 9 再迁移）——但 **Phase 9 已于今日落地（commit 2aca7be）**，故采用**路线 B/D1**：CheckBoxStyle/RadioStyle 直接进 Theme（职责确认 v1.1 D1 已定），无迁移往返。
+**与 Phase 9 关系（评审 澄清）**：外部评审时假设 Phase 9 未实现（路线 A：6.2 先做控件、Phase 9 再迁移）——但 **Phase 9 已于今日落地（commit 2aca7be）**，故采用**路线 B/D1**：CheckBoxStyle/RadioStyle 直接进 Theme（职责确认 v1.1 D1 已定），无迁移往返。
 
 ## 2. 文件改动清单（原子授权）
 
@@ -69,7 +69,7 @@ public:
 	/// @brief 设置选中状态（唯一状态入口——契约 2；🔴 v1.1：**virtual**——Radio override 扩展互斥必须，否则编译失败）
 	/// @details 值变化才触发通知（m_checked != checked 时：OnCheckedChanged + 回调 + Invalidate）；
 	/// 相同值 no-op（Radio 交互不可取消的保证基础）。
-	/// 架构含义精化（GPT v1.1）："唯一入口" = **所有状态修改必须最终经过 StateWidget::SetChecked()**——
+	/// 架构含义精化（评审 v1.1）："唯一入口" = **所有状态修改必须最终经过 StateWidget::SetChecked()**——
 	/// 互斥内部 `sibling->StateWidget::SetChecked(false)` 显式限定基类也符合此契约（强制取消，不重入互斥策略）。
 	virtual void SetChecked(bool checked);
 
@@ -198,14 +198,14 @@ protected:
 ```cpp
 void CheckBox::OnPaint(PaintContext& ctx, int x, int y){
 	// 状态框：控件左上角，boxSize 边长（默认 16）
-	// 🟠 v1.2 几何输入防御（GPT）：size/bw 都是用户可改 Style——负值会产生非法 Rect
+	// 🟠 v1.2 几何输入防御（评审）：size/bw 都是用户可改 Style——负值会产生非法 Rect
 	const float size = (std::max)(0.0f, m_style.boxSize.value);
 	if (size <= 0.0f)
 		return;   // 0 尺寸直接跳过（不产生 0×0 RenderCommand）
 	const float bw   = (std::max)(0.0f, m_style.borderWidth.value);
 	// 焦点态边框色（focusBorder）vs 普通（border）
 	const Color border = HasFocus() ? m_style.focusBorder.value : m_style.border.value;
-	// 🟠 v1.1 几何防御（GPT）：innerSize 可能为负（borderWidth > size/2——Style 用户可改）——
+	// 🟠 v1.1 几何防御（评审）：innerSize 可能为负（borderWidth > size/2——Style 用户可改）——
 	// 与 Radio/Button v1.4 同级防御
 	const float innerSize = (std::max)(0.0f, size - 2.0f * bw);
 
@@ -216,7 +216,7 @@ void CheckBox::OnPaint(PaintContext& ctx, int x, int y){
 	else{
 		ctx.DrawRect(Rect{ (float)x, (float)y, size, size }, border);
 	}
-	// 🟠 v1.1 内背景（GPT）：cornerRadius>0 时内层也必须 DrawRoundedRect（圆角随内缩缩小）——
+	// 🟠 v1.1 内背景（评审）：cornerRadius>0 时内层也必须 DrawRoundedRect（圆角随内缩缩小）——
 	// 否则方形填充会越界到圆角边框区（与 Radio 统一）
 	const Color innerColor = IsChecked() ? m_style.checkedBackground.value : m_style.background.value;
 	const float innerRadius = (std::max)(0.0f, m_style.cornerRadius.value - bw);
@@ -319,9 +319,9 @@ void Radio::UncheckSiblings(){
 }
 ```
 
-**互斥范围精确语义（GPT 修正）**：`直接父 Widget 的直接子节点中类型为 Radio 的控件`——嵌套 Container 内的 Radio 不跨级（B 与 A/C 不同组）。`sibling->StateWidget::SetChecked(false)` 显式限定基类——避免 Radio::SetChecked(false) 走 override（false 分支无互斥副作用，但显式限定语义更清晰）。
+**互斥范围精确语义（评审 修正）**：`直接父 Widget 的直接子节点中类型为 Radio 的控件`——嵌套 Container 内的 Radio 不跨级（B 与 A/C 不同组）。`sibling->StateWidget::SetChecked(false)` 显式限定基类——避免 Radio::SetChecked(false) 走 override（false 分支无互斥副作用，但显式限定语义更清晰）。
 
-**通知顺序契约（🟠 v1.1 冻结——GPT）**：`Radio::SetChecked(true)` 时兄弟先取消、自身后选中：
+**通知顺序契约（🟠 v1.1 冻结——评审）**：`Radio::SetChecked(true)` 时兄弟先取消、自身后选中：
 
 ```
 r2.SetChecked(true)
@@ -338,7 +338,7 @@ r2.SetChecked(true)
 ```cpp
 void Radio::OnPaint(PaintContext& ctx, int x, int y){
 	// 外圆：DrawRoundedRect(cornerRadius = circleSize/2)（Phase 8 能力——真实圆）
-	// 🟠 v1.2 几何输入防御（GPT）：同 CheckBox——负值/0 尺寸直接跳过
+	// 🟠 v1.2 几何输入防御（评审）：同 CheckBox——负值/0 尺寸直接跳过
 	const float size = (std::max)(0.0f, m_style.circleSize.value);
 	if (size <= 0.0f)
 		return;
@@ -428,7 +428,7 @@ struct RadioStyleOverride{
 ### 6.3 Theme 接口扩展（Theme.h / DefaultTheme.h / DefaultTheme.cpp）
 
 ```cpp
-// Theme.h——Phase 9 v1.4 预留注释兑现（GPT："Phase 6.2 控件实现时新增"）
+// Theme.h——Phase 9 v1.4 预留注释兑现（评审："Phase 6.2 控件实现时新增"）
 	virtual CheckBoxStyle GetCheckBoxStyle() const = 0;
 	virtual RadioStyle    GetRadioStyle() const = 0;
 
@@ -518,7 +518,7 @@ void CheckBox::SetStyle(CheckBoxStyleOverride override){
 
 **说明**：S1-S9 纯状态/互斥逻辑无窗口可测（GetParent 树结构测试同 WidgetTests 先例——需手动 AddChild 建树）；S10 同 ThemeTests T-F08 模式。绘制（勾/圆几何）留视觉验证。
 
-**回调生命周期契约（GPT v1.2 注明——沿用 7.5 既有规则，6.2 不新增）**：`SetChecked → RaiseCheckedChanged` 回调执行期间仍处于调用栈中——**回调契约不承诺"回调中可以销毁当前 Widget"**（与 7.5 SetOnClick/SetOnTextChanged 同款约束；`delete this`/`RemoveChild(this)` 在回调内属未定义行为，用户需延迟销毁）。此约束是 ECDI Event/Callback 生命周期模型的全局规则，非 CheckBox 特有问题。
+**回调生命周期契约（评审 v1.2 注明——沿用 7.5 既有规则，6.2 不新增）**：`SetChecked → RaiseCheckedChanged` 回调执行期间仍处于调用栈中——**回调契约不承诺"回调中可以销毁当前 Widget"**（与 7.5 SetOnClick/SetOnTextChanged 同款约束；`delete this`/`RemoveChild(this)` 在回调内属未定义行为，用户需延迟销毁）。此约束是 ECDI Event/Callback 生命周期模型的全局规则，非 CheckBox 特有问题。
 
 ## 9. 与既有约束的对齐
 
@@ -533,10 +533,10 @@ void CheckBox::SetStyle(CheckBoxStyleOverride override){
 | Phase 9 名字隐藏 | CheckBox/Radio `using TextWidget::SetStyle`（v1.2 教训） |
 | 7.5 回调模式 | OnCheckedChanged 虚方法基座 + SetOnCheckedChanged 回调便利层（D4 分离） |
 | 资源类禁复制 | StateWidget/CheckBox/Radio 树节点地址稳定（禁移动，同 Widget 先例） |
-| 测试由用户做 | S1-S10 自动（7.2 体系）+ 勾/圆视觉验证用户确认 |
+| 测试由用户做 | S1-S10 自动（7.2 体系）+ 勾/圆视觉验证确认 |
 | 五阶段法 | 本文档 = 详细设计；确认后进入实现 |
 
-## 10. 与 Phase 9 接口边界（GPT 7 项收口）
+## 10. 与 Phase 9 接口边界（评审 7 项收口）
 
 1. ✅ CheckBoxStyle/RadioStyle **归 Theme**（本次新增 GetXxxStyle 虚方法 + DefaultTheme 默认值）——Phase 9 v1.4 预留注释兑现
 2. ✅ 不重复 foreground——文字视觉统一 TextStyle（TextWidget::m_style）
@@ -548,6 +548,6 @@ void CheckBox::SetStyle(CheckBoxStyleOverride override){
 
 ## 11. 修订记录
 
-- v1.2（2026-08-25）GPT 最终审（**✅ APPROVED — 可以进入实现**，无必改）：**🟠 几何输入防御补全**——CheckBox/Radio OnPaint 入口 `size = max(0, style.size)` + `if (size <= 0.0f) return`（负值/0 尺寸直接跳过，不产生 0×0 RenderCommand）+ `bw = max(0, style.borderWidth)`（防负 borderWidth 使内层大于外层）——Style 是用户可改 API，绘制入口统一防御；**S2/S3 测试名称精确化**（OnCheckedChanged 虚方法 vs SetOnCheckedChanged 用户回调区分）；**回调生命周期契约注明**（回调中销毁 Widget 未定义——沿用 7.5 全局规则，6.2 不新增）；拒绝清单重申（RadioGroup/Toggle/StateWidgetStyle/dotSize/三态/ThemeManager/Path 系统/S11 全不加）。
-- v1.1（2026-08-25）GPT 评审整合（"修掉 virtual 硬错误 + 补几何防御 + 明确回调顺序后可进入实现"）：**🔴 StateWidget::SetChecked 改 virtual**（Radio override 编译必须——否则 C2259）；**🟠 CheckBox OnPaint 内背景圆角化**（cornerRadius>0 时内层 DrawRoundedRect(max(0, radius-bw))——否则方形填充越界圆角边框区，与 Radio 统一）+ **innerSize 几何防御**（max(0, size-2*bw)——borderWidth 用户可改）；**🟠 冻结 Radio 通知顺序契约**（SetChecked(true) → 兄弟先 OnCheckedChanged(false) → 自身后 OnCheckedChanged(true)——先释放旧选择再建立新选择）；"唯一入口"措辞精化（所有状态修改最终经过 StateWidget::SetChecked——sibling->StateWidget::SetChecked(false) 显式基类限定符合契约）；**S11 明确不加**（SetChecked(true) 自身 no-op 已被 S1 覆盖 + S7 交互路径覆盖——GPT 判定可选）；DrawTextContent 偏移布局确认（x 参数 = 相对控件原点绝对偏移，"控件内部自定义文字位置"场景 TextWidget 接口支持）。
-- v1.0（2026-08-25）详细设计初稿（**此前从未有 detailed-design**——6.2 因 7.2 优先级挂起时只到初步设计）：StateWidget 行为复用基类（无视觉 Style）+ CheckBox/Radio 专属 Style（Phase 9 机制直接消费——路线 B/D1，GPT 路线 A 讨论已过时：Phase 9 今日落地）+ 真实勾（DrawLine）/圆（DrawRoundedRect）绘制（Phase 8 约束消解）+ Radio 同父互斥精确语义（直接父直接子节点）+ 程序可取消/交互不可取消 + CheckBoxStyle/RadioStyle 进 Theme + S1-S10 TestCase。
+- v1.2（2026-08-25）评审 最终审（**✅ APPROVED — 可以进入实现**，无必改）：**🟠 几何输入防御补全**——CheckBox/Radio OnPaint 入口 `size = max(0, style.size)` + `if (size <= 0.0f) return`（负值/0 尺寸直接跳过，不产生 0×0 RenderCommand）+ `bw = max(0, style.borderWidth)`（防负 borderWidth 使内层大于外层）——Style 是用户可改 API，绘制入口统一防御；**S2/S3 测试名称精确化**（OnCheckedChanged 虚方法 vs SetOnCheckedChanged 用户回调区分）；**回调生命周期契约注明**（回调中销毁 Widget 未定义——沿用 7.5 全局规则，6.2 不新增）；拒绝清单重申（RadioGroup/Toggle/StateWidgetStyle/dotSize/三态/ThemeManager/Path 系统/S11 全不加）。
+- v1.1（2026-08-25）外部评审整合（"修掉 virtual 硬错误 + 补几何防御 + 明确回调顺序后可进入实现"）：**🔴 StateWidget::SetChecked 改 virtual**（Radio override 编译必须——否则 C2259）；**🟠 CheckBox OnPaint 内背景圆角化**（cornerRadius>0 时内层 DrawRoundedRect(max(0, radius-bw))——否则方形填充越界圆角边框区，与 Radio 统一）+ **innerSize 几何防御**（max(0, size-2*bw)——borderWidth 用户可改）；**🟠 冻结 Radio 通知顺序契约**（SetChecked(true) → 兄弟先 OnCheckedChanged(false) → 自身后 OnCheckedChanged(true)——先释放旧选择再建立新选择）；"唯一入口"措辞精化（所有状态修改最终经过 StateWidget::SetChecked——sibling->StateWidget::SetChecked(false) 显式基类限定符合契约）；**S11 明确不加**（SetChecked(true) 自身 no-op 已被 S1 覆盖 + S7 交互路径覆盖——评审 判定可选）；DrawTextContent 偏移布局确认（x 参数 = 相对控件原点绝对偏移，"控件内部自定义文字位置"场景 TextWidget 接口支持）。
+- v1.0（2026-08-25）详细设计初稿（**此前从未有 detailed-design**——6.2 因 7.2 优先级挂起时只到初步设计）：StateWidget 行为复用基类（无视觉 Style）+ CheckBox/Radio 专属 Style（Phase 9 机制直接消费——路线 B/D1，评审 路线 A 讨论已过时：Phase 9 今日落地）+ 真实勾（DrawLine）/圆（DrawRoundedRect）绘制（Phase 8 约束消解）+ Radio 同父互斥精确语义（直接父直接子节点）+ 程序可取消/交互不可取消 + CheckBoxStyle/RadioStyle 进 Theme + S1-S10 TestCase。

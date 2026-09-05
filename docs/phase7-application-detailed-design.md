@@ -3,7 +3,7 @@
 > 状态：v1.1（2026-08-16）｜✅ 已实现（用户验证：编译零警告 + 功能正常 + main.cpp 免宏防护）
 > 相关：phase7-application-requirements.md（职责确认 v1.0）/ phase7-application-preliminary-design.md（初步设计 v1.2）
 > 目标：**7.1 平台抽象完全闭环**——Framework 层可脱离 Windows 独立存在（Application.h + Application.cpp 零 Win32）
-> 架构原则（GPT）：给每个 Win32 依赖找到唯一归属
+> 架构原则（评审）：给每个 Win32 依赖找到唯一归属
 
 ## 0. 实现前置事实（已核实）
 
@@ -38,7 +38,7 @@
 
 // ② Win32WindowClass.h：
 //    - include 链不变（Windows.h + DrawText undef + <string>——skill 9 宏防护）
-//    - + 静态单例（窗口系统资源归窗口类自身——GPT 三轮）：
+//    - + 静态单例（窗口系统资源归窗口类自身——评审 三轮）：
 //      /// @brief 共享窗口类实例（7.1.5：注册一次跨窗口共用——窗口系统资源）
 //      /// @details static 局部 RAII（进程退出反注册）；WindowProc 平台内闭环
 //      static WindowClass& Instance();
@@ -172,7 +172,7 @@ void Win32PlatformApplication::RequestExit(){
 | V1 | 编译 | VS Debug x64 零错误零新警告；三工具链惯例 |
 | V2 | 回归 | 窗口创建/消息循环/事件分发（鼠标/键盘/IME）/多窗口/退出全正常（**延迟销毁：关闭窗口后立即释放验证**） |
 | V3 | grep 实证 | Application.h 零 Windows.h/零 Win32；Application.cpp 零 Windows.h；Window.h 零 WindowClass |
-| V4 | grep 实证（GPT） | 框架抽象头零 Windows.h——`grep -r "Windows.h" include/ECDI` 仅命中 Platform/Win32/ + 后端实现头（GDIBackend/GDITextMeasurer——豁免） |
+| V4 | grep 实证（评审） | 框架抽象头零 Windows.h——`grep -r "Windows.h" include/ECDI` 仅命中 Platform/Win32/ + 后端实现头（GDIBackend/GDITextMeasurer——豁免） |
 
 ## 4. 技术债记账（7.1.5 遗留）
 

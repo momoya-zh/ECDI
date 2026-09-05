@@ -2,13 +2,13 @@
 
 > 阶段：需求确认（五阶段法 ①）
 > 日期：2026-09-01（v1.5 修订 2026-09-02）
-> 状态：**v1.5 定稿**（v1.4 GPT 职责审查通过；v1.5 修正 R5 语义与初设 §4 的矛盾——GPT 初设评审 2026-09-02 指出，见修订记录；**配合初设 v1.1 进入详细设计**）
+> 状态：**v1.5 定稿**（v1.4 外部职责审查通过；v1.5 修正 R5 语义与初设 §4 的矛盾——外部初设评审 2026-09-02 指出，见修订记录；**配合初设 v1.1 进入详细设计**）
 > 前置：ModelProbe P1 实操暴露（用户观察：「我们其实缺少自适应尺寸的功能」）
 > 文档目录：框架能力 → docs/（与 phase9.6-* 同级；ModelProbe demo 文档在 model-probe-docs/ 不受影响）
-> **边界一句话（GPT 审查定调）**：9.8 = 「**让控件知道自己需要多大，并允许调用方显式让它调整到这个尺寸**」——不是「建立完整的 GUI 尺寸协商系统」（sizeHint/minSize/maxSize/policy/alignment/negotiation 全部不做）。
-> **编号变更（v1.1）**：原 9.7 → **9.8**（用户裁决 2026-09-01）——9.7 编号归「自适应布局」；本文档「内容→尺寸」与 9.7「窗口→尺寸分配」正交（§7）。
+> **边界一句话（评审 审查定调）**：9.8 = 「**让控件知道自己需要多大，并允许调用方显式让它调整到这个尺寸**」——不是「建立完整的 GUI 尺寸协商系统」（sizeHint/minSize/maxSize/policy/alignment/negotiation 全部不做）。
+> **编号变更（v1.1）**：原 9.7 → **9.8**（裁决 2026-09-01）——9.7 编号归「自适应布局」；本文档「内容→尺寸」与 9.7「窗口→尺寸分配」正交（§7）。
 > **v1.2 重新评估（2026-09-02）**：9.7 落地后语境变化——剩余需求收敛为动态文本、§2 R5 尺寸来源三分、§3.5 交互语义冻结。
-> **v1.4 GPT 职责审查**：R5「SetSize 是操作不是状态」→ 改「尺寸意图三分」；§3.5 no-op 语义澄清（调用时判断非永久关闭）；§3.2 padding 冻结原则；§3.6 垂直居中降级为验证项；R4 删除自动挂钩；新增 §3.7 AutoSize 副作用边界。
+> **v1.4 外部职责审查**：R5「SetSize 是操作不是状态」→ 改「尺寸意图三分」；§3.5 no-op 语义澄清（调用时判断非永久关闭）；§3.2 padding 冻结原则；§3.6 垂直居中降级为验证项；R4 删除自动挂钩；新增 §3.7 AutoSize 副作用边界。
 
 ---
 
@@ -46,7 +46,7 @@
 - 单行文本：宽 = 测量文本宽 + padding；高 = 行高 + padding
 - 多行（TextBox 8.5.2）：宽 = 最长行宽；高 = 行数 × 行高（**v1 挂账**——多行高度自适应复杂，见 §4 边界）
 
-### R3：布局消费（**v1 明确不做**——GPT 审查定调）
+### R3：布局消费（**v1 明确不做**——评审 审查定调）
 
 `VerticalLayout` / `HorizontalLayout` 排位时消费 preferred 尺寸（布局期协商）——**v1 明确不做**（§3.1 方案 B 挂账：会重造 LinearLayout 提取压力 + 验收场景不需要）。v1 的 Layout 排位逻辑零改动。
 
@@ -66,7 +66,7 @@
 | 2 | **Stretch** | 用户主动声明参与父布局分配（9.7 opt-in）——**与 AutoSize 互斥**（§3.5） |
 | 3（兜底） | **AutoSize** | 用户未声明前两者时的内容自适应 |
 
-**调用顺序冻结（v1.5——GPT 初设评审定调）**：
+**调用顺序冻结（v1.5——外部初设评审定调）**：
 
 > **尺寸来源优先级只描述布局/自适应机制之间的关系，不构成对显式 API 调用顺序的强制约束。**
 
@@ -102,11 +102,11 @@ stretch > 0    = AutoSize() no-op
 
 **建议 v1 仍取方案 A**（理由已从「碰不得契约」更新为「增量最小 + 与 9.7 opt-in 精神一致 + 验收场景不需要协商」）：`AutoSize()` 显式方法 + §3.5 交互语义冻结。
 
-### 3.2 内边距来源（v1.4 GPT 审查冻结原则——初设只做实现）
+### 3.2 内边距来源（v1.4 评审 审查冻结原则——初设只做实现）
 
 **问题**：Label / Button / TextBox 的 padding 来源不统一（TextBoxStyle 有 padding 字段，ButtonStyle/Label 侧没有）——若不冻结，`GetPreferredSize()` 语义三分裂（text + ? 各不相同）。
 
-**冻结原则（GPT 审查定调）**：
+**冻结原则（评审 审查定调）**：
 
 > **9.8 v1 的 preferred size 必须包含控件自身已经存在的有效内边距；没有独立 padding 机制的控件暂不新增完整 Style API，使用当前控件已有的内边距语义。**
 
@@ -139,7 +139,7 @@ v1.1 完全没有覆盖这组决策——9.7 落地后 AutoSize 不再面对「�
 
 > 三项均为**行为冻结**（需求层定死，初步设计不重开）；实现路径归初步设计。
 
-### 3.6 TextBox 垂直对齐（v1.4 GPT 审查降级——从决策点改为验证项，v1 不做 API）
+### 3.6 TextBox 垂直对齐（v1.4 评审 审查降级——从决策点改为验证项，v1 不做 API）
 
 **现状（已核实源码）**：TextBox 的 `padding` 字段**四边同源**——`textX/textY = f + inset`（TextBox.cpp:1109/1110）、`TextArea W/H = size − padding×2`（:453/:385）、光标 Y / 点击定位 Y / 滚动上限全套同源（:477）。
 
@@ -147,7 +147,7 @@ v1.1 完全没有覆盖这组决策——9.7 落地后 AutoSize 不再面对「�
 
 > **9.8 v1 不新增 VerticalCentered API。单行 TextBox 通过 preferred height = `lineH + padding×2` 获得自然垂直居中（上下 padding 对称 → 文字居中）；多行/显式大尺寸 TextBox 的垂直对齐作为后续需求观察项**（若将来确认需要，单独立项，再评估 `GetTextTopInset()` 单一真相机制）。
 
-**理由**：AutoSize 高度方向落地后「高度从哪来」前提改变——布局按内容高定框，padding 上下对称天然居中，Center 机制需求消解大半；现在引入 `SetVerticalCentered/GetTextTopInset` 是 YAGNI（GPT 审查 + Zcode「现在做可能白做」判断一致）。
+**理由**：AutoSize 高度方向落地后「高度从哪来」前提改变——布局按内容高定框，padding 上下对称天然居中，Center 机制需求消解大半；现在引入 `SetVerticalCentered/GetTextTopInset` 是 YAGNI（评审 审查 + Zcode「现在做可能白做」判断一致）。
 
 **验证项（测试断言）**：
 
@@ -157,7 +157,7 @@ TextBox AutoSize 后：
     textY   == padding        （上下对称 → 视觉居中）
 ```
 
-### 3.7 AutoSize 副作用边界（v1.4 新增——GPT 审查：保护 9.7 Arrange 纯度）
+### 3.7 AutoSize 副作用边界（v1.4 新增——评审 审查：保护 9.7 Arrange 纯度）
 
 **冻结语义**：
 
@@ -231,8 +231,8 @@ TextBox AutoSize 后：
 ## 8. 修订记录
 
 - v1.0（2026-09-01）需求确认初稿：ModelProbe 实操暴露（用户观察）→ 现状核实（无 GetPreferredSize/Layout 契约 10）→ R1-R5 需求条目 + §3 决策点（Layout 集成 A/B/C、padding 来源、命名、多行边界）+ §4 非目标 + §5 测试方向 + §6 影响面。待评审。
-- v1.1（2026-09-01）**编号变更 9.7 → 9.8**（用户裁决——9.7 编号归自适应布局 Zcode 方案）：文档头加编号变更说明；§1 边界对齐 9.7（窗口自适应 = 9.7 立项）；§3.1 方案 B 补 stretch opt-in 先例；§4 修正「权重尺寸需求未出现」→ 已由 9.7 立项；新增 §7 关系节（双文档正交 + 三点吸收：sizeHint 能力已具备 / 显式尺寸优先同构 / stretch opt-in 先例）；修订记录顺延 §8。
+- v1.1（2026-09-01）**编号变更 9.7 → 9.8**（裁决——9.7 编号归自适应布局 Zcode 方案）：文档头加编号变更说明；§1 边界对齐 9.7（窗口自适应 = 9.7 立项）；§3.1 方案 B 补 stretch opt-in 先例；§4 修正「权重尺寸需求未出现」→ 已由 9.7 立项；新增 §7 关系节（双文档正交 + 三点吸收：sizeHint 能力已具备 / 显式尺寸优先同构 / stretch opt-in 先例）；修订记录顺延 §8。
 - v1.2（2026-09-02）**9.7 落地后的重新评估**（用户：「需要根据我们做完的 9.7 重新评估一下 9.8」）：① §1 现状更新——「Layout 不碰尺寸」已过时（9.7 分配走 SetSize 虚分派）、宽度手工写死已被 fillCrossAxis 解决大半、spacing 取代 MakeSpacer（spacer 已删）、**剩余需求收敛为动态文本**（m_statLabel 状态消息固定 180 宽截断 = 最真实场景）；② §2 R5 升格「**尺寸来源三分**」（显式 SetSize > stretch 分配 > AutoSize 兜底）——v1.1 只处理二分；③ §3.1 方案重估——B 的架构成本因 9.7 触碰契约 10 而下降，但「分配+协商」交织会重造 LinearLayout 提取压力，v1 仍取 A（理由更新）；④ **新增 §3.5 交互语义三项冻结**（stretch>0 与 AutoSize 互斥 / fillCrossAxis 跨轴优先 / spacing 无冲突）——v1.1 完全缺失；⑤ §4 非目标加「布局期协商不做」；⑥ §5 测试补 §3.5 冻结断言；⑦ §7 关系节升级「正交澄清 → 落地后交互冻结」。
 - v1.3（2026-09-02）**新增 §3.6 TextBox 垂直对齐**（Zcode 提案整合——用户转发其分析）：现状核实 padding 四边同源（textX/textY/TextArea W/H/光标 Y 全套，TextBox.cpp:1109/1110/453/385/477）；问题 = padding 是「贴顶+内边距」非垂直居中（Qt QLineEdit 风格）；选项 A 机制化（SetVerticalCentered + GetTextTopInset 单一真相）/ B 凑（padding=(height−lineH)/2）；**评估意见 = 挂 9.8 一起定**（AutoSize 高度落地后「高度从哪来」前提改变，padding 上下对称天然居中，Center 需求消解大半——现在做 A 可能白做）；决策点归初步设计。§3.4 多行边界与 §3.6 联动（单行 AutoSize 高 = lineH + padding×2 是消解前提）。
-- v1.4（2026-09-02）**GPT 职责审查通过——5 条修订 + 1 新增决策点全部采纳，可进入初步设计**：① R5 改写「SetSize 是操作不是状态」→ **尺寸意图三分**（Explicit Size / Stretch / AutoSize——区分「用户 SetSize」与「Layout 内部 SetSize」的机制归详设，需求层不冻结字段）；② §3.5 条 1 澄清 **no-op 是调用时判断非永久关闭**（SetStretch(0) 后 AutoSize 重新生效——opt-in 精神）；③ §3.2 冻结 **padding 原则**（preferred 含控件已有有效内边距；无独立 padding 机制的控件不新增完整 Style API——Button 归初设评估）；④ §3.6 垂直居中**从决策点降级为验证项**（v1 不做 VerticalCentered API；单行经 preferred height = lineH + padding×2 自然居中；大尺寸场景留观察项）；⑤ R4 **删除 SetText 自动挂钩**（消除与 §4 的文档内部冲突——触发方式 = 显式 AutoSize() 唯一）；⑥ **新增 §3.7 AutoSize 副作用边界**（只改自身尺寸、不递归 Arrange、不负责 Invalidate——保护 9.7 Arrange 纯度）；⑦ 文档头加「边界一句话」定调（让控件知道自己需要多大 + 调用方显式调整 ≠ 完整尺寸协商系统）；⑧ §4/§5 同步。
-- v1.5（2026-09-02）**R5 语义修正**（GPT 初设评审指出——「唯一必须改的语义问题」）：v1.4 R5「显式 SetSize 优先（不被 AutoSize 覆盖）」与初设 §4「约定式无标志、AutoSize 显式动作」存在矛盾（`SetSize(500,100)` 后 `AutoSize()` 按需求应不覆盖、按初设会覆盖）。**采纳 GPT 建议冻结「后调用者赢」**：R5 重写——三分表保留（描述机制间关系）+ 新增「调用顺序冻结」（SetSize = 立即设置 / AutoSize = 立即按 preferred / stretch>0 = no-op；不构成对显式 API 调用顺序的强制约束）；GPT 赞成约定式简化（AutoSize 本身是显式命令，无需 m_hasExplicitSize 追踪）。配合初设 v1.1 进详细设计。
+- v1.4（2026-09-02）**外部职责审查通过——5 条修订 + 1 新增决策点全部采纳，可进入初步设计**：① R5 改写「SetSize 是操作不是状态」→ **尺寸意图三分**（Explicit Size / Stretch / AutoSize——区分「用户 SetSize」与「Layout 内部 SetSize」的机制归详设，需求层不冻结字段）；② §3.5 条 1 澄清 **no-op 是调用时判断非永久关闭**（SetStretch(0) 后 AutoSize 重新生效——opt-in 精神）；③ §3.2 冻结 **padding 原则**（preferred 含控件已有有效内边距；无独立 padding 机制的控件不新增完整 Style API——Button 归初设评估）；④ §3.6 垂直居中**从决策点降级为验证项**（v1 不做 VerticalCentered API；单行经 preferred height = lineH + padding×2 自然居中；大尺寸场景留观察项）；⑤ R4 **删除 SetText 自动挂钩**（消除与 §4 的文档内部冲突——触发方式 = 显式 AutoSize() 唯一）；⑥ **新增 §3.7 AutoSize 副作用边界**（只改自身尺寸、不递归 Arrange、不负责 Invalidate——保护 9.7 Arrange 纯度）；⑦ 文档头加「边界一句话」定调（让控件知道自己需要多大 + 调用方显式调整 ≠ 完整尺寸协商系统）；⑧ §4/§5 同步。
+- v1.5（2026-09-02）**R5 语义修正**（外部初设评审指出——「唯一必须改的语义问题」）：v1.4 R5「显式 SetSize 优先（不被 AutoSize 覆盖）」与初设 §4「约定式无标志、AutoSize 显式动作」存在矛盾（`SetSize(500,100)` 后 `AutoSize()` 按需求应不覆盖、按初设会覆盖）。**采纳评审 建议冻结「后调用者赢」**：R5 重写——三分表保留（描述机制间关系）+ 新增「调用顺序冻结」（SetSize = 立即设置 / AutoSize = 立即按 preferred / stretch>0 = no-op；不构成对显式 API 调用顺序的强制约束）；评审 赞成约定式简化（AutoSize 本身是显式命令，无需 m_hasExplicitSize 追踪）。配合初设 v1.1 进详细设计。

@@ -64,9 +64,9 @@ std::optional<TextBox::SelectionRange> TextBox::GetSelection() const {
 
 > **v1.2 实现回写**：`SelectionRange` 是 `TextBox` 的嵌套类型，类外定义返回类型时必须完整限定为 `TextBox::SelectionRange`（写 `SelectionRange` 时 clangcl 报 unknown type name——嵌套类型不在类外作用域可见）。
 
-### 2.3 GetSelection 接口的合理性（回应 GPT 评审）
+### 2.3 GetSelection 接口的合理性（回应 外部评审）
 
-GPT 指出"不应仅为测试修改生产代码"。`GetSelection()` 保留的理由：
+评审指出"不应仅为测试修改生产代码"。`GetSelection()` 保留的理由：
 
 - **Phase 8 文本系统 2.0**：剪贴板操作（Ctrl+C/Ctrl+X）需要读取选区内容——`GetSelection()` 是必要前置
 - **Phase 9 主题系统**：选区高亮样式可能需要序列化/反序列化选区状态
@@ -145,7 +145,7 @@ void ECDI::Test::RunAllTests()
 
 using namespace ECDI;
 
-// 浮点比较辅助（GPT 建议：避免浮点 == 直接比较）
+// 浮点比较辅助（评审建议：避免浮点 == 直接比较）
 constexpr float kEpsilon = 0.001f;
 inline bool FloatEq(float a, float b) { return std::abs(a - b) < kEpsilon; }
 
@@ -846,7 +846,7 @@ void ECDI::Test::RunTextBoxTests()
 
 ### 3.7 EventTests.cpp（P2，可选）
 
-GPT 建议：删除 `EventType != 0` 和 `KeyModifier::Shift == 1` 等无意义测试（测试的是语言规则/实现细节，不是行为）。仅保留验证行为的测试（StaticType 一致性、IsShiftDown/IsCtrlDown 位检查）：
+评审建议：删除 `EventType != 0` 和 `KeyModifier::Shift == 1` 等无意义测试（测试的是语言规则/实现细节，不是行为）。仅保留验证行为的测试（StaticType 一致性、IsShiftDown/IsCtrlDown 位检查）：
 
 ```cpp
 #include "RunAllTests.h"
@@ -1087,7 +1087,7 @@ vcxproj 使用静态文件列表（`<ClCompile Include="..."/>`），需要手�
 
 | 决策 | 内容 |
 |------|------|
-| **D-Test-1** | 测试代码在 `src/Tests/` 下（与 GPT 确认），不在 `include/ECDI/` 下——转库时不暴露测试 API |
+| **D-Test-1** | 测试代码在 `src/Tests/` 下（与 评审 确认），不在 `include/ECDI/` 下——转库时不暴露测试 API |
 | **D-Test-2** | 每个模块暴露一个 `RunXxxTests()` 入口（`RunRendererTests` / `RunWidgetTests` / `RunLayoutTests` / `RunTextBoxTests` / `RunEventTests`），内部包含所有 Test 块声明——避免 `RunAllTests.cpp` 膨胀为几十个头文件声明 |
 | **D-Test-3** | `GetSelection()` 是只读查询接口，不提供 `SetSelection()`——测试中无法构造"有选中区"的前置状态，Selection 交互逻辑归 Phase 10 集成测试 |
 | **D-Test-4** | `SelectionRange` 是公开结构体（`TextBox` 内部定义）——供未来 Phase 10 集成测试直接使用 |
@@ -1103,7 +1103,7 @@ vcxproj 使用静态文件列表（`<ClCompile Include="..."/>`），需要手�
   - §3.6 TextBoxTests 补 5 处 `MoveCaretToEnd()` 前置（TextBox 构造后光标默认开头；VS 实测暴露遗漏）
   - §4.1/4.2/4.3 main.cpp include 改为 `src/Tests/RunAllTests.h`（相对 main.cpp 目录）；UTF8.h 保留（DemoApplication 用 EncodeUTF8）
   - §5.2 vcxproj 实际添加 5 个文件（EventTests P2 未做）
-- v1.1（2026-08-17）整合 GPT 评审：
+- v1.1（2026-08-17）整合 外部评审：
   - 浮点比较改用 `FloatEq` epsilon 辅助函数（避免 `==` 直接比较）
   - EventTests 删除 `EventType != 0` 等无意义测试，仅保留行为测试
   - RunAllTests 改为每模块一个 `RunXxxTests()` 入口（避免声明膨胀）

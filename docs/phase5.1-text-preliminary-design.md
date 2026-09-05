@@ -110,7 +110,7 @@ class RenderingBackend {
 
 | # | 决策 | 结论 |
 |---|------|------|
-| P1 | Font 测量归属 | ✅ **路线 X**：Font 纯描述 + TextMeasurer 独立接口 + GDIBackend 实现 + PaintContext 注入（GPT 边界修正采纳） |
+| P1 | Font 测量归属 | ✅ **路线 X**：Font 纯描述 + TextMeasurer 独立接口 + GDIBackend 实现 + PaintContext 注入（评审 边界修正采纳） |
 | P2 | Font 默认构造 | ✅ `Font()` = 框架默认；`""` 是内部表达 |
 | P3 | DrawTextCommand | ✅ 起点 + 死数据（不带对齐/区域） |
 | P4 | PaintContext::DrawText | ✅ font 默认参数（默认 ≠ 只有默认字体） |

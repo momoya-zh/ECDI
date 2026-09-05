@@ -1,9 +1,9 @@
 ﻿# Phase 7.1.4 Backend 注入 — 职责确认
 
-> 状态：v1.2（2026-08-16，用户决策 A：7.1.4 拆 GDIBackend）｜待用户确认后进初步设计
+> 状态：v1.2（2026-08-16，用户决策 A：7.1.4 拆 GDIBackend）｜待确认后进初步设计
 > 相关：phase7-platform-requirements.md（c-2 PlatformRenderContext 定稿）/ phase7-platform-detailed-design.md（7.1.1 SetHwnd 过渡记账）
 > 目标：解决**决策 35 代价**（Window 持 GDIBackend 值成员 → 后端不可替换）——**v1.0 转库前必须完成**（skill 23）
-> 终态（GPT）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd——只剩纯框架概念
+> 终态（评审）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd——只剩纯框架概念
 
 ## 现状（7.1.3 后，已核实）
 
@@ -49,7 +49,7 @@ struct RenderServices{
 - 拆分依据（已核实 GDIBackend.cpp）：测量实现（MeasureText/LineHeight）用 `GetDC(NULL)` 临时屏幕 DC——**零 hwnd 依赖**，技术上完全独立；唯一共享依赖 = `m_fontCache`（绘制 DrawText 与测量共用 GetOrCreateFont）——拆开后各持一份
 - RecordingBackend **不拆**（见 D1——测试便利，main.cpp 断言段零改动）
 
-### D2 平台句柄注入 — b（GPT 修订全采纳）
+### D2 平台句柄注入 — b（评审 修订全采纳）
 **✅ `PlatformRenderContext` 抽象基类 + `PlatformWindow::GetRenderContext()`（不用 dynamic_cast 于 Window 层）**：
 ```cpp
 // Render/PlatformRenderContext.h（框架层，零 Win32）：
@@ -75,11 +75,11 @@ virtual const PlatformRenderContext& GetRenderContext() const = 0;
 virtual void Initialize(const PlatformRenderContext& context) {}
 // GDIBackend override：static_cast<const Win32RenderContext&> 取句柄 → SetHwnd
 //   （体系内约定转换——GDIBackend 是 Win32 后端，识别 Win32RenderContext 是"同体系内"，
-//     非跨层 dynamic_cast；GPT"都是 Win32 体系内部的事情"）
+//     非跨层 dynamic_cast；评审"都是 Win32 体系内部的事情"）
 ```
-- **GPT 修订价值**：句柄获取从"GDIBackend 参数识别"（dynamic_cast 在抽象层）→"PlatformWindow 返回"（GetRenderContext）——Window 层零识别，识别发生在 Win32 体系内部
+- **评审 修订价值**：句柄获取从"GDIBackend 参数识别"（dynamic_cast 在抽象层）→"PlatformWindow 返回"（GetRenderContext）——Window 层零识别，识别发生在 Win32 体系内部
 
-### D3 Window 构造注入 + 工厂 — c（GPT 修订全采纳 + D1 分离适配）
+### D3 Window 构造注入 + 工厂 — c（评审 修订全采纳 + D1 分离适配）
 **✅ 构造参数注入（默认 → 平台默认工厂）**：
 ```cpp
 // Window 构造：+ RenderServices services = CreateDefaultRenderServices()
@@ -90,7 +90,7 @@ RenderServices CreateDefaultRenderServices();
 // Win32 平台实现：make_unique<GDIBackend>() + make_unique<GDITextMeasurer>() 填 bundle（两个独立对象）
 // 未来 Linux：OpenGLRenderer + FreeTypeTextMeasurer 填 bundle（接口分离天然支持，零改动）
 ```
-- **工厂价值（GPT）**：平台默认后端选择从 Window 移出——Windows→GDIBackend+GDITextMeasurer，未来 Linux→OpenGLBackend
+- **工厂价值（评审）**：平台默认后端选择从 Window 移出——Windows→GDIBackend+GDITextMeasurer，未来 Linux→OpenGLBackend
 - 测试：RecordingBackend 不进 Window（断言段直接使用），无需注入；未来 Window 测试注入时传独立对象或单类双接口对象（RenderServices 按需构造）
 - **Renderer 引用绑定注意**：`m_renderer(*m_renderBackend)` 必须在初始化列表绑定（决策 34 引用成员）——**成员声明顺序：m_renderBackend 在 m_renderer 之前**（初始化列表按声明顺序）
 
@@ -119,7 +119,7 @@ Window 构造：platform 创建 → m_renderBackend->Initialize(platform->GetRen
 | GDIBackend::Initialize 内 static_cast\<Win32RenderContext\> | GDIBackend.cpp | 第二平台后端出现时评估 |
 
 ## 修订记录
-- v1.0（2026-08-16）职责确认定稿：D1-D5。GPT 评审：D2（GetRenderContext 替代 Window 层 dynamic_cast）/ D3（CreateDefaultRenderBackend 工厂）**全采纳**；D1 **保留组合接口 + 记债**（YAGNI：分离是预测性设计；v1.x 双接口消费者是事实；GPT 妥协认可）。
+- v1.0（2026-08-16）职责确认定稿：D1-D5。外部评审：D2（GetRenderContext 替代 Window 层 dynamic_cast）/ D3（CreateDefaultRenderBackend 工厂）**全采纳**；D1 **保留组合接口 + 记债**（YAGNI：分离是预测性设计；v1.x 双接口消费者是事实；评审 妥协认可）。
 - v1.1（2026-08-16，**用户决策覆盖 D1**）D1 改为**能力接口分离**："实现可能会用同一个，但不代表它们应该合在一起"——RenderingBackend/TextMeasurer 各自独立持有（shared_ptr 共享控制块解决"一个对象两个角色指针"）；RenderServices bundle 注入；工厂返回 bundle；技术债从"组合接口待拆"改为"GDIBackend 单类双实现待拆"（接口已分离，实现聚合是 GDI 事实）。
 - v1.2（2026-08-16，**用户决策 A：7.1.4 拆 GDIBackend**）：
   - D1 从 shared_ptr 共享控制块改为 **unique_ptr 双成员**（拆类后无需共享所有权——两个独立对象）

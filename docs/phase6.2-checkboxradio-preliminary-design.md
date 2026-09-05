@@ -1,6 +1,6 @@
 ﻿# Phase 6.2 CheckBox / Radio 初步设计
 
-> 状态：v1.0（2026-08-15）｜初步设计（待用户确认后实现）
+> 状态：v1.0（2026-08-15）｜初步设计（待确认后实现）
 > 相关：phase6.2-checkboxradio-requirements.md（职责确认 v1.0：StateWidget 契约 6 条 + C1-C8）
 
 ## 1. 定稿决策（P1-P8）
@@ -17,7 +17,7 @@ public:
 	void SetChecked(bool checked);       // 唯一状态入口（契约 2）：设值 + OnCheckedChanged + Invalidate
 	bool IsChecked() const noexcept { return m_checked; }
 protected:
-	virtual void OnCheckedChanged(bool checked){}   // 契约 3（带参，GPT 修订）
+	virtual void OnCheckedChanged(bool checked){}   // 契约 3（带参，评审 修订）
 	virtual void OnClickToggle();        // 键鼠共享切换逻辑（契约 6）：默认 CheckBox 语义 = SetChecked(!m_checked)
 	void OnMouseButtonDown(const MouseButtonDownEvent&) override;   // 调 OnClickToggle
 	void OnKeyDown(const KeyDownEvent&) override;                    // Space → OnClickToggle
@@ -29,13 +29,13 @@ private:
 // Radio    : StateWidget（差异：OnClickToggle=SetChecked(true) + SetChecked 同父互斥 + 绘制）
 ```
 
-### P2 接口形态（无 Toggle——GPT 硬约束）
+### P2 接口形态（无 Toggle——评审 硬约束）
 
 ```cpp
 // StateWidget：
 void SetChecked(bool checked);      // CheckBox 程序化设值 / Radio override 加互斥
 bool IsChecked() const noexcept;
-// 无 Toggle()——Radio 不能取反（GPT）；键鼠都经 OnClickToggle 虚方法（契约 6）
+// 无 Toggle()——Radio 不能取反（评审）；键鼠都经 OnClickToggle 虚方法（契约 6）
 
 // CheckBox：继承基类（OnClickToggle 默认反转）
 // Radio：

@@ -139,7 +139,7 @@ case WM_EXITSIZEMOVE:
 ```
 
 **关键点**：
-- WM_IME_* 三个 case 全部 `return std::nullopt` → HandleMessage 走 `DefWindowProcW`（IME 状态机必需，GPT 第 4 点）
+- WM_IME_* 三个 case 全部 `return std::nullopt` → HandleMessage 走 `DefWindowProcW`（IME 状态机必需，评审 第 4 点）
 - 翻译器零新增 include（WM_IME_* 常量在 Windows.h 已含）；Imm API 只在 Window.cpp 出现
 - **COMPOSITION 已由预留升级为实际调用**（v1.0.2 实测驱动——P5 决定项预设路径，case 内加一行，消息结构不变）
 
@@ -324,7 +324,7 @@ endif()
 |---|---|
 | C1 范围 | 系统 caret = **隐藏的文本输入插入点信标**（HideCaret 不显示——光标竖线仍 OnPaint 自画，视觉零变化）；生命周期跟 TextBox 焦点（获焦创建/失焦销毁） |
 | C2 分层 | Window 中介（TextBox → `UpdateTextInputCaret`/`DestroyTextInputCaret`）；TextBox 零平台依赖，只给客户区坐标（与 GetCaretClientPosition 同款） |
-| C3 双通道 | `UpdateTextInputCaret` 内同时做 `SetCaretPos`（TSF 主路径）+ `ImmSetCompositionWindow`（IMM 保底）——GPT 双保险 |
+| C3 双通道 | `UpdateTextInputCaret` 内同时做 `SetCaretPos`（TSF 主路径）+ `ImmSetCompositionWindow`（IMM 保底）——评审 双保险 |
 | C4 调用点 | OnFocusGained(懒创建+初始位置) / 光标变动:OnMouseButtonDown·OnMouseMove·OnKeyDown方向键·InsertCodepoint·DeleteBackward·DeleteForward·MoveCaret·MoveCaretToStart·MoveCaretToEnd / OnFocusLost(销毁) |
 | C5 坐标 | 统一用**光标顶部**客户区坐标（SetCaretPos 语义=caret 左上角；Imm 转 ClientToScreen 后同点）→ CalculateCaretPosition **回归返回顶部**（v1.0.2 曾为底部锚点，现以 caret 为主通道） |
 
@@ -381,14 +381,14 @@ void TextBox::SyncTextInputCaret(){
 ## 10. 修订记录
 
 - v1.0（2026-08-14）详细设计定稿：文件清单 + 逐文件改动 + 关键点理由 + 验证计划。实现按此文档逐条落地。
-- v1.0.1（2026-08-14，GPT 第三轮）：① CalculateCaretPosition/GetCaretClientPosition 注释补坐标系语义（相对控件 / 窗口客户区）② 验证矩阵加"窗口拖动"项（设计限制确认）③ 命名决议：**保留 GetCaretClientPosition**（项目内 Client == 窗口客户区已统一——GetMouseX/GetAbsolutePosition 先例；改名收益 < 三份文档 + 代码变更成本）。
+- v1.0.1（2026-08-14，评审 第三轮）：① CalculateCaretPosition/GetCaretClientPosition 注释补坐标系语义（相对控件 / 窗口客户区）② 验证矩阵加"窗口拖动"项（设计限制确认）③ 命名决议：**保留 GetCaretClientPosition**（项目内 Client == 窗口客户区已统一——GetMouseX/GetAbsolutePosition 先例；改名收益 < 三份文档 + 代码变更成本）。
 - v1.0.2（2026-08-14，实测驱动修正）：
   - **COMPOSITION 空通道升级为实际调用**（P5 决定项执行）——实测：STARTCOMPOSITION 单次定位不可靠，窗口移动后候选窗飘回屏幕左上角（组合窗 START 时未创建，ImmSetCompositionWindow 被忽略）；组合期间每次按键重新定位
   - **锚点回归职责确认 P3 决策 c**——CalculateCaretPosition 返回光标底部（textPos.y + lineH），OnPaint 竖线用 y - lineH 还原顶部（实现曾偏离为顶部）
   - 文档代码同步实现（float 直传无 narrowing / GetCaretClientPosition 非 const）
-- v1.0.3（2026-08-15，TSF 实测驱动 + 用户确认"先测试出问题回退"）：
+- v1.0.3（2026-08-15，TSF 实测驱动 + 确认"先测试出问题回退"）：
   - **根因确认**：用户输入法为 TSF 架构（Win11 微软拼音），ImmSetCompositionWindow 对其候选窗位置无效；最小实验证明 TSF 查询**系统 caret**
-  - **系统 caret 双通道**（GPT 建议全采纳）：`UpdateTextInputCaret` = SetCaretPos（TSF 主）+ ImmSetCompositionWindow（IMM 保底）；`DestroyTextInputCaret` 失焦销毁；`SyncTextInputCaret` TextBox 私有辅助统一 11 个调用点
+  - **系统 caret 双通道**（评审建议全采纳）：`UpdateTextInputCaret` = SetCaretPos（TSF 主）+ ImmSetCompositionWindow（IMM 保底）；`DestroyTextInputCaret` 失焦销毁；`SyncTextInputCaret` TextBox 私有辅助统一 11 个调用点
   - **坐标回归顶部**（C5）：CalculateCaretPosition 返回 textPos.y（顶部），OnPaint 竖线恢复 `fy + caretLocal.y`（v1.0.2 的底部锚点 + y-lineH 还原撤销——caret 语义要求顶部）
   - **清理**：移除 NotifyIMEComposition 内诊断日志 + 最小实验代码；WindowMessageHandler.cpp 未动
   - **回退基线**：v1.0.2 状态（见 9.4）

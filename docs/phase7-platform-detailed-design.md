@@ -2,7 +2,7 @@
 
 > 状态：v1.1（2026-08-15）｜**已实现并验证通过**（V1-V5：编译零警告 + 事件/渲染/焦点/IME 回归正常）
 > 相关：phase7-platform-requirements.md（D1-D8 v1.0.1）/ phase7-platform-preliminary-design.md（v1.1 边界守则）
-> 目标（GPT 验收）：**Window.h 不出现 Win32 类型**——HWND/HDC/UINT/WPARAM/LPARAM/LRESULT/RECT/IME API（V2 grep 实证通过）
+> 目标（评审 验收）：**Window.h 不出现 Win32 类型**——HWND/HDC/UINT/WPARAM/LPARAM/LRESULT/RECT/IME API（V2 grep 实证通过）
 > 边界（v1.1）：翻译器结构不动 / dynamic_cast\<TextBox\> 债务不处理 / WindowClass+MessageLoop 标记 7.1.5 / Application 仅一行适配
 
 ## 1. 文件清单（3 新 + 2 改 + 构建）
@@ -358,7 +358,7 @@ Application::Application():m_windowClass("ECDI FrameWork", Win32PlatformWindow::
 | # | 验收项 | 判据 |
 |---|---|---|
 | V1 | 编译 | VS Debug x64 零错误零新警告；三工具链惯例 |
-| V2 | **Window.h 零 Win32（GPT 验收）** | `grep -E "HWND|HDC|UINT|WPARAM|LPARAM|LRESULT|RECT|Imm|Caret"` Window.h 无命中 |
+| V2 | **Window.h 零 Win32（评审 验收）** | `grep -E "HWND|HDC|UINT|WPARAM|LPARAM|LRESULT|RECT|Imm|Caret"` Window.h 无命中 |
 | V3 | 回归-事件 | 鼠标/键盘/字符/IME 消息翻译与派发行为不变（demo 全交互） |
 | V4 | 回归-渲染/焦点 | 绘制无回归（PaintFrame 经 OnPaint 回调链）；Tab 焦点导航正常 |
 | V5 | 回归-IME | 中文候选窗跟随光标；移动窗口 EXITSIZEMOVE 归位（经 OnExitSizeMove 链） |

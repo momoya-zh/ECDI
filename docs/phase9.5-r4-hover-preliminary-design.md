@@ -1,6 +1,6 @@
 ﻿# Phase 9.5 R4 Hover / MouseEnter / Leave 初步设计
 
-> 状态：v1.1（2026-08-26）｜升级记录：v1.0 通过评审（GPT：无推翻项），v1.1 = 评审整合——**新增 §2.1 四条硬契约**（详细设计冻结）+ 状态机闭合 + 测试补 R4-SX
+> 状态：v1.1（2026-08-26）｜升级记录：v1.0 通过评审（评审：无推翻项），v1.1 = 评审整合——**新增 §2.1 四条硬契约**（详细设计冻结）+ 状态机闭合 + 测试补 R4-SX
 > 承接：phase9.5-wrapup-requirements.md v1.1（R4 = 9.6 前置交互基础设施——只产生 Hover 状态变化事实，不负责视觉过渡/动画/Hover Style）
 > 相关：phase3-architecture.md（事件流/HitTest）/ phase5.4-interaction-requirements.md（Capture/Invalidate）/ phase7.2 测试体系（无窗口测试框架）
 
@@ -47,7 +47,7 @@ MouseMoveEvent → Application::OnMouseMove
 
 ## 2.1 四条硬契约（v1.1 新增，详细设计冻结，测试断言依据）
 
-> GPT 评审整合（v1.0 → v1.1，无推翻项，全部采纳为契约）。
+> 外部评审整合（v1.0 → v1.1，无推翻项，全部采纳为契约）。
 
 - **契约 A（Capture 冻结）**：存在 Capture 时，MouseMove 不更新 Hover Target——hover 状态机**完全冻结**（不运行）
 - **契约 B（Capture 释放不重算）**：`ReleaseCapture` 本身不触发 Hover 重算；释放后的**下一次 MouseMove** 才恢复正常 HitTest——防止 ReleaseCapture 隐式触发 Leave/Enter（状态机唯一驱动 = MouseMove 输入，无第二入口）
@@ -96,4 +96,4 @@ virtual void OnMouseLeave();
 ## 7. 修订记录
 
 - v1.0（2026-08-26）初稿：方案总览（驱动/状态/响应三件套）+ D1-D5 + 状态机 + 测试策略。
-- v1.1（2026-08-26）GPT 评审整合（12 项全部采纳，无推翻）：① 新增 §2.1 四条硬契约（A Capture 冻结 / B Release 不重算 / C 脱树不补发 Leave / D Leave→Enter 顺序）；② D3 补释放边界（契约 B）；③ D4 树有效性强判定规则（不新增公共 API）+ 区分正常离开/异常失效；④ 状态机补两行闭合（脱树行 + 捕获期行）；⑤ 测试补 R4-SX（Capture 释放后首次 MouseMove）；⑥ IsHovered() 明确 9.6 也不做（事件驱动状态变化，非查询型）。
+- v1.1（2026-08-26）外部评审整合（12 项全部采纳，无推翻）：① 新增 §2.1 四条硬契约（A Capture 冻结 / B Release 不重算 / C 脱树不补发 Leave / D Leave→Enter 顺序）；② D3 补释放边界（契约 B）；③ D4 树有效性强判定规则（不新增公共 API）+ 区分正常离开/异常失效；④ 状态机补两行闭合（脱树行 + 捕获期行）；⑤ 测试补 R4-SX（Capture 释放后首次 MouseMove）；⑥ IsHovered() 明确 9.6 也不做（事件驱动状态变化，非查询型）。

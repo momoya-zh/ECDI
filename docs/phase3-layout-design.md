@@ -1,4 +1,4 @@
-# Layout 详细设计（phase3-layout-design.md）
+﻿# Layout 详细设计（phase3-layout-design.md）
 
 > 阶段：第三阶段 Widget System → Layout 子模块 → 详细设计（五阶段法第 3 步）
 > 前置：Layout 职责确认 + 初步设计已评审通过（决策表 21 项）

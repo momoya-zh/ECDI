@@ -1,6 +1,6 @@
 ﻿# Phase 9.5 Alpha Primitive 补强（GDIBackend 半透明绘制）
 
-> 状态：v1.0（2026-08-26）｜简短设计（用户定：能力补强记账级，不展开三档）
+> 状态：v1.0（2026-08-26）｜简短设计（裁决：能力补强记账级，不展开三档）
 > 定位：**能力层补齐**——RenderCommand 的 Color.a 语义一直存在，GDIBackend 未兑现（DrawRect/RoundedRect 的 ToColorRef 丢弃 alpha）。非 API 变化，RecordingBackend/Renderer/Command 零改动。
 > 与 9.6 边界：本次 = **primitive alpha 能力**（Color.a → AlphaBlend）；9.6 = opacity(t) 时间驱动（只把动画结果转成渲染属性，**不重新实现 alpha blending**）。
 
@@ -20,7 +20,7 @@
 
 实现：匿名 namespace 辅助 `BlendAlphaSolid(HDC, Rect, Color, cornerRadius)`——创建临时 32bpp 顶降 DIB（负 biHeight），逐像素填充，AlphaBlend(AC_SRC_ALPHA) 到 m_memoryDC。
 
-## 3. 两条硬约束（GPT 评审写死）
+## 3. 两条硬约束（外部评审写死）
 
 - **约束 1（预乘规则）**：DIB 像素必须**预乘 BGRA**——`B=round(b·a·255), G=round(g·a·255), R=round(r·a·255), A=round(a·255)`。禁止写非预乘 RGB（`(255,0,0,128)` 是错的，应为 `(128,0,0,128)`）。复用 Phase 8 DrawImage §8.3 已验证的 AC_SRC_ALPHA 链路。
 - **约束 2（圆角无抗锯齿）**：`DrawRoundedRect` 半透明分支只做颜色 alpha 合成，**不引入几何抗锯齿**（圆角边缘与现有 GDI RoundRect 同款非 AA 语义）。防膨胀成 alpha compositor。

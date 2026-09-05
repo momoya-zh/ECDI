@@ -1,10 +1,10 @@
-# Phase 5.3 Button 初步设计 v1.0
+﻿# Phase 5.3 Button 初步设计 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（P1-P6）+ GPT 评审
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（P1-P6）+ 外部评审
 
 ## 决策记录
 
-### P1 TextWidget 最终形态（B1/B3/B4 + GPT 确认）
+### P1 TextWidget 最终形态（B1/B3/B4 + 评审 确认）
 
 ```cpp
 class TextWidget : public Widget {
@@ -51,7 +51,7 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 }
 ```
 
-- **DrawTextContent 参数保留 int x/y**（GPT 提议 Point 浮点化——暂缓）：与 `Widget::OnPaint` 接口一致；亚像素/DPI/动画浮点化是 Phase 8 渲染增强的事，现在半浮点化两头不靠
+- **DrawTextContent 参数保留 int x/y**（评审 提议 Point 浮点化——暂缓）：与 `Widget::OnPaint` 接口一致；亚像素/DPI/动画浮点化是 Phase 8 渲染增强的事，现在半浮点化两头不靠
 - **MeasureText 替代 LineHeight**：居中需要宽度 → MeasureText 必调，宽高一次拿（`.height` 与 LineHeight 同源，GDIBackend 同用 GetTextMetrics）——5.2 断言不受影响（Recording 返回 {10,14}）
 
 ### P2 Label 改造（行为零变化）
@@ -95,7 +95,7 @@ private:
 
 ```cpp
 Button::Button(const std::string& text) : TextWidget(text){
-	SetTextColor(Color::White());          // B2 默认白字——GPT 修正：用公共 API，不直接改基类成员
+	SetTextColor(Color::White());          // B2 默认白字——评审 修正：用公共 API，不直接改基类成员
 }
 
 Point Button::CalculateTextPosition(int x, int y, float textWidth, float lineHeight) const{
@@ -114,8 +114,8 @@ void Button::OnPaint(PaintContext& ctx, int x, int y){
 }
 ```
 
-- **Button 水平对齐 = 居中**（GPT 推荐方案 A + 用户表态确认）——绝大多数 GUI 框架按钮默认居中
-- 构造内 `SetTextColor(White)`（GPT 风格修正：子类用公共 API 设默认样式，不直接改基类成员）
+- **Button 水平对齐 = 居中**（评审 推荐方案 A + 用户表态确认）——绝大多数 GUI 框架按钮默认居中
+- 构造内 `SetTextColor(White)`（评审 风格修正：子类用公共 API 设默认样式，不直接改基类成员）
 
 ### P4 Color operator==（连带决策点）
 

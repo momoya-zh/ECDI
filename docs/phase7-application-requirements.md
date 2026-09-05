@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.5 Application 解耦 — 职责确认
 
-> 状态：v1.0（2026-08-16）｜待用户确认后进初步设计
+> 状态：v1.0（2026-08-16）｜待确认后进初步设计
 > 相关：phase7-platform-requirements.md（D5 Application 挂起——7.1.1-7.1.4 后回看）/ phase7-platform-detailed-design.md（WindowClass 标记 7.1.5）
 > 目标：**7.1 平台抽象完全闭环**——Framework 层可脱离 Windows 独立存在（Window + Application 双零残留）
 > 触发：用户 2026-08-16 决策——"我们既然决定平台解耦，那就不应该在框架里残留"（E2/E4 从记账改为实施）
@@ -18,7 +18,7 @@
 | Window 构造:42 | `const WindowClass&` 参数（传 Win32PlatformWindow） | 平台类型穿过框架接口 |
 | Window.h:19 | `class WindowClass;` 前置声明 | 平台类型残留 |
 
-## 1. Application 职责边界（先定义，防返工——GPT 要求）
+## 1. Application 职责边界（先定义，防返工——评审 要求）
 
 ### 框架编排层（Application 保留）
 - 窗口生命周期管理（创建/持有/延迟销毁/空窗退出判定）
@@ -32,9 +32,9 @@
 
 ### 边界澄清（与 Phase 7.5 正交）
 - 7.5 事件回调注册（Button::SetOnClick 等）是 **Widget 层业务便利**（virtual OnClick 转发 std::function），与 Application 的事件入口正交——**Application 仍是 EventRouter 入口，回调注册不改变其平台职责**
-- 窗口系统（WindowClass）与事件循环（MessageLoop）是**两个独立概念**（GPT）——分别归位，不绑一起
+- 窗口系统（WindowClass）与事件循环（MessageLoop）是**两个独立概念**（评审）——分别归位，不绑一起
 
-## 2. 决策（拆两个子步骤，GPT 建议）
+## 2. 决策（拆两个子步骤，评审建议）
 
 ### 7.1.5.1 WindowClass 下沉（窗口系统归位）
 - 文件移 `Platform/Win32/`（git rename，类名 WindowClass 不变——与 7.1.2 翻译器归位同例）
@@ -63,7 +63,7 @@ public:
 //   Exit() → m_platformApplication->RequestExit()
 //   Application.cpp 删 <Windows.h> ✓
 ```
-- **接口设计**：PumpMessages(onFrame) 带每帧钩子（比 GPT 的 Run()/Quit() 完整——ProcessDeferredDestroy 需要）；命名区分（不与 Application::Run/Exit 混淆）
+- **接口设计**：PumpMessages(onFrame) 带每帧钩子（比 评审 的 Run()/Quit() 完整——ProcessDeferredDestroy 需要）；命名区分（不与 Application::Run/Exit 混淆）
 - **创建方式**：cpp 层 make_unique<Win32PlatformApplication>（协调者模式——与 Window.cpp make_unique<Win32PlatformWindow> 同构）；**不设注入参数**（消息泵无"可替换"需求——YAGNI，与 RenderServices 注入不同）
 
 ### 7.1.5.3 注释转正（小项并入 7.1.5.2）
@@ -92,4 +92,4 @@ public:
 
 ## 6. 修订记录
 
-- v1.0（2026-08-16）职责确认定稿：职责边界定义（框架编排/事件循环/窗口系统三分）+ 7.1.5.1 WindowClass 下沉 + 7.1.5.2 PlatformApplication 抽象。GPT 深化：E2 从"记账"改"实施"（闭环目标）+ 窗口系统/事件循环分离 + 职责边界先行（防 7.1.5 返工）。用户决策：框架零残留（E4 窗口类注册下沉）。
+- v1.0（2026-08-16）职责确认定稿：职责边界定义（框架编排/事件循环/窗口系统三分）+ 7.1.5.1 WindowClass 下沉 + 7.1.5.2 PlatformApplication 抽象。评审 深化：E2 从"记账"改"实施"（闭环目标）+ 窗口系统/事件循环分离 + 职责边界先行（防 7.1.5 返工）。用户决策：框架零残留（E4 窗口类注册下沉）。

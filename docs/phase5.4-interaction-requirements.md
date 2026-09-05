@@ -1,6 +1,6 @@
-# Phase 5.4 交互基础设施职责确认 v1.0
+﻿# Phase 5.4 交互基础设施职责确认 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（I1-I7）+ GPT 评审（5.4 为 Phase 5 质量最高份）
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（I1-I7）+ 外部评审（5.4 为 Phase 5 质量最高份）
 
 ## 背景
 
@@ -33,9 +33,9 @@ newWidget → OnFocusGained() → Invalidate()
 
 TextBox 未来：`OnFocusGained → m_cursorVisible = true` / `OnFocusLost → m_selection.Clear()` 自然接入。
 
-### I3 Tab 焦点切换 —— ⚠️ GPT 修正：放 Window，不放 Application ✅
+### I3 Tab 焦点切换 —— ⚠️ 评审 修正：放 Window，不放 Application ✅
 
-原方案：Application::OnKeyDown 拦截 Tab → FocusNext。**GPT 修正：Application 不该知道 Tab——焦点属于 Window**（一个 Application 多窗口，Tab 是"当前窗口内部"移动焦点）。
+原方案：Application::OnKeyDown 拦截 Tab → FocusNext。**评审 修正：Application 不该知道 Tab——焦点属于 Window**（一个 Application 多窗口，Tab 是"当前窗口内部"移动焦点）。
 
 **定稿**：`Window::HandleKeyDown(event)`——**Tab → FocusNext()；否则 → 派发给 m_focusedWidget**。`Application::OnKeyDown` 改为调 `window.HandleKeyDown(event)`（不再直接 FindFocusedWidget）。
 
@@ -58,9 +58,9 @@ MouseDown → capture = button → MouseMove(移出) → 仍派发 capture → M
 
 修复"按下移出后 Up 不达、m_pressed 卡死"。Windows 原生 API 经典行为；Button/TextBox/Slider/Scrollbar/Splitter 未来全依赖。
 
-### I6 Button 按下态 —— ⚠️ GPT 修正：拖出释放取消点击 ✅
+### I6 Button 按下态 —— ⚠️ 评审 修正：拖出释放取消点击 ✅
 
-原方案：Up 必触发 OnClick。**GPT 修正（标准 GUI 行为）**：**"按下→移出→释放"应取消点击**——只有"按下且释放时鼠标仍在按钮内"才触发。
+原方案：Up 必触发 OnClick。**评审 修正（标准 GUI 行为）**：**"按下→移出→释放"应取消点击**——只有"按下且释放时鼠标仍在按钮内"才触发。
 
 ```cpp
 void Button::OnMouseButtonUp(const MouseButtonUpEvent& event){
@@ -74,13 +74,13 @@ void Button::OnMouseButtonUp(const MouseButtonUpEvent& event){
 - 按下变深色：`m_pressed ? FromRGBA8(60,90,180) : FromRGBA8(80,120,220)`；Down/Up 各 Invalidate
 - 坐标判断方式（绝对坐标如何获得）初步设计固化
 
-### I7 main.cpp 验证 —— A ✅（GPT：少断言，人工交互为主）
+### I7 main.cpp 验证 —— A ✅（评审：少断言，人工交互为主）
 
 Focus/Capture/Invalidate 是**状态机**——写大量断言意义低。**人工交互验证为主**：
 
 - Tab 在两按钮间切换（焦点框移动）
 - 按下按钮变色、释放恢复
-- **拖出取消**：按下→移出→释放→**不触发** OnClick（GPT 修正的行为验证）
+- **拖出取消**：按下→移出→释放→**不触发** OnClick（评审 修正的行为验证）
 - 按住拖出释放不触发、在按钮内释放触发
 - 断言只保留最基础的（如 HasFocus 状态一条）
 

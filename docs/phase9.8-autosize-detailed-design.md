@@ -2,8 +2,8 @@
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-02（v1.1 修订 2026-09-02）
-> 状态：**v1.1 GPT 详设评审通过**（2026-09-02——「通过，允许进入实现阶段」；两处文字决策修订 + DoMeasureText 定 private，见修订记录）
-> 前置：phase9.8-autosize-requirements.md v1.5（R5「后调用者赢」定稿）/ phase9.8-autosize-preliminary-design.md v1.1（GPT 初设评审通过）
+> 状态：**v1.1 外部详设评审通过**（2026-09-02——「通过，允许进入实现阶段」；两处文字决策修订 + DoMeasureText 定 private，见修订记录）
+> 前置：phase9.8-autosize-requirements.md v1.5（R5「后调用者赢」定稿）/ phase9.8-autosize-preliminary-design.md v1.1（外部初设评审通过）
 > 边界一句话：**让控件知道自己需要多大，并允许调用方显式让它调整到这个尺寸**——不是尺寸协商系统
 
 ---
@@ -62,7 +62,7 @@ bool Widget::AutoSize(){
 }
 ```
 
-> **v1.1 float → int 策略冻结（GPT 详设评审建议②）**：`AutoSize()` 将 preferred 的浮点分量经 `static_cast<int>` **向零截断**为 Widget 的整数像素尺寸（40.9 → 40）；**v1 不引入 rounding policy**（不 std::round）——Widget 几何 API 本就是整数尺寸，截断是最小变化方案。Size 保持 float（测量层精度），转换只在 AutoSize 边界发生一次。
+> **v1.1 float → int 策略冻结（外部详设评审建议②）**：`AutoSize()` 将 preferred 的浮点分量经 `static_cast<int>` **向零截断**为 Widget 的整数像素尺寸（40.9 → 40）；**v1 不引入 rounding policy**（不 std::round）——Widget 几何 API 本就是整数尺寸，截断是最小变化方案。Size 保持 float（测量层精度），转换只在 AutoSize 边界发生一次。
 
 ### 3.3 `TextWidget`：preferred 测量 + ResolveMeasurer 接缝
 
@@ -92,7 +92,7 @@ TextMeasurer* TextWidget::ResolveMeasurer() const{
     return nullptr;
 }
 
-// private 成员（v1.1 定案——GPT 详设评审：preferred 测量是 TextWidget 语义组成部分，归 private 非匿名 namespace）
+// private 成员（v1.1 定案——外部详设评审：preferred 测量是 TextWidget 语义组成部分，归 private 非匿名 namespace）
 Size TextWidget::DoMeasureText(TextMeasurer& measurer) const{
     const Size textSize = measurer.MeasureText(m_style.font.value, m_text);
     const float lineHeight = measurer.LineHeight(m_style.font.value);
@@ -229,9 +229,9 @@ void ModelProbePage::RefreshStatText(const std::string& message){
 
 请评审：① 3.2 AutoSize 实现体冻结（§3.7 纯度靠实现结构保证 + 行为测试——是否接受「审查性保证」而非可测计数？这是初设开放点 5 的答案）② 3.3 DoMeasureText 私有 helper 形态 ③ 3.4 TextBox 单行走 `TextWidget::GetPreferredSize()` 显式限定调用（多态正确性）④ 4 FakeTextMeasurer 码点计数规则（0xC0 前导字节判法）⑤ 5 用例 7 数据自洽性 ⑥ 6 RefreshStatText 调用点迁移（5 处 SetText → 统一出口——错误消息与统计消息语义合并是否影响 UpdateStat 现有逻辑）。
 
-> **已评审（GPT，2026-09-02）**：「通过，允许进入实现阶段」——① 审查性保证接受（AutoSize 实现体冻结 + 结果/副作用测试）② DoMeasureText 定 private ③ 显式限定正确 ④ 措辞修订见 v1.1 ⑤ 用例 7 自洽 ⑥ UpdateStat 调用链留实现阶段检查（若 UpdateStat 自带布局/状态更新则避免机械迁移造成重复 Arrange）。实现阶段检查点：UpdateStat 是否依赖 m_statLabel 尺寸/Arrange 副作用。
+> **已评审（评审，2026-09-02）**：「通过，允许进入实现阶段」——① 审查性保证接受（AutoSize 实现体冻结 + 结果/副作用测试）② DoMeasureText 定 private ③ 显式限定正确 ④ 措辞修订见 v1.1 ⑤ 用例 7 自洽 ⑥ UpdateStat 调用链留实现阶段检查（若 UpdateStat 自带布局/状态更新则避免机械迁移造成重复 Arrange）。实现阶段检查点：UpdateStat 是否依赖 m_statLabel 尺寸/Arrange 副作用。
 
 ## 9. 修订记录
 
 - v1.0（2026-09-02）详细设计初稿：需求 v1.5 / 初设 v1.1 冻结语义落成精确签名与实现（Widget GetPreferredSize 虚默认当前尺寸 + AutoSize 4 行冻结实现；TextWidget override + ResolveMeasurer 接缝 + DoMeasureText helper + 空文本宽 0；TextBox override 多行拦截 + padding×2——§3.6 验证项自动成立）；FakeTextMeasurer（码点×8 宽 / 行高 16——UTF-8 前导字节计数）+ TestableLabel；测试 10 用例精确数据（用例 7 复核 {24,24} 自洽）；用例 8 断言方式定案（实现体冻结 + 行为验证——Invalidate/Arrange 非虚 + 无窗口 no-op 使计数不可行）；ModelProbe RefreshStatText 统一出口（+m_statRow 指针）+ 5 处调用点迁移；影响清单（Layout/main.cpp/vcxproj 零改动）。待评审。
-- v1.1（2026-09-02）**GPT 详设评审通过**（「通过，允许进入实现阶段」）——两处文字决策 + 一处实现定案：① §4 FakeTextMeasurer 措辞修订（非 continuation byte 计数 = 测试测量模型，**不承担 UTF-8 合法性验证**）；② §3.2 float → int **向零截断策略冻结**（40.9 → 40；v1 不引入 rounding policy，不 std::round——Widget 几何本就是整数，截断是最小变化）；③ §3.3 `DoMeasureText()` 定案 **private 成员**（preferred 测量是 TextWidget 语义组成部分，非 cpp 匿名辅助函数）。评审确认不改项：AutoSize 不 Arrange/Invalidate、不做副作用计数测试（实现体冻结 + 行为验证）、TextBox 显式限定基类调用、多行 fallback、Button 不加 padding、Layout 零改动、RefreshStatText 顺序、无 m_hasExplicitSize、bool 返回值保留。
+- v1.1（2026-09-02）**外部详设评审通过**（「通过，允许进入实现阶段」）——两处文字决策 + 一处实现定案：① §4 FakeTextMeasurer 措辞修订（非 continuation byte 计数 = 测试测量模型，**不承担 UTF-8 合法性验证**）；② §3.2 float → int **向零截断策略冻结**（40.9 → 40；v1 不引入 rounding policy，不 std::round——Widget 几何本就是整数，截断是最小变化）；③ §3.3 `DoMeasureText()` 定案 **private 成员**（preferred 测量是 TextWidget 语义组成部分，非 cpp 匿名辅助函数）。评审确认不改项：AutoSize 不 Arrange/Invalidate、不做副作用计数测试（实现体冻结 + 行为验证）、TextBox 显式限定基类调用、多行 fallback、Button 不加 padding、Layout 零改动、RefreshStatText 顺序、无 m_hasExplicitSize、bool 返回值保留。

@@ -1,6 +1,6 @@
 ﻿# Phase 7.2 测试体系补强 详细设计
 
-> 状态：v0.2（2026-08-24）｜详细设计待审（GPT 评审整合）
+> 状态：v0.2（2026-08-24）｜详细设计待审（外部评审整合）
 > 前序：职责确认 v1.1 ✅ / 初步设计 v0.4 ✅（`phase7.2-test-system-requirements.md` / `phase7.2-test-system-preliminary-design.md`）
 > 依据：调研实态（TextBox Selection 码点契约 / WindowMessageHandler 翻译形态 / PlatformWindowHost 接口 / vcxproj 组织）——本稿全部设计基于实际代码事实
 
@@ -128,7 +128,7 @@ namespace Detail {
 
 - 失败行为：**记录 + 继续**（不弹框、不终止）；位置信息自动捕获
 - 浮点迁移：现有 `FloatEq(a, b)`（kEpsilon=0.001）→ `EXPECT_NEAR(a, b, kEpsilon)`
-- **实现语义（GPT 修正）**：`EXPECT_NEAR` 用 `static_cast<double>` 收窄到 double 再 `std::abs`——避免无符号类型 `a - b` 下溢出错误（如 `unsigned(1) - unsigned(2)`）；首版**仅用于浮点场景**（`TestFramework.h` 需 `#include <cmath>`）
+- **实现语义（评审 修正）**：`EXPECT_NEAR` 用 `static_cast<double>` 收窄到 double 再 `std::abs`——避免无符号类型 `a - b` 下溢出错误（如 `unsigned(1) - unsigned(2)`）；首版**仅用于浮点场景**（`TestFramework.h` 需 `#include <cmath>`）
 - 双轨语义（职责确认 G）：`FRAMEWORK_ASSERT` = 框架运行时不变量（终止）；`EXPECT_*` = 测试期望值（记录继续）
 
 ### 2.5 TestRunner
@@ -368,5 +368,5 @@ ECDI 测试/验证体系最终三层结构：
 
 | 版本 | 日期 | 内容 |
 |---|---|---|
-| v0.2 | 2026-08-24 | GPT 评审整合：EXPECT_NEAR 改 double+std::abs（修无符号减法下溢）；异常 FailureRecord 置空 file/line（不冒充 TestRunner 位置，Summary 特判）；新增 §5.5 现有视觉验证资产记账；FakeHost 事件指针加"仅即时断言"生命周期约束；6 注册入口注明含 TestFrameworkTests |
+| v0.2 | 2026-08-24 | 外部评审整合：EXPECT_NEAR 改 double+std::abs（修无符号减法下溢）；异常 FailureRecord 置空 file/line（不冒充 TestRunner 位置，Summary 特判）；新增 §5.5 现有视觉验证资产记账；FakeHost 事件指针加"仅即时断言"生命周期约束；6 注册入口注明含 TestFrameworkTests |
 | v0.1 | 2026-08-23 | 初稿（基于实现事实调研：TextBox 码点契约 / WindowMessageHandler 形态 / FakeHost 方案 / P0 范围修正 Ctrl+A+双击=新功能排除） |

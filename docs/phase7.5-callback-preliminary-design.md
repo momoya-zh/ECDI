@@ -1,6 +1,6 @@
 ﻿# Phase 7.5 事件回调（std::function 回调注册 API）初步设计
 
-> 状态：v1.2（2026-08-19）｜初步设计待审（GPT 二轮评审修复）
+> 状态：v1.2（2026-08-19）｜初步设计待审（评审 二轮评审修复）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / 职责确认 v1.2 ✅
 > 相关文档：phase7.5-callback-requirements.md（职责确认）/ phase7.2-testing-requirements.md（测试边界）/ phase6.2-checkboxradio-requirements.md（C4 契约）
 
@@ -35,7 +35,7 @@ m_xxxCallback          [std::function，独立通道]
 
 > ⚠️ 原子授权提醒：本次改动涉及 **6 个文件**。如需授权，请全部确认后我再统一修改。
 >
-> ⚠️ Button 回调测试**不在本次范围**——推迟到集成测试阶段（GPT v1.2 决策，见 §5.1）。
+> ⚠️ Button 回调测试**不在本次范围**——推迟到集成测试阶段（评审 v1.2 决策，见 §5.1）。
 
 ---
 
@@ -183,7 +183,7 @@ protected:
 
     /// @brief 文本变化虚方法（子类可 override 扩展行为）
     /// @details 调用链：编辑操作 → RaiseTextChanged → OnTextChanged() + m_onTextChanged()
-    ///   保护可见性：仅子类/自身可调（D3 GPT 修订）
+    ///   保护可见性：仅子类/自身可调（D3 评审 修订）
     virtual void OnTextChanged(const std::string& text);
 
 private:
@@ -330,15 +330,15 @@ private:
 
 ## 5. 测试设计（R5）
 
-### 5.1 测试策略（GPT v1.2 决策：Button 回调测试推迟集成测试）
+### 5.1 测试策略（评审 v1.2 决策：Button 回调测试推迟集成测试）
 
 **7.5 只做 TextBox 回调测试；Button 回调测试推迟到集成测试阶段。**
 
-理由（GPT v1.2 核心洞察）：
+理由（评审 v1.2 核心洞察）：
 - Button 回调的唯一真实触发路径 = `OnMouseButtonUp`（protected 事件方法）→ 构造 `MouseButtonUpEvent` → 依赖坐标/命中判断/Window——**把回调测试变成了鼠标事件 + 命中 + 布局 + 坐标的耦合测试**，违背 7.2"无窗口单元测试"的初衷
 - TextBox 回调的触发点 = `InsertCodepoint`/`DeleteBackward`/`DeleteForward`——**全部是 public 编辑 API，天然适合 7.2 无窗口测试体系**
 - Button 与 TextBox **共用同一套 RaiseXxx 机制**（结构完全相同）——机制正确性（注册 → 触发 → 回调收到值；override 不吞回调）由 TextBox 测试覆盖即可证明；Button 特有的"OnMouseButtonUp → RaiseClick"接线属于**事件交互**，归集成测试阶段
-- 不做"测试辅助类暴露 private 成员"（TestableButton 之类）——破坏封装，GPT 亦不推荐
+- 不做"测试辅助类暴露 private 成员"（TestableButton 之类）——破坏封装，评审 亦不推荐
 
 > 📌 推迟项记录：Button 回调注册/触发/override 语义 → 集成测试清单（Phase 10 或未来集成测试阶段补充，roadmap-deferred.md 记一笔）。
 
@@ -397,7 +397,7 @@ private:
 {
     class MyTextBox : public TextBox{
     public:
-        bool baseCalled = false;   // 类成员变量——lambda/override 可访问（GPT v1.1 修复）
+        bool baseCalled = false;   // 类成员变量——lambda/override 可访问（评审 v1.1 修复）
 
     protected:
         void OnTextChanged(const std::string&) override{
@@ -456,10 +456,10 @@ private:
 
 ## 8. 修订记录
 
-- **v1.2（2026-08-19）整合 GPT 二轮评审（3 问题 + 1 建议）**：
+- **v1.2（2026-08-19）整合 评审 二轮评审（3 问题 + 1 建议）**：
   1. **问题 1/2（TC1-TC4 无法编译——前后矛盾）**：统一测试策略——**删除 Button 回调测试**（原 TC1-TC4），7.5 只保留 TextBox 回调测试（现 TC1-TC4）
   2. **问题 3（Button 测试耦合 MouseEvent）**：Button 回调唯一真实路径依赖事件链（OnMouseButtonUp → 坐标/命中/Window），违背 7.2 无窗口测试初衷——**Button 回调测试推迟到集成测试**；机制正确性由 TextBox 测试覆盖（同一套 RaiseXxx）
   3. **小建议（采纳）**：引入 `using ClickCallback` / `using TextChangedCallback` typedef，Phase 8 CheckBox 预留 `CheckedChangedCallback`——统一可读性
   4. 文档同步：文件清单 7 → 6（去掉 WidgetTests.cpp）；删除 §6 FireClickEvent 测试方案；D9 契约简化（不再需要测试协调）
-- v1.1（2026-08-19）整合 GPT 一轮评审：测试文件归属（Button→WidgetTests）、TC1 冗余变量、TC2/TC8 局部变量编译错误、RaiseClick private 测试协调、D9 契约明确化
+- v1.1（2026-08-19）整合 评审 一轮评审：测试文件归属（Button→WidgetTests）、TC1 冗余变量、TC2/TC8 局部变量编译错误、RaiseClick private 测试协调、D9 契约明确化
 - v1.0（2026-08-19）初步设计初稿（职责确认 v1.2 后的完整接口设计）

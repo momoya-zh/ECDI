@@ -1,13 +1,13 @@
 ﻿# Phase 6 布局系统完善 — HorizontalLayout 初步设计
 
-> 状态：v1.0（2026-08-15）｜初步设计（待用户确认后实现）
+> 状态：v1.0（2026-08-15）｜初步设计（待确认后实现）
 > 相关：phase6.1-horizontallayout-requirements.md（职责确认 v1.0）/ VerticalLayout（镜像基准）
 
 ## 1. 定稿决策（P1-P5）
 
 ### P1 HorizontalLayout.h/cpp —— A ✅（VerticalLayout 水平镜像）
 
-**同构约束（GPT 2026-08-15）**：HorizontalLayout.cpp 与 VerticalLayout.cpp 的 diff **尽可能只出现 y→x、height→width**——除变量名外零逻辑差异。收益：① VerticalLayout 修 bug 时 HorizontalLayout 同步可见 ② 未来 Wrap/Grid/Flex 出现时两者天然成 LinearLayout 抽象模板。
+**同构约束（评审 2026-08-15）**：HorizontalLayout.cpp 与 VerticalLayout.cpp 的 diff **尽可能只出现 y→x、height→width**——除变量名外零逻辑差异。收益：① VerticalLayout 修 bug 时 HorizontalLayout 同步可见 ② 未来 Wrap/Grid/Flex 出现时两者天然成 LinearLayout 抽象模板。
 
 **新头** `Layout/HorizontalLayout.h`（与 VerticalLayout.h 同构）：
 
@@ -91,7 +91,7 @@ void HorizontalLayout::Arrange(Widget& parent){
 	FRAMEWORK_ASSERT(b3->GetX() == 180  && b3->GetY() == 0);   // 100+80——验证 x += childWidth 非固定步长
 }
 
-// 测试 2（GPT 补充）：超出父容器——Layout 不裁切不换行（边界原则验证）
+// 测试 2（评审 补充）：超出父容器——Layout 不裁切不换行（边界原则验证）
 {
 	ECDI::Panel panel;
 	panel.SetSize(200, 50);   // 父宽 200
@@ -156,4 +156,4 @@ win1.GetRootWidget().Arrange();   // 已有一处，顺带覆盖新 panel
 ## 2. 修订记录
 
 - v1.0（2026-08-15）初步设计定稿：P1-P5。HorizontalLayout 为 VerticalLayout 纯镜像（差异一行代码）；断言/交互/构建三路验证。
-- v1.1（2026-08-15，GPT 评审）：① P1 加 **diff 同构约束**（仅 y→x / height→width，维护可同步 + 未来 LinearLayout 抽象模板）② P2 加**边界测试 2**（超出父容器：总宽 300 > 父宽 200，第 3 子仍放 x=200——验证 Layout 不裁切不换行原则）③ P4 记未来项：CMake 自动生成 VS 工程（2.x 后，减少 vcxproj 手工维护）。
+- v1.1（2026-08-15，外部评审）：① P1 加 **diff 同构约束**（仅 y→x / height→width，维护可同步 + 未来 LinearLayout 抽象模板）② P2 加**边界测试 2**（超出父容器：总宽 300 > 父宽 200，第 3 子仍放 x=200——验证 Layout 不裁切不换行原则）③ P4 记未来项：CMake 自动生成 VS 工程（2.x 后，减少 vcxproj 手工维护）。

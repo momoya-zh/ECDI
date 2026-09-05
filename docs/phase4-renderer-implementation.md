@@ -1,4 +1,4 @@
-# Phase 4 Renderer 实现设计（phase4-renderer-implementation.md）
+﻿# Phase 4 Renderer 实现设计（phase4-renderer-implementation.md）
 
 > 前置：`docs/phase4-renderer-design.md` v1.7（42 条决策 + §20 Header 规则 + §21 实现顺序）
 > 本文档：落地实现蓝图——文件树 / 类定义 / 成员 / 签名 / Commit 修改范围 / 验证方式
@@ -8,7 +8,7 @@
 
 ## 1. 目标与原则
 
-承接 design v1.7，按**修订后顺序**（§21 + GPT 评审修正：双缓冲并入 GDIBackend 一次到位）落代码。
+承接 design v1.7，按**修订后顺序**（§21 + 外部评审修正：双缓冲并入 GDIBackend 一次到位）落代码。
 
 原则：
 - 小步提交，**每个 commit 可编译**
@@ -340,7 +340,7 @@ void Window::PaintFrame() {
 
 ## 7. 修订记录
 
-- v1.0（2026-08-10）初版：基于 design v1.7 + GPT 评审修正（双缓冲并入 GDIBackend，Commit 4.7 一次到位；顺序 4.1-4.7；测试随 commit）
+- v1.0（2026-08-10）初版：基于 design v1.7 + 外部评审修正（双缓冲并入 GDIBackend，Commit 4.7 一次到位；顺序 4.1-4.7；测试随 commit）
 - v1.1（2026-08-11）**实现完成**：4.1-4.7 全部落地并验证通过（三工具链编译 + Debug 运行两窗口正常显示 + 双层测试断言通过）。与实际实现的差异记录：
   1. **Button 颜色**用 `Color::FromRGBA8(80, 120, 220)` 精确保持原 RGB（v1.0 写的 `Color::Blue()` 近似作废——验收要求视觉一致）
   2. **测试段**放 main.cpp `wWinMain` 开头（4.5 五条 Recording 断言 + 4.6 命令断言，Debug 自检保留）

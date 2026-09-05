@@ -1,6 +1,6 @@
 ﻿# Phase 6 布局系统完善 — HorizontalLayout 详细设计
 
-> 状态：v1.0（2026-08-15）｜实现蓝图（待用户确认后实现）
+> 状态：v1.0（2026-08-15）｜实现蓝图（待确认后实现）
 > 相关：phase6.1-horizontallayout-requirements.md（职责确认 v1.0）/ phase6.1-horizontallayout-preliminary-design.md（初步设计 v1.1）
 
 ## 1. 文件改动清单
@@ -72,7 +72,7 @@ void HorizontalLayout::Arrange(Widget& parent){
 
 测试 1（不同宽度累加）+ 测试 2（超出父容器不裁切）——代码见初步设计 v1.1 P2，逐字照搬。
 
-**测试 3（GPT 第三轮补充）：0/1 子控件边界**：
+**测试 3（评审 第三轮补充）：0/1 子控件边界**：
 
 ```cpp
 // 测试 3：边界——0 子控件不崩溃 / 1 子控件归零位
@@ -103,7 +103,7 @@ void HorizontalLayout::Arrange(Widget& parent){
 - `<ClCompile Include="src\Layout\HorizontalLayout.cpp" />`（Layout 区）
 - `<ClInclude Include="include\ECDI\Layout\HorizontalLayout.h" />`（Layout 区）
 
-## 3. 设计契约（GPT 第三轮补充，写死为实现约束）
+## 3. 设计契约（评审 第三轮补充，写死为实现约束）
 
 **HorizontalLayout v1.0 设计契约**：
 
@@ -134,4 +134,4 @@ void HorizontalLayout::Arrange(Widget& parent){
 ## 5. 修订记录
 
 - v1.0（2026-08-15）详细设计定稿：5 步实现 + 5 项验收。实现按此文档逐条落地。
-- v1.1（2026-08-15，GPT 第三轮）：① 新增**设计契约 10 条**（幂等/完全接管 Position/不碰尺寸等）② 加**断言测试 3**（0/1 子控件边界）③ 验收 V5→V8（幂等/交互/焦点导航细化 Tab+Shift+Tab 顺序/回归）。
+- v1.1（2026-08-15，评审 第三轮）：① 新增**设计契约 10 条**（幂等/完全接管 Position/不碰尺寸等）② 加**断言测试 3**（0/1 子控件边界）③ 验收 V5→V8（幂等/交互/焦点导航细化 Tab+Shift+Tab 顺序/回归）。

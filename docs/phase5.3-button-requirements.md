@@ -1,6 +1,6 @@
-# Phase 5.3 Button 完整化职责确认 v1.0
+﻿# Phase 5.3 Button 完整化职责确认 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（B1-B6）+ GPT 评审
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（B1-B6）+ 外部评审
 
 ## 背景
 
@@ -45,9 +45,9 @@ class Button : public TextWidget {  // OnPaint = DrawRect(蓝底) + DrawTextCont
 
 TextWidget 默认 `m_textColor = Black()`（Label 用）；**Button 成员初始化/构造设 `Color::White()`**（控件自带默认样式，调用方 `Button("OK")` 即白字叠蓝底，不用额外 SetTextColor）。
 
-### B3 对齐策略 —— ⚠️ GPT 修正：不写死对齐算法 ✅
+### B3 对齐策略 —— ⚠️ 评审 修正：不写死对齐算法 ✅
 
-原方案把"左对齐+垂直居中"写死在 DrawTextContent——**GPT 修正**：Label 默认左对齐、Button 未来很可能水平居中（多数 GUI 框架 Button 默认 Center），写死会导致 Button 被迫重写绘制逻辑、抽象失去意义。
+原方案把"左对齐+垂直居中"写死在 DrawTextContent——**评审 修正**：Label 默认左对齐、Button 未来很可能水平居中（多数 GUI 框架 Button 默认 Center），写死会导致 Button 被迫重写绘制逻辑、抽象失去意义。
 
 **定稿**：TextWidget 提供 `virtual Point CalculateTextPosition(int x, int y, float lineHeight) const`——**默认实现 = 左对齐 + 垂直居中**（P7 定案），子类可 override 改对齐（Button 未来居中只 override 这一个方法）。DrawTextContent 内部：空文本跳过 → LineHeight → CalculateTextPosition → DrawText。
 
@@ -55,11 +55,11 @@ TextWidget 默认 `m_textColor = Black()`（Label 用）；**Button 成员初始
 
 5.1 D8 收尾：`m_text` 以 `std::string` 形态进入 TextWidget，Button 构造/SetText 全 string 化（Label 5.2 已迁）。`DemoButton` 的 `using Button::Button` 继承构造自动获得 string 版。
 
-### B5 main.cpp —— A ✅（含 GPT 修正）
+### B5 main.cpp —— A ✅（含 评审 修正）
 
 - `DemoButton(L"Click Me")` → `("Click Me")`（win1/win2 共 2 处）
 - 5.3 断言段：Button → 2 命令顺序断言（先 DrawRect 背景后 DrawText 文本 = D5 命令顺序语义）
-- **GPT 修正**：颜色断言用**完整比较**（`txt.color == Color::White()` 或逐字段），不只查 `r`——为未来 Alpha（RGBA 四通道）准备
+- **评审 修正**：颜色断言用**完整比较**（`txt.color == Color::White()` 或逐字段），不只查 `r`——为未来 Alpha（RGBA 四通道）准备
 - ⚠️ 连带决策点：`Color` 目前无 `operator==`（POD 聚合）——为完整比较需给 Color 加 **constexpr operator==（4 字段全比较）**（未来主题系统比较颜色也要用）
 
 ### B6 边界 —— A：强烈同意 ✅

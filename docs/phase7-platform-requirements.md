@@ -1,8 +1,8 @@
 ﻿# Phase 7.1 平台抽象 — 职责确认
 
-> 状态：v1.0（2026-08-15）｜待用户确认后进初步设计
+> 状态：v1.0（2026-08-15）｜待确认后进初步设计
 > 相关：MEMORY.md「Window 平台抽离（正式决策）」/ roadmap-deferred.md #1-8
-> 目标（契约语言）：**让 Window 不再知道 Win32——而不是让 Win32 不再存在**（GPT 概括，已采纳）
+> 目标（契约语言）：**让 Window 不再知道 Win32——而不是让 Win32 不再存在**（评审 概括，已采纳）
 
 ## 1. 核心原则
 
@@ -39,9 +39,9 @@ PlatformWindow → PlatformWindowHost（抽象接口）← Window（实现）
 ### D3 Backend 注入（决策 35 代价解决）— c
 **✅ c-1 后端可替换**：Window 持 `unique_ptr<RenderingBackend>`（默认 GDIBackend）+ TextMeasurer 抽象访问（`GetTextMeasurer()` 已返回 `TextMeasurer&`，TextBox 测量路径不受后端替换影响——分层已就位）。
 
-**⚠️ c-2 平台句柄注入方式（GPT 修订，用户 2026-08-15 定稿）：**
+**⚠️ c-2 平台句柄注入方式（评审 修订，用户 2026-08-15 定稿）：**
 - **✅ 方案 Y（定稿）：`PlatformRenderContext` 抽象基类** + `Win32RenderContext{HWND}` 子类——平台句柄经框架层类型传递，非类型擦除
-- 方案 X：`Initialize(void*)`——类型擦除是"假抽象"（HWND/X11 Window/Wayland Surface 不是一回事），易成技术债（GPT 反对）——**已否决**
+- 方案 X：`Initialize(void*)`——类型擦除是"假抽象"（HWND/X11 Window/Wayland Surface 不是一回事），易成技术债（评审 反对）——**已否决**
 - 注：虽现在只有 GDI，但未来明确 X11/OpenGL，`PlatformRenderContext` 是低成本（空基类）防债
 
 ### D4 WindowMessageHandler 去向
@@ -54,14 +54,14 @@ PlatformWindow → PlatformWindowHost（抽象接口）← Window（实现）
 ### D6 输入层抽象（TextInputInterface，#2 债务）— e
 **✅ e-1 随 7.1 一并做**：IME 平台代码随 PlatformWindow 下沉（UpdateTextInputCaret/DestroyTextInputCaret 变为 PlatformWindow 方法，客户区坐标语义封装在 Win32IME 内）。
 
-**⚠️ e-2 契约结构命名（GPT 修订，用户 2026-08-15 定稿）：**
+**⚠️ e-2 契约结构命名（评审 修订，用户 2026-08-15 定稿）：**
 - **✅ 方案 Y（定稿）：`CaretGeometry{ Rect rect; }`**——语义放大：光标位置是通用能力（单行/多行/富文本/代码编辑器都需要），不只 IME
 - 方案 X：`TextInputContext`——语义收窄为 IME——**已否决**
 
 ### D7 可测性（衔接 7.2）
 **契约**：抽象后 `Window`/`Widget`/`TextBox` 不再含 Win32 类型——TextBox 编辑逻辑（InsertCodepoint/DeleteBackward/Selection/MoveCaret）是**纯逻辑，可脱离窗口单元测试**（编辑逻辑不依赖测量，只有坐标/绘制路径依赖）。7.1 不实现测试，但保证"纯逻辑可测"边界不被打破；7.2 覆盖（Selection 外部行为断言 + 布局契约 + 编辑逻辑）。
 
-### D8 子步骤（GPT 重排，两条线分开改）
+### D8 子步骤（评审 重排，两条线分开改）
 **✅ 采纳顺序**（窗口线 3 步 → 渲染线 1 步 → Application 回看，不同时改两条线，调试难度不叠加）：
 
 | 子步骤 | 内容 | 线 |
@@ -82,5 +82,5 @@ PlatformWindow → PlatformWindowHost（抽象接口）← Window（实现）
 
 ## 4. 修订记录
 
-- v1.0（2026-08-15）职责确认定稿：D1-D8 + 核心原则。GPT 评审修订全采纳：D2 Host 接口核心化 / D3 PlatformRenderContext 替代 void*（c-2 决策点）/ D6 CaretGeometry 命名（e-2 决策点）/ D8 子步骤重排（窗口线 3 步 + 渲染线 1 步）。**用户决策：Application 挂起（D5，不设计不排期，前四步实现后回看）**。
-- v1.0.1（2026-08-15）两个决策点定稿（用户确认）：**c-2 = PlatformRenderContext 抽象基类**（否决 void* 类型擦除）；**e-2 = CaretGeometry{ Rect }**（语义放大，否决 TextInputContext）。全部决策点关闭，进入初步设计。
+- v1.0（2026-08-15）职责确认定稿：D1-D8 + 核心原则。外部评审修订全采纳：D2 Host 接口核心化 / D3 PlatformRenderContext 替代 void*（c-2 决策点）/ D6 CaretGeometry 命名（e-2 决策点）/ D8 子步骤重排（窗口线 3 步 + 渲染线 1 步）。**用户决策：Application 挂起（D5，不设计不排期，前四步实现后回看）**。
+- v1.0.1（2026-08-15）两个决策点定稿（确认）：**c-2 = PlatformRenderContext 抽象基类**（否决 void* 类型擦除）；**e-2 = CaretGeometry{ Rect }**（语义放大，否决 TextInputContext）。全部决策点关闭，进入初步设计。

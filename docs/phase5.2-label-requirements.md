@@ -1,6 +1,6 @@
-# Phase 5.2 Label 职责确认 v1.0
+﻿# Phase 5.2 Label 职责确认 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（核心 6 项 → 范围 2 项）+ GPT 评审
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（核心 6 项 → 范围 2 项）+ 外部评审
 
 ## 背景
 
@@ -38,7 +38,7 @@ Label(std::string) → DrawTextCommand(std::string) → GDIBackend → UTF8ToWid
 
 ### L4 文本颜色与字体
 
-**A：提供 `SetTextColor`（默认黑）+ 字体暂缓**——**但内部预留 `Font m_font{}` 成员**（GPT 补充）
+**A：提供 `SetTextColor`（默认黑）+ 字体暂缓**——**但内部预留 `Font m_font{}` 成员**（评审 补充）
 
 ```cpp
 // 内部永远成立：
@@ -58,7 +58,7 @@ ctx.DrawText(pos, m_text, m_textColor, m_font);
 
 **A：SetText 只更新内部数据，不自动触发重绘**（框架无 Invalidate 机制，Phase 3 明确"跨系统通知归未来子系统"）
 
-**⚠️ 已知限制必须写注释**（GPT 补充）：
+**⚠️ 已知限制必须写注释**（评审 补充）：
 
 ```cpp
 /// @brief 设置文本

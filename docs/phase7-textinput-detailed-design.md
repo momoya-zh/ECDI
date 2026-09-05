@@ -2,7 +2,7 @@
 
 > 状态：v1.1（2026-08-16）｜**已实现并验证通过**（V1 编译零警告 + V2 IME 回归正常）
 > 相关：phase7-textinput-requirements.md（D1-D5）/ phase7-textinput-preliminary-design.md（v1.2）
-> 本质（GPT）：文本插入点模型升级——光标不是点，是矩形区域；**独立 Caret 子系统第一块基石**
+> 本质（评审）：文本插入点模型升级——光标不是点，是矩形区域；**独立 Caret 子系统第一块基石**
 
 ## 0. 实现前置事实（已核实）
 
@@ -39,14 +39,14 @@
 namespace ECDI{
 
 /// @brief 文本插入点几何（7.1.3 输入层抽象——"光标不是点，是矩形区域"）
-/// @details 语义放大（GPT）：光标位置是通用能力——单行/多行/富文本/代码编辑器都需要，
+/// @details 语义放大（评审）：光标位置是通用能力——单行/多行/富文本/代码编辑器都需要，
 /// 不只 IME。由 TextBox 输出（唯一生产者），经 Window 转发给平台层消费。
 /// 领域落点：Widget/ 目录（非 Core——迁 Core 条件 = 3~4 个独立子系统使用）。
 /// 扩展预留（注释记录，非现在实现）：baseline——部分输入法候选框按基线定位。
 struct CaretGeometry{
 	Rect rect;	///< 插入点矩形（客户区坐标：x/y = 光标顶部 + width/height = 光标尺寸）
 
-	/// @brief 光标**逻辑可见性**（存在 ≠ 可见——GPT 三轮语义精化）
+	/// @brief 光标**逻辑可见性**（存在 ≠ 可见——评审 三轮语义精化）
 	/// @note 注意（防后续维护者误解）：
 	/// 此标志控制逻辑光标状态，**不是平台可见性**——
 	/// Win32 系统 caret 永远隐藏（仅作 TSF/IMM 定位锚点），
@@ -65,7 +65,7 @@ struct CaretGeometry{
 // include：+ "ECDI/Widget/CaretGeometry.h"（返回类型完整定义）
 
 // 41 行：Point GetCaretClientPosition();  → 改名 + 返回类型
-CaretGeometry GetCaretClientGeometry();   // ⚠️ GPT 二轮：返回值已是 CaretGeometry，Position 名不副实
+CaretGeometry GetCaretClientGeometry();   // ⚠️ 评审 二轮：返回值已是 CaretGeometry，Position 名不副实
 ```
 
 ### 2.3 `TextBox.cpp`（改）
@@ -73,7 +73,7 @@ CaretGeometry GetCaretClientGeometry();   // ⚠️ GPT 二轮：返回值已是
 ```cpp
 // 文件顶部匿名 namespace 或函数外常量（放在 CalculateTextPosition 相关区域前）：
 namespace{
-constexpr float kCaretWidth = 2.0f;   ///< 光标竖线宽（GPT 二轮：OnPaint 与 CaretGeometry 同源——不散落魔法数字）
+constexpr float kCaretWidth = 2.0f;   ///< 光标竖线宽（评审 二轮：OnPaint 与 CaretGeometry 同源——不散落魔法数字）
 }
 
 // 152 行：实现改名 + 返回 CaretGeometry
@@ -140,7 +140,7 @@ void UpdateTextInputCaret(const CaretGeometry& geometry) override;
 
 // .cpp 201 行实现升级：
 void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
-	// 7.1.3：visible 判断在**平台表现层**（GPT：Window 不知 CreateCaret/HideCaret 细节）
+	// 7.1.3：visible 判断在**平台表现层**（评审：Window 不知 CreateCaret/HideCaret 细节）
 	// visible=false → HideCaret（**存在 ≠ 可见**——caret 仍存在但不显示；
 	// 区别于"销毁"（DestroyTextInputCaret）——失焦销毁 vs 存在隐藏是两种语义）
 	if (!geometry.visible){
@@ -156,7 +156,7 @@ void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
 	}
 	SetCaretPos(static_cast<int>(geometry.rect.x), static_cast<int>(geometry.rect.y));
 	// ⚠️ 保持 5.6 行为：始终 HideCaret（**不自画双光标**——系统 caret 仅作 TSF 位置信标，
-	// 光标竖线由控件 OnPaint 自画）。visible=true 不做 ShowCaret（GPT 三轮认同——分歧消解）。
+	// 光标竖线由控件 OnPaint 自画）。visible=true 不做 ShowCaret（评审 三轮认同——分歧消解）。
 	HideCaret(m_hwnd);
 	// ② ImmSetCompositionWindow（IMM 保底通道）——客户区坐标语义（5.6 实测，注释保留）
 	POINT pt{ static_cast<LONG>(geometry.rect.x), static_cast<LONG>(geometry.rect.y) };

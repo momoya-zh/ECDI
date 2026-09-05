@@ -1,14 +1,14 @@
 ﻿# Phase 8.5 文本系统 2.0 初步设计
 
-> 状态：v1.2（2026-08-24）｜初步设计待审（GPT 两轮评审整合）
-> 前序：Phase 8.5 职责确认 v1.1（GPT 评审整合）/ Phase 7.2 测试体系补强 ✅
+> 状态：v1.2（2026-08-24）｜初步设计待审（评审 两轮评审整合）
+> 前序：Phase 8.5 职责确认 v1.1（外部评审整合）/ Phase 7.2 测试体系补强 ✅
 > 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase5.5-textbox-detailed-design.md（5.5）/ phase5.6-ime-detailed-design.md（5.6）
 
 ## 1. 设计目标
 
-在 Phase 8.5 职责确认 v1.1 基础上，解决 GPT 评审提出的 8 个边界问题，为详细设计铺路。
+在 Phase 8.5 职责确认 v1.1 基础上，解决 外部评审提出的 8 个边界问题，为详细设计铺路。
 
-## 2. 边界问题解答（GPT 8 点）
+## 2. 边界问题解答（评审 8 点）
 
 ### B1 IME Composition State 归属
 
@@ -19,7 +19,7 @@
 - **TextBox 层**：持有 Composition 状态（组合区间——见下方数据模型）
 - **PlatformWindow 层**：只负责候选窗口定位（已有 `UpdateTextInputCaret`），不持有 Composition State
 
-**数据模型**（GPT 评审修正——`m_compositionStart` 单点不足以描述组合区间）：
+**数据模型**（外部评审修正——`m_compositionStart` 单点不足以描述组合区间）：
 
 ```cpp
 // TextBox 新增成员：
@@ -30,7 +30,7 @@ size_t m_compositionCaret = 0;    ///< 组合内光标位置（相对组合串�
 bool m_isComposing = false;       ///< 是否在组合中
 ```
 
-**模型 B 锁定（GPT 第二轮评审——Composition 覆盖正式文本的临时区间）**：
+**模型 B 锁定（评审 第二轮评审——Composition 覆盖正式文本的临时区间）**：
 
 ```
 模型 A（否决）：Composition 独立于 m_text，"额外绘制字符串"
@@ -45,8 +45,8 @@ bool m_isComposing = false;       ///< 是否在组合中
 
 **理由**：
 1. Composition 本质是**临时文本区间**（start + length + caret），不只是起点——8.5.2 的 Backspace/候选切换/取消组合/组合内移动都需要完整区间
-2. **模型 B 与 m_compositionStart + m_compositionLength 设计一致**（GPT 论证：否则 compositionLength 描述什么会含糊）；Commit 语义 = 用 m_compositionText 替换 m_text[compositionStart, compositionStart+compositionLength) 区间
-3. 不抽象成独立 CompositionState 类（GPT 确认：YAGNI——当前只有一个可编辑控件 TextBox，先够用即可）
+2. **模型 B 与 m_compositionStart + m_compositionLength 设计一致**（评审 论证：否则 compositionLength 描述什么会含糊）；Commit 语义 = 用 m_compositionText 替换 m_text[compositionStart, compositionStart+compositionLength) 区间
+3. 不抽象成独立 CompositionState 类（评审 确认：YAGNI——当前只有一个可编辑控件 TextBox，先够用即可）
 4. Phase 5.6 已建立模式：TextBox 持有客户区坐标，PlatformWindow 负责平台转换
 
 **演进路径**：第二个可编辑控件出现时 → 抽象 EditableTextWidget，共享 Composition State 逻辑
@@ -55,7 +55,7 @@ bool m_isComposing = false;       ///< 是否在组合中
 
 **问题**：剪贴板 PlatformWindow 接口具体长什么样？
 
-**解答**：**扩展 PlatformWindow，新增两个虚函数**（剪贴板是 Platform capability，不是 Event 类型——GPT 评审修正，见 §7 C1）
+**解答**：**扩展 PlatformWindow，新增两个虚函数**（剪贴板是 Platform capability，不是 Event 类型——外部评审修正，见 §7 C1）
 
 ```cpp
 // PlatformWindow.h 新增：
@@ -88,7 +88,7 @@ case Ctrl+A → SelectAll
 
 **问题**：Timer 到底在哪一层产生？
 
-**解答**：**PlatformWindow 层产生，Window 层翻译，TextBox 层消费**（Timer 接口语义通用化——GPT 评审修正，见 §7 C2）
+**解答**：**PlatformWindow 层产生，Window 层翻译，TextBox 层消费**（Timer 接口语义通用化——外部评审修正，见 §7 C2）
 
 ```
 TextBox::OnFocusGained()
@@ -128,7 +128,7 @@ static constexpr unsigned int kCaretBlinkMs = 500;
 **理由**：
 1. 保持 Phase 7.1 平台边界（Timer 是平台能力，与 IME 同性质）
 2. `StartCaretBlink/StopCaretBlink` 泄漏 TextBox 语义——平台只应知道"有个 Timer ID 每 500ms 触发"，不该知道"这是光标闪烁"
-3. TextBox 不碰 WM_TIMER（GPT 评审修正）
+3. TextBox 不碰 WM_TIMER（外部评审修正）
 4. YAGNI：不引入通用 Timer/Scheduler 管理器，只做 id + interval 的最简接口
 
 **实现细节**：
@@ -154,7 +154,7 @@ std::vector<size_t> m_lineStarts;  // 每行起始码点索引（缓存，避免
 bool m_needsLineRecalc = true;     // 编辑后标记需要重算行信息
 ```
 
-**缓存失效责任（GPT 评审补充——谁负责置 m_needsLineRecalc）**：
+**缓存失效责任（外部评审补充——谁负责置 m_needsLineRecalc）**：
 
 ```
 置 m_needsLineRecalc = true（文本内容变化）：
@@ -210,7 +210,7 @@ struct UndoSnapshot {
 ```
 
 **理由**：
-1. 快照模式 = 记录完整状态（MVP 先行，GPT 认可）
+1. 快照模式 = 记录完整状态（MVP 先行，评审 认可）
 2. Selection 是编辑系统的横切面（Phase 5.5 T4 决策），必须记录
 3. 滚动偏移影响视觉状态，撤销时应恢复
 
@@ -222,7 +222,7 @@ std::vector<UndoSnapshot> m_redoStack;
 size_t m_maxUndoDepth = 100;    // 防内存爆炸
 ```
 
-**Push 时机契约（GPT 评审补充——详细设计必须锁死）**：
+**Push 时机契约（外部评审补充——详细设计必须锁死）**：
 
 ```
 执行编辑操作前：Push 当前状态 → 执行修改 → Clear redo
@@ -235,7 +235,7 @@ size_t m_maxUndoDepth = 100;    // 防内存爆炸
   移动光标 / Shift 选择 / 鼠标点击 / 滚动 / Caret Blink → NO
 ```
 
-**IME Composition 与 Undo 的关系（GPT 评审补充——8.5 易踩坑点）**：
+**IME Composition 与 Undo 的关系（外部评审补充——8.5 易踩坑点）**：
 
 ```
 [开始输入拼音] → Composition 状态变化 → 不产生 Undo
@@ -246,7 +246,7 @@ size_t m_maxUndoDepth = 100;    // 防内存爆炸
 ```
 
 **理由**：
-1. 快照模式 = 记录完整状态（MVP 先行，GPT 认可）
+1. 快照模式 = 记录完整状态（MVP 先行，评审 认可）
 2. Selection 是编辑系统的横切面（Phase 5.5 T4 决策），必须记录
 3. 滚动偏移影响视觉状态，撤销时应恢复
 
@@ -254,12 +254,12 @@ size_t m_maxUndoDepth = 100;    // 防内存爆炸
 
 **问题**：双击选词的 code point 边界？
 
-**解答**：**Unicode code point 边界（GPT 修正）**
+**解答**：**Unicode code point 边界（评审 修正）**
 
 **分词规则**：
 1. **英文**：空格/标点作为分隔符（连续字母/数字为一个词）
 2. **中文**：每个 code point 作为独立单元（无空格分隔）
-3. **Emoji**：按 TextBox 当前 code point 索引模型处理（GPT 修正——👨‍👩‍👧‍👦 是多个 code point + ZWJ，👍🏽 也是多个 code point；Phase 8.5 **不引入 grapheme cluster 语义**，否则范围爆炸）
+3. **Emoji**：按 TextBox 当前 code point 索引模型处理（评审 修正——👨‍👩‍👧‍👦 是多个 code point + ZWJ，👍🏽 也是多个 code point；Phase 8.5 **不引入 grapheme cluster 语义**，否则范围爆炸）
 
 **算法**：
 ```cpp
@@ -279,9 +279,9 @@ std::pair<size_t, size_t> GetWordBounds(size_t clickIndex) const;
 
 **问题**：SetFont 与 TextMeasurer 的所有权关系？
 
-**解答**：**TextBox 持有 Font 描述/值，RenderingBackend/TextMeasurer 管理平台字体资源**（GPT 修正措辞——避免"引用"歧义）
+**解答**：**TextBox 持有 Font 描述/值，RenderingBackend/TextMeasurer 管理平台字体资源**（评审 修正措辞——避免"引用"歧义）
 
-**代码事实确认（2026-08-24，GPT 第二轮要求核实）**：
+**代码事实确认（2026-08-24，评审 第二轮要求核实）**：
 
 ```cpp
 // ECDI/Core/Font.h:14 —— 已确认是纯数据值语义：
@@ -311,7 +311,7 @@ void SetFont(const Font& font);   // 更新 m_font（值拷贝）+ Invalidate
 2. 最小化接口（`SetFont` 只更新内部状态 + 触发重绘）
 3. 字体资源由后端管理（GDIBackend::CreateFont），TextBox 不碰平台句柄
 
-### B9 多行坐标 → Caret 映射（GPT 第二轮补充——详细设计必须锁死）
+### B9 多行坐标 → Caret 映射（评审 第二轮补充——详细设计必须锁死）
 
 **问题**：进入多行后，CaretIndexFromX 单行模型如何升级？
 
@@ -324,7 +324,7 @@ void SetFont(const Font& font);   // 更新 m_font（值拷贝）+ Invalidate
 size_t CaretIndexFromPosition(Point localPos) const;
 ```
 
-**定位链**（GPT 论证——避免多行 + Selection + 双击 + Scroll 坐标体系混乱）：
+**定位链**（评审 论证——避免多行 + Selection + 双击 + Scroll 坐标体系混乱）：
 
 ```
 鼠标坐标（相对文本框）
@@ -339,7 +339,7 @@ size_t CaretIndexFromPosition(Point localPos) const;
 2. m_lineStarts 缓存在步骤 2 提供 O(1) 行起始索引（缓存失效契约见 B4）
 3. Scroll 偏移参与第 1 步（可视行 ↔ 逻辑行换算），保证点击定位与绘制同源
 
-### B10 索引单位契约（GPT 第二轮补充——全局锁死）
+### B10 索引单位契约（评审 第二轮补充——全局锁死）
 
 **契约**：**所有 TextBox 内部索引 API 的单位均为 Unicode code point，不是 UTF-8 byte offset**
 
@@ -394,7 +394,7 @@ Event
 ├── 现有：KeyDownEvent/KeyUpEvent/CharInputEvent/MouseButtonDownEvent/...
 ├── 新增：TimerEvent（带 timerId 字段；光标闪烁消费）
 ├── 新增：MouseWheelEvent（滚动）
-└── 不新增：ClipboardCopyEvent/ClipboardPasteEvent（GPT 修正 C1——
+└── 不新增：ClipboardCopyEvent/ClipboardPasteEvent（评审 修正 C1——
     Ctrl+A/C/V/X 走 KeyDownEvent 语义处理，剪贴板是 Platform capability 不是 Event）
 ```
 
@@ -419,7 +419,7 @@ Phase 8.5.3 高级功能（B6）
   → 验证：撤销重做
 ```
 
-**实施方式（GPT 第十点——7.2 完成后改变测试节奏）**：
+**实施方式（评审 第十点——7.2 完成后改变测试节奏）**：
 
 ```
 设计一个子系统 → 实现 → 立即写对应 TestCase → VS 编译运行 → 进入下一项
@@ -438,9 +438,9 @@ Phase 8.5.3 高级功能（B6）
 | 测试由用户做 | 新功能测试由用户编译运行验证；8.5 采用逐项 TestCase 节奏 |
 | 五阶段法 | 本文档 = 初步设计；确认后进详细设计 |
 
-## 6. GPT 评审整合（v1.1）
+## 6. 外部评审整合（v1.1）
 
-> GPT 评审时间：2026-08-24 20:30
+> 外部评审时间：2026-08-24 20:30
 > 评审结论：**可以进入详细设计（85~90% 成熟）**，但需先锁死 C1-C6 六个契约。
 
 ### 修正项（3 处重要）
@@ -461,7 +461,7 @@ Phase 8.5.3 高级功能（B6）
 - 8.5 **不再采用"先做功能最后补测试"**——改为：设计子系统 → 实现 → 立即写对应 TestCase → 编译运行 → 下一项
 - 8.5 是第一个充分利用新测试体系的**大型功能 Phase**
 
-### 第二轮评审整合（GPT 2026-08-24 20:44）
+### 第二轮评审整合（评审 2026-08-24 20:44）
 
 > 评审结论：**初步设计通过，建议进入详细设计。成熟度约 90%。** 3 个⚠️项已全部处理：
 
@@ -472,7 +472,7 @@ Phase 8.5.3 高级功能（B6）
 
 ## 7. 修订记录
 
-- v1.2（2026-08-24）GPT 第二轮评审整合（通过，成熟度 90%）：B1 锁定**模型 B**（Composition 覆盖 m_text 临时区间，Commit = 区间替换）；B8 **代码事实确认**（Core/Font.h 已是纯数据值语义 struct，SetFont 值拷贝成立）；新增 **B9 多行坐标→Caret 映射**（CaretIndexFromX → CaretIndexFromPosition(Point)，Y 定行 → X 定行内 → 全局索引）；新增 **B10 索引单位契约**（所有内部索引 API 单位 = code point，禁 substr(m_caret)）。
-- v1.1（2026-08-24）GPT 评审整合：C1 剪贴板不做 Event；C2 Timer 接口通用化（StartTimer/StopTimer）；B1 Composition 数据模型扩展（start+length+caret）；B4 缓存失效责任明确；B6 Undo Push 时机契约 + IME Commit 入历史；B7 Emoji 措辞（不引入 grapheme cluster）；B8 Font 值语义确认；实施方式改逐项 TestCase。
+- v1.2（2026-08-24）评审 第二轮评审整合（通过，成熟度 90%）：B1 锁定**模型 B**（Composition 覆盖 m_text 临时区间，Commit = 区间替换）；B8 **代码事实确认**（Core/Font.h 已是纯数据值语义 struct，SetFont 值拷贝成立）；新增 **B9 多行坐标→Caret 映射**（CaretIndexFromX → CaretIndexFromPosition(Point)，Y 定行 → X 定行内 → 全局索引）；新增 **B10 索引单位契约**（所有内部索引 API 单位 = code point，禁 substr(m_caret)）。
+- v1.1（2026-08-24）外部评审整合：C1 剪贴板不做 Event；C2 Timer 接口通用化（StartTimer/StopTimer）；B1 Composition 数据模型扩展（start+length+caret）；B4 缓存失效责任明确；B6 Undo Push 时机契约 + IME Commit 入历史；B7 Emoji 措辞（不引入 grapheme cluster）；B8 Font 值语义确认；实施方式改逐项 TestCase。
 - v1.0（2026-08-24）初步设计初稿：B1-B8 边界问题解答 + 模块划分 + 实施顺序。
 

@@ -1,6 +1,6 @@
 ﻿# Phase 9.5 R4 Hover / MouseEnter / Leave 详细设计
 
-> 状态：v1.2（2026-08-26）｜升级记录：v1.1 有条件通过（GPT：确认 RemoveChild 所有权语义），v1.2 = 补强 **Widget 所有权模型契约**——`m_hoverWidget` 与 `m_focusedWidget`/`m_captureWidget` 同族，框架已假设 Widget 不通过随机 RemoveChild 静默销毁
+> 状态：v1.2（2026-08-26）｜升级记录：v1.1 有条件通过（评审：确认 RemoveChild 所有权语义），v1.2 = 补强 **Widget 所有权模型契约**——`m_hoverWidget` 与 `m_focusedWidget`/`m_captureWidget` 同族，框架已假设 Widget 不通过随机 RemoveChild 静默销毁
 > 承接：phase9.5-r4-hover-preliminary-design.md v1.1（四条硬契约 A/B/C/D + 状态机）
 > 相关：phase3-architecture.md（事件流/HitTest）/ phase5.4-interaction-requirements.md（Capture/Invalidate）/ phase7.2 测试体系（无窗口测试框架）
 
@@ -192,4 +192,4 @@ return false;   // 上溯到 null 仍未到 RootWidget = 已脱树
 ## 7. 修订记录
 
 - v1.0（2026-08-26）初稿：3 文件接口变更清单 + 算法伪代码 + 完整状态机 + 10 测试用例。
-- v1.1（2026-08-26）GPT 评审整合（8 条全采纳，无推翻）：① 明确 MouseMove null 分支**不改变既有语义**（现有代码 target==nullptr 时直接 return，R4 保持）；② 接口契约写死（`@pre` 由调用方保证，UpdateHoverState 不做验证）；③ IsWidgetInTree 注释精确化（"沿 Parent 链上溯，只有最终可达当前 Window 的 RootWidget 才视为属于当前 Window"）；④ 销毁自动兜底措辞严谨化（裸指针随 Window 消失，无显式清理）；⑤ 新增 §4.3 回调重入边界（不定义 Enter/Leave 回调期间 Widget Tree 修改的行为）；⑥ 测试合并：R4-SX 并入 R4-S7（去重）；⑦ R4-S3 顺序测试强化（事件序列 vector 断言，非仅计数）；⑧ R4-S5 强调 R4 不定义 Z 序规则，直接消费既有 HitTest 结果。
+- v1.1（2026-08-26）外部评审整合（8 条全采纳，无推翻）：① 明确 MouseMove null 分支**不改变既有语义**（现有代码 target==nullptr 时直接 return，R4 保持）；② 接口契约写死（`@pre` 由调用方保证，UpdateHoverState 不做验证）；③ IsWidgetInTree 注释精确化（"沿 Parent 链上溯，只有最终可达当前 Window 的 RootWidget 才视为属于当前 Window"）；④ 销毁自动兜底措辞严谨化（裸指针随 Window 消失，无显式清理）；⑤ 新增 §4.3 回调重入边界（不定义 Enter/Leave 回调期间 Widget Tree 修改的行为）；⑥ 测试合并：R4-SX 并入 R4-S7（去重）；⑦ R4-S3 顺序测试强化（事件序列 vector 断言，非仅计数）；⑧ R4-S5 强调 R4 不定义 Z 序规则，直接消费既有 HitTest 结果。

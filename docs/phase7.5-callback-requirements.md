@@ -1,6 +1,6 @@
 ﻿# Phase 7.5 事件回调（std::function 回调注册 API）职责确认
 
-> 状态：v1.2（2026-08-19）｜职责确认待审（GPT 二轮评审整合）
+> 状态：v1.2（2026-08-19）｜职责确认待审（评审 二轮评审整合）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅
 > 相关文档：phase6.2-checkboxradio-requirements.md（C4 契约）/ phase7.2-testing-requirements.md（测试边界）/ roadmap-deferred.md（#9）
 
@@ -56,10 +56,10 @@ MEMORY 决策原文（2026-08-15）：
   - TextBox::SetOnTextChanged → `std::function<void(const std::string&)>`（新文本，UTF-8）
   - CheckBox::SetOnCheckedChanged → `std::function<void(bool)>`（与 phase6 C4 虚方法签名一致，新状态参数——外部无需再查 IsChecked）
 
-### D3 TextBox 是否建虚方法基座？【GPT v1.2 修订：统一 RaiseXxx/OnXxx 命名】
+### D3 TextBox 是否建虚方法基座？【评审 v1.2 修订：统一 RaiseXxx/OnXxx 命名】
 - TextBox 现**无**文本变化虚方法（不同于 Button 已有 OnClick 基座）
 - 方案 A：只加回调（SetOnTextChanged），不建虚方法——YAGNI
-- 方案 B（**GPT 建议，倾向 B**）：建 **protected virtual** 钩子，遵循与 Button 完全一致的 `RaiseXxx → OnXxx → callback` 三段式：
+- 方案 B（**评审建议，倾向 B**）：建 **protected virtual** 钩子，遵循与 Button 完全一致的 `RaiseXxx → OnXxx → callback` 三段式：
 
   ```cpp
   // TextBox 内部（编辑操作调用）
@@ -74,7 +74,7 @@ MEMORY 决策原文（2026-08-15）：
 
   调用链：`InsertCodepoint → RaiseTextChanged → OnTextChanged() → m_onTextChanged()`——**override 不吞回调**
 
-- **理由（GPT）**：命名统一性——Button 是 `RaiseClick` + `OnClick`，TextBox 必须是 `RaiseTextChanged` + `OnTextChanged`，不能出现 `NotifyTextChanged` 这种"异类命名"（违反一致性原则）。未来 CheckBox/Radio 也是 `RaiseCheckedChanged` + `OnCheckedChanged`，整个框架形成统一范式：
+- **理由（评审）**：命名统一性——Button 是 `RaiseClick` + `OnClick`，TextBox 必须是 `RaiseTextChanged` + `OnTextChanged`，不能出现 `NotifyTextChanged` 这种"异类命名"（违反一致性原则）。未来 CheckBox/Radio 也是 `RaiseCheckedChanged` + `OnCheckedChanged`，整个框架形成统一范式：
 
   ```
   状态变化
@@ -86,11 +86,11 @@ MEMORY 决策原文（2026-08-15）：
   callback          [std::function，独立通道]
   ```
 
-- ⚠️ 命名修正（v1.2）：`NotifyTextChanged()` → `RaiseTextChanged()` + `OnTextChanged()`——保证 RaiseXxx 内部入口与 OnXxx 钩子名称完全对齐（GPT 二轮评审明确要求）
+- ⚠️ 命名修正（v1.2）：`NotifyTextChanged()` → `RaiseTextChanged()` + `OnTextChanged()`——保证 RaiseXxx 内部入口与 OnXxx 钩子名称完全对齐（评审 二轮评审明确要求）
 
-### D4 虚方法基座与回调的调用关系？【GPT v1.2 修订：统一 RaiseXxx/OnXxx 命名】
-- ~~方案 A：虚方法内部调用回调~~（`Button::OnClick(){ if(m_onClick) m_onClick(); }`）——**❌ 否决（GPT 指出危险）**：子类 override OnClick 不调基类 → 回调静默失效。用户直觉"SetOnClick 后点击一定执行"，而非"除非继承链上有人忘了调基类"
-- **方案 B（GPT 建议，采用）：RaiseXxx 分离模式——事件 → RaiseXxx → 虚方法 → 回调，四者独立**：
+### D4 虚方法基座与回调的调用关系？【评审 v1.2 修订：统一 RaiseXxx/OnXxx 命名】
+- ~~方案 A：虚方法内部调用回调~~（`Button::OnClick(){ if(m_onClick) m_onClick(); }`）——**❌ 否决（评审指出危险）**：子类 override OnClick 不调基类 → 回调静默失效。用户直觉"SetOnClick 后点击一定执行"，而非"除非继承链上有人忘了调基类"
+- **方案 B（评审建议，采用）：RaiseXxx 分离模式——事件 → RaiseXxx → 虚方法 → 回调，四者独立**：
   ```cpp
   // Button 内部（OnMouseButtonUp 调用）
   void Button::RaiseClick(){        // 内部入口（private，非虚）
@@ -110,7 +110,7 @@ MEMORY 决策原文（2026-08-15）：
   - TextBox: `InsertCodepoint → RaiseTextChanged → OnTextChanged() → m_onTextChanged()`
   - **override 不吞回调**（与 Qt 信号/槽"与继承无关"同构）
 
-- **统一范式**（整个框架任何控件全按此——GPT v1.2 核心洞察）：
+- **统一范式**（整个框架任何控件全按此——评审 v1.2 核心洞察）：
   ```
   状态变化
        ↓
@@ -126,7 +126,7 @@ MEMORY 决策原文（2026-08-15）：
   | TextBox | `RaiseTextChanged()` | `OnTextChanged(text)` | `m_onTextChanged` |
   | CheckBox | `RaiseCheckedChanged()` | `OnCheckedChanged(bool)` | `m_onCheckedChanged` |
 
-- **与 5.5.1.4 先例的关系**（GPT 提问澄清）：不冲突。5.5.1.4 是 Application override `OnCharInput` **吞掉框架事件派发**（事件入口虚方法 = 派发链，override 需负责转发）；控件层 `RaiseXxx` 的 `OnXxx` 是**业务钩子 + 独立回调通道**（虚方法扩展不影响回调消费）。场景不同，各自成立
+- **与 5.5.1.4 先例的关系**（评审 提问澄清）：不冲突。5.5.1.4 是 Application override `OnCharInput` **吞掉框架事件派发**（事件入口虚方法 = 派发链，override 需负责转发）；控件层 `RaiseXxx` 的 `OnXxx` 是**业务钩子 + 独立回调通道**（虚方法扩展不影响回调消费）。场景不同，各自成立
 
 ### D5 回调生命周期与线程？
 - std::function 为控件值成员——控件析构自动释放（无泄漏）
@@ -147,16 +147,16 @@ MEMORY 决策原文（2026-08-15）：
 - **倾向 A（7.5 先做编辑操作触发）**：SetText 触发涉及 TextWidget 接口改动（非 virtual → virtual），范围扩大；且 SetText 初始化场景触发回调易造成"初始化误报"。B 留待未来需要时评估
 - ⚠️ 边界语义：**文本实际变化才触发**（如 DeleteBackward 头边界空操作——不触发；最小惊讶）
 
-### D8 测试策略（7.2 体系扩展）？【随 D4 v1.2 更新，GPT 点赞】
+### D8 测试策略（7.2 体系扩展）？【随 D4 v1.2 更新，评审 点赞】
 - Button 回调：测试子类暴露触发入口（`class TestButton : public Button { public: void SimulateClick(){ RaiseClick(); } };`），注册回调 → SimulateClick → 断言回调触发
-- **核心语义测试（GPT v1.2 明确要求）**：
+- **核心语义测试（评审 v1.2 明确要求）**：
   - 子类 override OnClick **不调基类** + 注册回调 + SimulateClick → **回调仍触发**（验证"override 不吞回调"——D4 修改的核心收益）
   - 空回调 + SimulateClick → 不崩溃（空 std::function 安全性）
   - SetOnClick(nullptr) 后 SimulateClick → 不触发、不崩溃（解除注册语义）
 - TextBox 回调：编辑 API public 无窗口可测——注册 → InsertCodepoint/DeleteBackward → 断言回调收到正确新文本 + 触发次数；空串编辑（DeleteBackward 头边界空操作）→ 不触发回调
 - 测试归属：ButtonTests/TextBoxTests 各自模块文件（7.2 结构沿用）；测试运行/验证由用户做（skill 第 1 条）
 
-### D9 RaiseXxx 入口可见性规范？【GPT v1.2 明确要求】
+### D9 RaiseXxx 入口可见性规范？【评审 v1.2 明确要求】
 - **核心约束：`RaiseXxx()` 必须是 `private`**，禁止作为公开 API
   ```cpp
   class Button {
@@ -168,7 +168,7 @@ MEMORY 决策原文（2026-08-15）：
       void SetOnClick(...);   // 公开注册
   };
   ```
-- **理由（GPT v1.2）**：
+- **理由（评审 v1.2）**：
   - `RaiseXxx()` 本质是内部通知机制，不是公开 API
   - 如果 public：`button.RaiseClick();` 直接触发 → 绕过正常的鼠标事件处理链 → 破坏一致性
   - 测试需要暴露触发点 → 用 `protected` 的子类暴露方案（TestButton 继承暴露）比 public 更安全
@@ -193,10 +193,10 @@ MEMORY 决策原文（2026-08-15）：
 
 ## 6. 修订记录
 
-- **v1.2（2026-08-19）整合 GPT 二轮评审**：
+- **v1.2（2026-08-19）整合 评审 二轮评审**：
   - **D3 修订**：`NotifyTextChanged()` → `RaiseTextChanged()` + `OnTextChanged()`（统一命名，与 Button/CheckBox 完全对齐）
   - **D4 统一范式**：`RaiseXxx`(private) → `OnXxx`(protected virtual) → `callback`(独立通道) 三段式，整个框架统一
   - **D9 新增**：RaiseXxx 必须是 `private`，禁止作为公开 API（测试用 TestButton 子类暴露）
   - D8 核心语义测试细化：增加空回调安全性 + 解除注册语义测试
-- v1.1（2026-08-19）整合 GPT 一轮评审：D4 改向（RaiseXxx 分离模式）、D3 改向（TextBox 补虚钩子）
+- v1.1（2026-08-19）整合 评审 一轮评审：D4 改向（RaiseXxx 分离模式）、D3 改向（TextBox 补虚钩子）
 - v1.0（2026-08-17）职责确认初稿

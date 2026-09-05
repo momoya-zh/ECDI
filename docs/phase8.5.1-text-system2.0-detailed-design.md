@@ -2,7 +2,7 @@
 # Phase 8.5.1 文本系统 2.0 详细设计（核心升级：IME 组合串内嵌 + 剪贴板 + Timer + SetFont）
 
 > 状态：v1.3（2026-08-24）｜已实现 + 验证通过（commit 8ab8300）
-> 前序：Phase 8.5 职责确认 v1.1 / 初步设计 v1.2（GPT 两轮评审通过）
+> 前序：Phase 8.5 职责确认 v1.1 / 初步设计 v1.2（评审 两轮评审通过）
 > 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase8.5-text-system2.0-preliminary-design.md（初步设计 v1.2）/ phase5.5-textbox-detailed-design.md（5.5）/ phase5.6-ime-detailed-design.md（5.6）
 > 拆分说明：8.5.2 → phase8.5.2-text-system2.0-detailed-design.md / 8.5.3 → phase8.5.3-text-system2.0-detailed-design.md
 
@@ -222,7 +222,7 @@ case WM_IME_COMPOSITION:{
 	if (lParam & GCS_COMPSTR){
 		// ① 组合串更新（正在组合的内容）——GCS_COMPSTR
 		if (HIMC imc = ImmGetContext(m_hwnd)){
-			// ⚠️ 实施要点（GPT 检查点 1）：ImmGetCompositionStringW 返回 LONG（字节数），
+			// ⚠️ 实施要点（评审 检查点 1）：ImmGetCompositionStringW 返回 LONG（字节数），
 			// 非 DWORD——负值 = 调用失败/无数据，必须先判负再使用
 			const LONG len = ImmGetCompositionStringW(imc, GCS_COMPSTR, nullptr, 0);
 			if (len > 0){
@@ -430,7 +430,7 @@ void TextBox::CancelComposition(){
 **关键契约（C3/C7/C8——详细设计锁死）**：
 - **Update ≠ Commit**：`UpdateComposition`（GCS_COMPSTR）= 临时编辑——不 RaiseTextChanged、不产生新 Undo；`CommitComposition`（GCS_RESULTSTR）= 正式编辑——RaiseTextChanged + 进 Undo（快照在组合开始时 Push 一次，Commit 不再 Push）
 - **空组合串 ≠ Commit**：`UpdateComposition("")` 只表示组合中无内容（组合仍在），Commit 必须由 `CommitComposition` 显式触发
-- **C12 契约（GPT 实施前补充）**：`CommitComposition("")` 是**合法 Commit**（IME 最终提交空文本——区间删除、正常结束组合）；**取消语义必须走 `CancelComposition()`**（擦除区间 + 无正式编辑副作用）。二者不混用
+- **C12 契约（评审 实施前补充）**：`CommitComposition("")` 是**合法 Commit**（IME 最终提交空文本——区间删除、正常结束组合）；**取消语义必须走 `CancelComposition()`**（擦除区间 + 无正式编辑副作用）。二者不混用
 - **Composition 不调正式编辑 API**：UpdateComposition 内部经 `ReplaceTextRange`（纯模型操作），不调 `InsertText`（后者带正式编辑副作用）——F6 测试成立
 
 **绘制（OnPaint 改造——组合串与正式文本同源）**：
@@ -564,7 +564,7 @@ void TextBox::OnFocusLost(){
 
 void TextBox::OnTimer(const TimerEvent& event){
 	if (event.GetTimerId() == kCaretBlinkTimer){
-		// ⚠️ 焦点防御（GPT 检查点 2）：失焦→获焦切换瞬间，旧控件可能收到排队中的
+		// ⚠️ 焦点防御（评审 检查点 2）：失焦→获焦切换瞬间，旧控件可能收到排队中的
 		// 最后一次 TimerEvent（SetFocusedWidget 顺序 = 旧 OnFocusLost → 新 OnFocusGained，
 		// 已核实 Window.cpp:152——StopTimer 在 StartTimer 前，但已排队的 WM_TIMER 无法撤回）
 		if (!HasFocus())
@@ -577,7 +577,7 @@ void TextBox::OnTimer(const TimerEvent& event){
 
 **架构说明**：TextBox 经 `GetWindow()` 拿 Window，Window 需暴露 `PlatformWindow& GetPlatformWindow()`（新增——与 GetTextMeasurer 同模式）。**TextBox 不直接碰定时器 ID 以外的平台细节**；Timer 产生在平台层、翻译在翻译器、消费在焦点控件（B3 链完整）。
 
-**C11 契约（Timer ID 作用域——GPT 评审补充）**：Timer ID 是 **Window 级别**（SetTimer 挂 m_hwnd）。同一 Window 内同一 timerId 同时只能有一个所有者——当前焦点模型保证"一个 Window → 一个 focusedWidget → 一个 TextBox caret timer"不并发注册，**8.5.1 可接受**；Phase 9 做动画/Tooltip/延迟动作多 timer 并发时再评估（不同 id 即可隔离，无架构改动）。
+**C11 契约（Timer ID 作用域——外部评审补充）**：Timer ID 是 **Window 级别**（SetTimer 挂 m_hwnd）。同一 Window 内同一 timerId 同时只能有一个所有者——当前焦点模型保证"一个 Window → 一个 focusedWidget → 一个 TextBox caret timer"不并发注册，**8.5.1 可接受**；Phase 9 做动画/Tooltip/延迟动作多 timer 并发时再评估（不同 id 即可隔离，无架构改动）。
 
 ### 5.7 Window 暴露 PlatformWindow（Window.h/cpp 新增）
 
@@ -623,8 +623,8 @@ void TextWidget::SetFont(const Font& font){
 | F11 | CopySelectionToClipboard 无选区 no-op | 无选区调用 → m_text 不变、无崩溃 | 边界 |
 | F12 | OnTimer 切换光标 | OnTimer(kCaretBlinkTimer) → m_showCaret 翻转 | 闪烁逻辑 |
 | F13 | OnTimer 非本 id 忽略 | OnTimer(999) → m_showCaret 不变 | 多 timer 隔离 |
-| F14 | Composition 中间替换（GPT 检查点 4） | 原 "abcDEF" caret=3 → UpdateComposition("nihao") → "abcnihaoDEF"；再 Update("你好") → "abc你好DEF"；Commit("你好") → "abc你好DEF"（组合不破坏前后文本） | 验证 start+length+ReplaceTextRange 协作 |
-| F15 | Composition code point 索引（GPT 检查点 5） | 原 "你ABC好" caret 移动 → UpdateComposition("中文") → compositionStart/Length/caret 全部按 code point 而非 UTF-8 byte（"你"=3 字节 1 码点） | 索引单位契约 B10 |
+| F14 | Composition 中间替换（评审 检查点 4） | 原 "abcDEF" caret=3 → UpdateComposition("nihao") → "abcnihaoDEF"；再 Update("你好") → "abc你好DEF"；Commit("你好") → "abc你好DEF"（组合不破坏前后文本） | 验证 start+length+ReplaceTextRange 协作 |
+| F15 | Composition code point 索引（评审 检查点 5） | 原 "你ABC好" caret 移动 → UpdateComposition("中文") → compositionStart/Length/caret 全部按 code point 而非 UTF-8 byte（"你"=3 字节 1 码点） | 索引单位契约 B10 |
 
 **说明**：剪贴板真实读写（GetClipboardText/SetClipboardText 的 Win32 实现）需窗口——留待视觉验证（用户实测复制粘贴）；TestCase 覆盖 TextBox 侧逻辑（F10/F11 走 Ctrl 组合处理路径，剪贴板调用用 Fake 平台窗口 stub——若测试基建允许；否则标注"最小窗口集成待办"同 7.2 遗留）。
 
@@ -639,9 +639,9 @@ void TextWidget::SetFont(const Font& font){
 
 ---
 
-## 11. GPT 评审回应（v1.1，C7-C10 契约）
+## 11. 外部评审回应（v1.1，C7-C10 契约）
 
-> GPT 评审时间：2026-08-24 21:00
+> 外部评审时间：2026-08-24 21:00
 > 评审结论：**8.5.1 架构 90% 成熟，但 IME Composition 有 2 个关键契约未闭合（Update/Commit 识别 + Composition 副作用），必须在实现前修掉**。已全部落地。
 
 ### C7：IME Commit 必须显式识别（❌→✅）
@@ -662,10 +662,10 @@ void TextWidget::SetFont(const Font& font){
 
 ### 采纳的观察项
 - **Timer ID Window 级限制**：契约注明 8.5.1 焦点模型保证不并发，Phase 9 多 timer 时不同 id 隔离（C11）
-- **Window::GetPlatformWindow() 可接受**：GPT 判定非 8.5.1 blocker（架构洁癖级，YAGNI 不要求改）
+- **Window::GetPlatformWindow() 可接受**：评审 判定非 8.5.1 blocker（架构洁癖级，YAGNI 不要求改）
 - **8.5.2 m_lineStarts 单位**：code point index，取内容须经 CodepointIndexToByteOffset 转 byte 再 substr（与 B10 索引单位契约一致）
 
-## 12. 实施前检查点核实（GPT 5 项，2026-08-24 已全部处理）
+## 12. 实施前检查点核实（评审 5 项，2026-08-24 已全部处理）
 
 | # | 检查点 | 状态 | 核实/落地 |
 |---|---|---|---|
@@ -675,7 +675,7 @@ void TextWidget::SetFont(const Font& font){
 | 4 | 补 F14：Composition 中间替换 | ✅ 已补 | §7 F14：原 "abcDEF" caret=3 → Update/Commit 不破坏前后文本 |
 | 5 | 补中文/Emoji code point 索引测试 | ✅ 已补 | §7 F15："你ABC好" + UpdateComposition("中文") 按 code point 断言 |
 
-**附加契约（GPT 本轮补充）**：C12——`CommitComposition("")` 是合法 Commit（空结果提交）；取消必须走 `CancelComposition()`（§4.4）。
+**附加契约（评审 本轮补充）**：C12——`CommitComposition("")` 是合法 Commit（空结果提交）；取消必须走 `CancelComposition()`（§4.4）。
 
 ## 13. 与既有约束的对齐（8.5.1 落地）
 
@@ -686,14 +686,14 @@ void TextWidget::SetFont(const Font& font){
 | skill 22 分层论证 | 契约语言描述（"TimerEvent = 某定时器触发"）；WM_* 细节只在平台实现层 |
 | skill 10 宏防护 | Win32PlatformWindow.h 已有 DrawText undef；新增代码不新增方法名冲突 |
 | skill 11 字符串 | 公共 API UTF-8；Win32 边界 UTF8ToWide/WideToUTF8（剪贴板/组合串/结果串提取） |
-| skill 3 原子授权 | 本设计文件清单 15 个文件——实施前用户确认 |
+| skill 3 原子授权 | 本设计文件清单 15 个文件——实施前确认 |
 | 资源类禁复制禁移动 | TextBox 新增成员均值语义（string/size_t/bool）；TimerEvent 值语义；ClipboardGuard 禁复制 |
 | 双工程同步 | vcxproj + CMakeLists 同时加 TimerEvent.h |
 
 ## 14. 修订记录
 
 - v1.3（2026-08-24）8.5.1 完结（commit 8ab8300）+ **8.5.2 定稿**（§9 v1.0：多行 RecalculateLines/LineRange、滚动 OnMouseWheel/EnsureCaretVisible、CaretIndexFromPosition（B9）、双击选词平台层 WM_LBUTTONDBLCLK 翻译 + WindowClass CS_DBLCLKS、多行绘制 + 组合串下划线补欠账、F16-F25）。
-- v1.2（2026-08-24）GPT 第三轮评审整合（"设计可以冻结，进入实现"）：§4.1 ImmGetCompositionStringW 改 LONG 判负；**C12 Commit("") 合法/取消走 Cancel**；**§5.4 Timer 派发链修正**（Application::OnTimer → FindFocusedWidget，代码事实核实——同 OnCharInput 模式，非 Window::DispatchTimerEvent）；§5.6 OnTimer 加 HasFocus 防御（Focus 顺序已核实 Window.cpp:152）；TestCase 补 F14（中间替换）/F15（code point）；新增 §12 实施前检查点核实（GPT 5 项全处理）。
-- v1.1（2026-08-24）GPT 评审整合（C7-C10）：IME **Update/Commit 分离**（GCS_COMPSTR/GCS_RESULTSTR + CommitComposition）；**ReplaceTextRange 抽取**（C8——UpdateComposition 不再调 InsertText，消除 TextChanged 副作用矛盾）；**C9 composition caret 明确**（8.5.1 固定组合末尾）；**C10 剪贴板失败释放 + ClipboardGuard RAII**；TestCase 重排 F3-F13（新增 Commit no-op/Cancel/空串不结束）；新增 §11 GPT 评审回应。
+- v1.2（2026-08-24）评审 第三轮评审整合（"设计可以冻结，进入实现"）：§4.1 ImmGetCompositionStringW 改 LONG 判负；**C12 Commit("") 合法/取消走 Cancel**；**§5.4 Timer 派发链修正**（Application::OnTimer → FindFocusedWidget，代码事实核实——同 OnCharInput 模式，非 Window::DispatchTimerEvent）；§5.6 OnTimer 加 HasFocus 防御（Focus 顺序已核实 Window.cpp:152）；TestCase 补 F14（中间替换）/F15（code point）；新增 §12 实施前检查点核实（评审 5 项全处理）。
+- v1.1（2026-08-24）外部评审整合（C7-C10）：IME **Update/Commit 分离**（GCS_COMPSTR/GCS_RESULTSTR + CommitComposition）；**ReplaceTextRange 抽取**（C8——UpdateComposition 不再调 InsertText，消除 TextChanged 副作用矛盾）；**C9 composition caret 明确**（8.5.1 固定组合末尾）；**C10 剪贴板失败释放 + ClipboardGuard RAII**；TestCase 重排 F3-F13（新增 Commit no-op/Cancel/空串不结束）；新增 §11 外部评审回应。
 - v1.0（2026-08-24）8.5.1 定稿：剪贴板（3 方法）/IME Composition 模型 B/Timer+闪烁/SetFont/TestCase/视觉验证；8.5.2/8.5.3 草案。
 

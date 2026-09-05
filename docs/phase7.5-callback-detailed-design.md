@@ -132,7 +132,7 @@ void Button::OnMouseButtonUp(const MouseButtonUpEvent& event){
 		mx >= abs.x && mx < abs.x + static_cast<float>(GetWidth()) &&
 		my >= abs.y && my < abs.y + static_cast<float>(GetHeight());
 
-	// D5 GPT 修正：先恢复视觉（m_pressed=false + 重绘）再 OnClick（用户直觉）
+	// D5 评审 修正：先恢复视觉（m_pressed=false + 重绘）再 OnClick（用户直觉）
 	m_pressed = false;
 
 	Invalidate();
@@ -247,7 +247,7 @@ public:
 	/// @details 纯几何查询：GetAbsolutePosition + CalculateCaretPosition（与光标绘制同源）。
 	/// 返回值 = 窗口客户区坐标（与 GetAbsolutePosition/事件 GetMouseX 同一坐标系——
 	/// 非屏幕坐标、非控件相对坐标；命名保留决议 2026-08-14：项目内 Client == 窗口客户区已统一）。
-	/// 7.1.3 改名（GPT 二轮）：返回值已是 CaretGeometry（rect + 逻辑可见性），Position 名不副实。
+	/// 7.1.3 改名（评审 二轮）：返回值已是 CaretGeometry（rect + 逻辑可见性），Position 名不副实。
 	/// 平台转换是平台职责（TextBox 零平台依赖，只输出客户区几何）。
 	/// 非 const：测量需经 GetWindow()->GetTextMeasurer()（Window 接口非 const，与 OnMouseButtonDown 同性质）。
 	CaretGeometry GetCaretClientGeometry();
@@ -265,7 +265,7 @@ protected:
 
 	/// @brief 文本变化虚方法（子类可 override 扩展行为；空实现）
 	/// @details 调用链：编辑操作 → RaiseTextChanged → OnTextChanged() + m_onTextChanged()
-	/// 保护可见性：仅子类/自身可调（D3 GPT 修订）
+	/// 保护可见性：仅子类/自身可调（D3 评审 修订）
 	virtual void OnTextChanged(const std::string& text);
 
 private:
@@ -415,7 +415,7 @@ void TextBox::SetOnTextChanged(TextChangedCallback callback){
 > ⚠️ `MoveCaret` / `MoveCaretToStart` / `MoveCaretToEnd` **不触发** RaiseTextChanged（仅光标移动，文本未变）。
 > ⚠️ `SetText`（TextWidget 继承）**不触发**——D7 决策：程序设值不算用户修改（初始化误报防护）。
 
-#### 3.2.5 通知契约（D7 补充规则，GPT 评审确认）
+#### 3.2.5 通知契约（D7 补充规则，外部评审确认）
 
 1. **一次逻辑编辑操作 = 一次通知**：无论内部修改多少个字符（如删除整个 Selection），一次完整的逻辑编辑操作**最多产生一次** `RaiseTextChanged()`。未来 Paste/Cut/ReplaceSelection/Undo/Redo 保持同语义。
 2. **callback 执行时机**：`TextChangedCallback` 执行时，TextBox 已完成本次编辑操作及其内部状态同步（m_text / m_caret / 视觉重绘 / IME 光标均已就绪），callback 接收到的是**修改后的完整 UTF-8 文本**——不会观察到"修改中"的中间态。
@@ -428,7 +428,7 @@ void TextBox::SetOnTextChanged(TextChangedCallback callback){
 
 - 7.5 只做 **TextBox 回调测试**（编辑 API public，天然无窗口可测）
 - **Button 回调测试推迟到集成测试**（唯一真实触发路径 OnMouseButtonUp 依赖事件链，违背 7.2 无窗口初衷）
-- 机制验证边界（GPT 评审收紧表述）：**TextBox 测试验证 RaiseXxx 三段式在实际控件中的实现语义**（注册 → 触发 → 回调收到值；override 不吞回调）；**Button 采用相同代码结构（由结构保证），其事件链验证留待集成测试**——不宣称"TextBox 测试覆盖证明 Button 正确"
+- 机制验证边界（外部评审收紧表述）：**TextBox 测试验证 RaiseXxx 三段式在实际控件中的实现语义**（注册 → 触发 → 回调收到值；override 不吞回调）；**Button 采用相同代码结构（由结构保证），其事件链验证留待集成测试**——不宣称"TextBox 测试覆盖证明 Button 正确"
 - 测试写入 `TextBoxTests.cpp`，并入 `RunTextBoxTests()`（详细设计调整，见 §1.2）
 
 ### 4.2 TextBoxTests.cpp —— 新增测试函数
@@ -527,7 +527,7 @@ void TestTextBoxCallback()
 	{
 		class MyTextBox : public TextBox{
 		public:
-			bool hookCalled = false;   // 类成员变量——override 内可访问（GPT v1.1 修复；hook 而非 base：未调用基类）
+			bool hookCalled = false;   // 类成员变量——override 内可访问（评审 v1.1 修复；hook 而非 base：未调用基类）
 
 		protected:
 			void OnTextChanged(const std::string&) override{
@@ -604,15 +604,15 @@ void ECDI::Test::RunTextBoxTests()
 | skill 21 YAGNI | 不做 Widget 基类通用回调/信号槽；TextBox 补虚方法钩子是"微成本高回报"对称性投资 |
 | skill 22 分层论证 | D4 用契约语言（"回调独立于虚方法"）论证 |
 | 原子授权 | 5 文件全部授权后再改（skill 3）；RunAllTests.h/.cpp 明确不动 |
-| 生命周期（GPT 补充） | Callback **所捕获对象**的生命周期由注册方负责；框架不对 lambda 捕获的外部对象提供生命周期管理（如 `[&obj]` 捕获的 obj 先于控件析构 → 悬空引用，属普通 C++ 责任，非框架 bug） |
-| 异常策略（GPT 确认） | 回调**同步调用，异常按普通 C++ 调用规则传播**——7.5 不做 try/catch 包裹（那是"框架异常边界策略"另一个设计问题，YAGNI） |
+| 生命周期（评审 补充） | Callback **所捕获对象**的生命周期由注册方负责；框架不对 lambda 捕获的外部对象提供生命周期管理（如 `[&obj]` 捕获的 obj 先于控件析构 → 悬空引用，属普通 C++ 责任，非框架 bug） |
+| 异常策略（评审 确认） | 回调**同步调用，异常按普通 C++ 调用规则传播**——7.5 不做 try/catch 包裹（那是"框架异常边界策略"另一个设计问题，YAGNI） |
 | 五阶段法 | 本文档 = 详细设计；确认后进实现 |
 
 ---
 
 ## 7. 修订记录
 
-- **v1.1（2026-08-20）整合 GPT 评审**：
+- **v1.1（2026-08-20）整合 外部评审**：
   - **必改①**：文件数量修正 4 → **5**（Button.h/.cpp、TextBox.h/.cpp、TextBoxTests.cpp；RunAllTests.h/.cpp 明确不修改）——§1.2 / §5 / §6 全部同步
   - **必改②**：TC1b 注释修正——"删选中区路径" → "普通删除路径"（实际无 Selection，走单码点删除）
   - **建议③**：`baseCalled` → `hookCalled`（未调基类，语义更准确；TC4 + 自查表）

@@ -2,24 +2,24 @@
 
 > 状态：v1.2（2026-08-15）｜**已实现并验证通过**（V1 编译零警告 + V3/V4 事件/IME 回归正常）
 > 相关：phase7-messagehandler-requirements.md（C1-C6）/ phase7-messagehandler-preliminary-design.md（v1.1）
-> 目标（GPT 验收）：**`Platform/` 零 `Application` 依赖** + **零 Window.h 依赖**（WM_IME 方案 B 移出后归零）
+> 目标（评审 验收）：**`Platform/` 零 `Application` 依赖** + **零 Window.h 依赖**（WM_IME 方案 B 移出后归零）
 
-## 0. 实现前置事实（已核实 + GPT 三轮修订）
+## 0. 实现前置事实（已核实 + 评审 三轮修订）
 
 | # | 事实 | 处理 |
 |---|---|---|
 | F1 | 翻译器 cpp 10 处 `m_application->OnEvent(event)` | → `m_host.OnEvent(event)` |
 | F2 | 翻译器 cpp include `ECDI/Application/Application.h`（第 4 行） | 移除（Application 依赖剥离） |
-| F3 | 翻译器 cpp include `ECDI/Window/Window.h`（第 3 行）——WM_IME 直调（227/236 行） | **GPT 三轮方案 B：WM_IME 移出翻译器 → Window.h include 移除**（平台层彻底零 Window.h） |
+| F3 | 翻译器 cpp include `ECDI/Window/Window.h`（第 3 行）——WM_IME 直调（227/236 行） | **评审 三轮方案 B：WM_IME 移出翻译器 → Window.h include 移除**（平台层彻底零 Window.h） |
 | F4 | 翻译器头前置声明 `class Window; class Application;` | Window 保留（Handle 参数 + Event 构造）；Application 移除 |
 | F5 | Win32PlatformWindow 构造 `(host, app, windowClass, ...)` + 成员 `m_application` | 去 app；`m_messageHandler(m_host)` |
 | F6 | Window.cpp 构造 `make_unique<Win32PlatformWindow>(*this, app, ...)` | 去 app |
 | F7 | EventRouter::OnEvent 签名 `const Event&` | Host::OnEvent 对齐 const |
 | **F8** | 翻译器 cpp WM_IME 三个 case（225-243 行）直调 window | **移出**——到 Win32PlatformWindow::HandleMessage 状态同步区；翻译器只留 Translate→Event→Host |
 
-## 1. 文件清单（GPT 三轮 + 用户迁移流程修订）
+## 1. 文件清单（评审 三轮 + 用户迁移流程修订）
 
-**迁移流程（用户 2026-08-15 指示 + GPT 问题 1）**：写新文件 → 测试使用 → 确认无依赖旧文件 → **旧文件先移到他处（如 `_legacy/`）再测试** → 确认无误后决定删除。**不在同一改动中删除旧文件**（Git 可恢复但没必要冒险）。
+**迁移流程（用户 2026-08-15 指示 + 评审 问题 1）**：写新文件 → 测试使用 → 确认无依赖旧文件 → **旧文件先移到他处（如 `_legacy/`）再测试** → 确认无误后决定删除。**不在同一改动中删除旧文件**（Git 可恢复但没必要冒险）。
 
 | 文件 | 动作 |
 |---|---|
@@ -60,7 +60,7 @@ class Window;   // 保留（Handle 参数 Window*——仅前置声明，cpp 不
 /// 将 Win32 的 HWND/UINT/WPARAM/LPARAM 翻译为类型安全的 Framework Event，
 /// 经 m_host.OnEvent() 派发（Dispatch 一级：翻译器 → 框架契约 → Window → Application）。
 ///
-/// 职责边界（GPT 三轮方案 B——职责纯粹化）：
+/// 职责边界（评审 三轮方案 B——职责纯粹化）：
 /// - 翻译：Win32 消息 → Framework Event（类型安全）
 /// - 派发：m_host.OnEvent()（不再直连 Application——C1）
 /// - ⚠️ WM_IME_* 已移出（7.1.2 方案 B）：IME 属输入法子系统（TSF/IMM/候选窗），
@@ -146,7 +146,7 @@ public:
 ```cpp
 	case WM_IME_STARTCOMPOSITION:
 	case WM_IME_COMPOSITION:
-		// 7.1.2 方案 B（GPT 三轮）：IME 属输入法子系统——平台层状态同步区上报，
+		// 7.1.2 方案 B（评审 三轮）：IME 属输入法子系统——平台层状态同步区上报，
 		// 不再经翻译器（翻译器职责纯粹：Translate→Event→Host）
 		m_host.OnIMEComposition();   // → Window::NotifyIMEComposition
 		return std::nullopt;         // 必须走 DefWindowProc（IME 内部状态机）
@@ -172,7 +172,7 @@ auto platform = std::make_unique<Win32PlatformWindow>(
     *this, windowClass, title, width, height);   // 去 app
 
 void Window::OnEvent(const Event& event){
-    // Transitional adapter（GPT 二轮）：平台层经 Window 转发翻译后的事件，
+    // Transitional adapter（评审 二轮）：平台层经 Window 转发翻译后的事件，
     // 直到 Application 解耦（7.1.5）完成——最终派发目标可能变化。
     // 临时代码标记：非框架最终形态。
     m_application->OnEvent(event);
@@ -203,7 +203,7 @@ void Window::OnIMEComposition(){
 | # | 验收项 | 判据 |
 |---|---|---|
 | V1 | 编译 | VS Debug x64 零错误零新警告；三工具链惯例 |
-| V2 | **grep 实证（GPT 三轮更严格）** | `grep -r "Application" include/ECDI/Platform src/Platform` **零命中**（含 Application&/Application/Application.h 全部形态） |
+| V2 | **grep 实证（评审 三轮更严格）** | `grep -r "Application" include/ECDI/Platform src/Platform` **零命中**（含 Application&/Application/Application.h 全部形态） |
 | V2.1 | **grep 实证（方案 B 强化）** | `grep -r "ECDI/Window/Window.h" src/Platform` **零命中**（原"恰 1 命中"→ 方案 B 归零） |
 | V3 | 回归-事件 | 鼠标/键盘/字符/窗口事件经新链（翻译器 → Host::OnEvent → Window::OnEvent → Application）行为不变 |
 | V4 | 回归-IME | 中文候选窗跟随光标 + 移动窗口归位（**经新链：Win32PlatformWindow → host.OnIMEComposition → NotifyIMEComposition**） |
@@ -219,5 +219,5 @@ void Window::OnIMEComposition(){
 ## 6. 修订记录
 
 - v1.0（2026-08-15）详细设计定稿：8 文件清单 + 逐文件代码蓝图 + Step 1-4 + V1-V4/V2.1。
-- v1.1（2026-08-15，GPT 三轮 + 用户迁移流程）三处修订：① **迁移流程**——旧文件不删除，先移 `_legacy/` 再测再删（用户指示 + GPT 问题 1）② **V2 grep 更严格**——`"Application"` 零命中（GPT 问题 2，覆盖 Application&/include 全部形态）③ **WM_IME 方案 B（GPT 问题 3）**——移出翻译器到 Win32PlatformWindow 状态同步区（host.OnIMEComposition），翻译器职责纯粹化（Translate→Event→Host），**技术债从 3 项减至 1 项**，V2.1 从"恰 1 命中"变"零命中"。
+- v1.1（2026-08-15，评审 三轮 + 用户迁移流程）三处修订：① **迁移流程**——旧文件不删除，先移 `_legacy/` 再测再删（用户指示 + 评审 问题 1）② **V2 grep 更严格**——`"Application"` 零命中（评审 问题 2，覆盖 Application&/include 全部形态）③ **WM_IME 方案 B（评审 问题 3）**——移出翻译器到 Win32PlatformWindow 状态同步区（host.OnIMEComposition），翻译器职责纯粹化（Translate→Event→Host），**技术债从 3 项减至 1 项**，V2.1 从"恰 1 命中"变"零命中"。
 - v1.2（2026-08-15）**验证通过**：实现 5 文件 + vcxproj（翻译器迁 Platform/Win32/，旧文件移 `_legacy/`）。实现期修 2 处：① Win32PlatformWindow WM_IME case 的 `return std::nullopt` → `break`（HandleMessage 返回 LRESULT 非 optional；break 走翻译器 → DefWindowProcW——IME 状态机必需）② **CMake GLOB 重复编译**（旧文件仍在 src/ 被 GLOB_RECURSE 扫入 → LNK2005）——迁移流程 Step 5 提前触发：旧文件移 `_legacy/` 解决。V2/V2.1 grep 双零命中（注释 9 处 "Application" 改"应用层"）；用户实测"功能都正常"（V3/V4）。

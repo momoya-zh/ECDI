@@ -1,6 +1,6 @@
-# Phase 5.2 Label 详细设计 v1.0
+﻿# Phase 5.2 Label 详细设计 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（D1-D4）+ GPT 评审（9.5/10）
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（D1-D4）+ 外部评审（9.5/10）
 
 ## 决策记录
 
@@ -42,7 +42,7 @@ protected:
 private:
 	std::string m_text;                            // L1：UTF-8
 	Color m_textColor = Color::Black();            // L4
-	Font m_font{};  // L4 预留：未来 SetFont() 一行接入（m_font = font），OnPaint 零改动（GPT 补充注释）
+	Font m_font{};  // L4 预留：未来 SetFont() 一行接入（m_font = font），OnPaint 零改动（评审 补充注释）
 };
 ```
 
@@ -143,7 +143,7 @@ Widget::Paint(ctx, offsetX, offsetY) → x = offsetX + m_geometry.x（绝对坐�
   → offsetY 只叠垂直偏移、不碰水平 → 衔接无误
 ```
 
-## ⚠️ 技术债务记录（GPT 补充，明确标记）
+## ⚠️ 技术债务记录（评审 补充，明确标记）
 
 **债务：Widget 无法在非 Paint 时刻访问 TextMeasurer**（5.1 路线 X 的架构约束——TextMeasurer 只经 PaintContext 注入）。
 
@@ -160,4 +160,4 @@ Widget::Paint(ctx, offsetX, offsetY) → x = offsetX + m_geometry.x（绝对坐�
 
 ## 修订记录
 
-- v1.0（2026-08-13）：详细设计定稿——D1-D4 确认 + GPT 两条补充（m_font 注释、技术债务标记）
+- v1.0（2026-08-13）：详细设计定稿——D1-D4 确认 + 评审 两条补充（m_font 注释、技术债务标记）

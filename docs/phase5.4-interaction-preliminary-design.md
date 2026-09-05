@@ -1,15 +1,15 @@
-# Phase 5.4 交互基础设施初步设计 v1.0
+﻿# Phase 5.4 交互基础设施初步设计 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（P1-P6）+ GPT 评审（含修正与实现顺序拆分）
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（P1-P6）+ 外部评审（含修正与实现顺序拆分）
 
 ## 决策记录
 
-### P1 Widget→Window 关联 + Invalidate + HasFocus —— A ✅（GPT：GetWindow 应 protected）
+### P1 Widget→Window 关联 + Invalidate + HasFocus —— A ✅（评审：GetWindow 应 protected）
 
 ```cpp
 // Widget.h 新增（前向声明 class Window; 到 Widget.h 顶部）
 protected:
-	Window* GetWindow() noexcept;               // ⚠️ protected（GPT 修正：TextBox/ScrollBar/ComboBox 未来要访问 Window）
+	Window* GetWindow() noexcept;               // ⚠️ protected（评审 修正：TextBox/ScrollBar/ComboBox 未来要访问 Window）
 	const Window* GetWindow() const noexcept;
 
 public:
@@ -39,7 +39,7 @@ void Window::Invalidate(){ if (m_handle) InvalidateRect(m_handle, nullptr, FALSE
 // Window.cpp 构造内：m_rootWidget 创建后 → m_rootWidget->SetWindow(this)
 ```
 
-- **GetWindow() protected**（GPT 修正）：Invalidate/HasFocus/未来 RequestLayout/主题查询复用同一入口；派生控件可直接访问 Window
+- **GetWindow() protected**（评审 修正）：Invalidate/HasFocus/未来 RequestLayout/主题查询复用同一入口；派生控件可直接访问 Window
 - m_window 只设根 + 上溯获取（一次关联，多入口共享）
 
 ### P2 Window::HandleKeyDown + FocusNext —— A ✅（用户修正：不用 Win32 API，Shift+Tab 留 5.5）
@@ -81,11 +81,11 @@ void Window::HandleKeyDown(const KeyDownEvent& event){
 
 修复"按下→移出→Up 不达→m_pressed 卡死"。
 
-### P5 GetAbsolutePosition —— A ✅（GPT 修正：进 Widget 公共接口）
+### P5 GetAbsolutePosition —— A ✅（评审 修正：进 Widget 公共接口）
 
 ```cpp
 // Widget.h 公共接口
-Point GetAbsolutePosition() const noexcept;    // ⚠️ 公共（GPT 修正：TextBox 光标/ScrollBar 拖动/Popup 定位/Tooltip 都要用）
+Point GetAbsolutePosition() const noexcept;    // ⚠️ 公共（评审 修正：TextBox 光标/ScrollBar 拖动/Popup 定位/Tooltip 都要用）
 
 // Widget.cpp：父链累加 GetX/GetY
 Point Widget::GetAbsolutePosition() const noexcept{
@@ -104,7 +104,7 @@ Point Widget::GetAbsolutePosition() const noexcept{
 // OnPaint：m_pressed ? FromRGBA8(60,90,180) : FromRGBA8(80,120,220)（按下变深）
 ```
 
-## ⚠️ 实现顺序拆分（GPT 建议采纳：5 个 commit，每步可测）
+## ⚠️ 实现顺序拆分（评审建议采纳：5 个 commit，每步可测）
 
 按依赖关系重新排序，**不要一次改 10 个文件**：
 

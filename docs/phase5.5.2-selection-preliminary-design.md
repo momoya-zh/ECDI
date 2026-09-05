@@ -3,11 +3,11 @@
 > 状态：v1.0（2026-08-14）｜初步设计完成，待详细设计
 > 相关：phase5.5.2-selection-requirements.md（职责确认 v1.0）/ phase5.5-textbox-*.md（5.5）
 
-## 1. 定稿决策（P1-P8 + GPT 修正）
+## 1. 定稿决策（P1-P8 + 评审 修正）
 
 ### P1 KeyModifier 独立头 —— A ✅
 
-**新头** `EventSystem/Input/KeyBoard/KeyModifier.h`（与 KeyCode.h 分离——**KeyCode=按了哪个键 / KeyModifier=修饰状态，两概念不同**，GPT 赞成）：
+**新头** `EventSystem/Input/KeyBoard/KeyModifier.h`（与 KeyCode.h 分离——**KeyCode=按了哪个键 / KeyModifier=修饰状态，两概念不同**，评审 赞成）：
 
 ```cpp
 #pragma once
@@ -79,7 +79,7 @@ void Window::HandleKeyDown(const KeyDownEvent& event){
 }
 ```
 
-### P4 Selection 数据模型 —— A ✅（GPT ⭐⭐⭐⭐⭐：anchor + caret）
+### P4 Selection 数据模型 —— A ✅（评审 ⭐⭐⭐⭐⭐：anchor + caret）
 
 ```cpp
 // TextBox.h private：
@@ -121,7 +121,7 @@ void TextBox::OnMouseButtonUp(const MouseButtonUpEvent&){
 }
 ```
 
-### P6 编辑操作内部处理 Selection（GPT 必须保留——编辑操作自包含）—— A ✅
+### P6 编辑操作内部处理 Selection（评审 必须保留——编辑操作自包含）—— A ✅
 
 ```cpp
 // InsertCodepoint：
@@ -158,9 +158,9 @@ size_t TextBox::DeleteSelection(){
 }
 ```
 
-- **为什么在编辑操作内部**（GPT）：未来 IME 上屏 / Ctrl+V / 程序调用 / 脚本 全走编辑操作——编辑操作必须自包含，事件层判断会漏
+- **为什么在编辑操作内部**（评审）：未来 IME 上屏 / Ctrl+V / 程序调用 / 脚本 全走编辑操作——编辑操作必须自包含，事件层判断会漏
 
-### P7 高亮绘制 —— A ✅（颜色不写死，GPT 零成本优化）
+### P7 高亮绘制 —— A ✅（颜色不写死，评审 零成本优化）
 
 ```cpp
 // TextBox.cpp 匿名 namespace：
@@ -174,19 +174,19 @@ if (HasSelection()){
 	const size_t maxByte = CodepointIndexToByteOffset(m_text, GetSelectionMax());
 	const Size minSize = ctx.MeasureText(m_font, m_text.substr(0, minByte));
 	const Size maxSize = ctx.MeasureText(m_font, m_text.substr(0, maxByte));
-	// 与文本裁切共享 maxTextWidth 钳制（高亮不溢出，GPT S5 要求）
+	// 与文本裁切共享 maxTextWidth 钳制（高亮不溢出，评审 S5 要求）
 	const float hlMin = (std::min)(minSize.width, maxTextWidth);
 	const float hlMax = (std::min)(maxSize.width, maxTextWidth);
 	ctx.DrawRect(Rect{ textPos.x + hlMin, textPos.y, hlMax - hlMin, lineH }, kSelectionColor);
 }
 ```
 
-### P8 验证 —— A ✅（GPT 要求②：不彻底放弃断言）
+### P8 验证 —— A ✅（评审 要求②：不彻底放弃断言）
 
 - **人工交互验证**（项目一贯策略）：拖选高亮 / Shift+方向键含反向收缩 / 输入替换选中区 / Backspace 删选中区 / 点击取消选择 / Shift+Tab 反向
-- **不新增测试 API、不 private 变 public**（GPT 明确）
+- **不新增测试 API、不 private 变 public**（评审 明确）
 - **记账（债务）**：Phase 7 建立完整测试体系时补 Selection 单元测试（外部行为：`选中 cd + 输入 中 → ab中e` 等）
 
 ## 2. 修订记录
 
-- v1.0（2026-08-14）初步设计：P1-P8 定稿。GPT 全部批准 + 两个要求落地：① P6 编辑操作自包含（必须项）② P8 人工验证 + Phase 7 补测记账；P7 颜色不写死（kSelectionColor 匿名 namespace，主题友好）。
+- v1.0（2026-08-14）初步设计：P1-P8 定稿。评审 全部批准 + 两个要求落地：① P6 编辑操作自包含（必须项）② P8 人工验证 + Phase 7 补测记账；P7 颜色不写死（kSelectionColor 匿名 namespace，主题友好）。

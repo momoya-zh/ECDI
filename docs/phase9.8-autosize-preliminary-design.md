@@ -2,7 +2,7 @@
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-09-02（v1.1 修订 2026-09-02）
-> 状态：**v1.1 GPT 初设评审通过**（2026-09-02——7 条意见全采纳，见修订记录；**可进入详细设计**）
+> 状态：**v1.1 外部初设评审通过**（2026-09-02——7 条意见全采纳，见修订记录；**可进入详细设计**）
 > 前置：phase9.8-autosize-requirements.md **v1.5 定稿**（R5「后调用者赢」语义修正，与初设 v1.1 一致）
 > 边界一句话（继承需求 v1.4）：**让控件知道自己需要多大，并允许调用方显式让它调整到这个尺寸**——不是尺寸协商系统
 
@@ -79,11 +79,11 @@ Size TextWidget::GetPreferredSize() const{
 }
 ```
 
-> **v1.1 澄清（GPT 初设评审 #4）——两条通道职责不同，勿混淆**：
+> **v1.1 澄清（外部初设评审 #4）——两条通道职责不同，勿混淆**：
 > - **`ResolveMeasurer()` = 测试接缝**：正常运行返回 Window 的 TextMeasurer；测试经 TestableTextWidget override 返回 FakeTextMeasurer。
 > - **无窗口 + 无注入 → 当前尺寸兜底 = 运行时 fallback**（防御路径，非测试机制）——测试不走这条道（走接缝）。
 
-### 3.2 内边距（需求 §3.2 冻结原则落地——v1.1 GPT 评审 #2 冻结确认）
+### 3.2 内边距（需求 §3.2 冻结原则落地——v1.1 外部评审 #2 冻结确认）
 
 > **冻结：9.8 的 TextWidget preferred size 只负责文本内容测量；非 TextBox 控件默认不引入新的 padding 语义。**
 
@@ -112,7 +112,7 @@ Size TextWidget::GetPreferredSize() const{
 
 ## 4. 尺寸意图机制（v1.1 冻结——需求 R5 v1.5 已同步「后调用者赢」）
 
-**冻结：约定式（无标志位）**——v1 不引入 `m_hasExplicitSize`（GPT 初设评审 #1 定调，需求 R5 已随 v1.5 同步）：
+**冻结：约定式（无标志位）**——v1 不引入 `m_hasExplicitSize`（外部初设评审 #1 定调，需求 R5 已随 v1.5 同步）：
 
 ```text
 SetSize()      = 立即设置尺寸
@@ -123,7 +123,7 @@ stretch > 0    = AutoSize() no-op（唯一强制机制）
 | 论点 | 内容 |
 |---|---|
 | AutoSize 本身是显式动作 | 调用方调 `AutoSize()` = 表达「我要内容尺寸」——后调者赢，与 `SetSize` 后调覆盖前调一致；需求 R5 的「优先级」只描述机制关系，**不构成对 API 调用顺序的强制约束** |
-| 无 m_hasExplicitSize | 追踪「尺寸是谁设置的」需要区分用户/内部调用（Layout 分配也走 SetSize 虚分派）——复杂度不值当（GPT：AutoSize 是显式命令，无需追踪） |
+| 无 m_hasExplicitSize | 追踪「尺寸是谁设置的」需要区分用户/内部调用（Layout 分配也走 SetSize 虚分派）——复杂度不值当（评审：AutoSize 是显式命令，无需追踪） |
 | 唯一机制 = stretch 互斥 | `GetStretch() > 0` 检查（§2.2 已落）——9.7 opt-in 语义的对称实现 |
 | 详细设计兜底 | 若详设发现必须机制化（防误用），另行评审——初设与需求 v1.5 均按约定式冻结 |
 
@@ -155,7 +155,7 @@ static_cast<Panel*>(m_statRow)->Arrange();   // ③ statRow 重新排位——st
 Invalidate();                   // ④ 请求重绘
 ```
 
-- **顺序是硬要求**（GPT 初设评审 #6）：statLabel 宽度变化**不会**自动挪动兄弟控件——只靠 AutoSize 不够，必须 statRow->Arrange()（H 布局按新 GetWidth 累加）→ Invalidate
+- **顺序是硬要求**（外部初设评审 #6）：statLabel 宽度变化**不会**自动挪动兄弟控件——只靠 AutoSize 不够，必须 statRow->Arrange()（H 布局按新 GetWidth 累加）→ Invalidate
 - statRow 是 H 布局：statLabel 宽度变化 → 后续 searchBox/allBtn/noneBtn 位置右移/左移——正是验收要的效果
 - demo 改动仅 ModelProbe.cpp（main.cpp 不动）
 
@@ -191,7 +191,7 @@ Invalidate();                   // ④ 请求重绘
 ## 9. 开放决策点（归详细设计）
 
 1. ~~意图机制深度~~——**已冻结（v1.1）**：约定式无标志（需求 R5 v1.5 同步「后调用者赢」）；仅当详设发现必须防误用时才重新评审
-2. **Button preferred 特化**：v1 冻结不做（0 inset 继承——GPT 评审 #B 确认）；补最小常量属未来需求
+2. **Button preferred 特化**：v1 冻结不做（0 inset 继承——外部评审 #B 确认）；补最小常量属未来需求
 3. **AutoSize 返回值**：bool（初设倾向——no-op 可观测）vs void
 4. **FakeTextMeasurer 形态**：固定字宽（码点 × 8）vs 可配置——测试灵活性
 5. **用例 8 的 Invalidate 断言方式**：Widget::Invalidate 无窗口行为确认后定
@@ -199,4 +199,4 @@ Invalidate();                   // ④ 请求重绘
 ## 10. 修订记录
 
 - v1.0（2026-09-02）初步设计初稿：需求 v1.4 冻结语义落成 API 设计（GetPreferredSize 虚 / AutoSize bool 动作 + stretch 互斥检查）+ TextWidget 测量（const_cast 先例 + 无窗口兜底 + ResolveMeasurer 接缝——ProgressBar 同构）+ TextBox 多行防护 + padding 落地表（TextBox 既有字段 / Label·Button 0 inset）+ 意图机制倾向约定式（无标志）+ ModelProbe statLabel 验收接线 + 测试 9 用例 + 影响面（Layout/main.cpp 零改动）。待评审。
-- v1.1（2026-09-02）**吸收 GPT 初设评审 7 条（配套需求 v1.5）**：① §4 意图机制**从倾向升格冻结**（约定式无标志 + 后调用者赢——与需求 R5 v1.5 同步修正矛盾）② §3.2 **冻结**「TextWidget preferred 只负责文本内容测量；非 TextBox 不引入新 padding 语义」③ §3.3 多行返回当前尺寸确认（GPT 认可不做多行）④ §3.1 澄清 **ResolveMeasurer = 测试接缝 / 无窗口兜底 = 运行时 fallback** 两条通道职责 ⑤ §2.2 AutoSize 纯 geometry operation **冻结确认**（不 Arrange/Invalidate/SetText）⑥ §6 RefreshStatText **顺序显式化**（SetText → AutoSize → statRow Arrange → Invalidate——兄弟控件随动硬要求）⑦ §7 测试 #11「既有 + 新增全通过」替代写死 141 条；用例表补 #9 LastCallWins（后调用者赢）+ 原 #9 顺延 #10。开放点收敛（意图机制深度从开放列表移除）。
+- v1.1（2026-09-02）**吸收 外部初设评审 7 条（配套需求 v1.5）**：① §4 意图机制**从倾向升格冻结**（约定式无标志 + 后调用者赢——与需求 R5 v1.5 同步修正矛盾）② §3.2 **冻结**「TextWidget preferred 只负责文本内容测量；非 TextBox 不引入新 padding 语义」③ §3.3 多行返回当前尺寸确认（评审 认可不做多行）④ §3.1 澄清 **ResolveMeasurer = 测试接缝 / 无窗口兜底 = 运行时 fallback** 两条通道职责 ⑤ §2.2 AutoSize 纯 geometry operation **冻结确认**（不 Arrange/Invalidate/SetText）⑥ §6 RefreshStatText **顺序显式化**（SetText → AutoSize → statRow Arrange → Invalidate——兄弟控件随动硬要求）⑦ §7 测试 #11「既有 + 新增全通过」替代写死 141 条；用例表补 #9 LastCallWins（后调用者赢）+ 原 #9 顺延 #10。开放点收敛（意图机制深度从开放列表移除）。

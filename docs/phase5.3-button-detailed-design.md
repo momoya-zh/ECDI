@@ -1,6 +1,6 @@
-# Phase 5.3 Button 详细设计 v1.0
+﻿# Phase 5.3 Button 详细设计 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（D1-D5）+ GPT 评审（8.5/10）
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（D1-D5）+ 外部评审（8.5/10）
 
 ## 决策记录
 
@@ -103,9 +103,9 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 }
 ```
 
-**⚠️ D5 性能注记（GPT 提出，决定保持现状 + 记录优化点）**：
+**⚠️ D5 性能注记（评审 提出，决定保持现状 + 记录优化点）**：
 - 统一 MeasureText：Label 每帧多测一次宽度（GDI GetTextExtentPoint32W 微秒级，当前控件数量个位数无感）
-- GPT 方案 B（条件测量：仅水平对齐需要时测宽）需要引入"是否需要宽度"状态/虚方法——复杂度换取当前不存在的性能问题
+- 评审 方案 B（条件测量：仅水平对齐需要时测宽）需要引入"是否需要宽度"状态/虚方法——复杂度换取当前不存在的性能问题
 - **决定**：保持统一 MeasureText（YAGNI，接口简单）；**优化点封闭在 DrawTextContent 内部**（未来 100+ Label 场景再加条件测量，接口零变化——与 D2 测量 DC 的"未来内部优化"同款模式）
 
 ### D2 Label.h/cpp（重写，行为零变化）
@@ -147,7 +147,7 @@ void Label::OnPaint(PaintContext& ctx, int x, int y){
 }
 ```
 
-### D3 Button.h/cpp（⚠️ GPT 反转修正：构造直接初始化成员）
+### D3 Button.h/cpp（⚠️ 评审 反转修正：构造直接初始化成员）
 
 ```cpp
 // Button.h
@@ -229,7 +229,7 @@ void Button::OnPaint(PaintContext& ctx,int x,int y){
 }
 ```
 
-**⚠️ GPT 前后反转记录**：初步设计时 GPT 建议 `SetTextColor(White)`（子类用公共 API 设样式）；详细设计时 GPT 反转为 `m_textColor = White()`（构造直接初始化成员更自然——"像 vector 构造里 push_back 一样绕一层"）。**采纳本轮**：构造阶段直接赋值成员是 C++ 惯例（构造期间不经过公共接口，避免虚调用风险——虽 SetTextColor 非虚，但精神一致）。两者功能完全等价。
+**⚠️ 评审 前后反转记录**：初步设计时 评审建议 `SetTextColor(White)`（子类用公共 API 设样式）；详细设计时 评审 反转为 `m_textColor = White()`（构造直接初始化成员更自然——"像 vector 构造里 push_back 一样绕一层"）。**采纳本轮**：构造阶段直接赋值成员是 C++ 惯例（构造期间不经过公共接口，避免虚调用风险——虽 SetTextColor 非虚，但精神一致）。两者功能完全等价。
 
 ### D4 Color operator==
 
@@ -253,4 +253,4 @@ void Button::OnPaint(PaintContext& ctx,int x,int y){
 
 ## 修订记录
 
-- v1.0（2026-08-13）：D1-D5 定稿——GPT 三条处理：D1 参数注释明确、D3 构造成员赋值（反转采纳）、D5 保持统一 MeasureText + 优化点记录
+- v1.0（2026-08-13）：D1-D5 定稿——评审 三条处理：D1 参数注释明确、D3 构造成员赋值（反转采纳）、D5 保持统一 MeasureText + 优化点记录

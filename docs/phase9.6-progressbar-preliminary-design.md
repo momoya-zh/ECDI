@@ -2,7 +2,7 @@
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-08-30（v1.2 修订 2026-08-31）
-> 状态：评审通过（GPT 全项授权，2026-08-31）——待用户确认进入详细设计
+> 状态：评审通过（评审 全项授权，2026-08-31）——待确认进入详细设计
 > 前置：需求确认 v1.1（已收敛）/ Animation ✅ / Theme ✅
 
 ---
@@ -27,14 +27,14 @@ Theme
 
 继承 Widget（不继承 TextWidget/Label/Panel——零文本、无子容器语义，纯视觉控件）。
 
-## 3. 状态模型（GPT v1.1 吸收）
+## 3. 状态模型（评审 v1.1 吸收）
 
 | 成员 | 语义 | 写者 | 读者 |
 |---|---|---|---|
 | `m_progress` | 目标值（逻辑状态） | `SetProgress` / `SetPercent` | 业务查询 |
 | `m_displayProgress` | 当前呈现值（视觉状态） | `AnimationManager` 回调 | `OnPaint` |
 
-分离原则（与 CollapsiblePanel 的 `m_expanded` / `s` 同构，**GPT v1.2 冻结**）：**动画不产生状态，只平滑改变视觉状态、把视觉推向逻辑状态**。`SetProgress(0.8)` 只改目标；`Tick()` 驱动呈现趋近目标；`OnPaint` 用呈现值画填充宽。
+分离原则（与 CollapsiblePanel 的 `m_expanded` / `s` 同构，**评审 v1.2 冻结**）：**动画不产生状态，只平滑改变视觉状态、把视觉推向逻辑状态**。`SetProgress(0.8)` 只改目标；`Tick()` 驱动呈现趋近目标；`OnPaint` 用呈现值画填充宽。
 
 ## 4. 接口
 
@@ -57,7 +57,7 @@ protected:
 
 private:
     /// @brief 启动到 target 的过渡动画（**只启动动画、不改逻辑状态**——m_progress 赋值由 SetProgress 负责）
-    /// @details 职责分离（GPT v1.2 冻结）：SetProgress 改 m_progress（逻辑状态）→ AnimateTo 只消费
+    /// @details 职责分离（评审 v1.2 冻结）：SetProgress 改 m_progress（逻辑状态）→ AnimateTo 只消费
     /// 目标值启动 AnimationManager 插值（onValue 驱动 m_displayProgress）。违反此分工 = 违反「动画不产生状态」。
     void AnimateTo(float target);
 
@@ -74,9 +74,9 @@ private:
 命令流 = PushClip(控件边界) → DrawRoundedRect(轨道) → DrawRoundedRect(填充) → PopClip
 ```
 
-**填充策略（GPT v1.1 方案 C——最 YAGNI）**：
+**填充策略（评审 v1.1 方案 C——最 YAGNI）**：
 - **轨道**：`DrawRoundedRect`（`cornerRadius` 圆角，=0 降级 `DrawRect`）
-- **填充**：`DrawRect`（矩形，无圆角）——⚠️ **已被详设 v1.3 变更**：demo 实测高进度时直角填充盖满圆角轨道 → bar 呈纯矩形，用户确认改方案 D（填充 `DrawRoundedRect` 同心圆角，见详设 v1.3 修订记录）
+- **填充**：`DrawRect`（矩形，无圆角）——⚠️ **已被详设 v1.3 变更**：demo 实测高进度时直角填充盖满圆角轨道 → bar 呈纯矩形，确认改方案 D（填充 `DrawRoundedRect` 同心圆角，见详设 v1.3 修订记录）
 
 理由：
 - 最简单、最常见（主流 GUI 框架默认如此）
@@ -101,7 +101,7 @@ AnimateTo(target):    // 只启动动画——不改 m_progress（逻辑状态�
     onFinished: 无（RAII token 自动）
 ```
 
-- **no-op 判断键（GPT v1.2 明确）**：恒为 `target ↔ m_progress`（目标 vs 目标），**绝不**用 `m_displayProgress` 判断目标是否变化——动画进行中 `m_displayProgress` 是中间态，拿它比较会把「目标未变」误判成「需要重启」
+- **no-op 判断键（评审 v1.2 明确）**：恒为 `target ↔ m_progress`（目标 vs 目标），**绝不**用 `m_displayProgress` 判断目标是否变化——动画进行中 `m_displayProgress` 是中间态，拿它比较会把「目标未变」误判成「需要重启」
 - Easing：`EaseOut`——进度追赶感
 - 替换式重启（动画中再调 SetProgress = 替换式重启，from = 当前呈现值）——与 S2 CollapsiblePanel 同构
 - 构造期 `SetProgress(0)`：Window 尚未绑定，走无 Window 分支——瞬时、无动画
@@ -119,7 +119,7 @@ ProgressBarStyle DefaultTheme::GetProgressBarStyle() const{
 }
 ```
 
-**cornerRadius 语义（GPT v1.2 冻结）**：`0 = 自动圆角（height/2）`——不区分「真正的 0 圆角」与「未指定」。理由：当前无「用户要求 ProgressBar 无圆角」的需求，为此引入 optional 语义违反 YAGNI；`effectiveRadius` 的 min(cornerRadius, height/2) 钳制由该规则自然覆盖。若未来出现「真实 0 圆角」需求，届时以新哨兵值或 optional 重议（挂账）。
+**cornerRadius 语义（评审 v1.2 冻结）**：`0 = 自动圆角（height/2）`——不区分「真正的 0 圆角」与「未指定」。理由：当前无「用户要求 ProgressBar 无圆角」的需求，为此引入 optional 语义违反 YAGNI；`effectiveRadius` 的 min(cornerRadius, height/2) 钳制由该规则自然覆盖。若未来出现「真实 0 圆角」需求，届时以新哨兵值或 optional 重议（挂账）。
 
 构造期 `ApplyTheme` → 读 Style → 若 `cornerRadius == 0` 则按 `GetHeight() / 2` 计算全圆角。
 
@@ -132,7 +132,7 @@ ProgressBarStyle DefaultTheme::GetProgressBarStyle() const{
 5. 动画中外部 SetSize 不是支持场景（同 S2 CollapsiblePanel 限制，冻结点延伸）
 6. fill 宽极端小（< 2×cornerRadius）视觉规整——因 fill 是矩形，无 artifact
 
-## 9. 测试计划（11 条，GPT v1.1 吸收）
+## 9. 测试计划（11 条，评审 v1.1 吸收）
 
 | # | 名 | 断言 |
 |---|---|---|
@@ -162,7 +162,7 @@ ProgressBarStyle DefaultTheme::GetProgressBarStyle() const{
 
 不改动：ProgressBar 不继承 Panel/TextWidget → 不影响 Panel/TextWidget 测试；不触及 Animation 框架（只消费）。
 
-## 11. 评审结论（GPT 2026-08-31）
+## 11. 评审结论（评审 2026-08-31）
 
 全项通过——继承 Widget / 状态分离（冻结）/ 双层 API / 同目标 no-op / Fill 矩形 / Track 圆角 / EaseOut / 单 Token / 不改 AnimationManager / 挂账合理 / 11 条测试基本完整。**可以进入详细设计。**
 
@@ -173,6 +173,6 @@ v1.2 吸收的实现级注意点：① no-op 判断键恒为 `target ↔ m_progr
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v1.0 | 2026-08-30 | 初版：继承 Widget / float 0..1 + int 0..100 双层 API / 双层 DrawRect 绘制 / AnimationManager 消费 / 8 条测试 |
-| v1.1 | 2026-08-30 | 吸收 GPT 评审：**fill 方案 C**（track rounded + fill rect——最 YAGNI、零新增能力、低进度无 artifact）；**状态分离**（`m_progress` 目标/逻辑状态 + `m_displayProgress` 呈现/视觉状态——与 CollapsiblePanel m_expanded/s 同构）；**测试 8→11**（新增 AnimationProgresses / AnimationReplacement / IdempotentTarget / ResizeFillGeometry）；**同目标 no-op**（fabs epsilon 比较，避免无意义重启） |
-| v1.2 | 2026-08-31 | 吸收 GPT 终审：**cornerRadius 语义冻结**（`0 = 自动圆角 height/2`，不引入 optional——YAGNI）；**no-op 判断键明确**（恒为 `target ↔ m_progress`，绝不用 m_displayProgress）；**动画测试不绑 easing 数值**（只断言区间/终值）；**AnimateTo 职责写死**（只启动动画、不改逻辑状态）；状态分离原则冻结；状态更新为评审通过 |
-| v1.3 | 2026-08-31 | **方案 C → D 变更标注**（用户授权，详见详设 v1.3）：填充 `DrawRect` → `DrawRoundedRect` 同心圆角——demo 实测「高进度 fill 盖满圆角轨道 → bar 呈矩形」观感缺陷修复；§5 填充策略段同步标注；fill 圆角挂账兑现 |
+| v1.1 | 2026-08-30 | 吸收 外部评审：**fill 方案 C**（track rounded + fill rect——最 YAGNI、零新增能力、低进度无 artifact）；**状态分离**（`m_progress` 目标/逻辑状态 + `m_displayProgress` 呈现/视觉状态——与 CollapsiblePanel m_expanded/s 同构）；**测试 8→11**（新增 AnimationProgresses / AnimationReplacement / IdempotentTarget / ResizeFillGeometry）；**同目标 no-op**（fabs epsilon 比较，避免无意义重启） |
+| v1.2 | 2026-08-31 | 吸收 评审 终审：**cornerRadius 语义冻结**（`0 = 自动圆角 height/2`，不引入 optional——YAGNI）；**no-op 判断键明确**（恒为 `target ↔ m_progress`，绝不用 m_displayProgress）；**动画测试不绑 easing 数值**（只断言区间/终值）；**AnimateTo 职责写死**（只启动动画、不改逻辑状态）；状态分离原则冻结；状态更新为评审通过 |
+| v1.3 | 2026-08-31 | **方案 C → D 变更标注**（授权，详见详设 v1.3）：填充 `DrawRect` → `DrawRoundedRect` 同心圆角——demo 实测「高进度 fill 盖满圆角轨道 → bar 呈矩形」观感缺陷修复；§5 填充策略段同步标注；fill 圆角挂账兑现 |

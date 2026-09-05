@@ -1,7 +1,7 @@
 ﻿# Phase 7.2 无窗口单元测试体系 初步设计
 
 > 状态：v1.0（2026-08-17）｜初步设计
-> 前序：职责确认（v1.1，2026-08-17，采纳 GPT 评审）
+> 前序：职责确认（v1.1，2026-08-17，采纳评审 评审）
 > 相关文档：phase7.2-testing-requirements.md（职责确认）、phase5.5.2-selection-detailed-design.md（P8 承诺）
 
 ## 1. 架构总览
@@ -114,7 +114,7 @@ void TestTextBoxInsertDelete()
 
 ### D2 文件拆分：独立 Tests/ 目录
 
-**决策**：按 GPT 方案拆分，每个模块一个文件。
+**决策**：按 评审 方案拆分，每个模块一个文件。
 
 **迁移方式**：现有 main.cpp 中的 8 个断言块逐个迁移到对应的 `Tests/*.cpp`，不一次全搬。main.cpp 保留 `#include` 和 GUI 代码。
 

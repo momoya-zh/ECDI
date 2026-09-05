@@ -1,7 +1,7 @@
 ﻿# Phase 9.5 R1 Clip 栈消费层——详细设计
 
 > 状态：v1.2（2026-08-27）｜五阶段法第 3 步（职责确认 ✅ v1.1 定稿 → 初步设计 ✅ v1.1 → **详细设计** → 实现 → 测试）  
-> 升级记录：v1.0 评审前并入横向滚动（用户拍板）；v1.1 GPT 评审**有条件通过，补 3 个设计收口**——① m_preferredColumn 坐标契约彻底冻结（§4.6）② EnsureCaretVisible 统一调用时机（§4.7）③ Resize 后 Caret 可见（§4.8）+ O(n²) 表述修正 + S1/S4 测试精确化  
+> 升级记录：v1.0 评审前并入横向滚动（拍板）；v1.1 外部评审**有条件通过，补 3 个设计收口**——① m_preferredColumn 坐标契约彻底冻结（§4.6）② EnsureCaretVisible 统一调用时机（§4.7）③ Resize 后 Caret 可见（§4.8）+ O(n²) 表述修正 + S1/S4 测试精确化  
 > 承接：phase9.5-r1-clip-preliminary-design.md v1.1（管线统一 Clip + D1-D4 + §6.5 必审清单 5 项）  
 > 相关：phase8-renderer-design.md（PushClip/PopClip 能力 §8.5）/ phase4-renderer-design.md（决策 24/25 开区间契约）/ phase8.5.2-multiline-textbox（垂直滚动 m_scrollOffsetY + EnsureCaretVisible 跟手模式）
 
@@ -95,7 +95,7 @@ if (!lineText.empty()){
 - `GetTextAreaWidth()`：**保留**（EnsureCaretVisible 横向右边界 + CaretIndexFromPosition 交互路径使用）
 - 光标竖线（1005-1010）：`CalculateCaretPosition` 返回坐标已含滚动偏移（§4.5 第 3 点）——绘制代码不动
 
-### 4.5 横向滚动（v1.1 新增——用户拍板并入 R1）
+### 4.5 横向滚动（v1.1 新增——拍板并入 R1）
 
 **现状契约**（已核实）：`CalculateCaretPosition` 352 行 `caretX = min(prefixWidth, 可视宽)`——**光标钉右缘，超长行尾部不可见/不可达**；`CaretIndexFromPosition` 436 行 `innerX` 无滚动偏移。
 
@@ -111,7 +111,7 @@ if (!lineText.empty()){
 
 **垂直滚动不动**（Y 逻辑独立正交）；**IME 候选窗**：光标 x 变化 → GetCaretClientGeometry → SyncTextInputCaret 自动联动（无额外改动）。
 
-### 4.6 坐标契约冻结（v1.2——GPT 收口 ①：m_preferredColumn 彻底冻结，不留"实现时核实"）
+### 4.6 坐标契约冻结（v1.2——评审 收口 ①：m_preferredColumn 彻底冻结，不留"实现时核实"）
 
 **TextBox 内容坐标系（逻辑坐标）是唯一真相**，全系统契约如下：
 
@@ -136,7 +136,7 @@ if (!lineText.empty()){
 - **绘制**：`viewX = textX - m_scrollOffsetX`（logical → viewport）
 - **Up/Down 跨行**：`m_preferredColumn`（逻辑 X）→ `CaretIndexFromLineX` 反推——与点击定位同路径，语义天然一致，无漂移空间
 
-### 4.7 EnsureCaretVisible 统一调用时机（v1.2——GPT 收口 ②）
+### 4.7 EnsureCaretVisible 统一调用时机（v1.2——评审 收口 ②）
 
 **原则（冻结）**：**所有导致 Caret 位置变化的既有路径，在提交 Caret 位置后统一调用 `EnsureCaretVisible()`**；新增 Caret 变更路径必须遵守同一契约。
 
@@ -144,7 +144,7 @@ if (!lineText.empty()){
 
 **测量**：`EnsureCaretVisible` 横向边界需 caretX（行内前缀测量）→ 经 `GetWindow()->GetTextMeasurer()`（既有路径，与 CalculateCaretPosition 同源）；无窗口（测试）时跳过测量，偏移更新规则提取为纯逻辑（测试 S7/S8 覆盖）。
 
-### 4.8 Resize 后 Caret 可见（v1.2——GPT 收口 ③）
+### 4.8 Resize 后 Caret 可见（v1.2——评审 收口 ③）
 
 **现状核实**：`SetSize` 非虚内联（Widget.h:84），**无尺寸变化通知**；Layout 只 `SetPosition` 不碰尺寸（已核实 Vertical/HorizontalLayout）——**`SetSize` 是尺寸唯一入口**。
 
@@ -185,6 +185,6 @@ if (!lineText.empty()){
 ## 7. 修订记录
 
 - v1.0（2026-08-27）初稿：必审清单 5 项落实 + 文件变更清单 + Widget::Paint 核心算法 + 三不变量 + TextBox 三处逐项迁移 + 6 测试用例。
-- v1.1（2026-08-27）**用户拍板并入横向滚动**：新增 §4.5（m_scrollOffsetX 成员 + EnsureCaretVisible 左右边界 + CalculateCaretPosition 去钉右缘 + CaretIndexFromPosition 加偏移 + OnPaint viewX 统一）+ `m_preferredColumn` 改存逻辑 x（防跨行漂移）+ 测试 S7-S10 + 风险登记更新；TextBox.h 加入文件变更清单。
-- v1.2（2026-08-27）**GPT 评审收口（有条件通过，补 3 项）**：① §4.6 坐标契约彻底冻结（TextBox 内容坐标系 = 逻辑 X 唯一真相；CaretIndexFromPosition 输入 viewport X / CaretIndexFromLineX 输入 logical X / m_preferredColumn 永远存逻辑 X / 绘制 viewX = logicalX - scrollOffsetX）——删"实现时核实"；② §4.7 EnsureCaretVisible 统一调用时机（原则冻结 + 既有路径全覆盖核实清单，不引入 setter）；③ §4.8 Resize 后 Caret 可见（SetSize 改虚 + TextBox override——Layout 只 SetPosition 已核实）；+ O(n²) 表述修正 + S1 深度计数测试描述精确化 + S4 断言稳定化（测"不 clamp"）+ 测试 S11 Resize + 风险登记更新。
+- v1.1（2026-08-27）**拍板并入横向滚动**：新增 §4.5（m_scrollOffsetX 成员 + EnsureCaretVisible 左右边界 + CalculateCaretPosition 去钉右缘 + CaretIndexFromPosition 加偏移 + OnPaint viewX 统一）+ `m_preferredColumn` 改存逻辑 x（防跨行漂移）+ 测试 S7-S10 + 风险登记更新；TextBox.h 加入文件变更清单。
+- v1.2（2026-08-27）**外部评审收口（有条件通过，补 3 项）**：① §4.6 坐标契约彻底冻结（TextBox 内容坐标系 = 逻辑 X 唯一真相；CaretIndexFromPosition 输入 viewport X / CaretIndexFromLineX 输入 logical X / m_preferredColumn 永远存逻辑 X / 绘制 viewX = logicalX - scrollOffsetX）——删"实现时核实"；② §4.7 EnsureCaretVisible 统一调用时机（原则冻结 + 既有路径全覆盖核实清单，不引入 setter）；③ §4.8 Resize 后 Caret 可见（SetSize 改虚 + TextBox override——Layout 只 SetPosition 已核实）；+ O(n²) 表述修正 + S1 深度计数测试描述精确化 + S4 断言稳定化（测"不 clamp"）+ 测试 S11 Resize + 风险登记更新。
 

@@ -3,7 +3,7 @@
 > 状态：v1.1（2026-08-16）｜✅ 已实现（用户验证：编译零警告 + 渲染回归正常）
 > 相关：phase7-backend-requirements.md（职责确认 D1-D5 + D1a，v1.2）/ phase7-backend-preliminary-design.md（初步设计 v1.1）
 > 目标：解决决策 35 代价——Window 持 GDIBackend 值成员 → 后端不可替换
-> 终态（GPT）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd
+> 终态（评审）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd
 
 ## 0. 实现前置事实（已核实）
 

@@ -3,10 +3,10 @@
 > 阶段：详细设计（五阶段法 ③）——已实施（2026-08-31）
 > 日期：2026-08-31
 > 状态：v1.3 已实施（110/110 全绿；方案 D：fill 圆角化——修复 demo 实测「高进度 fill 盖满圆角轨道 → bar 呈矩形」观感缺陷）
-> 前置：初步设计 v1.2 已通过（GPT 终审 2026-08-31 + 用户确认）
-> v1.1：吸收 GPT 评审——测试 8/9 精确化（§5）/ 接缝不扩散约束（§2.2）/ ProgressBarStyle 头文件注释要求（§2.5）
+> 前置：初步设计 v1.2 已通过（评审 终审 2026-08-31 + 确认）
+> v1.1：吸收 外部评审——测试 8/9 精确化（§5）/ 接缝不扩散约束（§2.2）/ ProgressBarStyle 头文件注释要求（§2.5）
 > v1.2：实现落地同步——Zcode 实现 + ProgressBarTests 11 条注册；运行 110/110 全绿
-> v1.3：方案 D 变更（用户授权）——填充恒 DrawRect → DrawRoundedRect（与轨道同心圆角）；§2.5/§4.5/§5/§7 同步
+> v1.3：方案 D 变更（授权）——填充恒 DrawRect → DrawRoundedRect（与轨道同心圆角）；§2.5/§4.5/§5/§7 同步
 
 ## 1. 目标与范围
 
@@ -48,7 +48,7 @@ virtual AnimationManager* ResolveAnimationManager() const noexcept;
 - **不违反初设评审结论**"不改 AnimationManager（只消费）"——manager 本体零改动。
 - 默认实现行为与"无窗口降级"逐字节等价（窗口存在 ⇔ 默认解析非空）。
 - 与 Widget 既有 protected virtual 家族（OnPaint/ContainsPoint/OnXxx）同层——不是新抽象种类。
-- **不扩散约束（GPT 评审 v1.1）**：本接缝是 ProgressBar 的**一次性例外**（其被测命题 = 动画中间态本身，无窗口不可观测），**不得扩散到其他动画控件**——后续动画控件（如 Button 模式）默认"无窗口降级瞬时"即可测，各自再造 `ResolveXXX()` 接缝 = 测试污染正式架构的起点。
+- **不扩散约束（外部评审 v1.1）**：本接缝是 ProgressBar 的**一次性例外**（其被测命题 = 动画中间态本身，无窗口不可观测），**不得扩散到其他动画控件**——后续动画控件（如 Button 模式）默认"无窗口降级瞬时"即可测，各自再造 `ResolveXXX()` 接缝 = 测试污染正式架构的起点。
 
 ### 2.3 AnimateTo 职责（初设 v1.2 冻结）
 
@@ -68,7 +68,7 @@ virtual AnimationManager* ResolveAnimationManager() const noexcept;
 - **绘制时计算、不存储**：`effectiveRadius = (radius > 0) ? radius : GetHeight() / 2.0f`——SetSize 后自动跟随（含"0 高 → effective 0 → 降级 DrawRect"的退化路径）。
 - **轨道与填充共用同一 `effectiveRadius`**（v1.3 方案 D——初设方案 C「填充恒 DrawRect 矩形」经 demo 实测推翻：高进度时直角填充盖满圆角轨道 → bar 视觉成矩形；改填充 `DrawRoundedRect` 同心圆角，视觉无缝；fill 右端呈果冻头，现代进度条常见）。
 - 低进度 `fillWidth < 2×radius` → 后端半径钳制（[0, min(w,h)/2]）自动缩圆角，无 artifact；`fillWidth == 0` → 后端空宽 no-op（与方案 C 零宽语义一致——轨道完整胶囊可见）。
-- **头文件注释要求（GPT 评审 v1.1 ④）**：`ProgressBarStyle.h` 的 `cornerRadius` 字段注释必须明确写出"**0 = 自动圆角（height/2），非真实 0 圆角——`SetStyle({.cornerRadius = 0})` 得到全圆角而非方角；v0.1 无法表达方角**"——防止未来使用者（包括自己）误读为方角。
+- **头文件注释要求（外部评审 v1.1 ④）**：`ProgressBarStyle.h` 的 `cornerRadius` 字段注释必须明确写出"**0 = 自动圆角（height/2），非真实 0 圆角——`SetStyle({.cornerRadius = 0})` 得到全圆角而非方角；v0.1 无法表达方角**"——防止未来使用者（包括自己）误读为方角。
 
 ### 2.6 样式颜色即时生效（与 Button 的有意差异）
 
@@ -310,8 +310,8 @@ void ProgressBar::OnPaint(PaintContext& ctx, int x, int y){
 | 5 | `ProgressBar.PaintZeroProgress` | `SetProgress(0)`（构造即 0——no-op 不重启）后直接 Paint → 填充 DrawRoundedRect 宽 == 0（§4.5 语义锚定） |
 | 6 | `ProgressBar.SetStyle` | `SetStyle(fillColor = 自定义)` → Paint 填充色立即反映；随后 `ApplyTheme(GetDefaultTheme())` 不回退（D7 overridden 契约——TestPanelSetStyle 同构） |
 | 7 | `ProgressBar.ApplyTheme` | 构造后 trackColor/fillColor == `GetDefaultTheme().GetProgressBarStyle()` 对应值（默认注入验证） |
-| 8 | `ProgressBar.AnimationProgresses` | 接缝注入替身 manager → `SetProgress(1.0f)` → `Tick(1ms)` → `0 < DisplayProgress() < 1`（中间态存在；**短 tick 防对具体时长实现的依赖**，v1.1 GPT 修订——不绑 easing 数值）→ `Tick(300ms)` → `DisplayProgress()==1.0f`（完成帧 onValue(final) 必达）且 `GetProgress()==1.0f` |
-| 9 | `ProgressBar.AnimationReplacement` | `SetProgress(1.0f)` → `Tick(50ms)` → 记 `p1 = DisplayProgress()`（∈ (0,1)）→ **`SetProgress(0.5f)` 后立即断言 `DisplayProgress()==p1`**（核心不变量：**替换动画的 from == 替换瞬间的呈现值**——SetProgress 只改目标、不动呈现，v1.1 GPT 修订——取代原"p1 附近"模糊断言）→ `Tick(1ms)` → `p3 > 0`（未跳回 0——新动画从 p1 出发向 0.5 运动）→ `Tick(300ms)` → `DisplayProgress()==0.5f` |
+| 8 | `ProgressBar.AnimationProgresses` | 接缝注入替身 manager → `SetProgress(1.0f)` → `Tick(1ms)` → `0 < DisplayProgress() < 1`（中间态存在；**短 tick 防对具体时长实现的依赖**，v1.1 评审 修订——不绑 easing 数值）→ `Tick(300ms)` → `DisplayProgress()==1.0f`（完成帧 onValue(final) 必达）且 `GetProgress()==1.0f` |
+| 9 | `ProgressBar.AnimationReplacement` | `SetProgress(1.0f)` → `Tick(50ms)` → 记 `p1 = DisplayProgress()`（∈ (0,1)）→ **`SetProgress(0.5f)` 后立即断言 `DisplayProgress()==p1`**（核心不变量：**替换动画的 from == 替换瞬间的呈现值**——SetProgress 只改目标、不动呈现，v1.1 评审 修订——取代原"p1 附近"模糊断言）→ `Tick(1ms)` → `p3 > 0`（未跳回 0——新动画从 p1 出发向 0.5 运动）→ `Tick(300ms)` → `DisplayProgress()==0.5f` |
 | 10 | `ProgressBar.IdempotentTarget` | 无宿主下 `SetProgress(0.5f)` 两次 → 第二次 no-op（GetProgress 不变）；接缝下完成一次动画（Tick 至 HasActive()==false）→ 再 `SetProgress(0.5f)`（同目标）→ `manager.HasActive()==false`（未启动新动画——no-op 判断键 target↔m_progress 验证） |
 | 11 | `ProgressBar.ResizeFillGeometry` | `SetProgress(0.25f)`（无宿主瞬时）→ `SetSize(400,20)` → Paint → 填充 DrawRoundedRect 宽 == 400×0.25（填充宽度跟随 Widget 宽度） |
 
@@ -339,7 +339,7 @@ void ProgressBar::OnPaint(PaintContext& ctx, int x, int y){
 
 ## 7. 已知限制（v0.1 冻结，与初设 §8 一致）
 
-1. ~~填充恒矩形（无圆角语义——方案 C）~~：v1.3 已改 `DrawRoundedRect`（方案 D，用户授权）——填充与轨道同心圆角；低进度 < 2×radius 时后端半径钳制为小圆角矩形（DrawRoundedRect 契约，非 artifact）；fill 圆角不再挂账。
+1. ~~填充恒矩形（无圆角语义——方案 C）~~：v1.3 已改 `DrawRoundedRect`（方案 D，授权）——填充与轨道同心圆角；低进度 < 2×radius 时后端半径钳制为小圆角矩形（DrawRoundedRect 契约，非 artifact）；fill 圆角不再挂账。
 2. 仅水平方向；垂直不做（挂账）。
 3. indeterminate 不做（DrawArc/PushTransform 未解锁 + 无循环 token 模式——挂账）。
 4. 不内置文本百分比（外部 Label 组合）。
@@ -349,13 +349,13 @@ void ProgressBar::OnPaint(PaintContext& ctx, int x, int y){
 
 ## 8. 评审结论
 
-> v1.0 评审请求（① 接缝 ② SetProgress 结构 ③ OnPaint ④ 测试充分性 ⑤ 影响清单）已由 GPT 评审（2026-08-31）：**五项全过**；① 另附"不扩散到其他控件"约束（已入 §2.2）；④ 的测试 8/9 精确化修订条件已吸收（§5）；另要求 ProgressBarStyle.h 注释明确 cornerRadius==0 语义（已入 §2.5）。**已实施（2026-08-31）。**
+> v1.0 评审请求（① 接缝 ② SetProgress 结构 ③ OnPaint ④ 测试充分性 ⑤ 影响清单）已由 外部评审（2026-08-31）：**五项全过**；① 另附"不扩散到其他控件"约束（已入 §2.2）；④ 的测试 8/9 精确化修订条件已吸收（§5）；另要求 ProgressBarStyle.h 注释明确 cornerRadius==0 语义（已入 §2.5）。**已实施（2026-08-31）。**
 >
-> v1.3（2026-08-31）：demo 实测发现方案 C 视觉缺陷——高进度时直角填充盖满圆角轨道 → bar 呈纯矩形；经用户确认实施方案 D（填充 DrawRoundedRect 同心圆角），代码 + 测试 4/5/6/11 同步，110/110 全绿。**状态：已实施。**
+> v1.3（2026-08-31）：demo 实测发现方案 C 视觉缺陷——高进度时直角填充盖满圆角轨道 → bar 呈纯矩形；经确认实施方案 D（填充 DrawRoundedRect 同心圆角），代码 + 测试 4/5/6/11 同步，110/110 全绿。**状态：已实施。**
 
 ## 9. 修订记录
 
 - v1.0（2026-08-31）详细设计初稿：初设 v1.2 冻结语义落成精确签名/实现；新增 D2 测试接缝（ResolveAnimationManager）；修正初设 §6 伪码的显式 Invalidate（按 d4 聚合契约定稿）；测试 11 条落到可执行粒度（TestPlatformWindow 精简替身 + TestableProgressBar）；影响面清单 11 项 + Theme 派生类自查。
-- v1.1（2026-08-31）吸收 GPT 评审：**测试 8 精确化**（中间态 tick 50ms → 1ms——降低对时长实现的依赖，只验 (0,1) → 终值）；**测试 9 精确化**（核心不变量改为"`SetProgress` 后立即 `DisplayProgress()==p1`"——直接验证替换动画 from == 替换瞬间呈现值，取代"p1 附近"模糊断言）；**§2.2 补接缝不扩散约束**（ProgressBar 一次性例外，禁止扩散）；**§2.5 补 ProgressBarStyle.h 注释要求**（cornerRadius==0 = 自动圆角语义写进头文件）；**§3 代码块同步回写**：`m_displayProgress` / `m_style` 移至 `protected`（实现同步——测试派生类需读取呈现值/样式字段，同 TextBox::m_style 先例，v1.3 主题详设已有先例）。
+- v1.1（2026-08-31）吸收 外部评审：**测试 8 精确化**（中间态 tick 50ms → 1ms——降低对时长实现的依赖，只验 (0,1) → 终值）；**测试 9 精确化**（核心不变量改为"`SetProgress` 后立即 `DisplayProgress()==p1`"——直接验证替换动画 from == 替换瞬间呈现值，取代"p1 附近"模糊断言）；**§2.2 补接缝不扩散约束**（ProgressBar 一次性例外，禁止扩散）；**§2.5 补 ProgressBarStyle.h 注释要求**（cornerRadius==0 = 自动圆角语义写进头文件）；**§3 代码块同步回写**：`m_displayProgress` / `m_style` 移至 `protected`（实现同步——测试派生类需读取呈现值/样式字段，同 TextBox::m_style 先例，v1.3 主题详设已有先例）。
 - v1.2（2026-08-31）实现落地同步：Zcode 实现（ProgressBar.h/.cpp + ProgressBarStyle.h + Theme/DefaultTheme + RunAllTests + vcxproj 登记）+ ProgressBarTests 11 条；运行 110/110 全绿（退出码 0）。§8 状态更新为已实施。
-- v1.3（2026-08-31）方案 D 变更（用户授权）：填充恒 `DrawRect` → `DrawRoundedRect`（与轨道同心 `effectiveRadius`）——修复 demo 实测观感缺陷「高进度 fill 盖满圆角轨道 → bar 呈纯矩形」；同步 §2.5（轨道/填充共用半径 + 低进度钳制语义）、§4.5（OnPaint ②）、命令流（§4.5）、§5 测试 4/5/11（`DrawRectCommand` → `DrawRoundedRectCommand`，测试 4 增补同心圆角断言）、§7 限制 1（fill 圆角不再挂账）。
+- v1.3（2026-08-31）方案 D 变更（授权）：填充恒 `DrawRect` → `DrawRoundedRect`（与轨道同心 `effectiveRadius`）——修复 demo 实测观感缺陷「高进度 fill 盖满圆角轨道 → bar 呈纯矩形」；同步 §2.5（轨道/填充共用半径 + 低进度钳制语义）、§4.5（OnPaint ②）、命令流（§4.5）、§5 测试 4/5/11（`DrawRectCommand` → `DrawRoundedRectCommand`，测试 4 增补同心圆角断言）、§7 限制 1（fill 圆角不再挂账）。

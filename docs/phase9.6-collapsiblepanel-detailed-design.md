@@ -2,9 +2,9 @@
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-08-30
-> 状态：已通过（GPT 评审 + 用户确认），v1.3 增量修订已实现
-> 前置：初步设计 v1.1 已通过（GPT 评审 + 用户确认）
-> v1.1：补测试 12/13（GPT 评审建议——Content 跟随验证 + 多次折叠记忆语义）
+> 状态：已通过（外部评审 + 确认），v1.3 增量修订已实现
+> 前置：初步设计 v1.1 已通过（外部评审 + 确认）
+> v1.1：补测试 12/13（外部评审建议——Content 跟随验证 + 多次折叠记忆语义）
 > v1.2：**默认收起变更**（详设：phase9.6-panel-container-semantics-detailed-design.md v1.1）——m_expanded=false / 收起态 SetSize = 定义展开基准（非动画轴保持、动画轴呈现 0）/ ApplyGeometry 直调防递归 / SetExpandDirection 升格「须在首次 SetSize 前设置」（初始化约定，无运行时 assert）/ Toggle 首次语义反转（默认收起下首次 = 展开）
 > v1.3：**位置锚定参照改为当前几何**（Showcase 实测：CollapsiblePanel 首次放入 Layout 容器——VerticalLayout 排位后当前位置 ≠ m_expandedRect 的 SetSize 时刻位置，展开动画把面板拉回陈旧位置、覆盖其他控件致无法交互）——ApplyGeometry 位置部分用 GetX/GetY（当前几何），尺寸部分仍用 m_expandedRect（w0/h0 基准）；锚定边固定语义不变；测试全兼容（所有用例 SetPosition 先于 SetSize，两参照等价）
 
@@ -12,7 +12,7 @@
 
 `CollapsiblePanel`：继承 `Panel` 的可折叠内容容器。四向折叠（Down/Up/Left/Right），header 外部自组，内容统一进内部容器 `m_content`（裸 Widget）。折叠 = 沿锚定边 resize 收缩到 0 + 内容容器隐藏；展开 = 内容先显示 + 恢复展开基准几何。复用 per-Window `AnimationManager`（9.6）。
 
-**本设计冻结 GPT 评审提出的 7 个歧义点**，实现不得弱化。
+**本设计冻结 外部评审提出的 7 个歧义点**，实现不得弱化。
 
 ## 2. 硬契约（冻结语义）
 
@@ -88,7 +88,7 @@ void CollapsiblePanel::SetSize(int w, int h) override{
 - 方向 = 用户通过 `SetExpandDirection` 告知的语义（header 在反侧锚定），控件不做 header 定位/跟随/隐藏。
 - 折叠到 0 时 header 不受影响（它不在面板内）——符合「header 锚定边固定」的直觉：header 钉在原位，面板向对侧收缩。
 
-### 2.7 动画配置不开放（GPT 评审 ②）
+### 2.7 动画配置不开放（外部评审 ②）
 
 **不提供** `SetAnimationDuration / SetEasing / SetAnimationEnabled / SetHeaderHeight / SetCollapseSize`——200ms、EaseIn/EaseOut 为内部常量（`kToggleDurationMs = 200`），无真实消费者，YAGNI。
 
@@ -328,8 +328,8 @@ float CollapsiblePanel::AxisTarget() const{         // 展开目标轴值
 | 9 | `CollapsiblePanel.ToggleFlipsState` | Toggle 翻转状态（v1.2：默认收起——首次 Toggle = 展开） |
 | 10 | `CollapsiblePanel.ContentContainer` | GetContent() 非空、可 AddChild、**展开态** SetSize 后容器尺寸跟随（冻结点 4 验证） |
 | 11 | `CollapsiblePanel.CollapseHitTestPanelSelf` | 面板自身坐标 HitTest 返回 nullptr（v1.2：Panel 永不命中——ContainsPoint 恒 false） |
-| 12 | `CollapsiblePanel.ContentFollowsGeometry`（GPT 建议） | panel (100,200,300,400) → content position==(0,0) size==(300,400)；SetSize(500,600) → content position==(0,0) size==(500,600)——防 SetSize override 同步逻辑被改坏（v1.2：几何断言在展开态查） |
-| 13 | `CollapsiblePanel.RepeatedCollapseMemory`（GPT 建议） | 展开→折叠→展开→折叠：m_expandedRect 保持「最近一次进入折叠前的完整尺寸」（无窗口瞬时路径，成本极低） |
+| 12 | `CollapsiblePanel.ContentFollowsGeometry`（评审建议） | panel (100,200,300,400) → content position==(0,0) size==(300,400)；SetSize(500,600) → content position==(0,0) size==(500,600)——防 SetSize override 同步逻辑被改坏（v1.2：几何断言在展开态查） |
+| 13 | `CollapsiblePanel.RepeatedCollapseMemory`（评审建议） | 展开→折叠→展开→折叠：m_expandedRect 保持「最近一次进入折叠前的完整尺寸」（无窗口瞬时路径，成本极低） |
 | 14 | `CollapsiblePanel.DefaultCollapsedPresentation`（v1.2 新增） | 默认收起呈现 + §4.2.1 硬契约：Down 下 SetSize(300,400) → w==300 保持 / h==0；SetExpanded(true) 恢复基准全尺寸；Right 对称断言（h==400 保持 / w==0 / x 锚定） |
 
 测试脚手架：`HitTest` 可在无 Window 树调用（基类不依赖 Window）；断言几何用 `GetGeometry()` 浮点比较（EXPECT_NEAR）；内容容器子控件用 `GetContent()->AddChild` 后按绝对/相对坐标 HitTest。
@@ -357,11 +357,11 @@ float CollapsiblePanel::AxisTarget() const{         // 展开目标轴值
 
 请评审：① 冻结点 2（m_expandedRect 记忆语义）② SetSize override（内容容器跟随载体）③ onValue 不显式 Invalidate（依赖 manager 聚合）④ 无窗口降级（测试可测性）⑤ 测试 11 条覆盖是否齐全。
 
-> v1.2 注：①② 已随默认收起变更扩展（§4.2.1 收起态语义）；评审已通过（GPT 全项授权 + 用户确认实施，2026-08-30）。
+> v1.2 注：①② 已随默认收起变更扩展（§4.2.1 收起态语义）；评审已通过（评审 全项授权 + 确认实施，2026-08-30）。
 
 ## 9. 修订记录
 
 - v1.0（2026-08-30）详细设计初稿：7 歧义点冻结 / 接口 / 几何公式 / 11 测试。
-- v1.1（2026-08-30）补测试 12/13（GPT 评审建议）。
-- v1.2（2026-08-30）**默认收起变更**（详设：phase9.6-panel-container-semantics-detailed-design.md v1.1，GPT 全项授权）：m_expanded=false + 构造 SetContentVisible(false)；**收起态 SetSize = 定义展开基准**（§4.2.1 硬契约——非动画轴保持给出值、动画轴呈现 0）；**ApplyGeometry 直调 Panel::SetSize + 容器同步**（防 override 递归/基准污染）；SetExpandDirection 升格「须在首次 SetSize 前设置」（初始化约定、无运行时 assert）；测试更新（DefaultCollapsed 改名、Up/Right/LeftCollapse 方向前置、ToggleFlipsState 反转、ContentContainer/ContentFollowsGeometry 移展开态断言）+ 新增 DefaultCollapsedPresentation（14 条）。
-- v1.3（2026-08-31）**位置锚定参照改当前几何**（Showcase 实测发现：CollapsiblePanel 首次放入 Layout 容器——VerticalLayout 排位后当前位置 ≠ m_expandedRect 的 SetSize 时刻位置，展开动画把面板拉回陈旧位置、覆盖 Toggle 按钮致「展开后无法收起」）：§2.1 四向公式位置部分 x0/y0 → **GetX()/GetY()（当前几何）**，尺寸部分仍用 m_expandedRect（w0/h0 基准）；§4.2 伪码同步；§7 限制 1/3 更新（折叠态外部 SetPosition 生效、「先 SetSize 后 SetPosition 跳回」消失）；测试 14 条全兼容无需改（所有用例 SetPosition 先于 SetSize，两参照等价）；用户确认方案后实施，BOM ✓
+- v1.1（2026-08-30）补测试 12/13（外部评审建议）。
+- v1.2（2026-08-30）**默认收起变更**（详设：phase9.6-panel-container-semantics-detailed-design.md v1.1，评审 全项授权）：m_expanded=false + 构造 SetContentVisible(false)；**收起态 SetSize = 定义展开基准**（§4.2.1 硬契约——非动画轴保持给出值、动画轴呈现 0）；**ApplyGeometry 直调 Panel::SetSize + 容器同步**（防 override 递归/基准污染）；SetExpandDirection 升格「须在首次 SetSize 前设置」（初始化约定、无运行时 assert）；测试更新（DefaultCollapsed 改名、Up/Right/LeftCollapse 方向前置、ToggleFlipsState 反转、ContentContainer/ContentFollowsGeometry 移展开态断言）+ 新增 DefaultCollapsedPresentation（14 条）。
+- v1.3（2026-08-31）**位置锚定参照改当前几何**（Showcase 实测发现：CollapsiblePanel 首次放入 Layout 容器——VerticalLayout 排位后当前位置 ≠ m_expandedRect 的 SetSize 时刻位置，展开动画把面板拉回陈旧位置、覆盖 Toggle 按钮致「展开后无法收起」）：§2.1 四向公式位置部分 x0/y0 → **GetX()/GetY()（当前几何）**，尺寸部分仍用 m_expandedRect（w0/h0 基准）；§4.2 伪码同步；§7 限制 1/3 更新（折叠态外部 SetPosition 生效、「先 SetSize 后 SetPosition 跳回」消失）；测试 14 条全兼容无需改（所有用例 SetPosition 先于 SetSize，两参照等价）；确认方案后实施，BOM ✓

@@ -1,6 +1,6 @@
 ﻿# Phase 8.5.3 文本系统 2.0 详细设计（Undo/Redo）
 
-> 状态：v1.1（2026-08-25）｜定稿待审（GPT 评审整合）
+> 状态：v1.1（2026-08-25）｜定稿待审（外部评审整合）
 > 前序：Phase 8.5.2 完结 ✅（commit edfde46）/ 8.5.1 完结 ✅（commit 8ab8300）
 > 相关：phase8.5-text-system2.0-preliminary-design.md（B6 Undo Snapshot / C3 Composition 与 Undo / C4 Push 时机）
 > 拆分说明：本文件 = 8.5.3 专属详细设计（原草案 §10 定稿）
@@ -91,7 +91,7 @@ void Redo();   ///< 重做：栈空 no-op；当前状态 → undo，恢复栈顶
 // TextBox.cpp：
 void TextBox::Undo(){
     if (m_isComposing)
-        return;   // 组合态防御（GPT 评审补充）：IME 占用输入通道，键盘撤销不中断组合
+        return;   // 组合态防御（外部评审补充）：IME 占用输入通道，键盘撤销不中断组合
     if (m_undoStack.empty())
         return;   // 空栈 no-op（F38）
     m_redoStack.push_back(CaptureCurrentState());   // C4：当前状态 → RedoStack
@@ -173,7 +173,7 @@ void TextBox::UpdateComposition(const std::string& compositionText){
 }
 ```
 
-**CancelComposition 修改**（GPT 评审修正——🔴 弹栈必须**真正恢复快照**，不能只 pop）：
+**CancelComposition 修改**（外部评审修正——🔴 弹栈必须**真正恢复快照**，不能只 pop）：
 
 ```cpp
 void TextBox::CancelComposition(){
@@ -208,7 +208,7 @@ void TextBox::CancelComposition(){
 }
 ```
 
-**Cancel vs Undo 语义表**（GPT 评审补充——写进契约）：
+**Cancel vs Undo 语义表**（外部评审补充——写进契约）：
 
 | 操作 | 恢复快照 | 移除快照 | 当前状态进 Redo |
 |---|---|---|---|
@@ -218,9 +218,9 @@ void TextBox::CancelComposition(){
 **边界**：
 - 首次 UpdateComposition 空串（组合开始但无内容）→ 不 Push（无实际变化）、`m_compositionPushedUndo` 保持 false
 - Commit 空结果（C12：`CommitComposition("")`）→ 组合区间删除，仍由组合开始快照覆盖（Ctrl+Z 恢复组合前文本）
-- **组合期间 Ctrl+Z/Y 防御**（GPT 评审补充）：`Undo()/Redo()` 开头 `if (m_isComposing) return;`——组合状态占用输入通道，键盘撤销不中断组合（fail-safe，不崩）；IME 通常拦截组合态快捷键，此为防御路径
+- **组合期间 Ctrl+Z/Y 防御**（外部评审补充）：`Undo()/Redo()` 开头 `if (m_isComposing) return;`——组合状态占用输入通道，键盘撤销不中断组合（fail-safe，不崩）；IME 通常拦截组合态快捷键，此为防御路径
 - 组合期间的新编辑？——不可能：Composition 期间用户输入走 IME 通道（无 OnCharInput 直插），无并发编辑路径
-- **一次用户可感知编辑 = 恰好一次 Push**（GPT 评审补充契约）：InsertCodepoint 与 InsertText **各自独立实现、互不嵌套**（已核对代码事实——InsertCodepoint 直接 insert，InsertText 走 ReplaceTextRange）；未来重构不得在两者间建立嵌套调用而不合并 Push
+- **一次用户可感知编辑 = 恰好一次 Push**（外部评审补充契约）：InsertCodepoint 与 InsertText **各自独立实现、互不嵌套**（已核对代码事实——InsertCodepoint 直接 insert，InsertText 走 ReplaceTextRange）；未来重构不得在两者间建立嵌套调用而不合并 Push
 
 ## 6. 快捷键（Ctrl+Z / Ctrl+Y）
 
@@ -262,8 +262,8 @@ case KeyCode::Y:    Redo(); break;
 | F41 | 快照含滚动/多行 | "abc\ndef" 末尾插入 → Undo → 文本/光标/scrollOffsetY 恢复 | 快照完整性 |
 | F42 | InsertText Undo | InsertText("xy") → Undo → 恢复 | 粘贴/Enter 路径 |
 | F43 | Cut Undo | 有选区 Cut → Undo → 文本与选区恢复 | 剪切路径 |
-| F44 | Composition Cancel（GPT 新增） | "abc"+组合"nihao" → Cancel → "abc"（**快照真正恢复**）→ Undo no-op（**快照已弹**） | 同时验证恢复+弹栈+不留历史 |
-| F45 | 连续 Redo（GPT 新增） | "abc"+d+e → Undo×2 → "abc" → Redo×2 → "abcde" | Undo↔Redo 双向流转 |
+| F44 | Composition Cancel（评审 新增） | "abc"+组合"nihao" → Cancel → "abc"（**快照真正恢复**）→ Undo no-op（**快照已弹**） | 同时验证恢复+弹栈+不留历史 |
+| F45 | 连续 Redo（评审 新增） | "abc"+d+e → Undo×2 → "abc" → Redo×2 → "abcde" | Undo↔Redo 双向流转 |
 
 **测试可测性**：`Undo/Redo` public 直接调；断言用 `GetText/GetCaret/GetSelection/GetScrollOffsetY`（均 public 只读）——无窗口环境全可测（Composition 路径走 TestableTextBox 的 using 暴露，同 8.5.1 F3-F15 先例）。
 
@@ -283,12 +283,12 @@ case KeyCode::Y:    Redo(); break;
 |---|---|
 | skill 15 分层 | Undo 纯 TextBox 内部状态（文本/光标/选区/滚动）——零平台依赖 |
 | skill 16 Event 原则 | Ctrl+Z/Y = KeyDown 语义（C1），非独立 UndoEvent |
-| skill 21 YAGNI | 快照模式（非命令模式——GPT 认可 MVP）；Selection 方向不存（第二次用例再扩展）；不做重做深度单独限制 |
+| skill 21 YAGNI | 快照模式（非命令模式——评审 认可 MVP）；Selection 方向不存（第二次用例再扩展）；不做重做深度单独限制 |
 | 资源类禁复制禁移动 | UndoSnapshot 值语义（string/size_t/optional/float）可拷贝入栈 |
 | 7.2 测试体系 | F35-F43 走 7.2 TestCase 体系（无窗口可测） |
 | 五阶段法 | 本文档 = 详细设计；确认后进实现 |
 
 ## 11. 修订记录
 
-- v1.1（2026-08-25）GPT 评审整合：🔴 **CancelComposition 真正 RestoreSnapshot**（模型 B 组合串已在 m_text——仅 pop 会残留拼音占位）+ Cancel vs Undo 语义表（恢复✅/移除✅/进 Redo❌）；🟡 **C4c 一次编辑=一次 Push 契约**（InsertCodepoint/InsertText 独立实现已核）；🟡 **C3b 组合态 Undo/Redo 防御**（`if (m_isComposing) return`）；🟢 TestCase 补 F44（Composition Cancel 恢复+弹栈+不留历史）/F45（连续 Redo 双向流转）。
+- v1.1（2026-08-25）外部评审整合：🔴 **CancelComposition 真正 RestoreSnapshot**（模型 B 组合串已在 m_text——仅 pop 会残留拼音占位）+ Cancel vs Undo 语义表（恢复✅/移除✅/进 Redo❌）；🟡 **C4c 一次编辑=一次 Push 契约**（InsertCodepoint/InsertText 独立实现已核）；🟡 **C3b 组合态 Undo/Redo 防御**（`if (m_isComposing) return`）；🟢 TestCase 补 F44（Composition Cancel 恢复+弹栈+不留历史）/F45（连续 Redo 双向流转）。
 - v1.0（2026-08-25）8.5.3 定稿：B6 快照结构落地 + C4 挂载点清单（含 DeleteBackward/Forward 空操作检查重构）+ Undo/Redo 栈流转 + C3 Composition 衔接（首次 Push/Commit 不 Push/Cancel 弹回）+ Ctrl+Z/Y + D4/D7/D9 契约 + F35-F43。

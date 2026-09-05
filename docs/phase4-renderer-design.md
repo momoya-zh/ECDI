@@ -1,9 +1,9 @@
-# Phase 4 Renderer 初步设计（phase4-renderer-design.md）
+﻿# Phase 4 Renderer 初步设计（phase4-renderer-design.md）
 
 > 阶段：第四阶段 Renderer System → 初步设计
 > 前置：职责确认已评审通过（Renderer 不知道 Widget / Paint 管"画什么"、Renderer 管"怎么画"）
 > 本文档收录 Renderer 全部决策（问题 1-23 复盘 + 双缓冲 + 迁移项），供详细设计使用。
-> 修订记录：v1.0 初版（2026-08-09），基于决策链复盘；已修正复盘中的两处决策误记（RenderCommand 形态、FromRGBA8）。v1.1（2026-08-09）：决策 34/35 落盘——Renderer 改持 `RenderingBackend&` 引用（推翻决策 10 的 unique_ptr）、Window 持 GDIBackend 值成员（构造体内 SetHwnd 两阶段初始化），连带修订决策 11/12、§9.2、§19 第 3/9 条。v1.2（2026-08-09）：决策 36 落盘——Renderer::Execute 用 std::visit（决策 9 重演确认）。v1.3（2026-08-09）：决策 37 落盘——DrawRectCommand = { Rect, Color }（决策 2 重演确认）+ emplace_back 入缓冲。v1.4（2026-08-09）：决策 38 落盘——Back Buffer 重建"先创建后替换"事务性顺序（决策 15/19/26 重建体系的细化）。v1.5（2026-08-09）：决策 39 落盘——WM_PAINT 路径：WindowProc 删特判 → HandleMessage `case WM_PAINT: OnPaint(); return 0;`。v1.6（2026-08-09）：详细设计评审修订——P0 删 §18 末尾 7 行重复记录（含与决策 34 矛盾的旧决策 10）、§9.3/决策 26 改"构造注入 hwnd"→"默认构造+SetHwnd"；P1 修正 §19 三处编号漂移（决策15→§7、决策24→25、决策26→18/20/31）；P2 §2架构图/§3职责链表补 GDIBackend、§19 加 OnPaint 撞名声明；P3 确认 Rect/Point float（§4.2/§17-3）。v1.7（2026-08-10）：GPT 终审建议落盘——决策 40 namespace ECDI 全项目引入（含旧文件，独立 Commit 4.0）、决策 41 Window::OnPaint 改名 PaintFrame、决策 42 PaintContext 改 class+私有成员；新增 §20 Header 依赖规则、§21 实现顺序 4.0-4.8；§16 补 RecordingBackend DrawCall 形态；同步 §2/§7/§10/决策 39/§19-10。
+> 修订记录：v1.0 初版（2026-08-09），基于决策链复盘；已修正复盘中的两处决策误记（RenderCommand 形态、FromRGBA8）。v1.1（2026-08-09）：决策 34/35 落盘——Renderer 改持 `RenderingBackend&` 引用（推翻决策 10 的 unique_ptr）、Window 持 GDIBackend 值成员（构造体内 SetHwnd 两阶段初始化），连带修订决策 11/12、§9.2、§19 第 3/9 条。v1.2（2026-08-09）：决策 36 落盘——Renderer::Execute 用 std::visit（决策 9 重演确认）。v1.3（2026-08-09）：决策 37 落盘——DrawRectCommand = { Rect, Color }（决策 2 重演确认）+ emplace_back 入缓冲。v1.4（2026-08-09）：决策 38 落盘——Back Buffer 重建"先创建后替换"事务性顺序（决策 15/19/26 重建体系的细化）。v1.5（2026-08-09）：决策 39 落盘——WM_PAINT 路径：WindowProc 删特判 → HandleMessage `case WM_PAINT: OnPaint(); return 0;`。v1.6（2026-08-09）：详细设计评审修订——P0 删 §18 末尾 7 行重复记录（含与决策 34 矛盾的旧决策 10）、§9.3/决策 26 改"构造注入 hwnd"→"默认构造+SetHwnd"；P1 修正 §19 三处编号漂移（决策15→§7、决策24→25、决策26→18/20/31）；P2 §2架构图/§3职责链表补 GDIBackend、§19 加 OnPaint 撞名声明；P3 确认 Rect/Point float（§4.2/§17-3）。v1.7（2026-08-10）：评审 终审建议落盘——决策 40 namespace ECDI 全项目引入（含旧文件，独立 Commit 4.0）、决策 41 Window::OnPaint 改名 PaintFrame、决策 42 PaintContext 改 class+私有成员；新增 §20 Header 依赖规则、§21 实现顺序 4.0-4.8；§16 补 RecordingBackend DrawCall 形态；同步 §2/§7/§10/决策 39/§19-10。
 
 ---
 
@@ -405,8 +405,8 @@ public:
 | 38 | Back Buffer 尺寸变化重建顺序 | A：**先创建新资源 → 全部成功后替换成员 → 最后释放旧资源**（事务性替换，决策 15/19/26 重建体系的顺序细化）。BeginFrame 发现尺寸不匹配时：① 创建新 Memory DC + Bitmap 并 SelectObject（新 DC 也保存自己的 old 选择，统一释放路径）→ ② 全部成功后替换成员（m_memoryDC / m_bitmap / m_oldBitmap / m_bitmapWidth·Height）→ ③ 释放旧资源（走决策 20/31 逆序：SelectObject(old) → DeleteObject(bitmap) → DeleteDC）。**实现原则**：尺寸变化时不修改当前资源，直到新 Back Buffer 完整创建成功——创建失败时旧资源仍在（与决策 30 的 assert/Release 静默失败模型兼容），杜绝"先删后用"的中间态。B（先释放旧再创建）失败即无 Buffer，无必要冒险、C（固定最大尺寸）需猜尺寸 + 浪费 GDI 内存，均否决 |
 | 39 | WM_PAINT → PaintFrame 访问路径 | A：**WindowProc 只做 HWND↔Window 路由（删除 Phase3 的 WM_PAINT 特判，§13 迁移项）→ `HandleMessage` 加 `case WM_PAINT: PaintFrame(); return 0;`**（与 WM_DESTROY/WM_SIZE 状态同步 switch 并列）。`PaintFrame()` 私有方法负责完整编排：clear → PaintContext → rootWidget->Paint → BeginFrame → Execute → EndFrame（§10；✅ 决策 41 改名，原 OnPaint）。**WM_PAINT 不进 m_messageHandler 翻译器**（绘制不是 Event，直接 return 0）。HandleMessage 保持薄：只转发不实现绘制逻辑。B（绘制逻辑直接写进 HandleMessage 分支）消息处理函数变胖、C（Application 处理 WM_PAINT）绘制生命周期从 Window 转移，违反"Window 管绘制生命周期"，均否决 |
 | 40 | namespace ECDI | A：**从现在开始全部引入 `namespace ECDI`，旧文件一并迁移**（2026-08-10 拍板，推翻"转库时再包"旧规划、提前落地）——所有 .h/.cpp 包 namespace；main.cpp 使用处加 `ECDI::` 前缀或 using；独立 Commit 4.0（§21）。理由：转库已确定要做、现在文件少迁移成本低、新 Render 文件天然在 namespace 内、避免"新旧不一致"过渡态 |
-| 41 | Window 编排函数命名 | A：**`Window::OnPaint()` 改名 `PaintFrame()`**（GPT 终审建议采纳）——语义准确（编排整帧 vs `Widget::OnPaint(PaintContext&, int, int)` 画自己），顺带消除 §19-10 撞名。同步改 §2/§10/决策 39/§19-10 |
-| 42 | PaintContext 形态 | A：**class + 私有成员**（GPT 终审建议采纳）——`explicit PaintContext(CommandBuffer&)` + `private: CommandBuffer& m_commands;`。强化决策 8"完全封装"（只暴露绘制方法）；未来加 dpiScale 等状态不动公开结构；与项目类风格一致。原 §7 struct + 公共 members 形态已修订 |
+| 41 | Window 编排函数命名 | A：**`Window::OnPaint()` 改名 `PaintFrame()`**（评审 终审建议采纳）——语义准确（编排整帧 vs `Widget::OnPaint(PaintContext&, int, int)` 画自己），顺带消除 §19-10 撞名。同步改 §2/§10/决策 39/§19-10 |
+| 42 | PaintContext 形态 | A：**class + 私有成员**（评审 终审建议采纳）——`explicit PaintContext(CommandBuffer&)` + `private: CommandBuffer& m_commands;`。强化决策 8"完全封装"（只暴露绘制方法）；未来加 dpiScale 等状态不动公开结构；与项目类风格一致。原 §7 struct + 公共 members 形态已修订 |
 
 ---
 
@@ -504,7 +504,7 @@ private:
 
 ## 21. 实现顺序（Commit 4.0 - 4.8）
 
-> GPT 终审建议采纳。原则：**平台相关（GDI）最后接**，先用 RecordingBackend 验证 命令→Renderer→Backend 链路。
+> 评审 终审建议采纳。原则：**平台相关（GDI）最后接**，先用 RecordingBackend 验证 命令→Renderer→Backend 链路。
 
 | Commit | 内容 | 验证 |
 |--------|------|------|

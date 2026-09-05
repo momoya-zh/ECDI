@@ -1,7 +1,7 @@
 ﻿# Phase 9 主题系统 — 详细设计
 
 > 状态：v1.8（2026-08-31）｜v1.4 定稿后增量修订（v1.5 9.6 收尾回写 / v1.6 Panel 设色 / v1.7 Panel 容器语义变更 / v1.8 ProgressBar 主题接入——修订记录见 §10）
-> 前序：Phase 9 初步设计 v1.1（GPT 评审通过）/ Phase 8 渲染能力 ✅ / Phase 8.5 文本系统 2.0 ✅
+> 前序：Phase 9 初步设计 v1.1（外部评审通过）/ Phase 8 渲染能力 ✅ / Phase 8.5 文本系统 2.0 ✅
 > 相关：phase9-theme-system-preliminary-design.md（初步设计 v1.1）/ Core/Color.h / Core/Font.h / Render/RenderingBackend.h / Widget/Button.cpp / Widget/Panel.cpp / Widget/TextWidget.cpp / Widget/Label.h / Widget/TextBox.cpp
 
 ## 1. 范围
@@ -822,9 +822,9 @@ Phase 9.3 透明主题值验证（可选——v1.2 改名：Alpha 能力属 Phas
 | 五阶段法 | 本文档 = 详细设计；确认后进入实现 |
 | 文档约定 | 更新 `docs/phase9-theme-system-detailed-design.md` v1.0 → v1.1 |
 
-## 9. GPT 评审回应（v1.1）
+## 9. 外部评审回应（v1.1）
 
-| # | GPT 反馈 | 处理 |
+| # | 评审 反馈 | 处理 |
 |---|---|---|
 | 🔴 1 | TextStyle 没进 Theme 接口；TextWidget 消费 GetLabelStyle() 类型不匹配 | **新增 `Theme::GetTextStyle()`** + `TextStyle.h`；TextWidget 改消费 `GetTextStyle()`；**删除 LabelStyle**（Label 无独立视觉属性） |
 | 🔴 2 | ButtonStyle/TextBoxStyle 的 foreground 与 TextStyle.foreground 双重真相——SetStyle 后文字不变色 | **删除 ButtonStyle.foreground / TextBoxStyle.foreground**——文字颜色统一来自 TextStyle（TextWidget 持有）；单一视觉真相原则锁死 |
@@ -845,8 +845,8 @@ Phase 9.3 透明主题值验证（可选——v1.2 改名：Alpha 能力属 Phas
 - v1.6（2026-08-29）**Panel 单实例设色落地**：新增 `PanelStyleOverride{ std::optional<Color> background }`（`PanelStyle.h`，补 `<optional>`）；`Panel` 新增 `public: void SetStyle(PanelStyleOverride)`（`Panel.h` 声明 + `Panel.cpp` 实现——`if (override.background) m_style.background.Set(...); Invalidate();`，与 Button/TextBox 同构）；`PanelStyle.h` / `Panel.h` / `Panel.cpp` 注释同步（删除「MVP 无 Override」旧陈述）；新增测试 `Widget.PanelSetStyle`（`WidgetTests.cpp`：覆盖前灰底 → 覆盖后自定义色生效 → 覆盖后 `ApplyTheme` 不再回退，验证 D7 overridden 契约）。触发 = 用户需求「镶板能否设色」——此前归 Phase 9 YAGNI，需求出现即按既有模式补（非过度设计：Panel 唯一样式字段即 background）。
 - v1.5（2026-08-29）9.6 收尾回写（**TextBox 焦点内缩 bug 修复 · 方案 B**）：**删除 `TextBoxStyle.borderWidth`**（旧语义 = 焦点内缩量，方案 B 改用 `DrawFocusRect` 后无任何消费者——遵守「StyleField 存了但没用会误导 SetStyle 用户」纪律；同步删除 `TextBoxStyleOverride.borderWidth` / `TextBox::ApplyTheme`·`SetStyle` 赋值 / `DefaultTheme` 默认值 / `ThemeTests` 断言，全仓 grep 确认无其他引用）；**`TextBoxStyle.padding` 语义变更**（焦点专用内缩 → 常驻「样式内边距」，默认 2.0→**0.0**；连带 `GetTextLeftInset/GetTextAreaWidth/GetTextAreaHeight` 去掉 `HasFocus()` 判断——修复焦点切换时文本位移 2px、滚动上限跳变、同一像素点击定位随焦点变化三个问题）；**TextBox 焦点视觉改 `DrawFocusRect` 点线框**（与 Button 同构，直角——TextBoxStyle 无 cornerRadius 字段），并纳入 9.6 新增的 `Widget::SetShowFocusRect/ShowFocusRect` 开关门控。
   - 注：本版**仅标注**历史快照正文（§3 字段列表等）的差异，不改写 v1.4 及其之前的设计正文——字段真相以代码为准。
-- v1.4（2026-08-25）GPT 评审整合 v1.4（"修掉几何边界问题后即可锁版，不需要再继续设计"）：**🔴 Button 内框尺寸几何防御**（borderWidth 是用户可改值——`尺寸 - 2×borderWidth` 可能为负（width=3/borderWidth=2 → -1 无效 Rect）；局部 `innerWidth/innerHeight/innerRadius = max(0, ...)` 保护，不做复杂 Clamp 工具——YAGNI）；**🟠 §3.4 改名"Style 与 Widget 的组合关系"**（明确 has-a 非 is-a——各 Style 是独立值对象无继承关系，图改为组合持有标注）；**🟠 StyleField::Reset() 补契约注释**（Reset 是 StyleField 层原语，不构成 Widget 层运行时样式 API——不要据此推断应提供 ClearStyle()）。
-- v1.3（2026-08-25）GPT 评审整合 v1.3（"修完 3 个明确问题后可锁版进入 Phase 9.1 实现"）：**🔴 Button/TextBox 的 `m_style` 改 protected**（TestableButton 测试派生类可访问——原 private 无法在派生类访问，编译错误）；**🟠 测试编号统一 T-F01-T-F10**（原文档多处仍写 T-F09，实际已 10 个）；**🟠 Theme 头文件 ×6 → ×7**（新增 TextStyle.h 后未更新计数）；**🟢 明确 SetStyle({}) 重载歧义契约**（Button/TextBox 双 Override 重载共存时 `{}` 有歧义——调用方须用明确类型 Override 对象，主动接受不引入额外接口）。
-- v1.2（2026-08-25）GPT 评审整合 v1.2（"修完 2 个 🔴 后可进入实现"）：**🔴 Button/TextBox 补 `using TextWidget::SetStyle`**（防 C++ 名字隐藏——否则 TextStyleOverride 无法从派生控件设置；§5.3/§5.4 + §3.2 锁死规则）；**🔴 Button::OnPaint 真正消费 `cornerRadius`**（radius==0 → DrawRect / radius>0 → DrawRoundedRect——Phase 8 能力接入，禁死字段；焦点内外框圆角随内缩对应缩小）；**🟠 删除不存在的 ClearOverrides() 引用**（统一 Reset()，明确 Phase 9 MVP 不提供 Widget 层 Override 清除 API）；**🟠 新增 T-F10**（TextStyle + ButtonStyle 独立覆盖共存——using SetStyle + D7 联动验证）；**🟢 Phase 9.3 改名**（"Alpha 消费"→"透明主题值验证（可选）"——职责归位：Alpha 能力属 Phase 8，Phase 9 只消费主题值）；单一视觉真相上升为总规则（"任何视觉属性只能存在一个权威 StyleField"）。
-- v1.1（2026-08-25）GPT 评审整合（3 🔴 + 2 🟠 + 1 🟡 全部落地）：**新增 TextStyle 进 Theme 接口**（GetTextStyle + TextStyle.h；删除 LabelStyle）；**删除 ButtonStyle/TextBoxStyle 的 foreground**（单一视觉真相——文字颜色统一 TextStyle）；**CheckBox/Radio 明确移出**（Phase 6.2 纳入）；Label 不重复 ApplyTheme；TextStyle.h 入文件清单；T-F07 改 TestableButton 真实测试；T-F06 补全字段；SetTextColor/SetFont 保留旧 API 内部转发；StyleField::Reset() 语义锁死；PanelStyle 无 Override 注明主动限制。
+- v1.4（2026-08-25）外部评审整合 v1.4（"修掉几何边界问题后即可锁版，不需要再继续设计"）：**🔴 Button 内框尺寸几何防御**（borderWidth 是用户可改值——`尺寸 - 2×borderWidth` 可能为负（width=3/borderWidth=2 → -1 无效 Rect）；局部 `innerWidth/innerHeight/innerRadius = max(0, ...)` 保护，不做复杂 Clamp 工具——YAGNI）；**🟠 §3.4 改名"Style 与 Widget 的组合关系"**（明确 has-a 非 is-a——各 Style 是独立值对象无继承关系，图改为组合持有标注）；**🟠 StyleField::Reset() 补契约注释**（Reset 是 StyleField 层原语，不构成 Widget 层运行时样式 API——不要据此推断应提供 ClearStyle()）。
+- v1.3（2026-08-25）外部评审整合 v1.3（"修完 3 个明确问题后可锁版进入 Phase 9.1 实现"）：**🔴 Button/TextBox 的 `m_style` 改 protected**（TestableButton 测试派生类可访问——原 private 无法在派生类访问，编译错误）；**🟠 测试编号统一 T-F01-T-F10**（原文档多处仍写 T-F09，实际已 10 个）；**🟠 Theme 头文件 ×6 → ×7**（新增 TextStyle.h 后未更新计数）；**🟢 明确 SetStyle({}) 重载歧义契约**（Button/TextBox 双 Override 重载共存时 `{}` 有歧义——调用方须用明确类型 Override 对象，主动接受不引入额外接口）。
+- v1.2（2026-08-25）外部评审整合 v1.2（"修完 2 个 🔴 后可进入实现"）：**🔴 Button/TextBox 补 `using TextWidget::SetStyle`**（防 C++ 名字隐藏——否则 TextStyleOverride 无法从派生控件设置；§5.3/§5.4 + §3.2 锁死规则）；**🔴 Button::OnPaint 真正消费 `cornerRadius`**（radius==0 → DrawRect / radius>0 → DrawRoundedRect——Phase 8 能力接入，禁死字段；焦点内外框圆角随内缩对应缩小）；**🟠 删除不存在的 ClearOverrides() 引用**（统一 Reset()，明确 Phase 9 MVP 不提供 Widget 层 Override 清除 API）；**🟠 新增 T-F10**（TextStyle + ButtonStyle 独立覆盖共存——using SetStyle + D7 联动验证）；**🟢 Phase 9.3 改名**（"Alpha 消费"→"透明主题值验证（可选）"——职责归位：Alpha 能力属 Phase 8，Phase 9 只消费主题值）；单一视觉真相上升为总规则（"任何视觉属性只能存在一个权威 StyleField"）。
+- v1.1（2026-08-25）外部评审整合（3 🔴 + 2 🟠 + 1 🟡 全部落地）：**新增 TextStyle 进 Theme 接口**（GetTextStyle + TextStyle.h；删除 LabelStyle）；**删除 ButtonStyle/TextBoxStyle 的 foreground**（单一视觉真相——文字颜色统一 TextStyle）；**CheckBox/Radio 明确移出**（Phase 6.2 纳入）；Label 不重复 ApplyTheme；TextStyle.h 入文件清单；T-F07 改 TestableButton 真实测试；T-F06 补全字段；SetTextColor/SetFont 保留旧 API 内部转发；StyleField::Reset() 语义锁死；PanelStyle 无 Override 注明主动限制。
 - v1.0（2026-08-25）详细设计初稿：文件清单（21 文件）/ StyleField\<T\> + 生命周期契约 / 各控件 Style 结构 + Override 结构 / Theme 抽象基类（返回值语义）/ DefaultTheme 继承 Theme + 默认值复刻 / 控件迁移实现 / 单元测试 T-F01-T-F09 / 实施顺序（9.1/9.2/9.3）。

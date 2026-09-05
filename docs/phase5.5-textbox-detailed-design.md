@@ -46,7 +46,7 @@ size_t ByteOffsetToCodepointIndex(const std::string& text, size_t byteOffset);
 ```
 
 - **命名**：ECDI 顶层函数（与 Core/String.h 的 UTF8ToWide/WideToUTF8 风格一致，不引入 namespace UTF8 嵌套）
-- **DecodeUTF8 已删**（GPT YAGNI 修正）：当前零消费者；5.6 IME 逐码点遍历时再加（DecodeUTF8 / IsLeadByte / IsContinuationByte）
+- **DecodeUTF8 已删**（评审 YAGNI 修正）：当前零消费者；5.6 IME 逐码点遍历时再加（DecodeUTF8 / IsLeadByte / IsContinuationByte）
 - include `<cstddef>`（size_t）+ `<string>`——绝对路径、带空格、标准库在后
 
 ### D2 Core/UTF8.cpp（实现 + 匿名 namespace 辅助）
@@ -152,15 +152,15 @@ TextMeasurer& GetTextMeasurer() noexcept;
 
 ## 3. 修订记录
 
-- v1.0（2026-08-13）5.5.1.1 定稿：D1-D5。**DecodeUTF8 删除**（GPT YAGNI 修正——零消费者，5.6 IME 时再加）；**SequenceLength 参数改 unsigned char**（GPT 符号修正——MSVC char 有符号）；**ByteOffsetToCodepointIndex @pre 明确**（非边界 UB，鼠标定位需调用方钳制）；断言字节布局修正（3 → 8，GPT 数学确认）；命名 ECDI 顶层函数（与 UTF8ToWide 风格一致，用户确认）。
+- v1.0（2026-08-13）5.5.1.1 定稿：D1-D5。**DecodeUTF8 删除**（评审 YAGNI 修正——零消费者，5.6 IME 时再加）；**SequenceLength 参数改 unsigned char**（评审 符号修正——MSVC char 有符号）；**ByteOffsetToCodepointIndex @pre 明确**（非边界 UB，鼠标定位需调用方钳制）；断言字节布局修正（3 → 8，评审 数学确认）；命名 ECDI 顶层函数（与 UTF8ToWide 风格一致，确认）。
 
 ## 4. 5.5.1.3 详细设计（编辑逻辑）
 
-### E1 类定义补充（TextBox.h，GPT 修正）
+### E1 类定义补充（TextBox.h，评审 修正）
 
 ```cpp
 public:
-	// ── 光标方向（类型即文档：MoveCaret(-1) 的 -1 是什么？——GPT 可读性修正）──
+	// ── 光标方向（类型即文档：MoveCaret(-1) 的 -1 是什么？——评审 可读性修正）──
 	enum class CaretDirection{ Left, Right };
 
 	// 编辑操作中：
@@ -178,7 +178,7 @@ void TextBox::InsertCodepoint(char32_t codepoint){
 	const size_t byte = CodepointIndexToByteOffset(m_text, m_caret);
 	m_text.insert(byte, EncodeUTF8(codepoint));
 	++m_caret;
-	Invalidate();   // 职责契约：修改了可见状态 → 自身负责请求重绘（GPT 论证，非平台合并）
+	Invalidate();   // 职责契约：修改了可见状态 → 自身负责请求重绘（评审 论证，非平台合并）
 }
 
 void TextBox::DeleteBackward(){
@@ -273,13 +273,13 @@ void TextBox::OnCharInput(const CharInputEvent& event){
 }
 ```
 
-### E5 债务记录（Invalidate 内嵌——GPT 最终论证 + 用户分层纪律）
+### E5 债务记录（Invalidate 内嵌——评审 最终论证 + 用户分层纪律）
 
 - **设计**：编辑操作内嵌 `Invalidate()`——理由 = **职责契约**（修改可见状态 → 自身负责请求重绘，防职责泄漏），**不依赖平台重绘合并**（第 21 条分层论证纪律）
 - **解耦时机 = Phase 7 API 审查**：出现批量编辑（PasteText/ReplaceSelection/SetText 大文本）时改两层结构（`XxxInternal` 无重绘 + 对外 API 负责刷新）——与编辑操作可见性审查同一批
 - 当前全是单步操作，YAGNI
 
-- v1.1（2026-08-13）5.5.1.3 定稿：E1-E5。CaretDirection 枚举 + GetCodepointCount 辅助（GPT 可读性/重复统计修正）；Invalidate 内嵌保留（职责契约论证，解耦归 Phase 7）；事件占位改实现（OnKeyDown/OnCharInput）。
+- v1.1（2026-08-13）5.5.1.3 定稿：E1-E5。CaretDirection 枚举 + GetCodepointCount 辅助（评审 可读性/重复统计修正）；Invalidate 内嵌保留（职责契约论证，解耦归 Phase 7）；事件占位改实现（OnKeyDown/OnCharInput）。
 
 ## 5. 5.5.1.4 详细设计（Paint 完整版 + 鼠标点击定位）
 
@@ -334,7 +334,7 @@ void TextBox::OnMouseButtonDown(const MouseButtonDownEvent& event){
 	TextMeasurer& measurer = GetWindow()->GetTextMeasurer();   // T1 首个消费者——非 Paint 时刻测量
 	const Size textSize = measurer.MeasureText(m_font, m_text);
 	// 与 OnPaint 完全同源：同一个 CalculateTextPosition → 同一个文本起点
-	// （点击定位与绘制共享同一坐标系——未来改居中/内边距/滚动不偏，GPT D2 原则）
+	// （点击定位与绘制共享同一坐标系——未来改居中/内边距/滚动不偏，评审 D2 原则）
 	const Point textPos = CalculateTextPosition(
 		static_cast<int>(abs.x), static_cast<int>(abs.y),
 		textSize.width, textSize.height);
@@ -344,7 +344,7 @@ void TextBox::OnMouseButtonDown(const MouseButtonDownEvent& event){
 }
 ```
 
-### F3 CaretIndexFromX（private 成员——GPT 最终采纳：5.5.2 Selection 必然复用，是"TextBox 坐标定位算法"）
+### F3 CaretIndexFromX（private 成员——评审 最终采纳：5.5.2 Selection 必然复用，是"TextBox 坐标定位算法"）
 
 ```cpp
 // TextBox.h private：
@@ -373,7 +373,7 @@ size_t TextBox::CaretIndexFromX(TextMeasurer& measurer, float innerX) const{
 }
 ```
 
-### F4 main.cpp（D4 GPT 建议：删断言改人工交互验证）
+### F4 main.cpp（D4 评审建议：删断言改人工交互验证）
 
 - TextBox 预填 `TextBox("Hello")`（文本可见，便于看光标初始位置）
 - **人工交互验证**（项目一贯测试策略——Button 点击/Tab/Capture/焦点全如此）：
@@ -388,4 +388,4 @@ size_t TextBox::CaretIndexFromX(TextMeasurer& measurer, float innerX) const{
 - OnMouseButtonDown 的 FRAMEWORK_ASSERT(false) → F2 真实实现（点击不再弹断言——遗留问题自然解决）
 - include 新增：MouseButtonDownEvent.h（TextBox.cpp）
 
-- v1.2（2026-08-13）5.5.1.4 定稿：F1-F5。**同源原则**（点击定位与绘制共享 CalculateTextPosition——GPT D2 真问题）；**空串高度兜底**（实测 GDIBackend::MeasureText("") 返回 {0,0}，GPT 担忧属实）；CaretIndexFromX **private 成员**（GPT 最终采纳——5.5.2 Selection 复用）；**删断言改人工验证**（GPT 建议 + private 可测性矛盾解）；性能注释（O(n²) MVP 取舍）。
+- v1.2（2026-08-13）5.5.1.4 定稿：F1-F5。**同源原则**（点击定位与绘制共享 CalculateTextPosition——评审 D2 真问题）；**空串高度兜底**（实测 GDIBackend::MeasureText("") 返回 {0,0}，评审 担忧属实）；CaretIndexFromX **private 成员**（评审 最终采纳——5.5.2 Selection 复用）；**删断言改人工验证**（评审建议 + private 可测性矛盾解）；性能注释（O(n²) MVP 取舍）。

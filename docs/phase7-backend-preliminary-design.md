@@ -1,9 +1,9 @@
 ﻿# Phase 7.1.4 Backend 注入 — 初步设计
 
-> 状态：v1.0（2026-08-16）｜待用户确认后进详细设计
+> 状态：v1.0（2026-08-16）｜待确认后进详细设计
 > 相关：phase7-backend-requirements.md（职责确认 D1-D5 + D1a，v1.2）
 > 目标：解决**决策 35 代价**（Window 持 GDIBackend 值成员 → 后端不可替换）
-> 终态（GPT）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd——只剩纯框架概念
+> 终态（评审）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd——只剩纯框架概念
 
 ## 0. 实现前置事实（已核实）
 
@@ -36,11 +36,11 @@ struct RenderServices{
 };
 }
 
-// Platform/PlatformRenderContext.h（平台契约层，零 Win32——GPT 第三处修订：归位 Platform 非 Render）：
+// Platform/PlatformRenderContext.h（平台契约层，零 Win32——评审 第三处修订：归位 Platform 非 Render）：
 #pragma once
 namespace ECDI{
 /// @brief 平台渲染上下文基类（7.1.1 c-2 定稿：防 void* 类型擦除假抽象）
-/// @details 空基类——平台句柄的类型安全容器。归位 Platform/（GPT 论证）：句柄本质是
+/// @details 空基类——平台句柄的类型安全容器。归位 Platform/（评审 论证）：句柄本质是
 /// "窗口/平台句柄"不是"渲染句柄"——Win32RenderContext/X11RenderContext/WaylandRenderContext
 /// 都是平台实现家族（与 Win32PlatformWindow 同族），语义统一在 Platform 层。
 /// RenderingBackend::Initialize 接收它（Render 层仅前置声明——零 include 依赖，见 P2）。
@@ -89,7 +89,7 @@ virtual void Initialize(const PlatformRenderContext& context) {}
 #pragma once
 #include "ECDI/Render/RenderServices.h"
 namespace ECDI{
-/// @brief 平台默认渲染服务（7.1.4：默认后端选择从 Window 移出——GPT D3）
+/// @brief 平台默认渲染服务（7.1.4：默认后端选择从 Window 移出——评审 D3）
 /// @details Win32 → GDIBackend + GDITextMeasurer；未来 Linux → OpenGLRenderer + FreeTypeTextMeasurer
 RenderServices CreateDefaultRenderServices();
 }
@@ -117,7 +117,7 @@ virtual const PlatformRenderContext& GetRenderContext() const = 0;
 #include <Windows.h>
 namespace ECDI{
 /// @brief Win32 渲染上下文（7.1.4：HWND 的类型安全容器——防 void* 类型擦除；
-/// 与 Win32PlatformWindow 同目录同族——GPT 第三处修订）
+/// 与 Win32PlatformWindow 同目录同族——评审 第三处修订）
 class Win32RenderContext : public PlatformRenderContext{
 public:
     Win32RenderContext() noexcept = default;
@@ -149,7 +149,7 @@ private:
 //       Renderer m_renderer;                                 // 决策 34：持 RenderingBackend&（初始化列表绑定）
 //   删：GDIBackend m_backend;
 
-// ⚠️ 构造传参方式论证（GPT 第五处担心——按值传参无需 && / optional）：
+// ⚠️ 构造传参方式论证（评审 第五处担心——按值传参无需 && / optional）：
 //   - RenderServices 含 unique_ptr → 不可拷贝、可移动（编译器生成移动构造/赋值）
 //   - 按值传参 + std::move 到成员 = move-only 类型标准惯用法（unique_ptr 参数同理）
 //   - 默认参数 `= CreateDefaultRenderServices()`：prvalue → C++17 guaranteed copy elision
@@ -199,7 +199,7 @@ Window::Window(..., RenderServices services)
 ## 修订记录
 
 - v1.0（2026-08-16）初步设计定稿：P1-P6。基于前置事实 F1-F8（测量零 hwnd 依赖 + fontCache 双份 / Renderer 引用绑定顺序 / SetHwnd 过渡消除 / RecordingBackend 不拆 / 默认参数工厂）。核心：**unique_ptr 双成员 + GDIBackend 拆类 + PlatformRenderContext 句柄注入**——7.1.4 后 Window.h 零具体后端。
-- v1.1（2026-08-16，GPT 评审）四处处理：
+- v1.1（2026-08-16，外部评审）四处处理：
   - **第三处（采纳）**：`PlatformRenderContext` 归位 **`Platform/` 目录**（非 Render/）——句柄本质是"窗口/平台句柄"不是"渲染句柄"；Win32RenderContext/X11RenderContext 都是平台实现家族（与 Win32PlatformWindow 同族），语义统一。RenderingBackend.h 仅前置声明（Initialize 参数 const&——零 include 依赖）
   - **第五处（不采纳，论证补充）**：构造保持**按值传参** `RenderServices services`——move-only 按值传 + std::move 是惯用法；默认参数 prvalue 经 C++17 guaranteed copy elision 就地构造、生命周期完整覆盖调用（`&&` 限右值调用、`optional` 多余复杂度——均不采纳）
   - 其余四点（拆类 / 工厂 / Initialize 默认空 / V3 验收）一致确认

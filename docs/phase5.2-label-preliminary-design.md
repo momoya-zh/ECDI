@@ -1,6 +1,6 @@
-# Phase 5.2 Label 初步设计 v1.0
+﻿# Phase 5.2 Label 初步设计 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（P1-P4）+ GPT 评审
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（P1-P4）+ 外部评审
 
 ## 决策记录
 
@@ -53,12 +53,12 @@ void Label::OnPaint(PaintContext& ctx, int x, int y)
 
 - **a. 空文本跳过**：不发空命令（空串 TextOutW 无害但无意义）
 - **b. 垂直居中用 `LineHeight()` 单次调用**：左对齐不需要宽度，省一次 MeasureText
-- **⚠️ 负 offsetY 合法（GPT 补充）**：当 `GetHeight() < lineHeight`（控件比文本小）时 offsetY 为负、文本向上偏移——**这是合法的，不要 `std::max(0.0f, offsetY)` 修正**：控件比文本小是布局问题，绘制系统不偷偷修正
+- **⚠️ 负 offsetY 合法（评审 补充）**：当 `GetHeight() < lineHeight`（控件比文本小）时 offsetY 为负、文本向上偏移——**这是合法的，不要 `std::max(0.0f, offsetY)` 修正**：控件比文本小是布局问题，绘制系统不偷偷修正
 
 ### P3 main.cpp 改造（L7）
 
 - 连带改动：win1/win2 的 `Label(L"...")` 构造改**窄字面量**（L1 迁移）
-- 新增 5.2 断言段——**期望值动态计算（GPT 修正，不硬编码 13.0f）**：
+- 新增 5.2 断言段——**期望值动态计算（评审 修正，不硬编码 13.0f）**：
 
 ```cpp
 // ── 5.2 Label 文本链路：Label → PaintContext → DrawTextCommand（命令断言）──
@@ -84,7 +84,7 @@ void Label::OnPaint(PaintContext& ctx, int x, int y)
 }
 ```
 
-**测试哲学（GPT 修正）**：断言验证"**使用了垂直居中公式**"，不是"结果恰好是 13"——`LineHeight()` 若未来返回 15/13，测试仍成立（不耦合 RecordingBackend 的模拟值）。
+**测试哲学（评审 修正）**：断言验证"**使用了垂直居中公式**"，不是"结果恰好是 13"——`LineHeight()` 若未来返回 15/13，测试仍成立（不耦合 RecordingBackend 的模拟值）。
 
 ### P4 边界确认
 

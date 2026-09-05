@@ -2,9 +2,9 @@
 
 > 状态：v1.1（2026-08-17）｜职责确认
 > 前序：Phase 7.1 平台抽象全部完成（7.1.1-7.1.5，2026-08-16）
-> 来源：roadmap-deferred.md §1.2 + 5.5.2 详细设计 P8（GPT 要求②"不彻底放弃断言"）
+> 来源：roadmap-deferred.md §1.2 + 5.5.2 详细设计 P8（评审 要求②"不彻底放弃断言"）
 > 相关文档：phase5.5.2-selection-detailed-design.md（P8 承诺）、phase5.5-textbox-detailed-design.md（5.5.1.3 测试块）、README.md
-> GPT 评审：2026-08-17 在线评价（核心洞察：Selection 不可测试暴露的是模型缺失，不是接口缺失）
+> 外部评审：2026-08-17 在线评价（核心洞察：Selection 不可测试暴露的是模型缺失，不是接口缺失）
 
 ## 1. 背景
 
@@ -43,11 +43,11 @@ ECDI 从 Phase 4 起，在 main.cpp 的 GUI 窗口启动前，以**断言块**�
 - **Phase 10 转库前测试保障**——7.2 是 v1.0 前硬性前置
 - **不依赖窗口**：测试必须可脱离窗口运行（当前 main.cpp 断言块即此模式）
 - **不引入重型框架**：当前 FRAMEWORK_ASSERT + RecordingBackend 模式已验证可行，优先延续
-- **5.5.2 P8 承诺**：GPT 要求"不彻底放弃断言"，Selection 单元测试必须补上
+- **5.5.2 P8 承诺**：评审 要求"不彻底放弃断言"，Selection 单元测试必须补上
 
 ## 2. 核心发现：Selection 不可测试暴露的是模型缺失，不是接口缺失
 
-### 2.1 GPT 的核心洞察
+### 2.1 评审 的核心洞察
 
 > "你缺少的不是测试接口。你缺少的是一个查询接口。"
 
@@ -66,15 +66,15 @@ private:
 
 | 方案 | 问题 |
 |------|------|
-| `SetSelectionForTesting(anchor, caret)` + `#ifdef _DEBUG` | 污染生产接口，长期膨胀（GPT 强烈反对） |
+| `SetSelectionForTesting(anchor, caret)` + `#ifdef _DEBUG` | 污染生产接口，长期膨胀（评审 强烈反对） |
 | 通过 `OnKeyDown` 模拟 Shift+方向键 | 需要 `Window*`，不满足"不依赖窗口" |
 | 通过公有编辑 API 间接构造 | 无 `SelectAll()` 等公开选择方法 |
 
-### 2.2 GPT 的结论（我采纳）
+### 2.2 评审 的结论（我采纳）
 
 > Selection 是一个交互功能。既然是交互功能，就归入集成测试。
 
-**GPT 的建议**：给 `TextBox` 增加一个只读查询接口 `GetSelection()`，**不提供 setter**。这样：
+**评审 的建议**：给 `TextBox` 增加一个只读查询接口 `GetSelection()`，**不提供 setter**。这样：
 
 - 纯编辑操作（InsertCodepoint/DeleteBackward/DeleteForward 无选中区路径）→ 7.2 单元测试
 - Shift+方向键选择、选中区编辑 → Phase 10 集成测试
@@ -82,7 +82,7 @@ private:
 
 ### 2.3 长远方案：模型分离
 
-GPT 指出，最终解决方案是分离编辑器模型：
+评审指出，最终解决方案是分离编辑器模型：
 
 ```
 TextBox
@@ -136,7 +136,7 @@ TextBox
 
 | 可选项 | 考量 | 决策 |
 |--------|------|------|
-| 测试独立于 main.cpp | 当前断言块在 GUI 启动前，直观但随测试增多 main.cpp 膨胀 | ✅ 采纳 GPT 方案（见 §5） |
+| 测试独立于 main.cpp | 当前断言块在 GUI 启动前，直观但随测试增多 main.cpp 膨胀 | ✅ 采纳评审 方案（见 §5） |
 | 创建单独的测试目标（CMake test target） | 转库后自然需要 | Phase 10 |
 | 断言结果汇总（非"一崩全崩"） | 当前 FRAMEWORK_ASSERT 遇失败即终止，多测试块无法全部运行 | Phase 10 评估 |
 
@@ -144,15 +144,15 @@ TextBox
 
 ### D1 测试框架：延续 FRAMEWORK_ASSERT
 
-**GPT 评价**：✅ 赞成。当前 20～30 个测试，完全没必要引入 Google Test / Catch2 / doctest。
+**评审 评价**：✅ 赞成。当前 20～30 个测试，完全没必要引入 Google Test / Catch2 / doctest。
 
 **决策**：延续 **FRAMEWORK_ASSERT**。Phase 10 转库时评估是否引入 Catch2（单头文件版）。
 
 ### D2 测试组织：从 main.cpp 拆分为独立文件
 
-**GPT 评价**：✅ 强烈赞成。"这个我强烈建议立即做。"
+**评审 评价**：✅ 强烈赞成。"这个我强烈建议立即做。"
 
-**GPT 方案**：
+**评审 方案**：
 ```
 src/
 ├── Tests/
@@ -174,7 +174,7 @@ int main()
 }
 ```
 
-**决策**：采纳 GPT 方案。
+**决策**：采纳评审 方案。
 
 ### D3 RecordingBackend 是否够用
 
@@ -184,7 +184,7 @@ RecordingBackend 同时实现 RenderingBackend + TextMeasurer，固定测量值�
 
 ### D4 是否要加 GetSelection() 查询接口
 
-**GPT 建议**：增加 `std::optional<SelectionRange> GetSelection() const` 只读接口。
+**评审建议**：增加 `std::optional<SelectionRange> GetSelection() const` 只读接口。
 
 **理由**：
 - 零副作用，纯查询
@@ -194,7 +194,7 @@ RecordingBackend 同时实现 RenderingBackend + TextMeasurer，固定测量值�
 
 **决策**：✅ 在 Phase 7.2 实现 T3 时加入 `GetSelection()`。
 
-## 5. 文件组织方案（GPT 方案采纳）
+## 5. 文件组织方案（评审 方案采纳）
 
 ### 5.1 目录结构
 
@@ -429,7 +429,7 @@ std::optional<SelectionRange> TextBox::GetSelection() const
 
 - **只读，无副作用**：不修改任何内部状态
 - **不依赖窗口**：纯逻辑，仅比较两个 size_t
-- **不提供 setter**：GPT 明确反对 `SetSelection()`，只提供查询
+- **不提供 setter**：评审 明确反对 `SetSelection()`，只提供查询
 - **Phase 10 集成测试时可直接验证**：`box.GetSelection()->start == 2`
 
 ## 8. 实现顺序建议
@@ -454,17 +454,17 @@ std::optional<SelectionRange> TextBox::GetSelection() const
 
 ### 核心变化（v1.0 → v1.1）
 
-| 项目 | v1.0 | v1.1（GPT 采纳） |
+| 项目 | v1.0 | v1.1（评审 采纳） |
 |------|------|-----------------|
 | 标题 | "Phase 7.2 测试体系" | "Phase 7.2 无窗口单元测试体系" |
 | Selection 测试方案 | `SetSelectionForTesting()` + `#ifdef _DEBUG` | ❌ 移除。承认 Selection 交互归 Phase 10 |
 | 查询接口 | 无 | ✅ 增加 `GetSelection()` 只读查询 |
-| 文件组织 | 粗略提到独立文件 | ✅ 采纳 GPT 的 `Tests/*.cpp` 方案 |
+| 文件组织 | 粗略提到独立文件 | ✅ 采纳评审 的 `Tests/*.cpp` 方案 |
 | 测试边界 | T1-T3 全部在 7.2 | 重新划分：纯编辑归 7.2，交互归 Phase 10 |
 
 ### 测试文件组织
 
-采纳 GPT 方案：
+采纳评审 方案：
 ```
 src/Tests/
   RendererTests.cpp
@@ -488,4 +488,4 @@ src/Tests/
 ## 10. 修订记录
 
 - v1.0（2026-08-17）职责确认初稿
-- v1.1（2026-08-17）采纳 GPT 评审：移除 `SetSelectionForTesting()`，增加 `GetSelection()` 查询接口，重新划分测试边界，采用 GPT 文件组织方案，改名"无窗口单元测试体系"
+- v1.1（2026-08-17）采纳评审 评审：移除 `SetSelectionForTesting()`，增加 `GetSelection()` 查询接口，重新划分测试边界，采用 评审 文件组织方案，改名"无窗口单元测试体系"

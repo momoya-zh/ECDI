@@ -1,7 +1,7 @@
 ﻿
 # Phase 8.5.2 文本系统 2.0 详细设计（多行与滚动）
 
-> 状态：v1.2（2026-08-24）｜定稿（GPT 两轮评审通过，可进入实现）
+> 状态：v1.2（2026-08-24）｜定稿（评审 两轮评审通过，可进入实现）
 > 前序：Phase 8.5.1 完结 ✅（commit 8ab8300）/ 职责确认 v1.1 / 初步设计 v1.2
 > 相关：phase8.5-text-system2.0-preliminary-design.md（B4 多行/B5 滚动/B7 双击/B9 坐标→Caret）/ phase8.5.1-text-system2.0-detailed-design.md（8.5.1 完结）
 > 拆分说明：本文件 = 8.5.2 专属详细设计（原 phase8.5-text-system2.0-detailed-design.md §9 拆出）
@@ -34,7 +34,7 @@
 	void RecalculateLines();
 ```
 
-**RecalculateLines 实现**（码点级扫描——与 B10 索引单位契约一致；GPT 修正：不直接 `m_text[index]` 判断，经 DecodeFirstCodepoint 取码点——避免"m_text[i] 就是第 i 个字符"的误读）：
+**RecalculateLines 实现**（码点级扫描——与 B10 索引单位契约一致；评审 修正：不直接 `m_text[index]` 判断，经 DecodeFirstCodepoint 取码点——避免"m_text[i] 就是第 i 个字符"的误读）：
 
 ```cpp
 void TextBox::RecalculateLines(){
@@ -58,14 +58,14 @@ void TextBox::RecalculateLines(){
 	size_t LineIndexFromCodepoint(size_t cp) const;
 
 	/// @brief 行号 → 该行码点区间 [start, end)（end 不含行尾 \n）
-	/// @details 尾部空行契约（GPT 修正——多行易漏边界）：
+	/// @details 尾部空行契约（评审 修正——多行易漏边界）：
 	///   "ab\ncd"  → line0=[0,2] line1=[3,5]
 	///   "ab\n"    → line0=[0,2] line1=[3,3]   ← 以 \n 结尾必须存在空的最后一行
 	///   "ab"      → line0=[0,2]（无 \n 时仅一行）
 	std::pair<size_t, size_t> LineRange(size_t lineIndex) const;
 ```
 
-**LineRange 实现伪代码（GPT 锁死——避免实现阶段重新推导）**：
+**LineRange 实现伪代码（评审 锁死——避免实现阶段重新推导）**：
 
 ```cpp
 std::pair<size_t, size_t> TextBox::LineRange(size_t lineIndex) const{
@@ -83,7 +83,7 @@ std::pair<size_t, size_t> TextBox::LineRange(size_t lineIndex) const{
 //   "a\n\nb" {0,2,3} count=4 → [0,1) [2,2) [3,4)
 ```
 
-**Y 映射契约（GPT 明确化——CaretIndexFromPosition 的行为定义）**：
+**Y 映射契约（评审 明确化——CaretIndexFromPosition 的行为定义）**：
 
 > **任何 Y 坐标都映射到最近的有效文本行**：点击控件底部下方 → clamp 到最后一行；点击第一行上方 → clamp 到第一行。这是设计契约（非"代码恰好如此"）。
 
@@ -118,12 +118,12 @@ void TextBox::OnMouseWheel(const MouseWheelEvent& event){
 
 **常量**（TextBox.cpp 匿名 namespace）：`constexpr float kScrollLinePx = 16.0f;`（一行滚动量——WHEEL_DELTA=120 一行）。
 
-**固定行高契约（GPT 锁死——8.5.2 全控件固定 lineH）**：
+**固定行高契约（评审 锁死——8.5.2 全控件固定 lineH）**：
 
 > **TextBox 2.0 暂不支持逐行不同字体/字号——整个 TextBox 使用固定 line height**（`GetLineHeight()`）。
 > 因此 `Y / lineH` 才成立（行号 = 逻辑 Y ÷ 行高）；未来富文本再升级 `line[i].height`（YAGNI，不提前设计）。
 
-**GetMaxScrollOffset 公式（GPT 锁死）**：
+**GetMaxScrollOffset 公式（评审 锁死）**：
 
 ```cpp
 float TextBox::GetMaxScrollOffset() const{
@@ -136,7 +136,7 @@ float TextBox::GetMaxScrollOffset() const{
 // 辅助：float GetTextAreaHeight() const;（与 GetTextAreaWidth 对称——垂直可视区，含焦点框内缩）
 ```
 
-**EnsureCaretVisible 边界语义（GPT 锁死）**：
+**EnsureCaretVisible 边界语义（评审 锁死）**：
 
 ```cpp
 void TextBox::EnsureCaretVisible(){
@@ -235,7 +235,7 @@ Point TextBox::CalculateCaretPosition(TextMeasurer& measurer) const{
 	const size_t lineIndex = LineIndexFromCodepoint(m_caret);
 	const size_t startByte = CodepointIndexToByteOffset(m_text, m_lineStarts[lineIndex]);
 	const size_t caretByte = CodepointIndexToByteOffset(m_text, m_caret);
-	// GPT 修正：统一 GetLineHeight()——不用整段文本 MeasureText 的高度（那是整段多行文本的高度，
+	// 评审 修正：统一 GetLineHeight()——不用整段文本 MeasureText 的高度（那是整段多行文本的高度，
 	// 非单行行高）；全系统唯一行高来源（OnPaint/CaretIndexFromPosition/EnsureCaretVisible/Scroll 共用）
 	const float lineH = GetLineHeight();
 	const Size prefixSize = measurer.MeasureText(m_font, m_text.substr(startByte, caretByte - startByte));
@@ -286,7 +286,7 @@ Point TextBox::CalculateCaretPosition(TextMeasurer& measurer) const{
 	}
 ```
 
-**GetWordBounds（分词规则锁死——GPT 修正：non-word 行为必须明确）**：
+**GetWordBounds（分词规则锁死——评审 修正：non-word 行为必须明确）**：
 
 ```
 word 规则（C5 契约）：
@@ -294,13 +294,13 @@ word 规则（C5 契约）：
   空格 / 标点 / \n           → non-word
   中文 / Emoji / 其他非 ASCII → 每个 code point 独立一个 word
 
-行为锁死（GPT 推荐方案——用户双击非 word 字符也有稳定反馈）：
+行为锁死（评审 推荐方案——用户双击非 word 字符也有稳定反馈）：
   word 字符上双击     → 选中整个 word
   non-word 字符上双击 → 选中该单个 non-word code point（如双击空格 → {5,5}？不——选中该字符本身）
   → 双击空格/标点 → 选中该空格/标点单个码点 {click, click+1}（非空选区，有视觉反馈）
   → 双击文本末尾（clickIndex == count）→ clamp 到 {count-1, count}（选最后一个字符）或 {count,count} 空——实现取 {count,count} 前先 clamp clickIndex 到 [0, count]
 
-Emoji 说明（GPT 明确——复杂度取舍）：
+Emoji 说明（评审 明确——复杂度取舍）：
   8.5.2 双击选词以 code point 为最小单位，不保证 Unicode grapheme cluster 整体选择
   （👨‍👩‍👧‍👦 = 多 code point + ZWJ，双击可能只选其中一个 code point）；
   grapheme cluster 支持留待后续文本系统增强阶段——非 bug，是明确取舍
@@ -318,7 +318,7 @@ std::pair<size_t, size_t> TextBox::GetWordBounds(size_t clickIndex) const{
 	if (count == 0)
 		return { 0, 0 };
 	if (clickIndex >= count)
-		clickIndex = count - 1;   // 点击末尾 → clamp 到最后一个字符（GPT 修正）
+		clickIndex = count - 1;   // 点击末尾 → clamp 到最后一个字符（评审 修正）
 	const auto IsWordChar = [](char32_t cp){
 		// 英文词字符 = ASCII 字母/数字；其余（空格/标点/中文/Emoji/\n）→ non-word
 		return (cp >= U'a' && cp <= U'z') || (cp >= U'A' && cp <= U'Z') || (cp >= U'0' && cp <= U'9');
@@ -328,7 +328,7 @@ std::pair<size_t, size_t> TextBox::GetWordBounds(size_t clickIndex) const{
 	const size_t clickNextByte = CodepointIndexToByteOffset(m_text, clickIndex + 1);
 	const char32_t clickCp = DecodeFirstCodepoint(m_text.substr(clickByte, clickNextByte - clickByte));
 	if (!IsWordChar(clickCp))
-		return { clickIndex, clickIndex + 1 };   // non-word → 选中该单个 code point（GPT 锁死）
+		return { clickIndex, clickIndex + 1 };   // non-word → 选中该单个 code point（评审 锁死）
 	// word 字符：向前/向后扩展到 word 边界
 	size_t start = clickIndex;
 	while (start > 0){
@@ -403,17 +403,17 @@ std::pair<size_t, size_t> TextBox::GetWordBounds(size_t clickIndex) const{
 | F23 | 双击中文选词 | "你好世界" 点第 2 个码点 → {1, 2}（单码点独立） |
 | F24 | 双击 emoji UTF-8 code point 完整选择 | "a😀b" 点 😀 → {1, 2}（😀 = 4 字节 1 码点——不被 UTF-8 byte 拆开） |
 | F25 | EnsureCaretVisible | 光标到末尾（多行超可视）→ scrollOffsetY > 0 |
-| F26 | 尾部换行空行（GPT） | "ab\n" → lineStarts == {0,3}；LineRange(1) == {3,3}（空尾行存在） |
-| F27 | 空文本（GPT） | "" → lineStarts == {0}；lineCount == 1 |
-| F28 | 连续换行（GPT） | "a\n\nb" → lineStarts == {0,2,3}（line0="a" line1="" line2="b"） |
-| F29 | 双击标点/空格（GPT） | "hello, world" 分别点 hello/逗号/空格/world → word 选整词、逗号/空格选单码点 {5,6}/{6,7} |
-| F30 | UTF-8 多字节换行索引（GPT） | "你\n好" → lineStarts == {0,2}（"你" 3 字节但 1 码点——证明 m_lineStarts 是 code point 非 byte） |
+| F26 | 尾部换行空行（评审） | "ab\n" → lineStarts == {0,3}；LineRange(1) == {3,3}（空尾行存在） |
+| F27 | 空文本（评审） | "" → lineStarts == {0}；lineCount == 1 |
+| F28 | 连续换行（评审） | "a\n\nb" → lineStarts == {0,2,3}（line0="a" line1="" line2="b"） |
+| F29 | 双击标点/空格（评审） | "hello, world" 分别点 hello/逗号/空格/world → word 选整词、逗号/空格选单码点 {5,6}/{6,7} |
+| F30 | UTF-8 多字节换行索引（评审） | "你\n好" → lineStarts == {0,2}（"你" 3 字节但 1 码点——证明 m_lineStarts 是 code point 非 byte） |
 
-**说明**：CaretIndexFromPosition/GetWordBounds/RecalculateLines 涉及测量（GetWindow()->GetTextMeasurer）——无窗口测试环境 GetWindow()==nullptr。**处理**（GPT 修正——不用"固定行高短路"伪造 TextMeasurer，污染真实实现）：
+**说明**：CaretIndexFromPosition/GetWordBounds/RecalculateLines 涉及测量（GetWindow()->GetTextMeasurer）——无窗口测试环境 GetWindow()==nullptr。**处理**（评审 修正——不用"固定行高短路"伪造 TextMeasurer，污染真实实现）：
 - **纯逻辑层（无窗口可测）**：RecalculateLines（F16/F26-F28/F30）、GetWordBounds（F22-F24/F29）、**Y→LineIndex**（F19a/F20a——CaretIndexFromPosition 的 Y 定行部分，经 m_lineStarts 纯码点可测）
 - **测量层（最小窗口集成待办，同 7.2 遗留）**：**X→Caret 行内定位**（F19b/F20b——依赖 TextMeasurer 前缀测量，需窗口）
 
-### 9.8.1 采纳的观察项（GPT 第二轮——非 blocker，明确记录）
+### 9.8.1 采纳的观察项（评审 第二轮——非 blocker，明确记录）
 
 - **水平溢出契约**：单行水平溢出**暂不提供水平滚动**；`CalculateCaretPosition` 的 Caret X 与绘制区域右边界 clamp（`min(prefixWidth, GetTextAreaWidth())`）——未来做水平滚动时此契约是起点
 - **MouseWheelEvent 原始 delta**：8.5.2 接受 Win32 原始 WHEEL_DELTA（120）；架构上最终应 framework-normalized（`Win32 → MouseWheelEvent(标准化) → TextBox`，TextBox 不应知道 120）——标注待 Event 层演进，当前不改
@@ -430,6 +430,6 @@ std::pair<size_t, size_t> TextBox::GetWordBounds(size_t clickIndex) const{
 
 ### 9.10 8.5.2 修订记录
 
-- v1.2（2026-08-24）GPT 第二轮评审整合（"可进入实现前最终冻结，不需再重新设计"）：**LineRange 实现伪代码**（end = 下一行起始 - 1 或 count，含验证表）；**GetMaxScrollOffset 公式**（行数×固定行高 - 可视高，含最后一行完整行高）+ GetTextAreaHeight 辅助；**EnsureCaretVisible 上下边界语义**（上：滚到光标顶；下：滚到光标底；统一 clamp）；**固定 lineH 契约**（8.5.2 不支持逐行字体——Y/lineH 成立）；F24 措辞改"UTF-8 code point 完整选择"（代理对是 UTF-16 概念）；**F30 UTF-8 多字节换行索引**（"你\n好"→{0,2}）；F19/F20 拆两层（Y→LineIndex 纯逻辑可测 / X→Caret 最小窗口集成——不用固定行高短路污染实现）；新增 §9.8.1 采纳观察项（水平溢出契约/MouseWheel 120 原始 delta/组合串下划线）。
-- v1.1（2026-08-24）GPT 评审整合（"基本通过，建议小修后定稿"）：RecalculateLines 改 **DecodeFirstCodepoint** 码点解码（非 m_text[index]）；LineRange **尾部 \n 空行契约**明确（"ab\n" → line1=[3,3]）+ Y 映射契约（"任意 Y → 最近有效行"）；CalculateCaretPosition **统一 GetLineHeight()**（不用整段文本 MeasureText 高度）；GetTextLeftInset 定义**单一来源**（文本绘制起点 X，非偏移相加）；GetWordBounds **non-word → 选单码点**行为锁死 + clickIndex clamp + **Emoji code point 级取舍说明**；TestCase 补 F26（尾部换行）/F27（空文本）/F28（连续换行）/F29（双击标点空格）。
+- v1.2（2026-08-24）评审 第二轮评审整合（"可进入实现前最终冻结，不需再重新设计"）：**LineRange 实现伪代码**（end = 下一行起始 - 1 或 count，含验证表）；**GetMaxScrollOffset 公式**（行数×固定行高 - 可视高，含最后一行完整行高）+ GetTextAreaHeight 辅助；**EnsureCaretVisible 上下边界语义**（上：滚到光标顶；下：滚到光标底；统一 clamp）；**固定 lineH 契约**（8.5.2 不支持逐行字体——Y/lineH 成立）；F24 措辞改"UTF-8 code point 完整选择"（代理对是 UTF-16 概念）；**F30 UTF-8 多字节换行索引**（"你\n好"→{0,2}）；F19/F20 拆两层（Y→LineIndex 纯逻辑可测 / X→Caret 最小窗口集成——不用固定行高短路污染实现）；新增 §9.8.1 采纳观察项（水平溢出契约/MouseWheel 120 原始 delta/组合串下划线）。
+- v1.1（2026-08-24）外部评审整合（"基本通过，建议小修后定稿"）：RecalculateLines 改 **DecodeFirstCodepoint** 码点解码（非 m_text[index]）；LineRange **尾部 \n 空行契约**明确（"ab\n" → line1=[3,3]）+ Y 映射契约（"任意 Y → 最近有效行"）；CalculateCaretPosition **统一 GetLineHeight()**（不用整段文本 MeasureText 高度）；GetTextLeftInset 定义**单一来源**（文本绘制起点 X，非偏移相加）；GetWordBounds **non-word → 选单码点**行为锁死 + clickIndex clamp + **Emoji code point 级取舍说明**；TestCase 补 F26（尾部换行）/F27（空文本）/F28（连续换行）/F29（双击标点空格）。
 - v1.0（2026-08-24）8.5.2 定稿：多行模型（RecalculateLines/LineRange）+ 滚动（OnMouseWheel/EnsureCaretVisible）+ CaretIndexFromPosition（B9）+ 双击选词（**平台层 WM_LBUTTONDBLCLK 翻译——草案"框架内判定"修正**，WindowClass 需 CS_DBLCLKS）+ 多行绘制（Selection 逐行 + 组合串下划线补欠账）+ F16-F25。

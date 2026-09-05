@@ -2,9 +2,9 @@
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-09-01
-> 状态：待评审（用户 / GPT）
-> 前置：phase9.7-adaptive-layout-requirements.md v1.0（GPT 评审通过——三决策定死 + 初设五要点）
-> 定位（GPT 定调）：让 ECDI **第一次具备真正意义上的窗口尺寸自适应能力**——不是完整布局系统
+> 状态：待评审（评审）
+> 前置：phase9.7-adaptive-layout-requirements.md v1.0（外部评审通过——三决策定死 + 初设五要点）
+> 定位（评审 定调）：让 ECDI **第一次具备真正意义上的窗口尺寸自适应能力**——不是完整布局系统
 
 ---
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 2. 冻结决策（职责确认 + GPT 评审，实现不得弱化）
+## 2. 冻结决策（职责确认 + 外部评审，实现不得弱化）
 
 | # | 决策 | 内容 |
 |---|------|------|
@@ -32,7 +32,7 @@
 
 ## 3. 核心算法
 
-### 3.1 主轴分配（GPT 冻结模型）
+### 3.1 主轴分配（评审 冻结模型）
 
 ```text
 主轴可用空间 available        （H = parent width；V = parent height）
@@ -47,7 +47,7 @@ totalStretch = Σ childStretch （仅 stretch>0 的子）
   ↓ 取整：前 N−1 个四舍五入（或截断——见 D2），最后一个 = remaining − Σ 前面
 ```
 
-**例**（自洽修订版——GPT 原例"固定 100+100 / spacing 10×2 / stretch 1+2 → 260/520"在 4 子 3 间隙下不自洽（1000−200−30=770≠780）；此处换 spacing=0 使数据自洽，spacing 由独立用例覆盖）：宽 1000、固定 100、stretch 1+2、spacing 0 →
+**例**（自洽修订版——评审 原例"固定 100+100 / spacing 10×2 / stretch 1+2 → 260/520"在 4 子 3 间隙下不自洽（1000−200−30=770≠780）；此处换 spacing=0 使数据自洽，spacing 由独立用例覆盖）：宽 1000、固定 100、stretch 1+2、spacing 0 →
 remaining = 1000 − 100 = 900 → stretch=1 得 **300**、stretch=2 得 **600**（Σ==1000 恒等）。
 
 ### 3.2 Arrange 伪码（HorizontalLayout 版——Vertical diff 同构，见 §5）
@@ -85,7 +85,7 @@ void HorizontalLayout::Arrange(Widget& parent){
 
 ### 3.3 跨轴行为——本设计唯一重大开放决策（D1）
 
-GPT 验收图里"行随窗口变宽"隐含了**跨轴填充**：V 布局的子（行面板，固定高）宽度必须跟随父宽，否则窗口变宽后行不跟着宽、内层 H 分配无从谈起。但跨轴填充默认开启会**破坏 F7 兼容承诺**（现有子的跨轴尺寸会被改写）。
+评审 验收图里"行随窗口变宽"隐含了**跨轴填充**：V 布局的子（行面板，固定高）宽度必须跟随父宽，否则窗口变宽后行不跟着宽、内层 H 分配无从谈起。但跨轴填充默认开启会**破坏 F7 兼容承诺**（现有子的跨轴尺寸会被改写）。
 
 | 方案 | 做法 | 优点 | 缺点 |
 |---|---|---|---|
@@ -93,7 +93,7 @@ GPT 验收图里"行随窗口变宽"隐含了**跨轴填充**：V 布局的子�
 | B. 跨轴恒填充 | 所有子跨轴 = 父跨轴（Qt 默认行为） | Qt 心智一致 | 破坏 F7；存量 demo（ModelProbe 手写 600 宽）Arrange 后视觉即变 |
 | C. **跨轴填充 = Layout 构造开关**（推荐） | `VerticalLayout(int spacing = 0, bool fillCrossAxis = false)`；开启时所有子跨轴 = 父跨轴、跨轴坐标 0 | F7 完整保留（默认 false）+ ModelProbe 显式 opt-in（改造 demo 本就是 9.7 验收的一部分） | 多一个参数；跨轴填充是"每布局"而非"每子"粒度（v0.1 够用——子级差异需求未出现） |
 
-**倾向 C**。理由：兼容承诺是需求冻结决策，不可为省一个参数而破；ModelProbe 全部布局 opt-in 一次即可；Qt 默认填充的心智差异记录在文档（ECDI 默认不填，opt-in 才填）。**待用户/GPT 拍板后进详细设计。**
+**倾向 C**。理由：兼容承诺是需求冻结决策，不可为省一个参数而破；ModelProbe 全部布局 opt-in 一次即可；Qt 默认填充的心智差异记录在文档（ECDI 默认不填，opt-in 才填）。**待用户/评审 拍板后进详细设计。**
 
 ### 3.4 取整方向（D2，小决策）
 
@@ -151,7 +151,7 @@ int m_spacing;        bool m_fillCrossAxis;
 | 组 | 用例 | 断言 |
 |---|------|------|
 | 基线回归 | 既有 LayoutTests 全部 | 全 stretch=0 + spacing=0 → 期望逐字节不变（F7） |
-| 分配 | `Layout.StretchBasic` | 1000 宽 / 100+100 固定 / spacing 10 / stretch 1+2 → 260/520（GPT 例逐值断言） |
+| 分配 | `Layout.StretchBasic` | 1000 宽 / 100+100 固定 / spacing 10 / stretch 1+2 → 260/520（评审 例逐值断言） |
 | 取整 | `Layout.StretchRemainder` | remaining 100 / stretch 1+1+1 → 33/33/34（F5：Σ == remaining） |
 | 负剩余 | `Layout.StretchNegative` | 300 宽 / 固定 350 → stretch 子尺寸 0、位置正确、不越界（F4） |
 | spacing | `Layout.SpacingPositions` | 三个固定子 + spacing 12 → x = 0 / w+12 / 2w+24 |
@@ -180,7 +180,7 @@ int m_spacing;        bool m_fillCrossAxis;
 
 ## 9. 待评审决策点汇总
 
-> **2026-09-01 GPT 评审已全部定死**（详设 phase9.7-adaptive-layout-detailed-design.md v1.0 落地）：**D1=C**（跨轴构造开关默认 false——且 fill=true 时为强制填充语义）/ **D2=截断**（末位吃余数，废除"或四舍五入"措辞）/ **D3=仅必要布局改造**（ModelProbe 是验收工具非 UI 重构机会）/ **D4=main.cpp 显式设置**（Window 不替用户决定 RootWidget 布局）；另冻结：Arrange 纯布局不 Invalidate（归 Window 层）、"stretch=0 的子"措辞纪律（不称固定子）、嵌套布局链测试必须覆盖（NestedComposite）。
+> **2026-09-01 外部评审已全部定死**（详设 phase9.7-adaptive-layout-detailed-design.md v1.0 落地）：**D1=C**（跨轴构造开关默认 false——且 fill=true 时为强制填充语义）/ **D2=截断**（末位吃余数，废除"或四舍五入"措辞）/ **D3=仅必要布局改造**（ModelProbe 是验收工具非 UI 重构机会）/ **D4=main.cpp 显式设置**（Window 不替用户决定 RootWidget 布局）；另冻结：Arrange 纯布局不 Invalidate（归 Window 层）、"stretch=0 的子"措辞纪律（不称固定子）、嵌套布局链测试必须覆盖（NestedComposite）。
 
 1. ~~**D1 跨轴行为**~~ → **C**
 2. ~~**D2 取整方向**~~ → **截断**
@@ -191,5 +191,5 @@ int m_spacing;        bool m_fillCrossAxis;
 
 ## 10. 修订记录
 
-- v1.1（2026-09-01）§3.1 算术勘误：GPT 原例"260/520"在 4 子 3 间隙下不自洽（1000−200−30=770≠780）→ 改 spacing=0 / 单固定 100 / stretch 1+2 → remaining=900 → 300/600（Σ==1000 自洽）；§9 决策点全部冻结为定稿（详设 phase9.7-adaptive-layout-detailed-design.md v1.0 落地）。
-- v1.0（2026-09-01）初步设计初稿：冻结决策 F1-F7（吸收 GPT 评审五要点——分配模型/负剩余钳 0/末位吃余数/根容器无特例/spacing 构造参数）；核心算法 + 伪码；**新增 D1 跨轴行为决策点**（GPT 验收图隐含跨轴填充，与 F7 兼容承诺冲突——三方案对比，倾向 C 构造开关）；触发链 + 动画边界；LinearLayout 抽象不重启论证（维持 diff 同构）；测试方向 + 影响面 + ModelProbe 验收定位。
+- v1.1（2026-09-01）§3.1 算术勘误：评审 原例"260/520"在 4 子 3 间隙下不自洽（1000−200−30=770≠780）→ 改 spacing=0 / 单固定 100 / stretch 1+2 → remaining=900 → 300/600（Σ==1000 自洽）；§9 决策点全部冻结为定稿（详设 phase9.7-adaptive-layout-detailed-design.md v1.0 落地）。
+- v1.0（2026-09-01）初步设计初稿：冻结决策 F1-F7（吸收 外部评审五要点——分配模型/负剩余钳 0/末位吃余数/根容器无特例/spacing 构造参数）；核心算法 + 伪码；**新增 D1 跨轴行为决策点**（评审 验收图隐含跨轴填充，与 F7 兼容承诺冲突——三方案对比，倾向 C 构造开关）；触发链 + 动画边界；LinearLayout 抽象不重启论证（维持 diff 同构）；测试方向 + 影响面 + ModelProbe 验收定位。

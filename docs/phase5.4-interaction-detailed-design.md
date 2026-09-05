@@ -1,10 +1,10 @@
-# Phase 5.4 交互基础设施详细设计 v1.0
+﻿# Phase 5.4 交互基础设施详细设计 v1.0
 
-> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（D1-D5 对应 5 个 commit）+ GPT 评审
+> 日期：2026-08-13 ｜ 状态：已确认 ｜ 方式：清单式问答（D1-D5 对应 5 个 commit）+ 外部评审
 
 ## 决策记录
 
-### D1 = 5.4.1 Invalidate + Widget 基础扩充（GPT 修正 2 处）
+### D1 = 5.4.1 Invalidate + Widget 基础扩充（评审 修正 2 处）
 
 **Widget.h**（3 处）：顶部加 `class Window;` 前向声明；新增：
 
@@ -14,10 +14,10 @@ public:
 	bool HasFocus() const noexcept;              // 上溯到根 → GetFocusedWidget() == this
 	Point GetAbsolutePosition() const noexcept;  // P5 公共（TextBox/ScrollBar/Popup/Tooltip/DragDrop 未来用）
 protected:
-	Window* GetWindow() noexcept;                // P1 GPT：protected
+	Window* GetWindow() noexcept;                // P1 评审：protected
 	const Window* GetWindow() const noexcept;
 private:
-	void SetWindow(Window* window);              // ⚠️ GPT 修正：private + friend（只有 Window 有权调用）
+	void SetWindow(Window* window);              // ⚠️ 评审 修正：private + friend（只有 Window 有权调用）
 	friend class Window;                         // ⚠️ 新增（SetWindow 私有化的配套）
 	Window* m_window = nullptr;                  // 非拥有；仅根设置
 ```
@@ -28,7 +28,7 @@ private:
 
 **验证**：编译（纯基础设施，无调用方）
 
-### D2 = 5.4.2 Mouse Capture（⚠️ GPT 修正：先派发再释放）
+### D2 = 5.4.2 Mouse Capture（⚠️ 评审 修正：先派发再释放）
 
 **Window.h/cpp**：`SetCaptureWidget(Widget*)` / `GetCaptureWidget()` + `Widget* m_captureWidget = nullptr`
 
@@ -49,16 +49,16 @@ if (target->CanFocus()) window.SetFocusedWidget(target);
 Widget* target = window.GetCaptureWidget();
 if (!target) target = FindTargetWidget(window, mouseX, mouseY);
 // Bubbling 派发 target（先派发）
-window.SetCaptureWidget(nullptr);      // ⚠️ GPT 修正：先派发再释放——控件 OnMouseButtonUp 里 GetCaptureWidget() 仍能拿到自身状态
+window.SetCaptureWidget(nullptr);      // ⚠️ 评审 修正：先派发再释放——控件 OnMouseButtonUp 里 GetCaptureWidget() 仍能拿到自身状态
 ```
 
 **验证**：编译 + 手动（按下按钮→拖出→释放，Button 收到 Up）
 
-### D3 = 5.4.3 Focus 通知（⚠️ GPT 修正：同控件短路 + Invalidate 全覆盖）
+### D3 = 5.4.3 Focus 通知（⚠️ 评审 修正：同控件短路 + Invalidate 全覆盖）
 
 **Widget.h**（Focus 区 CanFocus 旁）：`virtual void OnFocusGained() {}` / `virtual void OnFocusLost() {}`
 
-**Window.cpp SetFocusedWidget 改造**（GPT 修正版）：
+**Window.cpp SetFocusedWidget 改造**（评审 修正版）：
 
 ```cpp
 void Window::SetFocusedWidget(Widget* widget){
@@ -73,15 +73,15 @@ void Window::SetFocusedWidget(Widget* widget){
 
 **验证**：编译 + 手动（点击按钮 → HasFocus 变化 + 重绘）
 
-### D4 = 5.4.4 Tab 导航（GPT 确认：仅正向；CollectFocusables 进匿名 namespace）
+### D4 = 5.4.4 Tab 导航（评审 确认：仅正向；CollectFocusables 进匿名 namespace）
 
 **Window.h**：`void HandleKeyDown(const KeyDownEvent& event);`（加 KeyDownEvent 前向声明）+ 私有 `void FocusNext(int direction = 1);`
 
-- ⚠️ **direction 参数保留**（GPT 建议无参，但我们**明确计划 5.5 Shift+Tab 复用 FocusNext(-1)**——债务已记，非猜测性参数；默认参数让 5.4 调用处写 `FocusNext()` 干净）
+- ⚠️ **direction 参数保留**（评审建议无参，但我们**明确计划 5.5 Shift+Tab 复用 FocusNext(-1)**——债务已记，非猜测性参数；默认参数让 5.4 调用处写 `FocusNext()` 干净）
 
 **Window.cpp**：
 ```cpp
-// 匿名 namespace：DFS 辅助（⚠️ GPT 修正：不放 Window 类，非公开能力）
+// 匿名 namespace：DFS 辅助（⚠️ 评审 修正：不放 Window 类，非公开能力）
 namespace {
 void CollectFocusables(Widget* node, std::vector<Widget*>& out){
 	if (node->CanFocus()) out.push_back(node);
@@ -111,9 +111,9 @@ void Window::FocusNext(int direction){
 
 **验证**：编译 + 手动（Tab 在两按钮间移动焦点框）
 
-### D5 = 5.4.5 Button 按下态 + 焦点边框（⚠️ GPT 修正：先恢复视觉再 OnClick）
+### D5 = 5.4.5 Button 按下态 + 焦点边框（⚠️ 评审 修正：先恢复视觉再 OnClick）
 
-**Button.cpp**（GPT 修正顺序）：
+**Button.cpp**（评审 修正顺序）：
 
 ```cpp
 // OnMouseButtonDown：m_pressed = true; Invalidate();
@@ -131,7 +131,7 @@ if (inside) OnClick();        // ⚠️ 再触发点击（用户直觉：视觉�
 
 **main.cpp**：人工交互验证为主（Tab 切换/按下变色/拖出取消——I7 定案，少断言）
 
-## ⚠️ 架构债务记录（GPT 观察，Phase 5 后处理）
+## ⚠️ 架构债务记录（评审 观察，Phase 5 后处理）
 
 5.4 暴露**责任交叉**：Mouse/Keyboard/Focus/Capture/Invalidate 全部堆在 Application/Window 层（`FindTargetWidget` → `SetFocusedWidget` → `SetCaptureWidget` → 派发…）。
 
@@ -141,4 +141,4 @@ if (inside) OnClick();        // ⚠️ 再触发点击（用户直觉：视觉�
 
 ## 修订记录
 
-- v1.0（2026-08-13）：D1-D5 定稿——GPT 修正 5 处（SetWindow private+friend / capture 先派发后释放 / 同控件短路+Invalidate 全覆盖 / CollectFocusables 匿名 namespace / Up 先视觉后 OnClick）+ 架构债务记录（Phase 5 后架构回顾）
+- v1.0（2026-08-13）：D1-D5 定稿——评审 修正 5 处（SetWindow private+friend / capture 先派发后释放 / 同控件短路+Invalidate 全覆盖 / CollectFocusables 匿名 namespace / Up 先视觉后 OnClick）+ 架构债务记录（Phase 5 后架构回顾）

@@ -109,7 +109,7 @@ public:
 `std::map<std::pair<float, std::string>, HFONT>` 懒创建缓存，析构统一 DeleteObject（与 ReleaseBackBuffer 并列）。
 - **约束 1（设计不变量）**：缓存键必须完整覆盖 Font 语义字段——当前 `pair<float,string>`（size+family）；**未来 Font 加 weight/italic 等字段必须同步扩展缓存键**（否则 Normal/Bold 误判同一字体）
 - **约束 2**：字号是用户直接输入的描述值，第一版不做浮点规范化；未来字号大量来自计算再引入标准化
-- ⚠️ 与 P6 的关系：P6 说"HFONT 缓存策略不上升公共架构决策"——D1 正是"平台实现内部"的缓存，两者不冲突（GPT 总结表曾误把 D1 写成"暂缓"，已纠正）
+- ⚠️ 与 P6 的关系：P6 说"HFONT 缓存策略不上升公共架构决策"——D1 正是"平台实现内部"的缓存，两者不冲突（评审 总结表曾误把 D1 写成"暂缓"，已纠正）
 
 ### D2 测量 HDC 来源 —— ✅ A（临时 GetDC(NULL)，帧无关）
 
@@ -199,4 +199,4 @@ void GDIBackend::DrawText(const Point& pos, const std::string& text,
 
 ## 5. 修订记录
 
-- v1.0（2026-08-12）：详细设计 D1-D7 全部落盘（含 GPT 约束；D1 结论纠正——A 缓存，非"暂缓"）
+- v1.0（2026-08-12）：详细设计 D1-D7 全部落盘（含 评审 约束；D1 结论纠正——A 缓存，非"暂缓"）
