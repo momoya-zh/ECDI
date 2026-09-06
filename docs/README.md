@@ -173,6 +173,12 @@
 | [phase10-library-preliminary-design.md](phase10-library-preliminary-design.md) | 初步设计（89→80 Public / 9 Internal 逐头审查 / 下沉 src/ + PRIVATE src / install-export 布局 / ExactVersion / 依赖方向单向律） | ✅ v1.2 定稿（评审「可进详设」） |
 | [phase10-library-detailed-design.md](phase10-library-detailed-design.md) | 详细设计（分类修正：RenderServices/BackendFactory 升 Public / 9 头移动清单 / 18 文件引用改写 / install 全文 / MinimalApp 全文 / 验收清单 10 项） | ✅ v1.1 已实施（2026-09-06——9 头下沉、80 Public 头零平台泄漏、MinimalApp 就位） |
 
+## Phase11 图片解码（🚧 需求确认）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase11-image-decode-requirements.md](phase11-image-decode-requirements.md) | 需求确认（WIC COM 解码 / Decode 新模块 / 静态函数 API / PBGRA 零转换契约 / 仅解码 API 不含控件） | 🚧 v1.0 待评审 |
+
 ## 文档约定
 
 - 命名：`phaseX.Y-<module>-<type>.md`（子阶段编号 + 模块名 + 阶段类型；2026-08-25 全量规范化：Phase 5/6/7 按内容编号对齐，如 `phase5.3-button-requirements.md`、`phase6.2-checkboxradio-detailed-design.md`、`phase7.5-callback-requirements.md`；阶段级评审文档保留 `phaseN-<module>.md`）
