@@ -2,7 +2,7 @@
 
 > 阶段：需求确认（五阶段法 ①）
 > 日期：2026-09-06
-> 状态：待评审
+> 状态：**v1.1 外部评审通过（可进初步设计）**
 > 前置：Phase 10 库化 ✅（80 Public 头 / 依赖方向单向律 / install-export 闭环）
 > 三项立项决策（已拍板）：**WIC（COM）** 解码方案 + **新模块 Decode/** + **仅解码 API**（不含显示控件）
 > 目标：补上「文件 → Image」的入口——`Image.h` 注释预留的「文件格式加载属未来 ImageLoader」正式兑现
@@ -40,20 +40,24 @@ namespace ECDI::Decode
 }
 ```
 
-### R2：WIC 实现（Internal——依赖方向单向律下位置决策点 §3.1）
+### R2：WIC 实现（Internal——v1.1 位置冻结 `src/Platform/Win32/WicImageDecoder.cpp`）
 
 - 实现 cpp 含平台代码（COM/WIC/Windows.h）——**下沉 src/**，Public 头零平台依赖
 - 位置候选：`src/Decode/WicImageDecoder.cpp`（与 Public 模块镜像）vs `src/Platform/Win32/WicImageDecoder.cpp`（平台实现惯例）——§3.1
 - WIC 管线：`CoCreateInstance(CLSID_WICImagingFactory)` → `CreateDecoderFromFilename/FromStream`（内存流：`SHCreateMemStream`）→ `GetFrame(0)` → `IWICFormatConverter::Initialize(GUID_WICPixelFormat32bppPBGRA)` → `CopyPixels(stride=width*4)` → 填入 `Image`
 - **GIF 取首帧**（动图多帧非目标）
 
-### R3：COM 生命周期（决策点 §3.2）
+### R3：COM 生命周期（v1.1 冻结——**per-call COM + per-call factory，不缓存**）
 
-框架零 CoInitialize——WIC 实现**自管**：decode 入口 `CoInitializeEx(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)`，容错已初始化（S_FALSE/RPC_E_CHANGED_MODE 均继续），配对 CoUninitialize；工厂实例 per-call 或缓存——初设定
+框架零 CoInitialize——WIC 实现**自管**：decode 入口 `CoInitializeEx(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)`，容错已初始化（S_FALSE/RPC_E_CHANGED_MODE 均继续），配对 CoUninitialize。
+**v1.1 冻结：COM per-call + WIC factory per-call，暂不缓存**（评审：apartment/线程归属使静态 COM 对象易踩坑；CoCreateInstance 非热点，profiling 证明后再优化——届时 thread_local 方案，不埋全局/static COM 对象）
 
-### R4：格式范围
+### R4：格式范围（v1.1 措辞修正）
 
-WIC 系统解码器全量接受（BMP/PNG/JPEG/GIF/TIFF/ICO/HD Photo），**不白名单**——WIC 按文件嗅探自动选解码器；不支持格式 → 解码失败路径（空 Image + Error 日志）。文档标注「实际可用格式随 Windows 版本」
+**区分两个概念**（评审：防未来维护歧义）：
+
+- **实现行为**：WIC 系统解码器全量接受、不白名单——WIC 按文件嗅探自动选解码器；不支持格式 → 解码失败路径（空 Image + Error 日志）
+- **ECDI 支持承诺**：Phase 11 是**通用 WIC 解码入口**——实际可用格式由当前 Windows/WIC 提供的 decoder 决定；**ECDI 不对 WIC 所有可识别格式做独立兼容性承诺**
 
 ### R5：像素契约（零转换红利）
 
@@ -69,12 +73,13 @@ WIC 系统解码器全量接受（BMP/PNG/JPEG/GIF/TIFF/ICO/HD Photo），**不�
 
 `DecodeFile(const std::string&)`——UTF-8 入参，内部 `UTF8ToWide`（Core/String 既有契约——与框架公共 API UTF-8 边界一致）
 
-## 3. 开放决策点
+## 3. 决策点（v1.1 全部收敛）
 
-1. **WIC 实现的 src 位置**：`src/Decode/`（镜像 Public 模块）vs `src/Platform/Win32/`（平台实现惯例）——倾向后者（WIC 是 Windows 组件，Platform/Win32 语义精确）
-2. **COM 生命周期粒度**：per-call init/uninit（简单、线程安全）vs 工厂缓存（省每次 CoCreate 开销）——倾向初设按「per-call + 工厂静态缓存」混合
-3. **API 形态复核**：静态函数（本方案）vs 接口工厂（ChildProcess 同构）——无状态解码倾向静态函数，评审确认
-4. **库化边界的 install 自包含**：ImageDecoder 全在库内，无新 install 项——确认无遗漏
+1. **WIC 实现 src 位置 → 冻结 `src/Platform/Win32/WicImageDecoder.cpp`**（WIC 是 Windows 组件，Platform/Win32 语义精确——评审确认）
+2. **COM 生命周期 → 冻结 per-call COM + per-call factory，不缓存**（R3——YAGNI；apartment 线程归属坑避让）
+3. **API 形态 → 冻结静态函数**（无状态解码；**坚持不做 IImageDecoder 接口**——单后端下 interface/factory/virtual dispatch 是为未来需求提前付成本；Linux 真立项时再抽象）
+4. ~~install 自包含~~——确认无遗漏（全在库内）
+5. **新增详设评审项**：`SHCreateMemStream`（shlwapi）vs 自实现只读 IStream——实现细节，详设定（不为省一个 API 造复杂 COM Stream，但倾向评估）
 
 ## 4. 非目标（YAGNI 圈定）
 
@@ -104,5 +109,7 @@ WIC 系统解码器全量接受（BMP/PNG/JPEG/GIF/TIFF/ICO/HD Photo），**不�
 | README/索引 | Phase 11 登记表 |
 
 ## 7. 修订记录
+
+- v1.1（2026-09-06）**外部评审通过——可进初设，决策点全收敛**：① **R3 冻结 per-call COM + per-call factory 不缓存**（评审：apartment/线程归属使静态 COM 对象易踩坑；CoCreate 非热点，profiling 后再优化——届时 thread_local 而非全局/static）；② **R4 措辞修正**——区分「实现行为（WIC 全量接受不白名单）」与「ECDI 支持承诺（不对 WIC 所有可识别格式做独立兼容承诺）」；③ **R2 位置冻结 src/Platform/Win32/WicImageDecoder.cpp**；④ **API 形态冻结静态函数**（坚持不做 IImageDecoder——单后端下提前付抽象成本；Linux 立项再抽象）；⑤ **SHCreateMemStream（shlwapi）vs 自实现只读 IStream → 详设评审项**（不为省 API 造复杂 COM Stream，但倾向评估）；⑥ 评审确认 Phase 11 数据链路 = 补齐 Phase 8「Image → Render」上游入口（文件→WIC→PBGRA→Image→GDIBackend→AlphaBlend→屏幕），非孤立功能。
 
 - v1.0（2026-09-06）需求确认初稿：现状勘察（Image.h 留口实证/零 COM/DrawImage 就绪）+ R1-R7（静态函数 API / WIC 管线 / COM 自管 / 格式全量 / PBGRA 零转换契约 / 失败=空图+日志 / UTF-8 路径）+ §3 四决策点（src 位置/COM 粒度/API 形态/install 自包含）+ §4 非目标（编码器/动图/EXIF/控件/流式）+ §5 测试方向 + 影响面。待评审。
