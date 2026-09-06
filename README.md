@@ -115,7 +115,7 @@ docs/                 design documents (requirements → preliminary → detaile
 | 1–5 | Core, events, widgets, text, IME | ✅ |
 | 6–7 | Layout, platform decoupling, test framework | ✅ |
 | 8–9 | Rendering extensions, theme, hover, clip, animation, AutoSize | ✅ |
-| **10** | **Library-ization (v0.1.0): public API boundary, install/export, external consumer** | 🚧 |
+| **10** | **Library-ization (v0.1.0): public API boundary, install/export, external consumer** | ✅ |
 
 ## License
 
