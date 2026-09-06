@@ -40,7 +40,7 @@
 
 ### 🔄 当前
 
-- **Phase 10 库化（ECDI 0.1.0）**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；待初步设计
+- **Phase 10 库化（ECDI 0.1.0）✅ 2026-09-06 收口**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；待初步设计
 
 ### 🔲 未来
 
@@ -166,7 +166,7 @@
 | [phase9.8-autosize-requirements.md](phase9.8-autosize-requirements.md) | 需求确认（尺寸意图三分「后调用者赢」/ §3.5 交互冻结 / §3.6 垂直居中验证项 / §3.7 副作用边界） | ✅ v1.5 定稿（评审 两轮评审） |
 | [phase9.8-autosize-preliminary-design.md](phase9.8-autosize-preliminary-design.md) / [detailed](phase9.8-autosize-detailed-design.md) | 初设 + 详设（GetPreferredSize/AutoSize 签名与 4 行冻结实现 + ResolveMeasurer 接缝 + FakeTextMeasurer） | ✅ 已实现（2026-09-02，151 测试全绿） |
 
-## Phase10 库化（🚧 进行中，目标 0.1.0）
+## Phase10 库化（✅ 完成，2026-09-06）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
