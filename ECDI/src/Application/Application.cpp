@@ -1,6 +1,6 @@
 ﻿#include "ECDI/Application/Application.h"
 
-#include "ECDI/Platform/Win32/Win32PlatformApplication.h"
+#include "Platform/Win32/Win32PlatformApplication.h"
 #include "ECDI/Window/Window.h"
 #include "ECDI/Animation/AnimationManager.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"

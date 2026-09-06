@@ -2,8 +2,8 @@
 
 #include "ECDI/Platform/PlatformWindow.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
-#include "ECDI/Platform/Win32/Win32RenderContext.h"
-#include "ECDI/Platform/Win32/WindowMessageHandler.h"
+#include "Platform/Win32/Win32RenderContext.h"
+#include "Platform/Win32/WindowMessageHandler.h"
 
 #include <Windows.h>
 #ifdef DrawText

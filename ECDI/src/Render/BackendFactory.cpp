@@ -1,7 +1,7 @@
 ﻿#include "ECDI/Render/BackendFactory.h"
 
-#include "ECDI/Render/GDIBackend.h"
-#include "ECDI/Render/GDITextMeasurer.h"
+#include "Render/GDIBackend.h"
+#include "Render/GDITextMeasurer.h"
 
 #include <memory>
 

@@ -1,4 +1,4 @@
-﻿#include "ECDI/Render/GDITextMeasurer.h"
+﻿#include "Render/GDITextMeasurer.h"
 
 #include "ECDI/Core/String.h"
 

@@ -6,7 +6,7 @@
 #undef DrawText   // 规范 10：本文件含 Windows.h——防 DrawTextW 宏污染 ECDI 头声明
 #endif
 
-#include "ECDI/Platform/Win32/WindowMessageHandler.h"
+#include "Platform/Win32/WindowMessageHandler.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
 #include "ECDI/EventSystem/EventRouter.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"

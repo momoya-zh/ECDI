@@ -1,0 +1,6 @@
+﻿#pragma once
+// ECDI 版本宏（configure_file 生成——勿手改；SemVer 0.y.z：MINOR/PATCH 递增不承诺 API 兼容）
+#define ECDI_VERSION_MAJOR @ECDI_VERSION_MAJOR@
+#define ECDI_VERSION_MINOR @ECDI_VERSION_MINOR@
+#define ECDI_VERSION_PATCH @ECDI_VERSION_PATCH@
+#define ECDI_VERSION "@ECDI_VERSION@"

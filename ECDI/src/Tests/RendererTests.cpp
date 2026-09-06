@@ -6,11 +6,11 @@
 #undef DrawText   // 防御性 undef（规范 10）：本文件含 Windows.h——防 DrawTextW 宏污染 ECDI 头声明
 #endif
 
-#include "ECDI/Render/GDIBackend.h"
+#include "Render/GDIBackend.h"
 #include "ECDI/Render/Renderer.h"
-#include "ECDI/Render/RecordingBackend.h"
+#include "Render/RecordingBackend.h"
 #include "ECDI/Render/PaintContext.h"
-#include "ECDI/Platform/Win32/Win32RenderContext.h"
+#include "Platform/Win32/Win32RenderContext.h"
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Font.h"

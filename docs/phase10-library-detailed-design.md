@@ -1,10 +1,28 @@
-﻿# Phase 10 库化详细设计（v1.0）
+﻿# Phase 10 库化详细设计（v1.1）
 
 > 阶段：详细设计（五阶段法 ③）
-> 日期：2026-09-05
-> 状态：待评审（评审）
+> 日期：2026-09-05（v1.1 修订 2026-09-05——外部评审通过「修正后进实施」，5 项处置见修订记录）
+> 状态：**v1.1 评审通过——可进实施**
 > 前置：phase10-library-requirements.md v1.1 / phase10-library-preliminary-design.md **v1.2 定稿**（评审「可进详设」）
 > 一句话：把初设的「三边界」落成**精确的移动清单、改写规则、CMake 全文与验收命令**——实施零决策
+
+---
+
+## 0. 仓库布局锚定（v1.1 澄清——外部评审路径质疑的澄清）
+
+本仓库为**双层 ECDI 命名**（评审易混点，先锚定）：
+
+```text
+C:\Users\a1367\source\repos\ECDI\     ← 仓库根（CMakeLists.txt 在此）
+├── CMakeLists.txt                    ← ${CMAKE_CURRENT_SOURCE_DIR} = 仓库根
+├── ECDI\                             ← 框架子目录（名为 ECDI）
+│   ├── include\ECDI\…
+│   └── src\…                         ← ⬅️ 因此 "ECDI/src" = ${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src ✓ 正确
+├── examples\…
+└── probe-go\
+```
+
+`target_include_directories(ECDI PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src")` 语义正确（评审 🔴#1 为布局误解，不修改；本节保留防再歧义）。
 
 ---
 
@@ -75,7 +93,11 @@
 
 **CMake 使能**：`target_include_directories(ECDI PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src")` → src 内 `#include "Platform/Win32/..."` 可达（评审倾向冻结）。
 
-**RecordingBackend 特例**：其消费者（Tests）经 `PRIVATE src` 可达；但 RecordingBackend.cpp 依赖 TestFramework 头（src/Tests/）——include dir 需含 `ECDI/src/Tests`（或 RecordingBackend.h 不依赖——实施时验证，必要时 `PRIVATE "${src}/Tests"`）。
+**RecordingBackend 依赖核查（v1.1 定案——评审 🟠 项的实证回答）**：
+
+- grep 实证：`RecordingBackend.cpp` 仅 include 自身头；`RecordingBackend.h` 仅依赖 Public 头（Core/Image + RenderingBackend + TextMeasurer）——**零 TestFramework 依赖**（初设 v1.0 的担忧不成立）
+- 且 `GDIBackend.cpp`（框架内部）引用 RecordingBackend——它**不是纯测试设施**，是框架内部记录工具
+- **定案：留 `src/Render/` 不移**（9 头方案不变；无需 Tests include dir）
 
 ## 4. install/export 全文（R4——含 version.h 特例处理）
 
@@ -199,16 +221,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 }
 ```
 
-**验收流程（三步）**：
+**验收流程（三步——v1.1 修正运行路径笔误）**：
 
 ```bash
 cmake -S . -B build && cmake --build build
 cmake --install build --prefix "%TEMP%\ecdi-install"
 cmake -S examples/MinimalApp -B build-minimal -DCMAKE_PREFIX_PATH="%TEMP%\ecdi-install"
-cmake --build build-minimal && "%TEMP%\ecdi-install\..\build-minimal\MinimalApp.exe"
+cmake --build build-minimal && .\build-minimal\MinimalApp.exe
 ```
 
-（Windows 下 prefix 用实际目录；四工具链各走一遍 = R8 验收。）
+- **MinimalApp 定位（v1.1 明确）**：**Windows 平台验收程序**——不承担跨平台消费者验证（当前框架 Windows-first；未来跨平台时另立消费验收，不回头改 MinimalApp 语义）
+- **验收标准强化（v1.1）**：MinimalApp 仅通过 `find_package(ECDI CONFIG REQUIRED)` + `ECDI::ECDI` 完成**配置、编译、链接、运行**——**不手工追加** ECDI 的 include 路径 / lib 路径 / platform libraries（user32/imm32/msimg32 经 ECDITargets.cmake 的 PUBLIC INTERFACE 依赖传播——这正是安装包消费才会暴露的问题）
 
 ## 8. 验收清单（实施完成判据）
 
@@ -217,11 +240,11 @@ cmake --build build-minimal && "%TEMP%\ecdi-install\..\build-minimal\MinimalApp.
 | 1 | 9 头下沉完成、include/ 只剩 80 头 | git mv 记录 + `find include -name "*.h" \| wc -l` = 80（+version.h.in） |
 | 2 | **依赖方向单向律** | `grep -rl "Windows.h" ECDI/include/` = 空；`grep -rl` 9 下沉头名 in `ECDI/include/` = 空 |
 | 3 | 四工具链 | CLion：ECDI 库 + modelprobe 编译通过 ×4 |
-| 4 | VS 不回归 | ECDI.vcxproj Debug/Release 出 ECDI.exe（图标/probe 嵌入不变） |
+| 4 | VS 不回归（**vcxproj 辅助工程定位——v1.1 冻结**） | ECDI.vcxproj Debug/Release 照常出 ECDI.exe（图标/probe 嵌入不变）；**它≠CMake 库产物，只承担开发/调试/回归**——不做静态库化重构，仅同步 9 头 ClInclude 路径 |
 | 5 | 151 测试全绿 | src/Tests 照常（vcxproj 编译） |
 | 6 | selfcontain | `--target ecdi_public_header_test` ×4 工具链 0 错误 |
 | 7 | **install 树结构** | 对照 §4 安装树（80 头 + version.h + lib + cmake×3） |
-| 8 | **MinimalApp 全链** | §7 三步 ×4 工具链（MingGW 的 find_package 亦通） |
+| 8 | **MinimalApp 全链（v1.1 强化）** | §7 三步 ×4 工具链；**仅 find_package + ECDI::ECDI，零手工 include/lib/platform 追加**（user32/imm32/msimg32 经 ECDITargets 传播验证） |
 | 9 | 版本宏 | MinimalApp 可 `#include <ECDI/Core/version.h>` 且三宏 == 0.1.0 |
 | 10 | README | install/消费命令段已补（R6 收口） |
 
@@ -231,12 +254,16 @@ cmake --build build-minimal && "%TEMP%\ecdi-install\..\build-minimal\MinimalApp.
 2. **改写引用**（§3 两规则——18 文件 sed 化逐条验证）
 3. **CMake 更新**：PRIVATE src include dir + project VERSION 0.1.0 + version.h configure + install/export 全段 + selfcontain target
 4. **cmake/ 模板**（ECDIConfig.cmake.in）+ version.h.in 新建
-5. **vcxproj**：ClInclude 9 行路径同步（最小维护）
-6. **自验**：验收 1-5（本仓库侧）
-7. **install + MinimalApp**：验收 7-9（外部消费侧）
-8. **README 增补**（验收 10）
-9. **用户四工具链/VS 终验 → tag v0.1.0**（SemVer 打标——R 收口）
+5. **vcxproj**：ClInclude 9 行路径同步（最小维护——辅助工程定位）
+6. **本地编译回归**：ECDI 库 / modelprobe / Tests（vcxproj）/ VS ECDI.exe（验收 3/4/5）
+7. **Public Header 自包含**：ecdi_public_header_test 80 TU × 4 工具链（验收 6）
+8. **install/export**：构建安装树对照 §4（验收 7）
+9. **MinimalApp 外部消费**：find_package → build → run × 4 工具链（验收 8/9）
+10. **README 增补**（验收 10——R6 收口）
+11. **四工具链最终验收**（全项过一遍）
+12. **tag v0.1.0**（SemVer 打标——Phase 10 收口）
 
 ## 10. 修订记录
 
+- v1.1（2026-09-05）**外部评审通过（「修正后进实施」）——5 项处置**：① §0 新增**仓库布局锚定**（双层 ECDI 命名——`ECDI/src` 路径为评审 🔴#1 布局误解，**不修改**，本节防再歧义）；② **RecordingBackend 依赖核查定案**——grep 实证零 TestFramework 依赖 + 被 GDIBackend.cpp（框架内部）引用 → **留 src/Render/ 不移**（9 头方案不变，无需 Tests include dir）；③ §7 运行路径笔误修正（`.\build-minimal\MinimalApp.exe`）+ MinimalApp 定位明确（**Windows 平台验收程序**）+ 验收 #8 强化（**仅 find_package + ECDI::ECDI，零手工追加**——platform 库经 ECDITargets 传播验证）；④ 验收 #4 vcxproj 辅助工程定位冻结（评审后续撤回「VS 需出 ECDI.lib」——两套构建入口职责不同：CMake=正式库构建主线，VS=开发/调试/回归）；⑤ §9 实施顺序细分（6→12 步——回归/selfcontain/install/MinimalApp/README/终验/tag 分离，出问题易定位）。version.h 宏命名冻结（四宏，不加 STRING/NUMBER 变体）。
 - v1.0（2026-09-05）详细设计初稿：**分类修正**（Window.h 公共签名按值依赖 RenderServices/BackendFactory 实证 → 两头升 Public，下沉 11→9、Public 78→80——依赖方向单向律可验收）+ 9 头精确移动清单 + 18 文件引用改写规则（两条全局替换）+ install/export 全文（version.h 特例 FILES + ExactVersion）+ version.h.in 全文 + selfcontain 定稿（ecdi_public_header_test）+ MinimalApp 双文件全文 + 验收清单 10 项 + 实施顺序 9 步。待评审。

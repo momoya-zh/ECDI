@@ -262,10 +262,10 @@
     <ClInclude Include="include\ECDI\Render\Renderer.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="include\ECDI\Render\RecordingBackend.h">
+    <ClInclude Include="src\Render\RecordingBackend.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="include\ECDI\Render\GDIBackend.h">
+    <ClInclude Include="src\Render\GDIBackend.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="include\ECDI\Render\TextMeasurer.h">

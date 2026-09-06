@@ -43,8 +43,27 @@ Targets:
 
 | Target | Type | Description |
 |---|---|---|
-| `ECDI` | static library | The framework (`include/ECDI/*.h`) |
+| `ECDI` | static library | The framework (`include/ECDI/*.h` — 80 public headers; internal implementation lives in `src/`) |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
+| `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
+
+### Install & consume as a library
+
+```bash
+cmake -S . -B build && cmake --build build
+cmake --install build --prefix <prefix>       # headers + ECDI.lib + ECDIConfig.cmake
+```
+
+Then, from any external CMake project:
+
+```bash
+cmake -S examples/MinimalApp -B build-minimal -DCMAKE_PREFIX_PATH=<prefix>
+cmake --build build-minimal && .\build-minimal\MinimalApp.exe
+```
+
+`examples/MinimalApp` is the library-ization smoke test: it consumes ECDI strictly via
+`find_package(ECDI CONFIG REQUIRED)` + `ECDI::ECDI` — no manual include/lib paths, and
+platform libraries propagate through the installed CMake targets.
 
 A Visual Studio project (`ECDI/ECDI.vcxproj`, via `ECDI.slnx`) is kept for Windows debugging.
 

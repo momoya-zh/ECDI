@@ -1,8 +1,8 @@
-﻿#include "ECDI/Render/GDIBackend.h"
+﻿#include "Render/GDIBackend.h"
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Core/String.h"
-#include "ECDI/Platform/Win32/Win32RenderContext.h"
+#include "Platform/Win32/Win32RenderContext.h"
 
 #include <algorithm>
 #include <cmath>

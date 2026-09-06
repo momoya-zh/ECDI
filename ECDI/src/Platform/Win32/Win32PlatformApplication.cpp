@@ -1,4 +1,4 @@
-﻿#include "ECDI/Platform/Win32/Win32PlatformApplication.h"
+﻿#include "Platform/Win32/Win32PlatformApplication.h"
 
 #include <Windows.h>
 

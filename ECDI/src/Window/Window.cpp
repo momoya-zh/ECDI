@@ -1,6 +1,6 @@
 ﻿#include "ECDI/Window/Window.h"
 
-#include "ECDI/Platform/Win32/Win32PlatformWindow.h"
+#include "Platform/Win32/Win32PlatformWindow.h"
 #include "ECDI/Widget/TextBox.h"
 #include "ECDI/Application/Application.h"
 #include "ECDI/Widget/Widget.h"

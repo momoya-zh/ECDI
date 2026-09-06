@@ -1,6 +1,6 @@
-﻿#include "ECDI/Platform/Win32/Win32WindowClass.h"
+﻿#include "Platform/Win32/Win32WindowClass.h"
 
-#include "ECDI/Platform/Win32/Win32PlatformWindow.h"
+#include "Platform/Win32/Win32PlatformWindow.h"
 #include "ECDI/Core/String.h"
 
 #include <system_error>

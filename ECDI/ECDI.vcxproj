@@ -118,7 +118,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -140,7 +140,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
@@ -225,17 +225,17 @@
     <ClInclude Include="include\ECDI\Platform\ChildProcess.h" />
     <ClInclude Include="include\ECDI\Platform\ExecutablePath.h" />
     <ClInclude Include="include\ECDI\Platform\PlatformApplication.h" />
-    <ClInclude Include="include\ECDI\Platform\Win32\Win32PlatformWindow.h" />
-    <ClInclude Include="include\ECDI\Platform\Win32\Win32RenderContext.h" />
-    <ClInclude Include="include\ECDI\Platform\Win32\Win32WindowClass.h" />
-    <ClInclude Include="include\ECDI\Platform\Win32\Win32PlatformApplication.h" />
+    <ClInclude Include="src\Platform\Win32\Win32PlatformWindow.h" />
+    <ClInclude Include="src\Platform\Win32\Win32RenderContext.h" />
+    <ClInclude Include="src\Platform\Win32\Win32WindowClass.h" />
+    <ClInclude Include="src\Platform\Win32\Win32PlatformApplication.h" />
     <ClInclude Include="include\ECDI\Render\PaintContext.h" />
     <ClInclude Include="include\ECDI\Render\RenderCommand.h" />
     <ClInclude Include="include\ECDI\Render\Renderer.h" />
     <ClInclude Include="include\ECDI\Render\RenderingBackend.h" />
-    <ClInclude Include="include\ECDI\Render\RecordingBackend.h" />
-    <ClInclude Include="include\ECDI\Render\GDIBackend.h" />
-    <ClInclude Include="include\ECDI\Render\GDITextMeasurer.h" />
+    <ClInclude Include="src\Render\RecordingBackend.h" />
+    <ClInclude Include="src\Render\GDIBackend.h" />
+    <ClInclude Include="src\Render\GDITextMeasurer.h" />
     <ClInclude Include="include\ECDI\Render\RenderServices.h" />
     <ClInclude Include="include\ECDI\Render\BackendFactory.h" />
     <ClInclude Include="include\ECDI\Render\TextMeasurer.h" />
@@ -286,7 +286,7 @@
     <ClInclude Include="Include\ECDI\Widget\TextBox.h" />
     <ClInclude Include="Include\ECDI\Widget\Widget.h" />
     <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
-    <ClInclude Include="Include\ECDI\Platform\Win32\WindowMessageHandler.h" />
+    <ClInclude Include="src\Platform\Win32\WindowMessageHandler.h" />
     <ClInclude Include="Include\ECDI\Window\Window.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowEvent.h" />
     <ClInclude Include="Include\ECDI\Theme\StyleField.h" />
@@ -306,7 +306,7 @@
     <ClInclude Include="src\Demo\CollapsiblePanelDemo.h" />
     <ClInclude Include="src\Demo\Showcase.h" />
     <ClInclude Include="..\examples\ModelProbe\ModelProbe.h" />
-    <ClInclude Include="include\ECDI\Platform\Win32\Win32ChildProcess.h" />
+    <ClInclude Include="src\Platform\Win32\Win32ChildProcess.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ECDI开发规范.md" />
