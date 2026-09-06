@@ -40,12 +40,11 @@
 
 ### 🔄 当前
 
-- **Phase 10 库化（ECDI 0.1.0）✅ 2026-09-06 收口**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；待初步设计
+- **Phase 10 库化（ECDI 0.1.0）✅ 2026-09-06 收口**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；初设 v1.2 / 详设 v1.1 / 实施全部完成（9 头下沉 + 80 Public 头 + install/export + MinimalApp）——库化闭环
 
 ### 🔲 未来
 
 - **Phase 9.5 收尾补充**：~~局部更新/裁剪系统 + Hover/MouseEnter/Leave~~（✅ R1/R4 已落地 2026-08-28）；~~LinearLayout 抽象、WM_MOVE 场景、Shortcut System~~（✅ 关闭记账——二次用例未出现）；详见 roadmap-deferred.md
-- **Phase 10**：库化 ECDI 0.1.0（公共 API 边界 + install/export + 外部消费者验收——进行中）
 - Phase 10 后能力路线：WindowChrome / 基础控件补充 / 渲染能力增强 / 跨平台（Linux/Android 远期）→ 接近 1.0
 
 ### 📋 技术债务（记账）
@@ -170,7 +169,9 @@
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase10-library-requirements.md](phase10-library-requirements.md) | 需求确认（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install-export / 自包含测试 / 外部消费者验收） | ✅ v1.1（外部评审 7 项采纳）——待初步设计 |
+| [phase10-library-requirements.md](phase10-library-requirements.md) | 需求确认（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install-export / 自包含测试 / 外部消费者验收） | ✅ v1.1（外部评审 7 项采纳） |
+| [phase10-library-preliminary-design.md](phase10-library-preliminary-design.md) | 初步设计（89→80 Public / 9 Internal 逐头审查 / 下沉 src/ + PRIVATE src / install-export 布局 / ExactVersion / 依赖方向单向律） | ✅ v1.2 定稿（评审「可进详设」） |
+| [phase10-library-detailed-design.md](phase10-library-detailed-design.md) | 详细设计（分类修正：RenderServices/BackendFactory 升 Public / 9 头移动清单 / 18 文件引用改写 / install 全文 / MinimalApp 全文 / 验收清单 10 项） | ✅ v1.1 已实施（2026-09-06——9 头下沉、80 Public 头零平台泄漏、MinimalApp 就位） |
 
 ## 文档约定
 
