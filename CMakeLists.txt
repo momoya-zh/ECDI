@@ -83,11 +83,14 @@ target_link_libraries(ecdi_public_header_test PRIVATE ECDI)
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src/Tests/*.cpp"
 )
+# ModelProbeTests 断言 ModelProbePage 行为 → 需链接 demo 实现（examples 内，非框架）
+list(APPEND TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/examples/ModelProbe/ModelProbe.cpp")
 add_executable(ecdi_tests ${TEST_SOURCES})
 target_include_directories(ecdi_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/include"   # ECDI 公共头
-    "${CMAKE_BINARY_DIR}/generated"              # version.h
-    "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src"       # 下沉头（RecordingBackend 等）
+    "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/include"            # ECDI 公共头
+    "${CMAKE_BINARY_DIR}/generated"                       # version.h
+    "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src"                # 下沉头（RecordingBackend 等）
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/ModelProbe"     # ModelProbe.h
 )
 target_link_libraries(ecdi_tests PRIVATE ECDI)
 target_compile_definitions(ecdi_tests PRIVATE UNICODE _UNICODE)
