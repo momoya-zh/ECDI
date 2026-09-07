@@ -217,6 +217,4 @@ Image DecodeFile(const std::string& utf8Path)
 	return DecodeFileImpl(UTF8ToWide(utf8Path));
 }
 
-} // namespace Decode
-
 } // namespace ECDI::Decode
