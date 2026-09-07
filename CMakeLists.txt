@@ -79,6 +79,22 @@ endforeach()
 add_library(ecdi_public_header_test STATIC EXCLUDE_FROM_ALL ${PUBLIC_HEADER_TEST_TUS})
 target_link_libraries(ecdi_public_header_test PRIVATE ECDI)
 
+# ── 测试运行入口（Phase 10 挂账兑现——console exe，CLion 直接跑；退出码 = 失败数）──
+file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src/Tests/*.cpp"
+)
+add_executable(ecdi_tests ${TEST_SOURCES})
+target_include_directories(ecdi_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/include"   # ECDI 公共头
+    "${CMAKE_BINARY_DIR}/generated"              # version.h
+    "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src"       # 下沉头（RecordingBackend 等）
+)
+target_link_libraries(ecdi_tests PRIVATE ECDI)
+target_compile_definitions(ecdi_tests PRIVATE UNICODE _UNICODE)
+if(MSVC)
+    target_compile_options(ecdi_tests PRIVATE /utf-8)
+endif()
+
 # ── R4：install/export（外部消费唯一正规入口）──
 install(TARGETS ECDI EXPORT ECDITargets ARCHIVE DESTINATION lib)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/include/ECDI"
