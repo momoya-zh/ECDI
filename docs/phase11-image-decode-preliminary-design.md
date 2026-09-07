@@ -2,7 +2,7 @@
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-09-06
-> 状态：待评审
+> 状态：**v1.1 外部评审通过（修改后通过——可进详设）**
 > 前置：phase11-image-decode-requirements.md **v1.1**（评审通过，决策点全收敛）
 > 一句话：把 WIC 决策落成「Public 头全文草案 + WIC 管线九步分解 + 链接库传播分析 + 测试方向」——详设收工程细节
 
@@ -30,6 +30,7 @@
 #include "ECDI/Core/Image.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace ECDI::Decode
@@ -61,35 +62,42 @@ namespace ECDI::Decode
 
 | # | 步骤 | API | 失败处理 |
 |---|---|---|---|
-| 3.1 | COM 初始化 | `CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED \| COINIT_DISABLE_OLE1DDE)` | S_FALSE/RPC_E_CHANGED_MODE 视为成功继续；其余 → 空 Image |
+| 3.0 | **输入校验（v1.1 新增）** | `DecodeMemory`：`size == 0 → 失败`；`data == nullptr && size != 0 → 立即失败`（不交给 WIC/流层） | 空 Image + Error |
+| 3.1 | COM 初始化 | `ComScope`（见 §4——S_OK/S_FALSE 取得引用计数；RPC_E_CHANGED_MODE 可用但不计数；其余失败） | 非 usable → 空 Image |
 | 3.2 | 工厂创建 | `CoCreateInstance(CLSID_WICImagingFactory, ..., IID_IWICImagingFactory)` | 同上 |
 | 3.3 | 解码器创建 | 文件路：`CreateDecoderFromFilename(widePath, nullptr, GENERIC_READ, METADATACACHE_ONDEMAND)`；内存路：`SHCreateMemStream(data, size)` → `CreateDecoderFromStream` | 失败 → 「无法创建解码器（格式不支持/文件不存在）」 |
 | 3.4 | 帧获取 | `decoder->GetFrame(0, &frame)` | GIF 首帧即 frame 0 |
-| 3.5 | 尺寸读取 | `frame->GetSize(&w, &h)` | w/h==0 → 空 Image |
+| 3.5 | 尺寸读取 + **溢出防护（v1.1 新增）** | `frame->GetSize(&w, &h)`；w/h==0 → 空；**乘法检查**：`w > kMaxDim \|\| h > kMaxDim \|\| w > SIZE_MAX/(4*h)` 等——防恶意/损坏图片触发异常大分配（`width*4`、`width*height*4` 均在分配**前**验证） | 超限 → 空 Image + Error |
 | 3.6 | 格式转换器 | `factory->CreateFormatConverter()` → `Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom)` | 源格式不可转 PBGRA → 失败路径 |
-| 3.7 | 像素拷贝 | `converter->CopyPixels(nullptr, stride = w*4, w*stride, pixels.data())` | **直灌**——PBGRA 与 Image 同构（§R5） |
-| 3.8 | RAII 收尾 | 局部 `struct ComScope` 析构 `CoUninitialize()`；WIC 接口指针 ComPtr/手动 Release | — |
+| 3.7 | 像素拷贝 | `converter->CopyPixels(nullptr, stride = w*4, w*h*stride, pixels.data())` | **直灌**——PBGRA 与 Image 同构（§R5） |
+| 3.8 | RAII 收尾 | 局部 `ComScope`（v1.1 修正版——见 §4）；WIC 接口指针手动 Release | — |
 | 3.9 | 返回 | `Image{w, h, stride, std::move(pixels)}` | — |
 
 ### 3.8 错误点映射表（全部走 R6 契约）
 
 每个失败点 → `Logger::Log(LogLevel::Error, "ImageDecoder: <步骤> failed (hr=0x...)")` → `return {}`。无异常路径。
 
-## 4. R3：COM RAII 包装（per-call——评审冻结）
+## 4. R3：COM RAII 包装（per-call——评审冻结；**v1.1 修正 ComScope 双状态 bug**）
 
 ```cpp
 namespace {
+/// @brief per-call COM 生命周期。
+/// 关键语义（评审修正）：RPC_E_CHANGED_MODE 表示当前线程【已有】其他模式的 COM 初始化——
+/// 本次调用【未取得】新的初始化引用计数，因此「可用但不得 CoUninitialize」（否则替别人撤销）。
+/// 「可以继续执行」与「负责 Uninitialize」是两个独立状态。
 struct ComScope {
-	bool ok = false;
-	ComScope() { ok = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))
-	             || hr == S_FALSE || hr == RPC_E_CHANGED_MODE; }   // 已初始化也继续
-	~ComScope() { if (ok) CoUninitialize(); }
+	HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+	bool shouldUninitialize = (hr == S_OK || hr == S_FALSE);   // 仅这两种取得了引用计数
+
+	bool Usable() const { return shouldUninitialize || hr == RPC_E_CHANGED_MODE; }
+	~ComScope() { if (shouldUninitialize) CoUninitialize(); }
 };
 }
 ```
 
+- 三态语义：`S_OK`（首次初始化）/ `S_FALSE`（已有同模式初始化，计数+1）/ `RPC_E_CHANGED_MODE`（模式冲突，**未取得计数——可用但不 Uninit**）；其余 → 不可用失败
 - **无静态/全局 COM 对象**（评审冻结：apartment 归属坑避让）
-- WIC 接口指针用局部 `Microsoft::WRL::ComPtr`？——**否：手动 Release 或最小 RAII**（不引 wrl 头——保持依赖面最小；详设定稿实现风格）
+- WIC 接口指针手动 Release 或最小 RAII（不引 wrl 头——保持依赖面最小；详设定稿实现风格）
 
 ## 5. 链接库传播分析（库化边界关键项）
 
@@ -110,15 +118,15 @@ struct ComScope {
 - 自实现只读 IStream（QueryInterface/AddRef/Read/Seek/Stat 五方法）约 80 行——仅在 MinGW SH 不可用时启用
 - **详设定稿**：MinGW 工具链实测 SHCreateMemStream 可用性 → 定方案
 
-## 7. 测试方向（ImageDecodeTests.cpp——新增）
+## 7. 测试方向（ImageDecodeTests.cpp——新增；**v1.1 修订：JPEG 不跳过 + 契约断言并入**）
 
 | 用例 | 资产 | 断言 |
 |---|---|---|
-| T1 最小 PNG 解码 | 硬编码 1×1 PNG bytes（67B hex 数组——IHDR/IDAT/IEND） | width/height/stride + 像素 == 预期 BGRA |
-| T2 半透明预乘验证 | 2×2 PNG（含 alpha=128 像素） | premultiply 值正确（R/B 已乘 alpha） |
-| T3 JPEG 解码 | 硬编码最小 JPEG（或跳过——JPEG 最小编码复杂，详设定） | 有损断言放宽（仅尺寸） |
+| T1 最小 PNG 解码 | 硬编码 1×1 PNG bytes（67B hex 数组——IHDR/IDAT/IEND） | width/height/stride + 像素 == 预期 BGRA；**契约断言：stride==width*4、pixels.size()==height*stride、非空** |
+| T2 半透明预乘验证（**本 Phase 最重要测试**） | 2×2 PNG（含 alpha=128 像素） | **P' = P×A/255**：原 R200/G100/B50/A128 → 内存序 B'G'R'A ≈ 25/50/100/128（同时验证 converter/PBGRA/预乘/BGRA 布局/Image 契约五件事）+ 契约断言同 T1 |
+| T3 JPEG 解码（**v1.1 不跳过**） | 硬编码最小 JPEG bytes（constexpr 数组） | **有损——只断言非空 + width/height/stride/pixels.size() 契约**，不验具体像素 |
 | T4 非法字节 | `"not an image"` 字符串 | 空 Image + 无崩溃 |
-| T5 空输入 | `DecodeMemory(nullptr, 0)` | 空 Image |
+| T5 空输入（v1.1 细化） | `DecodeMemory(nullptr, 0)`、`DecodeMemory(valid, 0)`、`DecodeMemory(nullptr, 5)` | 三者均空 Image（**nullptr&&size>0 立即失败契约**） |
 | T6 文件不存在 | `DecodeFile("Z:/nonexistent.png")` | 空 Image |
 | T7 DrawImage 集成 | T1 结果 → PaintContext DrawImage → RecordingBackend 断言 DrawImageCommand 参数 | 管线贯通 |
 
@@ -128,17 +136,20 @@ struct ComScope {
 |---|---|
 | include/ECDI/Decode/ | 新建 ImageDecoder.h（Public——81 头） |
 | src/Platform/Win32/ | 新建 WicImageDecoder.cpp（Internal） |
-| CMakeLists | PUBLIC 链接追加（windowscodecs/uuid/ole32[/shlwapi]） |
+| CMakeLists | PUBLIC 链接追加（windowscodecs/uuid/ole32[/shlwapi]——**以实际符号收敛最小**，详设编译验证） |
 | ECDI.vcxproj | ClInclude 登记 + 链接库同步（辅助工程） |
 | Tests | ImageDecodeTests.cpp + RunAllTests 登记 |
 
-## 9. 开放决策点（归详设）
+## 9. 开放决策点（归详设——v1.1 增补 2 项）
 
 1. `SHCreateMemStream` MinGW 可用性 → 定内存流方案（§6——详设实测）
 2. WIC 接口指针管理风格：手动 Release vs 最小 RAII 模板（§4——不引 wrl）
-3. JPEG 测试资产：硬编码最小 JPEG vs 跳过 JPEG 用例（§7 T3）
+3. ~~JPEG 测试资产~~——**已冻结（v1.1）**：硬编码最小 JPEG bytes，不跳过
 4. `uuid.lib` vs `__uuidof`：跨工具链写法统一（§5——MinGW 对 CLSID 常量的链接差异）
+5. **palette 参数语义查证**（新增）：`WICBitmapPaletteTypeCustom` vs `MedianCut`——32bpp 非索引输出下 palette 基本无意义，详设查 WIC 文档选语义最明确值
+6. **链接库最小收敛**（新增）：windowscodecs/uuid/ole32/shlwapi 以实际符号为准——详设编译一次后剔除未用库（不为「保险」长期悬挂）
 
 ## 10. 修订记录
 
+- v1.1（2026-09-07）**外部评审通过（修改后通过——可进详设），5 必改全采纳**：① **§4 ComScope 双状态 bug 修正**（原草案 hr 未定义 + RPC_E_CHANGED_MODE 误调 CoUninitialize——会替别人撤销 COM 引用计数；修正为 `shouldUninitialize = hr==S_OK||hr==S_FALSE` 双状态 + `Usable()` 三态语义，注释明写「RPC_E_CHANGED_MODE 未取得计数——可用但不 Uninit」防误改）；② §2 头草案**显式加 `<cstdint>`**（`std::uint8_t` 不依赖 Image.h 间接包含——Phase 10 自包含原则）；③ §3 新增 **3.0 输入校验**（size==0 失败；nullptr&&size>0 立即失败——不交给 WIC）+ **3.5 溢出防护**（w/h 上限 + `width*4`/`width*height*4` 分配前乘法验证——防恶意图片异常大分配）；④ §7 **T3 JPEG 不跳过**（constexpr 最小 JPEG 资产；有损只断言契约不断像素）+ T1/T2 并入 Image 契约断言（stride/size/非空）+ T5 细化三输入；⑤ §9 开放点增补 2 项（palette 语义查证 / 链接库以实际符号收敛最小）。可保持项全数确认（WIC/位置/自由函数/无接口/per-call×2/SH 待实测/无白名单/PBGRA 直灌/GIF 首帧/空 Image+Logger/无控件）。
 - v1.0（2026-09-06）初步设计初稿：**头全文草案**（80+1=81 头）+ **WIC 管线九步分解**（COM→Factory→Decoder→Frame→Converter PBGRA→CopyPixels 直灌）+ COM RAII 包装（无静态 COM 对象）+ **链接库传播分析**（windowscodecs/uuid/ole32[/shlwapi] 全 PUBLIC——静态库消费者链接器解析需要）+ 内存流倾向（SH，MinGW 可用性定方案）+ 测试方向 7 用例（T1 硬编码 1×1 PNG）+ 影响面 + 4 开放点。待评审。
