@@ -200,8 +200,7 @@ Image DecodeMemoryImpl(const std::uint8_t* data, std::size_t size)
 
 } // anonymous namespace
 
-namespace Decode
-{
+// ⚠️ 外层已处于 namespace ECDI::Decode——此处直接定义公开函数（不得再嵌套 namespace Decode）
 
 Image DecodeMemory(const std::uint8_t* data, std::size_t size)
 {
