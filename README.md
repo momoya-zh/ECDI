@@ -116,6 +116,7 @@ docs/                 design documents (requirements → preliminary → detaile
 | 6–7 | Layout, platform decoupling, test framework | ✅ |
 | 8–9 | Rendering extensions, theme, hover, clip, animation, AutoSize | ✅ |
 | **10** | **Library-ization (v0.1.0): public API boundary, install/export, external consumer** | ✅ |
+| 11 | Image decoding (WIC backend, `Decode` module, premultiplied-BGRA contract) | ✅ |
 
 ## License
 
