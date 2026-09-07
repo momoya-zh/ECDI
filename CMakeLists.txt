@@ -122,3 +122,6 @@ configure_package_config_file(
 
 # ── 应用（ModelProbe——第一个 example：链接 ECDI + 自有资源）──
 add_subdirectory(examples/ModelProbe)
+
+# ── 视觉验收 GUI（Phase 11——解码图 vs 期望图并排人工核）──
+add_subdirectory(examples/VisualTest)

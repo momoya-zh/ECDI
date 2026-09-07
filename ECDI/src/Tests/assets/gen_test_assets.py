@@ -40,7 +40,38 @@ png_t2 = make_png(2, 2, [
     [(200, 100, 50, 128), (200, 100, 50, 128)],
 ])
 
-print(to_hex_array(png_t1, "kPng1x1White"))
+
+def make_quadrant_png() -> bytes:
+    """视觉测试：64×64 四象限（红/绿/蓝/黄 不透明）——色彩与象限肉眼验证"""
+    rows = []
+    for y in range(64):
+        row = []
+        for x in range(64):
+            if x < 32 and y < 32:
+                row.append((255, 0, 0, 255))
+            elif x >= 32 and y < 32:
+                row.append((0, 255, 0, 255))
+            elif x < 32:
+                row.append((0, 0, 255, 255))
+            else:
+                row.append((255, 255, 0, 255))
+        rows.append(row)
+    return make_png(64, 64, rows)
+
+
+def make_alpha_gradient_png() -> bytes:
+    """视觉测试：64×64 红色 alpha 横向渐变（0→255）——覆盖深底呈淡入，预乘视觉验证"""
+    rows = []
+    for y in range(64):
+        row = []
+        for x in range(64):
+            a = round(255 * x / 63)
+            row.append((255, 0, 0, a))
+        rows.append(row)
+    return make_png(64, 64, rows)
+
+
+print(to_hex_array(make_quadrant_png(), "kPngQuadrant64"))
 print()
-print(to_hex_array(png_t2, "kPng2x2Alpha"))
+print(to_hex_array(make_alpha_gradient_png(), "kPngAlphaGrad64"))
 print(f"// sizes: t1={len(png_t1)}B t2={len(png_t2)}B")
