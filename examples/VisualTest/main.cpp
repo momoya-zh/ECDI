@@ -1,4 +1,10 @@
-﻿#include "ECDI/Application/Application.h"
+﻿#include <windows.h>
+
+#ifdef DrawText
+#undef DrawText
+#endif
+
+#include "ECDI/Application/Application.h"
 #include "ECDI/Window/Window.h"
 #include "ECDI/Widget/Panel.h"
 #include "ECDI/Widget/Label.h"
@@ -111,7 +117,7 @@ Image MakeExpectedGradient(unsigned int w, unsigned int h)
 	return img;
 }
 
-std::unique_ptr<ECDI::Panel> MakeText(const std::string& caption)
+std::unique_ptr<ECDI::Widget> MakeText(const std::string& caption)
 {
 	auto label = std::make_unique<ECDI::Label>(caption);
 	label->SetStretch(1);
