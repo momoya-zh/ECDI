@@ -46,9 +46,11 @@ if(MSVC)
 endif()
 
 if(WIN32)
-    # 链接库 PUBLIC：静态库自身不链接——依赖传递给最终 exe（modelprobe / find_package 消费者）
+    # Existing Win32 / rendering dependencies
     # msimg32：Phase 8 AlphaBlend（DrawImage 的 AC_SRC_ALPHA 混合）
     target_link_libraries(ECDI PUBLIC user32 imm32 msimg32)
+    # Phase 11 image decoding dependencies（WIC/COM——组内以实际符号收敛，linker 验证收尾）
+    target_link_libraries(ECDI PUBLIC windowscodecs ole32 shlwapi)
 endif()
 
 # ── R5：version.h 生成（三宏——configure 注入 SemVer）──

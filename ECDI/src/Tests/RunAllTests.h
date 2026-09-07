@@ -23,5 +23,6 @@ void RegisterCollapsiblePanelTests();
 void RegisterProgressBarTests();
 void RegisterChildProcessTests();
 void RegisterModelProbeTests();
+void RegisterImageDecodeTests();
 
 } // namespace ECDI::Test

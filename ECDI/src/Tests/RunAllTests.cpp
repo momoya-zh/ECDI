@@ -19,6 +19,7 @@ void ECDI::Test::RunAllTests()
     RegisterProgressBarTests();
     RegisterChildProcessTests();
     RegisterModelProbeTests();
+    RegisterImageDecodeTests();
 
     TestRunner runner;
     runner.Run(GetTestRegistry());
