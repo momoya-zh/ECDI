@@ -9,6 +9,14 @@
 #include <wincodec.h>     // WIC 全套 + CLSID_WICImagingFactory + IID_PPV_ARGS
 #include <shlwapi.h>      // SHCreateMemStream
 
+// windows.h 的 min/max 宏会打爆 numeric_limits<>::max()（skill 条 10 防御性 undef 先例）
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
+
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -39,6 +47,7 @@ class ComPtr {
 	T* m_ptr = nullptr;
 public:
 	ComPtr() = default;
+	explicit ComPtr(T* p) noexcept : m_ptr(p) {}   // 接管裸指针所有权（如 SHCreateMemStream 返回值）
 	~ComPtr() { Reset(); }
 	ComPtr(const ComPtr&) = delete;
 	ComPtr& operator=(const ComPtr&) = delete;
