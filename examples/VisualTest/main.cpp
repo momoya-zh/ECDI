@@ -191,20 +191,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
 	ECDI::Widget& root = window.GetRootWidget();
 	root.SetLayout(std::make_unique<ECDI::VerticalLayout>(6, true));
-	root.SetStyle(ECDI::PanelStyleOverride{ .background = ECDI::Color::FromRGBA8(15, 17, 21, 255) });
 
 	// ── 行 1：解码渐变 PNG（预乘视觉对照）──
 	root.AddChild(MakeText("Row1: gradient PNG decoded (WIC->PBGRA)"));
-	root.AddChild(std::make_unique<ImageHost>(Decode::DecodeMemory(kPngAlphaGrad64, sizeof(kPngAlphaGrad64))));
+	root.AddChild(std::make_unique<ImageHost>(ECDI::Decode::DecodeMemory(kPngAlphaGrad64, sizeof(kPngAlphaGrad64))));
 	// ── 行 2：期望结果对照（代码直接构造 premultiplied BGRA）——应与 Row1 视觉一致
 	root.AddChild(MakeText("Row2: expected result (constructed in code) - should match Row1"));
 	root.AddChild(std::make_unique<ImageHost>(MakeExpectedGradient(64, 64)));
 	// ── 行 3：四象限（色彩/象限验证）
 	root.AddChild(MakeText("Row3: quadrant PNG decoded (red/green/blue/yellow)"));
-	root.AddChild(std::make_unique<ImageHost>(Decode::DecodeMemory(kPngQuadrant64, sizeof(kPngQuadrant64))));
+	root.AddChild(std::make_unique<ImageHost>(ECDI::Decode::DecodeMemory(kPngQuadrant64, sizeof(kPngQuadrant64))));
 	// ── 行 4：JPEG（32×32 拉伸显示——有损管线验证）
 	root.AddChild(MakeText("Row4: JPEG decoded (lossy - format pipeline check)"));
-	root.AddChild(std::make_unique<ImageHost>(Decode::DecodeMemory(kJpeg32x32, sizeof(kJpeg32x32))));
+	root.AddChild(std::make_unique<ImageHost>(ECDI::Decode::DecodeMemory(kJpeg32x32, sizeof(kJpeg32x32))));
 
 	window.Show();
 	return application.Run();
