@@ -208,6 +208,7 @@
     <ClCompile Include="src\Tests\ProgressBarTests.cpp" />
     <ClCompile Include="src\Tests\ChildProcessTests.cpp" />
     <ClCompile Include="src\Tests\ModelProbeTests.cpp" />
+    <ClCompile Include="src\Tests\ImageDecodeTests.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32ChildProcess.cpp" />
     <ClCompile Include="src\Platform\Win32\WicImageDecoder.cpp" />
     <ClCompile Include="src\Platform\Win32\ExecutablePath.cpp" />
