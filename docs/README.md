@@ -179,6 +179,7 @@
 |------|------|------|
 | [phase11-image-decode-requirements.md](phase11-image-decode-requirements.md) | 需求确认（WIC COM 解码 / Decode 新模块 / 静态函数 API / PBGRA 零转换契约 / 仅解码 API 不含控件） | ✅ v1.1（外部评审通过） |
 | [phase11-image-decode-preliminary-design.md](phase11-image-decode-preliminary-design.md) | 初步设计（头全文草案 / WIC 管线九步 / COM RAII per-call / 链接库 PUBLIC 传播 / 测试 7 用例） | 🚧 v1.0 待评审 |
+| [phase11-image-decode-detailed-design.md](phase11-image-decode-detailed-design.md) | 详细设计（6 开放点全收：initguid+IID_PPV_ARGS 零 uuid.lib / ComRAII 模板 / 溢出两步数学界 / SH 主案+IStream 预案 / 测试资产生成策略 / 验收 6 项） | 🚧 v1.0 待评审 |
 
 ## 文档约定
 
