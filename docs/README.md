@@ -181,6 +181,12 @@
 | [phase11-image-decode-preliminary-design.md](phase11-image-decode-preliminary-design.md) | 初步设计（头全文草案 / WIC 管线九步 / COM RAII per-call / 链接库 PUBLIC 传播 / 测试 7 用例） | ✅ v1.1（评审「修改后通过」） |
 | [phase11-image-decode-detailed-design.md](phase11-image-decode-detailed-design.md) | 详细设计（6 开放点全收：initguid+IID_PPV_ARGS 零 uuid.lib / ComRAII 模板 / 溢出两步数学界 / SH 主案+IStream 预案 / 测试资产生成策略 / 验收 6 项） | ✅ v1.1 已实施（2026-09-07——Decode 模块 + WIC 后端 + 8 用例，158 全绿） |
 
+## Phase12 WindowChrome（🚧 需求确认）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase12-windowchrome-requirements.md](phase12-windowchrome-requirements.md) | 需求确认（无边框 NCCALCSIZE/HITTEST 拦截 / 保留 WS_OVERLAPPEDWINDOW / 最大化修正 / CaptionBar 范围分歧 / DWM 阴影圆角 / 4 决策点） | 🚧 v1.0 待评审 |
+
 ## 文档约定
 
 - 命名：`phaseX.Y-<module>-<type>.md`（子阶段编号 + 模块名 + 阶段类型；2026-08-25 全量规范化：Phase 5/6/7 按内容编号对齐，如 `phase5.3-button-requirements.md`、`phase6.2-checkboxradio-detailed-design.md`、`phase7.5-callback-requirements.md`；阶段级评审文档保留 `phaseN-<module>.md`）
