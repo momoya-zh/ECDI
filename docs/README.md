@@ -181,11 +181,12 @@
 | [phase11-image-decode-preliminary-design.md](phase11-image-decode-preliminary-design.md) | 初步设计（头全文草案 / WIC 管线九步 / COM RAII per-call / 链接库 PUBLIC 传播 / 测试 7 用例） | ✅ v1.1（评审「修改后通过」） |
 | [phase11-image-decode-detailed-design.md](phase11-image-decode-detailed-design.md) | 详细设计（6 开放点全收：initguid+IID_PPV_ARGS 零 uuid.lib / ComRAII 模板 / 溢出两步数学界 / SH 主案+IStream 预案 / 测试资产生成策略 / 验收 6 项） | ✅ v1.1 已实施（2026-09-07——Decode 模块 + WIC 后端 + 8 用例，158 全绿） |
 
-## Phase12 WindowChrome（🚧 需求确认）
+## Phase12 WindowChrome（🚧 需求 v1.2 ✅ → 待初设）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase12-windowchrome-requirements.md](phase12-windowchrome-requirements.md) | 需求确认（无边框 NCCALCSIZE/HITTEST 拦截 / 保留 WS_OVERLAPPEDWINDOW / 最大化修正 / CaptionBar 范围分歧 / DWM 阴影圆角 / 4 决策点） | 🚧 v1.0 待评审 |
+| [phase12-windowchrome-requirements.md](phase12-windowchrome-requirements.md) | 需求确认（无边框 NCCALCSIZE/HITTEST 拦截 / 保留 WS_OVERLAPPEDWINDOW / R9 能力式扩展点 / R10 WindowLayer Bottom+Desktop / 7 决策全拍板） | ✅ v1.2（外部评审通过——可进初设） |
+| [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase） | 🚧 v1.1 待评审 |
 
 ## 文档约定
 
