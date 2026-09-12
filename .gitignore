@@ -59,6 +59,7 @@ model-probe-gui/
 *.VC.db
 *.VC.opendb
 ipch/
+CMakeSettings.json
 
 # ===== CMake =====
 CMakeCache.txt
