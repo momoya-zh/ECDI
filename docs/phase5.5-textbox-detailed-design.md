@@ -1,6 +1,6 @@
 ﻿# Phase 5.5 TextBox 详细设计
 
-> 状态：v1.0（2026-08-13）｜5.5.1.1 部分定稿，5.5.1.2-5.5.1.4 随进度补充
+> 状态：v1.3（2026-08-13）｜✅ 已实现（2026-08-13，5.5.1.1-5.5.1.4 全部定稿落地）
 > 相关：phase5.5-textbox-requirements.md（职责确认 v1.0）/ phase5.5-textbox-preliminary-design.md（初步设计 v1.0）
 
 ## 1. 实施结构（4 个 commit）
@@ -153,6 +153,7 @@ TextMeasurer& GetTextMeasurer() noexcept;
 ## 3. 修订记录
 
 - v1.0（2026-08-13）5.5.1.1 定稿：D1-D5。**DecodeUTF8 删除**（评审 YAGNI 修正——零消费者，5.6 IME 时再加）；**SequenceLength 参数改 unsigned char**（评审 符号修正——MSVC char 有符号）；**ByteOffsetToCodepointIndex @pre 明确**（非边界 UB，鼠标定位需调用方钳制）；断言字节布局修正（3 → 8，评审 数学确认）；命名 ECDI 顶层函数（与 UTF8ToWide 风格一致，确认）。
+- v1.3（2026-09-11）实现落地状态同步（补记）：5.5.1 全部落地；同时将状态行版本由 v1.0 同步至 v1.3（此前滞后于修订记录 v1.2）。
 
 ## 4. 5.5.1.3 详细设计（编辑逻辑）
 

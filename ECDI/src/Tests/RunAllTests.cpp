@@ -22,6 +22,7 @@ int ECDI::Test::RunAllTests()
     RegisterChildProcessTests();
     RegisterModelProbeTests();
     RegisterImageDecodeTests();
+    RegisterAntiAliasingTests();   // Phase 8.6：圆角覆盖度抗锯齿
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

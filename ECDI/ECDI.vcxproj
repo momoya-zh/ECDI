@@ -163,6 +163,7 @@
     <ClCompile Include="src\Render\Renderer.cpp" />
     <ClCompile Include="src\Render\RecordingBackend.cpp" />
     <ClCompile Include="src\Render\GDIBackend.cpp" />
+    <ClCompile Include="src\Render\CornerCoverageMask.cpp" />
     <ClCompile Include="src\Render\GDITextMeasurer.cpp" />
     <ClCompile Include="src\Widget\Button.cpp" />
     <ClCompile Include="src\Widget\CheckBox.cpp" />
@@ -209,6 +210,7 @@
     <ClCompile Include="src\Tests\ChildProcessTests.cpp" />
     <ClCompile Include="src\Tests\ModelProbeTests.cpp" />
     <ClCompile Include="src\Tests\ImageDecodeTests.cpp" />
+    <ClCompile Include="src\Tests\AntiAliasingTests.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32ChildProcess.cpp" />
     <ClCompile Include="src\Platform\Win32\WicImageDecoder.cpp" />
     <ClCompile Include="src\Platform\Win32\ExecutablePath.cpp" />
@@ -238,6 +240,7 @@
     <ClInclude Include="include\ECDI\Render\RenderingBackend.h" />
     <ClInclude Include="src\Render\RecordingBackend.h" />
     <ClInclude Include="src\Render\GDIBackend.h" />
+    <ClInclude Include="src\Render\CornerCoverageMask.h" />
     <ClInclude Include="src\Render\GDITextMeasurer.h" />
     <ClInclude Include="include\ECDI\Render\RenderServices.h" />
     <ClInclude Include="include\ECDI\Render\BackendFactory.h" />

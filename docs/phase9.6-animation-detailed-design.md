@@ -1,6 +1,6 @@
 ﻿# Phase 9.6 动画系统 · 详细设计
 
-> 版本 v1.1（2026-08-29）。五阶段法第三步：接口与实现方案定稿。前置：requirements v1.1（职责确认通过）、preliminary-design v1.1（初步设计通过）、评审 实现前评审（有条件通过，四硬约束已补齐）。
+> 版本 v1.3（2026-08-29）。五阶段法第三步：接口与实现方案定稿。**✅ 已实现（2026-08-30）**——v1.2 实现落账（§8 全清单）+ AnimationTests 12 项
 
 ## 0. 决策汇总（逐题收敛记录，2026-08-29 拍板）
 
@@ -223,3 +223,4 @@ void Window::OnAnimationTick() {
 - v1.0（2026-08-29）初稿：九个决策点全部拍板收敛（d6 值回调式 / d7 AnimationToken 替换键 / d8 onFinished 纳入 / d5 弱引用令牌=生命周期保护机制、用户澄清非 Widget 指针管理 / d1 owner-held+保留段（否决集中头倾向）/ d9 Tick(elapsed) 参数化）；核心类型草案（Easing/插值/Token RAII/Manager/Tick 规则）；路由落地清单；S1/S2 实现要点；测试计划；TimerId 登记表；实现文件清单（原子授权预览）。
 - v1.1（2026-08-29）外部评审整合（有条件通过 → 四约束补齐）：① §2.3 生命周期不变量写死——TokenState = 共享状态块非弱 Widget 指针、对 manager 引用必须可失效、「析构标脏 / Tick 清理」顺序（token 析构不依赖 manager 存活）、manager 析构遍历置空为硬不变量；② §2.4 Tick 回调重入契约冻结——允许 onValue/onFinished 内 Start/Cancel，manager 保证遍历安全，本轮 Start 的新动画下轮才推进（机制留实现期，行为契约不改）；③ 完成帧顺序写死——onValue(finalValue) → onFinished → 移除；④ onFinished 触发契约明确——正常完成才调，Replace/Cancel/Token 失效一律不调；⑤ 测试计划补 8/9/10（重入 / 终值顺序 / 生命周期不变量）；⑥ §8 main.cpp 措辞修正——skill 条 2 实为「需单独授权」（2026-08-25 由禁止放宽），非绝对禁止；接线 AI 修改（单独授权）或用户自接二选一；工作区 MEMORY.md「不动 main」同步修订。评审 附加确认无异议项：per-Window / Tick(elapsed) / 值回调 / Token 替换键 / onFinished 纳入 / float+Color / 四 easing / owner-held 保留段 / S2 demo 承载 / 失效不调 onFinished。
 - v1.2（2026-08-29）实现落账（§8 全清单已实现，main.cpp 接线待用户二选一）：① TokenState 最终形态 = { animationId, alive }——**无 manager 指针字段**（token 永不回调 manager——比「可失效引用」更彻底；manager 条目持 TokenState 的 shared_ptr 弱所有权共享，无环）；② Tick 重入机制定稿 = Entry 堆稳定（vector<unique_ptr<Entry>>）+ tickEnd 边界（本轮 Start 的新动画下轮推进）+ 重入期 Cancel/Replace 延迟删除（cancelled 标记）；③ 新增 SetOnTimerStarted 钩子——Window 重置 elapsed 锚点（首次 tick 从 timer 启动时刻起算，防 epoch 累积跳变）；④ S1 实现落点：m_displayedBackground 呈现值 = OnPaint 单一视觉真相（ApplyTheme/SetStyle = 即时重置语义）；hover/focus 暂无专属色字段（ButtonStyle v0.1）——机制就绪待主题扩展，YAGNI 未预建；⑤ 测试 12 项落 AnimationTests.cpp（TestPlatformWindow 测试替身验 timer 启停序列）。
+- v1.3（2026-09-11）实现落地状态同步（补记）：9.6 已于 2026-08-30 实现；同时将头部版本由 v1.1 更正为 v1.3（修订记录已含 v1.2 实现落账）。

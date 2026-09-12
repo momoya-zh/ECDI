@@ -1,12 +1,25 @@
 ﻿# ECDI
 
-**ECDI** is a hand-written C++20 GUI framework for Windows, built from scratch on top of raw Win32 and GDI — no third-party UI, rendering, or utility libraries. Pure C++ and the platform SDK only.
+**ECDI** is a from-scratch C++20 GUI framework for Windows, built directly on raw Win32 and GDI — no third-party UI, rendering, or utility libraries. Pure C++ and the platform SDK only.
 
 > Currently under active development toward **v0.1.0** (first library release). Not yet stable — the API may change freely under SemVer `0.y.z`.
 
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 90+ design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 100+ design documents in Chinese).
+
+## How this was built
+
+"From-scratch" describes the provenance of the code — no third-party libraries, no borrowed framework — not its authorship. Implementation and documentation drafting are done with heavy AI assistance.
+
+What that assistance is *not* is unsupervised generation. Every phase runs the same loop, and each step leaves a written record:
+
+1. **Design before code** — requirements → preliminary design → detailed design, reviewed before any implementation (`docs/`, per phase)
+2. **External review gate** — every design document is critiqued and then revised, with version numbers bumped per review round
+3. **Atomic authorization** — a change set is applied only when *all* of its files are approved; if one file is unapproved, nothing is touched
+4. **Verification by hand** — builds and test runs happen in Visual Studio / CLion across four toolchains, never delegated
+
+The architecture, the layering, the phase breakdown, and every design decision are mine. That is what `docs/` is evidence of.
 
 ## Architecture
 
@@ -18,7 +31,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 
 - **Four-layer rendering contract**: Widget, PaintContext, CommandBuffer and Renderer never see each other's internals — a `Widget` only emits commands, the backend only consumes them. Swapping GDI for another backend means implementing one interface.
 - **Platform abstraction**: `PlatformWindow`, `PlatformApplication`, `ChildProcess` interfaces isolate all `Windows.h` usage; the framework core is platform-independent C++20.
-- **Zero dependencies**: no STL-external libraries, no GDI+, no UI framework. `msimg32` (AlphaBlend) is the only non-kernel link.
+- **Zero third-party dependencies**: no external libraries, no GDI+, no UI framework — only the Windows SDK (`user32`, `imm32`, `msimg32`, `windowscodecs`, `ole32`, `shlwapi`). Rendering is GDI + `msimg32` (AlphaBlend); image decoding uses the system WIC.
 
 ## Features
 
@@ -28,7 +41,9 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Animation**: per-window `AnimationManager`, token-based, easing functions
 - **Theme**: style layer (colors/fonts/corner radius/borders) with per-instance overrides
 - **Text**: text measuring, selection, IME composition, clipboard, undo/redo
-- **Testing**: self-hosted test framework (~150 cases, zero dependencies) with a recording backend for paint assertions
+- **Imaging**: WIC-backed decoding (`Decode::DecodeFile` / `Decode::DecodeMemory`) producing premultiplied BGRA, ready for `DrawImage`
+- **Anti-aliasing**: supersampled corner coverage masks for rounded rects (`S=8`), cached per radius — GDI has no native AA, so arcs are composited through a premultiplied alpha path that composes with the theme's corner radius
+- **Testing**: self-hosted test framework (170+ cases, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -43,7 +58,7 @@ Targets:
 
 | Target | Type | Description |
 |---|---|---|
-| `ECDI` | static library | The framework (`include/ECDI/*.h` — 80 public headers; internal implementation lives in `src/`) |
+| `ECDI` | static library | The framework (`include/ECDI/*.h` — 81 public headers; internal implementation lives in `src/`) |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
 
@@ -100,10 +115,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ## Project layout
 
 ```
-ECDI/                 framework sources (include/ = public headers, src/ = implementation + tests)
-examples/ModelProbe/  first real-world consumer of the framework
-probe-go/             Go backend embedded into ModelProbe as an RC resource
-docs/                 design documents (requirements → preliminary → detailed, per phase)
+ECDI/       framework sources (include/ = 81 public headers, src/ = implementation + tests)
+examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest
+probe-go/   Go backend embedded into ModelProbe as an RC resource
+docs/       design documents (100+ files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.

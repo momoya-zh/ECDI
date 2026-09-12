@@ -1,6 +1,6 @@
 ﻿# Phase 9 主题系统 — 详细设计
 
-> 状态：v1.8（2026-08-31）｜v1.4 定稿后增量修订（v1.5 9.6 收尾回写 / v1.6 Panel 设色 / v1.7 Panel 容器语义变更 / v1.8 ProgressBar 主题接入——修订记录见 §10）
+> 状态：v1.9（2026-08-31）｜✅ 已实现（2026-08-25 主题系统落地；v1.5-v1.8 增量随 9.6 Panel 设色 / Panel 容器语义 / ProgressBar 主题接入陆续落地——修订记录见 §10）
 > 前序：Phase 9 初步设计 v1.1（外部评审通过）/ Phase 8 渲染能力 ✅ / Phase 8.5 文本系统 2.0 ✅
 > 相关：phase9-theme-system-preliminary-design.md（初步设计 v1.1）/ Core/Color.h / Core/Font.h / Render/RenderingBackend.h / Widget/Button.cpp / Widget/Panel.cpp / Widget/TextWidget.cpp / Widget/Label.h / Widget/TextBox.cpp
 
@@ -840,6 +840,7 @@ Phase 9.3 透明主题值验证（可选——v1.2 改名：Alpha 能力属 Phas
 
 ## 10. 修订记录
 
+- v1.9（2026-09-11）实现落地状态同步（补记）：Phase 9 主题系统主体已于 2026-08-25 实现，v1.5-v1.8 增量（9.6 收尾回写 / Panel 设色 / Panel 容器语义 / ProgressBarStyle）均已在 2026-08-30~31 落地；本文件定位为**活文档**，后续控件主题接入继续在本文件增量修订。
 - v1.8（2026-08-31）**ProgressBar 主题接入**（详设：phase9.6-progressbar-detailed-design.md v1.1）：`Theme` 抽象基类新增 `virtual ProgressBarStyle GetProgressBarStyle() const = 0;`（+`#include ProgressBarStyle.h`；全仓唯一派生类 `DefaultTheme` 同步实现，闭环）；`DefaultTheme::GetProgressBarStyle()` 返回默认值——trackColor `(220,220,230)` 浅灰轨道 / fillColor `(80,120,220)` 主题蓝填充（同 Button/TextBox 焦点色协调）/ cornerRadius `0.0f`（= 自动圆角 height/2，详设 §2.5 冻结语义）；`ProgressBarStyle{ trackColor, fillColor, cornerRadius }` + `ProgressBarStyleOverride{ optional }` 定义于新增 `ProgressBarStyle.h`（cornerRadius 注释明确"0 = 自动圆角非真实 0 圆角"）。无既有控件测试波及。
 - v1.7（2026-08-30）**Panel 容器语义变更落地**（详设：phase9.6-panel-container-semantics-detailed-design.md v1.1）：**Panel 默认背景透明**（`DefaultTheme::GetPanelStyle` 灰底 → `Color::FromRGBA8(0,0,0,0)`——镶板 = 隐形布局容器，需底色经 `SetStyle` 显式设色）；**Panel 输入透传**（`Panel::ContainsPoint` override 恒 false——镶板自身永不参与命中，鼠标事件只由子控件接收；HitTest 子优先递归天然支持；固定语义无开关——YAGNI）；**OnPaint alpha 短路**（`a==0` 跳过 DrawRect——性能优化，命令流 PushClip→PopClip size 2）；测试更新（`Widget.PanelPaint` 默认透明断言 + 设色场景恢复 / `Widget.PanelSetStyle` 覆盖前断言改透明 / 新增 `Widget.PanelInputPassThrough`）。触发 = demo 美化前置需求（Panel 默认透明 + 默认跳过鼠标 + CollapsiblePanel 默认收起）。
 - v1.6（2026-08-29）**Panel 单实例设色落地**：新增 `PanelStyleOverride{ std::optional<Color> background }`（`PanelStyle.h`，补 `<optional>`）；`Panel` 新增 `public: void SetStyle(PanelStyleOverride)`（`Panel.h` 声明 + `Panel.cpp` 实现——`if (override.background) m_style.background.Set(...); Invalidate();`，与 Button/TextBox 同构）；`PanelStyle.h` / `Panel.h` / `Panel.cpp` 注释同步（删除「MVP 无 Override」旧陈述）；新增测试 `Widget.PanelSetStyle`（`WidgetTests.cpp`：覆盖前灰底 → 覆盖后自定义色生效 → 覆盖后 `ApplyTheme` 不再回退，验证 D7 overridden 契约）。触发 = 用户需求「镶板能否设色」——此前归 Phase 9 YAGNI，需求出现即按既有模式补（非过度设计：Panel 唯一样式字段即 background）。

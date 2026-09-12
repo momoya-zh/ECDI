@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.2 翻译器契约改造 — 职责确认
 
-> 状态：v1.0（2026-08-15）｜待确认后进初步设计
+> 状态：v1.1（2026-09-11）｜✅ 已实现（2026-08-15）——7.1.2 翻译器契约改造，见 phase7-messagehandler-detailed-design.md v1.2（V1 编译零警告 + V3/V4 事件/IME 回归正常）
 > 相关：phase7-platform-requirements.md（D1-D8）/ phase7-platform-detailed-design.md（v1.1，7.1.1 已实现）
 > 定位：**7.1.1 = 物理迁移（代码搬家）；7.1.2 = 依赖关系重构（真正的平台解耦）**（评审 概括，采纳）
 
@@ -97,3 +97,4 @@ Window 是**事件转发节点**，不是最终派发者（最终派发者是 Ap
 ## 4. 修订记录
 
 - v1.0（2026-08-15）职责确认定稿：C1-C6。外部评审全采纳：C1 同步事件模型论证（反对 unique_ptr 过度设计）/ C2 目录归位 / C3 const Event& 修正（抓出 7.1.1 草案的 Event&）/ C4 过渡层注释 / C5 两级 Dispatch 表述 / V2 grep 验收 = Platform 零 Application 依赖。
+- v1.1（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进初步设计」，实际 7.1.2 翻译器契约改造已于 2026-08-15 实现并验证通过（见 phase7-messagehandler-detailed-design.md v1.2（V1 编译零警告 + V3/V4 事件/IME 回归正常））。

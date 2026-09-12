@@ -1,6 +1,6 @@
 ﻿# Phase 5.5.2 Selection + 修饰键 详细设计
 
-> 状态：v1.0（2026-08-14）｜详细设计完成，进入实现
+> 状态：v1.1（2026-08-14）｜详细设计——✅ 已实现（2026-08-14，D1-D9 落地）
 > 相关：phase5.5.2-selection-requirements.md（职责确认 v1.0）/ phase5.5.2-selection-preliminary-design.md（初步设计 v1.0）
 
 ## 1. 改动清单（9 文件）
@@ -151,3 +151,4 @@ void Window::HandleKeyDown(const KeyDownEvent& event){
 ## 5. 修订记录
 
 - v1.0（2026-08-14）详细设计：D1-D9 定稿。评审 5 处调整全采纳：D1 operator| 配套；D2 全 inline 确认；D4 TranslateModifier 匿名 namespace 函数（双分支共用非分支内 lambda）；D7 补 OnKeyDown 清单（Shift+方向键/Home/End + 无 Shift 清选择——最容易漏）；D8 预填 20-30 字符长文本；记账 m_mouseDown 未来升级 m_dragSelecting（6.x 双击/三击/选词/选行）。
+- v1.1（2026-09-11）实现落地状态同步（补记）：5.5.2 已于 2026-08-14 实现；头部状态由「进入实现」回写为「已实现」。

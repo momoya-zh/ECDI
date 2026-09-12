@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.4 Backend 注入 — 初步设计
 
-> 状态：v1.0（2026-08-16）｜待确认后进详细设计
+> 状态：v1.2（2026-09-11）｜✅ 已实现（2026-08-16）——7.1.4 Backend 注入（决策 35 闭环 + RenderServices），见 phase7-backend-detailed-design.md v1.1（V1 编译零警告 + V2 渲染回归正常 + V3 grep 实证 Window.h 零具体后端）
 > 相关：phase7-backend-requirements.md（职责确认 D1-D5 + D1a，v1.2）
 > 目标：解决**决策 35 代价**（Window 持 GDIBackend 值成员 → 后端不可替换）
 > 终态（评审）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd——只剩纯框架概念
@@ -203,3 +203,4 @@ Window::Window(..., RenderServices services)
   - **第三处（采纳）**：`PlatformRenderContext` 归位 **`Platform/` 目录**（非 Render/）——句柄本质是"窗口/平台句柄"不是"渲染句柄"；Win32RenderContext/X11RenderContext 都是平台实现家族（与 Win32PlatformWindow 同族），语义统一。RenderingBackend.h 仅前置声明（Initialize 参数 const&——零 include 依赖）
   - **第五处（不采纳，论证补充）**：构造保持**按值传参** `RenderServices services`——move-only 按值传 + std::move 是惯用法；默认参数 prvalue 经 C++17 guaranteed copy elision 就地构造、生命周期完整覆盖调用（`&&` 限右值调用、`optional` 多余复杂度——均不采纳）
   - 其余四点（拆类 / 工厂 / Initialize 默认空 / V3 验收）一致确认
+- v1.2（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进详细设计」，实际 7.1.4 Backend 注入（决策 35 闭环 + RenderServices）已于 2026-08-16 实现并验证通过（见 phase7-backend-detailed-design.md v1.1（V1 编译零警告 + V2 渲染回归正常 + V3 grep 实证 Window.h 零具体后端））（且原头部版本 v1.0 滞后于修订记录 v1.1）。

@@ -1,6 +1,6 @@
 ﻿# Phase 9 主题系统 — 初步设计
 
-> 状态：v1.1（2026-08-25）｜初步设计待审（外部评审整合）
+> 状态：v1.2（2026-08-25）｜初步设计——✅ 已实现（2026-08-25，B1-B5 接口方案落地）
 > 前序：Phase 9 职责确认 v1.1（外部评审通过）/ Phase 8 渲染能力 ✅ / Phase 8.5 文本系统 2.0 ✅
 > 相关：phase9-theme-system-requirements.md（职责确认 v1.1）/ Core/Color.h / Render/RenderingBackend.h / Widget/TextWidget.h / Widget/Button.h
 
@@ -324,5 +324,6 @@ Phase 9.3 Alpha 消费（T3）
 
 ## 9. 修订记录
 
+- v1.2（2026-09-11）实现落地状态同步（补记）：Phase 9 已于 2026-08-25 实现；头部状态由「初步设计待审」回写为「已实现」。
 - v1.1（2026-08-25）外部评审整合（"小修后进入详细设计"——5 项必修）：**① B3 改为 `DefaultTheme : public Theme`**（修复 v1.0 编译错误：ApplyTheme(const Theme&) 无法接受 GetDefaultTheme() 返回值）；**② B1 删除 Theme 中 GetForegroundColor/GetBorderWidth/GetCornerRadius/GetPadding 基础属性查询**（避免 Style 与基础属性双重真相——Style 是唯一视觉属性来源）；**③ B4 明确 Reset 顺序 = ClearOverrides() + ApplyTheme(theme)**（MVP 不实现，禁止反向）；**④ B5 修正 SetStyle 不适用 hover 例子**（改为"运行时用户样式覆盖"，Hover/Pressed 由 Widget 状态 + Style 状态属性决定）；**⑤ §7 新增 Phase 9 TestCase（T-F01-T-F09）**覆盖 StyleField/DefaultTheme/D7 契约（无窗口单元测试）；新增 §4 架构边界图 + Style 纯数据结构原则；新增 §3 SetStyle 场景澄清（生命周期级 Override）。
 - v1.0（2026-08-25）初步设计初稿：B1 Theme 接口（属性查询纯虚）/ B2 StyleField\<T\> 泛型 + D7 落地（Apply/Set 语义）/ B3 DefaultTheme 非 Singleton（自由函数 + static local）/ B4 ApplyTheme 不清除 Override / B5 控件迁移策略（构造函数 + ApplyTheme）/ 模块划分 / 实施顺序（9.1/9.2/9.3）。

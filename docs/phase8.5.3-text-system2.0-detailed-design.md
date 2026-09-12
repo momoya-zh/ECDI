@@ -1,6 +1,6 @@
 ﻿# Phase 8.5.3 文本系统 2.0 详细设计（Undo/Redo）
 
-> 状态：v1.1（2026-08-25）｜定稿待审（外部评审整合）
+> 状态：v1.2（2026-08-25）｜详细设计——✅ 已实现（2026-08-25，快照模式 Undo/Redo + Composition 一次撤销）
 > 前序：Phase 8.5.2 完结 ✅（commit edfde46）/ 8.5.1 完结 ✅（commit 8ab8300）
 > 相关：phase8.5-text-system2.0-preliminary-design.md（B6 Undo Snapshot / C3 Composition 与 Undo / C4 Push 时机）
 > 拆分说明：本文件 = 8.5.3 专属详细设计（原草案 §10 定稿）
@@ -290,5 +290,6 @@ case KeyCode::Y:    Redo(); break;
 
 ## 11. 修订记录
 
+- v1.2（2026-09-11）实现落地状态同步（补记）：8.5.3 已于 2026-08-25 实现；头部状态由「定稿待审」回写为「已实现」。
 - v1.1（2026-08-25）外部评审整合：🔴 **CancelComposition 真正 RestoreSnapshot**（模型 B 组合串已在 m_text——仅 pop 会残留拼音占位）+ Cancel vs Undo 语义表（恢复✅/移除✅/进 Redo❌）；🟡 **C4c 一次编辑=一次 Push 契约**（InsertCodepoint/InsertText 独立实现已核）；🟡 **C3b 组合态 Undo/Redo 防御**（`if (m_isComposing) return`）；🟢 TestCase 补 F44（Composition Cancel 恢复+弹栈+不留历史）/F45（连续 Redo 双向流转）。
 - v1.0（2026-08-25）8.5.3 定稿：B6 快照结构落地 + C4 挂载点清单（含 DeleteBackward/Forward 空操作检查重构）+ Undo/Redo 栈流转 + C3 Composition 衔接（首次 Push/Commit 不 Push/Cancel 弹回）+ Ctrl+Z/Y + D4/D7/D9 契约 + F35-F43。

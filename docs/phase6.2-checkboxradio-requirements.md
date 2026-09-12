@@ -1,6 +1,6 @@
 ﻿# Phase 6.2 CheckBox / Radio 职责确认
 
-> 状态：v1.1（2026-08-25）｜职责确认对齐更新（Phase 9 主题系统 + 7.5 回调 + 7.2 测试体系已落地）
+> 状态：v1.2（2026-08-25）｜职责确认对齐更新——✅ 已实现（2026-08-25，StateWidget + CheckBox/Radio，含绘制断言 S11-S14）
 > 相关：phase6.1-horizontallayout-requirements.md（Phase 6 布局系统边界）/ phase3-focus-design.md（Focus/键盘链）/ phase9-theme-system-requirements.md（Phase 9 主题——CheckBox/Radio 样式直接纳入）/ phase7.2 测试体系（7.2 完结）
 
 ## 0. v1.1 对齐更新（2026-08-25——三个 Phase 落地后的架构对齐）
@@ -94,6 +94,7 @@ protected:
 
 ## 7. 修订记录
 
+- v1.2（2026-09-11）实现落地状态同步（补记）：6.2 已于 2026-08-25 实现（StateWidget 行为基类 + 真实勾/圆绘制 + 同父互斥 + CheckBoxStyle/RadioStyle 进 Theme）。
 - v1.1（2026-08-25）**架构对齐更新**（Phase 9 主题 + 7.5 回调 + 7.2 测试 + Phase 8 渲染全部落地）：D1 样式直接带 CheckBoxStyle/RadioStyle 进 Theme（StyleField 机制）；D2 纳入 SetOnCheckedChanged 回调（7.5 两套并存先例）；D3 验证改 7.2 TestCase；D4 真实勾/圆（DrawLine/DrawRoundedRect 约束消解）；D5 StateWidget 基类保留（继承 Phase 9 TextWidget）。6 条 StateWidget 契约 + C1-C8 全部保留。
 - v1.0（2026-08-15）职责确认定稿：C1-C8 + 6 条 StateWidget 契约 + 绑定机制说明。评审 修订全采纳：C4 带参 OnCheckedChanged(bool) / 无 Toggle / C2 互斥范围 + 不可取消写死。
 - **v1.0.1（2026-08-15）延期**：CheckBox/Radio **整体延期 Phase 8 后**（用户决策——勾/圆依赖 Phase 8 渲染能力，不做填充版将就）。本设计定稿存档，Phase 8 后直接进初步设计（已完成的 preliminary 同步存档）。

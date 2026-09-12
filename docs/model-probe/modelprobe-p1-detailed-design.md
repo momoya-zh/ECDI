@@ -1,10 +1,10 @@
 ﻿# ModelProbe P1 详细设计（v1.1）
 
 > 阶段：详细设计（五阶段法 ③）
-> 日期：2026-09-01（v1.1 修订 2026-09-01）
-> 状态：待评审（用户 / GPT）——v1.0 已过 GPT 评审（架构/拆分/测试/YAGNI 全过），v1.1 吸收其 7 条意见
+> 日期：2026-09-01（v1.1 修订 2026-09-01；v1.2 状态回写 2026-09-11）
+> 状态：**✅ P1 已实现**（2026-09-01/05 落地；`ecdi_tests` 覆盖 ChildProcessTests / ModelProbeTests）——本版是 P1 的实现依据；**P2 演进（资源嵌入 / SetSingleLine / 二次查询修复）无独立文档，见 §10**
 > 前置：初步设计 v1.3（用户 2026-09-01 确认「差不多不缺东西了」）
-> 文档目录：本 demo 文档独立存 `model-probe-docs/`，不与框架 `docs/`（phaseN-*）混放
+> 文档目录：`docs/model-probe/`（2026-09-11 从仓库根的 `model-probe-docs/` 移入 docs/ 体系——用户决策：统一文档入口，同时保留 demo 与框架文档的区隔）
 > v1.1：吸收 GPT 评审（2026-09-01，逐条已回应）——① ChildProcess 父侧句柄 `SetHandleInformation`（**P0 硬问题**：防子进程继承父写端 → CloseInput 永收不到 EOF）② Start 改 `(executable, args vector)` 接口边界（引号转义归 Win32 实现）③ 描边环几何公式冻结（outer/inner/radius + 退化保护）④ 新增分包测试 `FetchFragmentedOutput` ⑤ 关窗清理顺序写死（StopTimer→CloseInput→Wait/Terminate→关窗）⑥ hover 配色陷阱标注（改 background 必须同设 hoverBackground）⑦ 7 能力最小实现边界声明
 
 ---
@@ -216,7 +216,7 @@ StyleField<Color> borderColor;    // 边框色（默认透明）
 | `GetTextBoxStyle` | `cornerRadius=0` `borderWidth=0` `borderColor=透明` | 现状不变（零回归） |
 | `GetPanelStyle` | `cornerRadius=0` `borderWidth=0` `borderColor=透明` | 透明容器语义不变 |
 
-## 7. Demo：ModelProbePage（ECDI/src/Demo/ModelProbe.{h,cpp}）
+## 7. Demo：ModelProbePage（`examples/ModelProbe/ModelProbe.{h,cpp}`）
 
 ### 7.1 类结构
 
@@ -363,12 +363,27 @@ ECDI::Application::OnWindowCloseRequested(event);            // ④ 转发基类
 | 框架 | `ECDI/include/ECDI/Theme/PanelStyle.h` + `ECDI/include/ECDI/Widget/Panel.h` / `ECDI/src/Widget/Panel.cpp` | 修改 |
 | 框架 | `ECDI/src/Theme/DefaultTheme.cpp` | 修改 |
 | 框架 | 测试：`ECDI/src/Tests/` 新增 ChildProcessTests.cpp + 扩展 TextBoxTests/ButtonTests/PanelTests + 解析单测 | 新增/修改 |
-| demo | `ECDI/src/Demo/ModelProbe.{h,cpp}` | 新增 |
-| 入口 | `ECDI/main.cpp`（ModelProbe 窗口 + DemoApplication::OnTimer/OnWindowCloseRequested 覆写 + Showcase 并存） | **单独授权** |
-| 工程 | `ECDI/ECDI.vcxproj`（登记新文件） | 修改 |
-| 文档 | `model-probe-docs/`（本目录） | 新增 |
+| demo | `examples/ModelProbe/ModelProbe.{h,cpp}`（实现时落位于此——Phase 10 库化把 demo 移出框架 src/） | 新增 |
+| 入口 | `examples/ModelProbe/main.cpp`（ModelProbe 窗口 + DemoApplication::OnTimer/OnWindowCloseRequested 覆写；独立 exe，不再与 Showcase 并存） | **单独授权** |
+| 工程 | `examples/ModelProbe/CMakeLists.txt` + `ECDI/ECDI.vcxproj`（登记新文件） | 修改 |
+| 文档 | `docs/model-probe/`（本目录） | 新增 |
 
-## 10. 修订记录
+## 10. P2 演进记录（**无独立设计文档**）
+
+> ⚠️ **本节是事后补记**——P2 的实现**没有走五阶段法**（无职责确认/初设/详设），代码先落地。此处仅登记「实现期发生了哪些偏离本文档的事」，供后续接手者了解 demo 的真实状态。**不要把它当作 P2 的设计依据。**
+
+| # | 演进项 | 说明 |
+|---|---|---|
+| 1 | **demo 移出框架目录** | `ECDI/src/Demo/` → `examples/ModelProbe/`（Phase 10 库化，2026-09-03）——独立 CMake 目标 + 独立 exe，不再与 Showcase 并存于同一进程 |
+| 2 | **后端资源嵌入** | `probe.exe` 作为 **RCDATA 资源（ID 101）** 编译进 demo exe → 运行时释放到 `networkbackend/`，带「已存在则复用」检测；不再依赖外部文件分发 |
+| 3 | **应用图标** | `app.ico`（`IDI_APP = 102`，黑色圆角矩形 + 白色 "API"，4 尺寸 16/32/48/256）经 `LoadImageW` 在 `Win32WindowClass` 注册时加载 |
+| 4 | **TextBox `SetSingleLine`** | BaseURL / Key 两个输入框改为单行（§3.3 形态规格之外的追加能力） |
+| 5 | **窗口尺寸固定** | 680×780 单窗口；页面 640×710 @ (20,30)，`#0f1115` 垫层防白底 |
+| 6 | **Release 静态运行时** | Release|x64 配 `/MT`（单文件分发） |
+| 7 | **二次查询不清空列表（缺陷修复）** | `HandleLine` 的 `OK FETCH` 分支补 `m_models.clear() + RebuildRows() + UpdateStat()`——原实现只追加不清空，第二轮结果会叠在上一轮之后。修复于 2026-09-11，含回归用例 `ModelProbePage.FetchReplacesPrevious` |
+
+## 11. 修订记录
 
 - v1.0（2026-09-01）详细设计初稿：7 项框架能力落成精确规格（ChildProcess 句柄表/创建参数、GetExecutableDirectory、TextBox echo 显示串机制/只读门禁/形态命令流、Button hover 三态、Panel 形态、DefaultTheme 默认值表）+ ModelProbePage 类结构/布局树/轮询接线/主流程伪码 + 22 条测试用例 + 授权清单。全部引用已对照源码核实。
 - v1.1（2026-09-01）吸收 GPT 评审（逐条已回应，7 项全采纳）：① **§2.2 Start 补 `SetHandleInformation` 清父侧句柄继承（P0 硬问题）** + 句柄继承矩阵冻结 ② §2.1 Start 改 `(executable, args vector)`——引号转义归 Win32 实现，接口不收命令行字符串 + §2.2 P1 边界声明（非进程管理器）③ §3.3 描边环几何公式冻结（outer/inner/outerRadius/innerRadius + 退化保护）④ §8 新增 `ModelProbePage.FetchFragmentedOutput`（分包/半行缓冲）+ `MaskedGeometry` 扩展（caret+selection 全链 display 串）⑤ §7.4 退出清理顺序写死（StopTimer→CloseInput→Wait/Terminate→关窗）⑥ §4 hover 配色陷阱标注（改 background 必须同设 hoverBackground）⑦ §2.2 最小实现边界。
+- v1.2（2026-09-11）**状态回写 + 目录迁移 + P2 补记**：① 状态由「待评审」改为**已实现**（核实：`ChildProcess.h`/`ExecutablePath.h` + Win32 实现 + `ChildProcessTests`/`ModelProbeTests` 均已落地）② 文档由仓库根 `model-probe-docs/` 移入 **`docs/model-probe/`**（用户决策——统一文档入口，同时保留 demo 与框架文档的区隔；原 2026-09-01「不混进 docs/」的决策就此修订）③ §7/§9 的 demo 与入口路径修正为实际落位（`examples/ModelProbe/`、独立 exe）④ 新增 §10 补记 P2 的 7 项演进（含 2026-09-11 的二次查询缺陷修复）。

@@ -1,8 +1,8 @@
-﻿# Phase 10 库化详细设计（v1.1）
+﻿# Phase 10 库化详细设计（v1.2）
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-05（v1.1 修订 2026-09-05——外部评审通过「修正后进实施」，5 项处置见修订记录）
-> 状态：**v1.1 评审通过——可进实施**
+> 状态：**✅ 已实现（2026-09-06）**——v1.1 评审通过后实施全部落地：9 头下沉 + 80 Public 头零平台泄漏 + install/export + MinimalApp 就位（README 索引同日收口）
 > 前置：phase10-library-requirements.md v1.1 / phase10-library-preliminary-design.md **v1.2 定稿**（评审「可进详设」）
 > 一句话：把初设的「三边界」落成**精确的移动清单、改写规则、CMake 全文与验收命令**——实施零决策
 
@@ -265,5 +265,6 @@ cmake --build build-minimal && .\build-minimal\MinimalApp.exe
 
 ## 10. 修订记录
 
+- v1.2（2026-09-11）**实现落地状态同步**（补记，非设计变更）：本阶段已于 2026-09-06 实施收口——9 头下沉、80 Public 头、install/export、MinimalApp 就位；头部状态由「可进实施」回写为「✅ 已实现（2026-09-06）」。
 - v1.1（2026-09-05）**外部评审通过（「修正后进实施」）——5 项处置**：① §0 新增**仓库布局锚定**（双层 ECDI 命名——`ECDI/src` 路径为评审 🔴#1 布局误解，**不修改**，本节防再歧义）；② **RecordingBackend 依赖核查定案**——grep 实证零 TestFramework 依赖 + 被 GDIBackend.cpp（框架内部）引用 → **留 src/Render/ 不移**（9 头方案不变，无需 Tests include dir）；③ §7 运行路径笔误修正（`.\build-minimal\MinimalApp.exe`）+ MinimalApp 定位明确（**Windows 平台验收程序**）+ 验收 #8 强化（**仅 find_package + ECDI::ECDI，零手工追加**——platform 库经 ECDITargets 传播验证）；④ 验收 #4 vcxproj 辅助工程定位冻结（评审后续撤回「VS 需出 ECDI.lib」——两套构建入口职责不同：CMake=正式库构建主线，VS=开发/调试/回归）；⑤ §9 实施顺序细分（6→12 步——回归/selfcontain/install/MinimalApp/README/终验/tag 分离，出问题易定位）。version.h 宏命名冻结（四宏，不加 STRING/NUMBER 变体）。
 - v1.0（2026-09-05）详细设计初稿：**分类修正**（Window.h 公共签名按值依赖 RenderServices/BackendFactory 实证 → 两头升 Public，下沉 11→9、Public 78→80——依赖方向单向律可验收）+ 9 头精确移动清单 + 18 文件引用改写规则（两条全局替换）+ install/export 全文（version.h 特例 FILES + ExactVersion）+ version.h.in 全文 + selfcontain 定稿（ecdi_public_header_test）+ MinimalApp 双文件全文 + 验收清单 10 项 + 实施顺序 9 步。待评审。

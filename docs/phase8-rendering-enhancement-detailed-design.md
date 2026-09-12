@@ -1,6 +1,6 @@
 ﻿# Phase 8 渲染增强（能力层）详细设计
 
-> 状态：v1.4（2026-08-21）｜详细设计已确认，进入实现  
+> 状态：v1.5（2026-08-21）｜详细设计——✅ 已实现（2026-08-24）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / Phase 7.5 事件回调 ✅  
 > 职责确认：phase8-rendering-enhancement-requirements.md v1.1  
 > 初步设计：phase8-rendering-enhancement-preliminary-design.md v1.0
@@ -700,6 +700,7 @@ void ECDI::Test::RunRendererTests()
 
 ## 15. 修订记录
 
+- v1.5（2026-09-11）实现落地状态同步（补记）：Phase 8 已于 2026-08-24 实现；头部状态由「进入实现」回写为「已实现」。
 - **v1.4（2026-08-21）** — 评审 准入审查后最终小修（4 点，架构不变；详细设计已确认，进入实现）
   1. **Image 空图像 no-op**：`width == 0 || height == 0` → DrawImage 不产生绘制（契约层确定边界）
   2. **Image stride 逐行读取明确**：契约补充"逐行读取时按 row*stride 定位（不能整体 memcpy）"

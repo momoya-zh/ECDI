@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.3 输入层抽象 — 初步设计
 
-> 状态：v1.0（2026-08-15）｜待确认后进详细设计
+> 状态：v1.3（2026-09-11）｜✅ 已实现（2026-08-16）——7.1.3 输入层抽象（CaretGeometry 插入点模型），见 phase7-textinput-detailed-design.md v1.1（V1 编译零警告 + V2 IME 候选窗跟随回归正常）
 > 相关：phase7-textinput-requirements.md（D1-D5）
 > 本质（评审）：文本插入点模型升级——**光标不是点，是矩形区域**
 
@@ -145,3 +145,4 @@ void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
 - v1.0（2026-08-15）初步设计定稿：P1-P5。CaretGeometry{ rect, visible } 全链升级（TextBox → Window → PlatformWindow → Win32PlatformWindow）；CreateCaret 尺寸来自 rect（消灭硬编码 2x20）；visible=false 跳过更新（失焦/隐藏语义）；12 个 SyncTextInputCaret 调用点零改动。
 - v1.1（2026-08-16，评审 二轮）五处修订：① **改名 GetCaretClientPosition → GetCaretClientGeometry**（返回值已是 CaretGeometry，Position 名不副实）② **kCaretWidth 常量提取**（匿名 namespace，OnPaint 竖线与 CaretGeometry 同源——不散落魔法数字）③ **visible 判断放平台表现层**（Window 不知 CreateCaret/HideCaret 细节）④ **visible=false → HideCaret**（存在 ≠ 可见——区别于销毁语义）⑤ **⚠️ 分歧点：不做 ShowCaret**——保持 5.6 无条件 HideCaret（系统 caret 仅作 TSF 信标，光标竖线控件自画；ShowCaret 会双光标）。
 - v1.2（2026-08-16，评审 三轮）分歧点**消解**（评审 完全认同自绘模型论证：系统 caret = 定位锚点 / 绘制 caret = 用户可见，两套独立）→ ① **visible 语义精化为"逻辑可见性"**（非平台可见性；防 8.5 闪烁阶段误 ShowCaret 双光标 Bug——注释防误解）② 预见 **CaretState/CaretController/BlinkTimer 发展方向**（8.5 消费），7.1.3 的 visible 是其第一块基石。
+- v1.3（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进详细设计」，实际 7.1.3 输入层抽象（CaretGeometry 插入点模型）已于 2026-08-16 实现并验证通过（见 phase7-textinput-detailed-design.md v1.1（V1 编译零警告 + V2 IME 候选窗跟随回归正常））（且原头部版本 v1.0 滞后于修订记录 v1.2）。

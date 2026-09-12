@@ -1,6 +1,6 @@
 ﻿# Phase 9 主题系统 — 职责确认
 
-> 状态：v1.1（2026-08-25）｜职责确认待审（外部评审整合）
+> 状态：v1.2（2026-08-25）｜职责确认——✅ 已实现（2026-08-25，T1-T5 范围 + D1-D5 决策全部落地）
 > 前序：Phase 8 渲染能力 ✅（Alpha 混合 + 顶降 DIB + PushClip/PopClip）/ Phase 8.5 文本系统 2.0 ✅
 > 相关：phase8-rendering-enhancement-requirements.md（Phase 8 能力层）/ phase5.3-button-requirements.md（Button 样式硬编码先例）
 
@@ -73,5 +73,6 @@
 
 ## 5. 修订记录
 
+- v1.2（2026-09-11）实现落地状态同步（补记）：Phase 9 主题系统已于 2026-08-25 实现（StyleField D7 契约 + Theme/DefaultTheme + TextStyle 单一视觉真相 + 控件迁移 + cornerRadius 消费）。
 - v1.1（2026-08-25）外部评审整合：T3/T5 重新措辞（避免重复描述 AlphaBlend 能力，明确 Phase 8 只提供能力、Phase 9 只消费）；**D1 取消 Singleton 锁死**（默认实现即可，避免未来多窗口多主题受限）；**新增 D6**（Theme 与 Style 关系：Theme=默认规范，Style=Widget 实际属性）；**新增 D7**（ApplyTheme 与 SetStyle 覆盖规则：局部覆盖优先，ApplyTheme 只更新未被覆盖的属性）。
 - v1.0（2026-08-25）职责确认初稿：T1-T5 范围定义，D1-D5 决策点与倾向。

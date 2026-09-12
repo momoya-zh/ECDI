@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.4 Backend 注入 — 职责确认
 
-> 状态：v1.2（2026-08-16，用户决策 A：7.1.4 拆 GDIBackend）｜待确认后进初步设计
+> 状态：v1.3（2026-09-11）｜✅ 已实现（2026-08-16）——7.1.4 Backend 注入（决策 35 闭环 + RenderServices），见 phase7-backend-detailed-design.md v1.1（V1 编译零警告 + V2 渲染回归正常 + V3 grep 实证 Window.h 零具体后端）
 > 相关：phase7-platform-requirements.md（c-2 PlatformRenderContext 定稿）/ phase7-platform-detailed-design.md（7.1.1 SetHwnd 过渡记账）
 > 目标：解决**决策 35 代价**（Window 持 GDIBackend 值成员 → 后端不可替换）——**v1.0 转库前必须完成**（skill 23）
 > 终态（评审）：Window.h 彻底消失 HWND/GDIBackend/HDC/HBITMAP/CreateWindowEx/SetHwnd——只剩纯框架概念
@@ -126,3 +126,4 @@ Window 构造：platform 创建 → m_renderBackend->Initialize(platform->GetRen
   - 新增 **D1a 拆类范围**：GDIBackend 拆 → GDIBackend（渲染，保留 fontCache）+ GDITextMeasurer（测量，自带 fontCache 双份——已核实测量零 hwnd 依赖、唯一共享依赖是 fontCache）；**RecordingBackend 不拆**（已核实不注入 Window——main.cpp 断言段 `Renderer`/`PaintContext` 各取角色，测试便利保留，TextMeasurer.h:13 原始设计意图）
   - 技术债：删"单类双实现待拆"（已拆）；新增"GetOrCreateFont/fontCache 双份逻辑重复"（FontCache 提取触发条件）
   - 边界：拆 GDIBackend 入范围；不拆 RecordingBackend
+- v1.3（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进初步设计」，实际 7.1.4 Backend 注入（决策 35 闭环 + RenderServices）已于 2026-08-16 实现并验证通过（见 phase7-backend-detailed-design.md v1.1（V1 编译零警告 + V2 渲染回归正常 + V3 grep 实证 Window.h 零具体后端））。

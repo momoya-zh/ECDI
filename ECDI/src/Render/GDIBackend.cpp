@@ -1,6 +1,7 @@
 ﻿#include "Render/GDIBackend.h"
 
 #include "ECDI/Core/ECDIAssert.h"
+#include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
 #include "Platform/Win32/Win32RenderContext.h"
 
@@ -16,16 +17,19 @@ namespace{
 
 // ── 9.5 Alpha Primitive 补强：半透明实心合成（约束 1：预乘 BGRA + AC_SRC_ALPHA）──
 // 复用 Phase 8 DrawImage §8.3 已验证链路（32bpp 顶降 DIB + AlphaBlend）。
-// 只合成颜色 alpha（约束 2：不引入几何抗锯齿）；alpha == 1 的调用不进入此路径（原 GDI 快速路径）。
+// Phase 8.6：圆角分支接入覆盖度抗锯齿（第 8.6 阶段**修订 9.5「约束 2」**——alpha 合成与
+// 几何覆盖度正交）；alpha == 1 的调用不进入此函数（走 GDI 快速路径或角补丁路径）。
 
 /// @brief 半透明实心绘制（矩形 / 圆角矩形共用）
 /// @param target 目标 DC（内存缓冲）
 /// @param rect   目标矩形（最终坐标）
 /// @param color  填充色（RGB 任意，alpha < 1 触发——本函数假定调用方已判 a < 1）
 /// @param cornerRadius 圆角半径（0 = 矩形；>0 = 圆角矩形）
+/// @param mask   覆盖度掩码（Phase 8.6；`nullptr` = 掩码不可用 → 退化既有二值判定）
 /// @details 创建临时 32bpp 预乘 DIB → 逐像素填充 → AlphaBlend(AC_SRC_ALPHA) → 释放。
 /// 每次调用创建/销毁 DIB（低频场景可接受，YAGNI 不做缓存池）。
-void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cornerRadius)
+void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cornerRadius,
+                     const CornerCoverageMask* mask)
 {
 	// 空矩形 no-op（契约层确定边界——与 DrawRect 一致）
 	if (rect.width <= 0.0f || rect.height <= 0.0f)
@@ -99,64 +103,97 @@ void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cor
 	}
 	else
 	{
-		// 圆角矩形（约束 2：不引入抗锯齿——GDI RoundRect 同款实心语义）
-		// 四角裁剪：以圆角圆心为中心，半径内保留、外透明（像素中心判定）
+		// 圆角矩形：Phase 8.6 覆盖度抗锯齿（D11——几何语义统一：所有圆角都带覆盖度）
+		// 四角以掩码取覆盖度；掩码不可用时退化为既有二值判定（不越界读、不崩溃）
 		const float radius = (std::min)(cornerRadius, (std::min)(static_cast<float>(width), static_cast<float>(height)) / 2.0f);
 		const float radiusSq = radius * radius;
+		const int R = static_cast<int>(std::lround(radius));
+
+		// 预乘色分量（循环外）：每像素只再乘覆盖度 cov
+		const float ba = color.b * color.a;
+		const float ga = color.g * color.a;
+		const float ra = color.r * color.a;
+
+		// 掩码可用性：内部不变量（半径一致）。不匹配 → 退化二值（防御，不越界读）
+		const bool maskUsable = (mask != nullptr && mask->radius == R);
 
 		for (int row = 0; row < height; ++row)
 		{
 			BYTE* line = dst + static_cast<size_t>(row) * dibStride;
 			for (int col = 0; col < width; ++col)
 			{
-				bool inside = true;
 				// 像素中心坐标（半像素偏移——避免边缘整像素误判）
 				const float cx = static_cast<float>(col) + 0.5f;
 				const float cy = static_cast<float>(row) + 0.5f;
 
+				// 覆盖度：矩形主体（三条带区）恒为 1；四角由掩码给出
+				float cov = 1.0f;
+
+				CornerId corner = CornerId::TopLeft;
+				int localI = 0;
+				int localJ = 0;
+				bool inCorner = false;
+
 				// 左上角
 				if (cx < radius && cy < radius)
 				{
-					const float dx = cx - radius;
-					const float dy = cy - radius;
-					inside = (dx * dx + dy * dy) <= radiusSq;
+					inCorner = true; corner = CornerId::TopLeft;
+					localI = col;                    localJ = row;
 				}
 				// 右上角
 				else if (cx > static_cast<float>(width) - radius && cy < radius)
 				{
-					const float dx = cx - (static_cast<float>(width) - radius);
-					const float dy = cy - radius;
-					inside = (dx * dx + dy * dy) <= radiusSq;
+					inCorner = true; corner = CornerId::TopRight;
+					localI = col - (width - R);      localJ = row;
 				}
 				// 左下角
 				else if (cx < radius && cy > static_cast<float>(height) - radius)
 				{
-					const float dx = cx - radius;
-					const float dy = cy - (static_cast<float>(height) - radius);
-					inside = (dx * dx + dy * dy) <= radiusSq;
+					inCorner = true; corner = CornerId::BottomLeft;
+					localI = col;                    localJ = row - (height - R);
 				}
 				// 右下角
 				else if (cx > static_cast<float>(width) - radius && cy > static_cast<float>(height) - radius)
 				{
-					const float dx = cx - (static_cast<float>(width) - radius);
-					const float dy = cy - (static_cast<float>(height) - radius);
-					inside = (dx * dx + dy * dy) <= radiusSq;
+					inCorner = true; corner = CornerId::BottomRight;
+					localI = col - (width - R);      localJ = row - (height - R);
 				}
 
-				if (inside)
+				if (inCorner)
 				{
-					line[col * 4 + 0] = b;
-					line[col * 4 + 1] = g;
-					line[col * 4 + 2] = r;
-					line[col * 4 + 3] = alphaByte;
+					if (maskUsable)
+					{
+						cov = static_cast<float>(
+							mask->At(MaskIndexX(localI, R, corner), MaskIndexY(localJ, R, corner)))
+							/ 255.0f;
+					}
+					else
+					{
+						// 防御退化：既有二值语义（像素中心判定）
+						const float ccx = (corner == CornerId::TopLeft || corner == CornerId::BottomLeft)
+						                  ? radius : (static_cast<float>(width) - radius);
+						const float ccy = (corner == CornerId::TopLeft || corner == CornerId::TopRight)
+						                  ? radius : (static_cast<float>(height) - radius);
+						const float dx = cx - ccx;
+						const float dy = cy - ccy;
+						cov = ((dx * dx + dy * dy) <= radiusSq) ? 1.0f : 0.0f;
+					}
 				}
-				else
+
+				if (cov <= 0.0f)
 				{
 					line[col * 4 + 0] = 0;
 					line[col * 4 + 1] = 0;
 					line[col * 4 + 2] = 0;
 					line[col * 4 + 3] = 0;   // 圆角外透明
+					continue;
 				}
+
+				// 预乘 BGRA（约束 1）；覆盖度作为额外 alpha 调制（最终 alpha = color.a × cov）
+				line[col * 4 + 0] = ToByte(ba * cov);
+				line[col * 4 + 1] = ToByte(ga * cov);
+				line[col * 4 + 2] = ToByte(ra * cov);
+				line[col * 4 + 3] = ToByte(color.a * cov);
 			}
 		}
 	}
@@ -185,6 +222,9 @@ GDIBackend::~GDIBackend()
 {
 	// 决策 31：缓冲统一释放（空句柄防御在 ReleaseBackBuffer 内部）
 	ReleaseBackBuffer();
+
+	// Phase 8.6：角补丁绘制面释放（幂等——内部空指针检查）
+	m_patchSurface.Release();
 
 	// D1：字体缓存统一清理（GDI 对象 10,000 上限纪律——渲染 DrawText 用）
 	for (auto& entry : m_fontCache)
@@ -286,7 +326,7 @@ void GDIBackend::DrawRect(const Rect& rect, const Color& color)
 	// 9.5 Alpha 补强：a < 1 → 半透明合成（预乘 DIB + AlphaBlend）；a == 1 → 原 GDI 快速路径（零开销不回归）
 	if (color.a < 1.0f)
 	{
-		BlendAlphaSolid(m_memoryDC, rect, color, 0.0f);
+		BlendAlphaSolid(m_memoryDC, rect, color, 0.0f, nullptr);
 		return;
 	}
 
@@ -381,15 +421,63 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	}
 
 	// 半径钳制到 [0, min(w,h)/2]：GDI RoundRect 对过大半径行为未定义（§8.2 契约）
+	// Phase 8.6：显式类型链（量化 → 上界 → 钳制 → int）——effective 整数半径 R 即掩码缓存键
+	const LONG w = static_cast<LONG>(rect.width);
+	const LONG h = static_cast<LONG>(rect.height);
+
+	const LONG roundedRadius   = static_cast<LONG>(std::lround(cornerRadius));   // ① 量化
+	const LONG maxRadius       = (std::min)(w, h) / 2;                           // ② 上界
+	const LONG effectiveRadius = std::clamp(roundedRadius, 0L, maxRadius);       // ③ 钳制
+
+	const int R = static_cast<int>(effectiveRadius);   // ④ effective 整数半径 = 缓存键
+
+	// ── 路径选择（Phase 8.6 §5.2）──
+	// ① R == 0 或 AA 关闭 → legacy（与改造前逐位一致）
+	if (R == 0 || !m_antiAliasing)
+	{
+		DrawRoundedRectLegacy(rect, cornerRadius, color);   // ⚠️ 传原始 cornerRadius（内部自行钳制）
+		return;
+	}
+
+	// ② a == 1 需要角补丁绘制面——准备失败则落 legacy（fail-safe：宁可无 AA，不可缺角）
+	if (color.a >= 1.0f && !m_patchSurface.Ensure(m_memoryDC, R))
+	{
+		Logger::Log(LogLevel::Warning,
+			L"GDIBackend: patch surface unavailable - rounded rect AA skipped");
+		DrawRoundedRectLegacy(rect, cornerRadius, color);
+		return;
+	}
+
+	// ③ 取掩码（键 = effective 整数半径——掩码只依赖半径，与尺寸/位置/颜色正交）
+	const CornerCoverageMask& mask = m_cornerMaskCache.Get(R);
+
+	if (color.a >= 1.0f)
+	{
+		DrawRoundedRectOpaqueAA(rect, R, color, mask);      // §5.3：3 带 + 4 角补丁
+	}
+	else
+	{
+		DrawRoundedRectBlendedAA(rect, R, color, mask);     // §5.4：全矩形 DIB + 覆盖度
+	}
+}
+
+void GDIBackend::DrawRoundedRectLegacy(const Rect& rect, float cornerRadius,
+                                       const Color& color)
+{
+	// ⚠️ 本函数为 Phase 8.6 之前两条分支的**原样搬移（零改写）**——
+	//    R == 0 或 AA 关闭时走此路，以保证「AA 关闭 / R == 0」与改造前逐位一致。
+
+	// 半径钳制到 [0, min(w,h)/2]：GDI RoundRect 对过大半径行为未定义（§8.2 契约）
 	const LONG w = static_cast<LONG>(rect.width);
 	const LONG h = static_cast<LONG>(rect.height);
 	const LONG clampedRadius = std::clamp(std::lround(cornerRadius),
 	                                      0L, (std::min)(w, h) / 2);
 
-	// 9.5 Alpha 补强：a < 1 → 半透明合成（圆角同款实心语义，约束 2 无抗锯齿）；a == 1 → 原 GDI 快速路径
+	// 9.5 Alpha 补强：a < 1 → 半透明合成（圆角同款实心语义）；
+	// a == 1 → 原 GDI 快速路径。mask 传 nullptr（legacy 不做几何抗锯齿）
 	if (color.a < 1.0f)
 	{
-		BlendAlphaSolid(m_memoryDC, rect, color, static_cast<float>(clampedRadius));
+		BlendAlphaSolid(m_memoryDC, rect, color, static_cast<float>(clampedRadius), nullptr);
 		return;
 	}
 
@@ -544,13 +632,21 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 
 	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, pen));
 
-	// GDI 开区间约定：有效像素 = [left, right-1] × [top, bottom-1]（right/bottom 列被
+	// GDI 开区间约定：可见像素 = [left, right-1] × [top, bottom-1]（right/bottom 列被
 	// PushClip(控件边界 [x,x+w)) 裁掉——手动画段需显式内缩，2026-08-27 修复）
 	const float fLeft = static_cast<float>(std::lround(rect.x));
 	const float fTop = static_cast<float>(std::lround(rect.y));
 	const float fRight = static_cast<float>(std::lround(rect.x + rect.width) - 1);
 	const float fBottom = static_cast<float>(std::lround(rect.y + rect.height) - 1);
-	const float r = (std::min)(cornerRadius, (std::min)((fRight - fLeft), (fBottom - fTop)) * 0.5f);
+
+	// ⚠️ 2026-09-11 修复：圆角弧心与半径必须基于「几何边界」[x, x+w) × [y, y+h)
+	//    （与 DrawRoundedRect / DrawRect 的形状语义一致），而非上面内缩后的可见像素边界。
+	//    原实现四角一律用 fRight/fBottom 定位弧心 ⇒ 右上 / 左下 / 右下三角的弧心各内移 1px
+	//    （左上角因 fLeft/fTop 本就不内缩而恰好对齐）→ 与背景圆角的弧错位，
+	//    在圆角与直线交接处表现为焦点框「内收」。
+	const float gRight = static_cast<float>(std::lround(rect.x + rect.width));
+	const float gBottom = static_cast<float>(std::lround(rect.y + rect.height));
+	const float r = (std::min)(cornerRadius, (std::min)((gRight - fLeft), (gBottom - fTop)) * 0.5f);
 
 	// ── 周界子段（按顺序：上 → 右上 → 右 → 右下 → 下 → 左下 → 左 → 左上）──
 	// 每个子段 = 直线（起终点）或圆弧（圆心 + 起止角）。s 为沿周界的弧长参数。
@@ -573,12 +669,12 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 	}
 	else
 	{
-		AddLine(fLeft + r, fTop, fRight - r, fTop);          // 上
-		AddArc(fRight - r, fTop + r, -kPi * 0.5f, 0.0f);     // 右上 -90°→0°
+		AddLine(fLeft + r, fTop, gRight - r, fTop);          // 上
+		AddArc(gRight - r, fTop + r, -kPi * 0.5f, 0.0f);     // 右上 -90°→0°
 		AddLine(fRight, fTop + r, fRight, fBottom - r);      // 右
-		AddArc(fRight - r, fBottom - r, 0.0f, kPi * 0.5f);   // 右下 0°→90°
-		AddLine(fRight - r, fBottom, fLeft + r, fBottom);    // 下
-		AddArc(fLeft + r, fBottom - r, kPi * 0.5f, kPi);     // 左下 90°→180°
+		AddArc(gRight - r, gBottom - r, 0.0f, kPi * 0.5f);   // 右下 0°→90°
+		AddLine(gRight - r, fBottom, fLeft + r, fBottom);    // 下
+		AddArc(fLeft + r, gBottom - r, kPi * 0.5f, kPi);     // 左下 90°→180°
 		AddLine(fLeft, fBottom - r, fLeft, fTop + r);        // 左
 		AddArc(fLeft + r, fTop + r, kPi, kPi * 1.5f);        // 左上 180°→270°
 	}
@@ -587,7 +683,11 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 	float total = 0.0f;
 	for (const Seg& s : segs)
 		total += s.len;
+	// ⚠️ 弧端点在「几何边界」上（x/y 可达 gRight / gBottom），而可见像素范围是
+	//    [fLeft, fRight] × [fTop, fBottom]——统一 clamp，避免无 PushClip 时越界 1px 绘制。
 	const auto PointAt = [&](float s){
+		float px = fLeft;
+		float py = fTop;
 		float acc = 0.0f;
 		for (const Seg& seg : segs)
 		{
@@ -598,17 +698,23 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 				{
 					// 直线线性插值
 					const float tx = (seg.len > 0.0f) ? u / seg.len : 0.0f;
-					return std::pair<float, float>{ seg.x1 + (seg.x2 - seg.x1) * tx,
-					                                seg.y1 + (seg.y2 - seg.y1) * tx };
+					px = seg.x1 + (seg.x2 - seg.x1) * tx;
+					py = seg.y1 + (seg.y2 - seg.y1) * tx;
 				}
-				// 圆弧：弧长 → 角度
-				const float a = seg.a1 + u / r;
-				return std::pair<float, float>{ seg.cx + r * std::cos(a),
-				                                seg.cy + r * std::sin(a) };
+				else
+				{
+					// 圆弧：弧长 → 角度
+					const float a = seg.a1 + u / r;
+					px = seg.cx + r * std::cos(a);
+					py = seg.cy + r * std::sin(a);
+				}
+				break;   // 命中即止（保留原「提前 return」的短路语义）
 			}
 			acc += seg.len;
 		}
-		return std::pair<float, float>{ fLeft, fTop };   // 兜底（不达）
+		// clamp 到可见像素范围（`(std::min)`/`(std::max)` 加括号——抑制 Windows 的 min/max 宏）
+		return std::pair<float, float>{ (std::min)((std::max)(px, fLeft), fRight),
+		                                (std::min)((std::max)(py, fTop), fBottom) };
 	};
 
 	// ── 沿周界连续段状：3px 实 + 3px 空交替，实心段细分画线 ──
@@ -691,6 +797,191 @@ void GDIBackend::EndFrame()
 
 	// 决策 17：BeginPaint/EndPaint 严格配对
 	EndPaint(m_hwnd, &m_ps);
+}
+
+// ── Phase 8.6：圆角覆盖度抗锯齿（详细设计 §5.3–§5.6）────────────────
+
+void GDIBackend::DrawRoundedRectOpaqueAA(const Rect& rect, int R, const Color& color,
+                                         const CornerCoverageMask& mask)
+{
+	const LONG x = static_cast<LONG>(rect.x);
+	const LONG y = static_cast<LONG>(rect.y);
+	const LONG w = static_cast<LONG>(rect.width);
+	const LONG h = static_cast<LONG>(rect.height);
+
+	// ── ① 三条实心带（覆盖度恒为 1 → 与覆盖度混合路径数学等价，初设 §2.2 已证）──
+	// 因 clamp 保证 2R <= min(w,h)，三条带的宽高恒 >= 0；零尺寸者跳过
+	// （真圆 w == h == 2R 时三条带全零尺寸 → 仅四角补丁拼成整圆；胶囊同理）
+	const RECT bands[3] = {
+		{ x,     y + R,     x + w,     y + h - R },   // 中带（全宽）
+		{ x + R, y,         x + w - R, y + R     },   // 上带（去左右两角）
+		{ x + R, y + h - R, x + w - R, y + h     }    // 下带（去左右两角）
+	};
+
+	HBRUSH brush = CreateSolidBrush(ToColorRef(color));
+	if (!brush)
+	{
+		return;   // 决策 30：局部失败跳过
+	}
+
+	for (const RECT& rc : bands)
+	{
+		if (rc.right > rc.left && rc.bottom > rc.top)
+		{
+			FillRect(m_memoryDC, &rc, brush);
+		}
+	}
+
+	DeleteObject(brush);   // 决策 24：1 次建销服务 3 条带
+
+	// ── ② 四个角补丁（同一份 canonical 掩码 + 索引变换）──
+	const struct { LONG x; LONG y; CornerId corner; } kCorners[4] = {
+		{ x,         y,         CornerId::TopLeft     },
+		{ x + w - R, y,         CornerId::TopRight    },
+		{ x,         y + h - R, CornerId::BottomLeft  },
+		{ x + w - R, y + h - R, CornerId::BottomRight }
+	};
+
+	for (const auto& c : kCorners)
+	{
+		FillPatchFromMask(mask, color, c.corner);         // 写入 PatchSurface（预乘 BGRA，R×R）
+		BlendPatch(m_memoryDC, static_cast<int>(c.x), static_cast<int>(c.y), R);
+	}
+}
+
+void GDIBackend::DrawRoundedRectBlendedAA(const Rect& rect, int R, const Color& color,
+                                          const CornerCoverageMask& mask)
+{
+	// 不变量防御：掩码半径必须等于 R（同一缓存键必然成立）；不匹配则退化为硬边，不崩溃
+	const bool maskUsable = (mask.radius == R);
+
+	BlendAlphaSolid(m_memoryDC, rect, color, static_cast<float>(R),
+	                maskUsable ? &mask : nullptr);
+}
+
+void GDIBackend::FillPatchFromMask(const CornerCoverageMask& mask, const Color& color,
+                                   CornerId corner)
+{
+	const auto ToByte = [](float v)
+	{
+		const float clamped = std::clamp(v, 0.0f, 1.0f);
+		return static_cast<BYTE>(clamped * 255.0f + 0.5f);
+	};
+
+	const int R = mask.radius;
+	// ⚠️ 行宽必须用 **DIB 实际行宽** = PatchSurface.size * 4，**不是** R * 4。
+	//    `PatchSurface` 只增不减（Ensure 仅在 requiredSize > size 时重建），故 size >= R 恒成立；
+	//    若按 R 定位行，则「同一后端先画过大半径、再画小半径」时本节整体行错位，
+	//    补丁内容被垂直压缩 → 圆角渲染错乱（2026-09-11 修复）。
+	//    每行只写前 R 个像素（R*4 字节），正好落在 [0,R)×[0,R) 有效区内。
+	const int stride = m_patchSurface.size * 4;
+	BYTE* dst = static_cast<BYTE*>(m_patchSurface.bits);
+
+	// 颜色分量（0~255）在循环外算好；每像素只再做一次 × c / 255
+	const int cb = static_cast<int>(ToByte(color.b));
+	const int cg = static_cast<int>(ToByte(color.g));
+	const int cr = static_cast<int>(ToByte(color.r));
+
+	for (int j = 0; j < R; ++j)
+	{
+		const int my = MaskIndexY(j, R, corner);
+		BYTE* line = dst + static_cast<size_t>(j) * stride;
+
+		for (int i = 0; i < R; ++i)
+		{
+			const std::uint8_t c = mask.At(MaskIndexX(i, R, corner), my);
+
+			// 预乘（约束 1）：color.a == 1 → A = c，RGB = colorByte × c（四舍五入）
+			// 不变量：RGB = round(colorByte × c / 255) <= c = A（因 colorByte <= 255）✓
+			line[i * 4 + 0] = static_cast<BYTE>((cb * c + 127) / 255);
+			line[i * 4 + 1] = static_cast<BYTE>((cg * c + 127) / 255);
+			line[i * 4 + 2] = static_cast<BYTE>((cr * c + 127) / 255);
+			line[i * 4 + 3] = c;
+		}
+	}
+}
+
+void GDIBackend::BlendPatch(HDC target, int x, int y, int size)
+{
+	BLENDFUNCTION blend{};
+	blend.BlendOp             = AC_SRC_OVER;
+	blend.SourceConstantAlpha = 255;
+	blend.AlphaFormat         = AC_SRC_ALPHA;   // 源为预乘 BGRA
+
+	AlphaBlend(target, x, y, size, size,
+	           m_patchSurface.dc, 0, 0, size, size, blend);
+}
+
+bool GDIBackend::PatchSurface::Ensure(HDC reference, int requiredSize)
+{
+	if (requiredSize <= 0 || reference == nullptr)
+	{
+		return false;
+	}
+
+	if (dc != nullptr && size >= requiredSize)
+	{
+		return true;   // 已够大（**只增不减**——初设 §6.2）
+	}
+
+	// 先建后替（与 EnsureBackBuffer 决策 38 同款：新资源就绪前不动旧资源）
+	BITMAPINFO bmi{};
+	bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth       = requiredSize;
+	bmi.bmiHeader.biHeight      = -requiredSize;   // 负 = 顶降（行序自上而下）
+	bmi.bmiHeader.biPlanes      = 1;
+	bmi.bmiHeader.biBitCount    = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	HDC newDC = CreateCompatibleDC(reference);
+	if (!newDC)
+	{
+		return false;
+	}
+
+	void* newBits = nullptr;
+	HBITMAP newBitmap = CreateDIBSection(newDC, &bmi, DIB_RGB_COLORS, &newBits, nullptr, 0);
+	if (!newBitmap || !newBits)
+	{
+		if (newBitmap) DeleteObject(newBitmap);
+		DeleteDC(newDC);
+		return false;
+	}
+
+	HBITMAP oldInNewDC = static_cast<HBITMAP>(SelectObject(newDC, newBitmap));
+
+	Release();   // 释放旧资源（严格逆序）
+
+	dc = newDC;
+	bitmap = newBitmap;
+	oldBitmap = oldInNewDC;
+	bits = newBits;
+	size = requiredSize;
+
+	return true;
+}
+
+void GDIBackend::PatchSurface::Release()
+{
+	// 决策 20/31 严格逆序：不能删除仍被选中的对象
+	if (dc)
+	{
+		SelectObject(dc, oldBitmap);
+	}
+	if (bitmap)
+	{
+		DeleteObject(bitmap);
+	}
+	if (dc)
+	{
+		DeleteDC(dc);
+	}
+
+	dc = nullptr;
+	bitmap = nullptr;
+	oldBitmap = nullptr;
+	bits = nullptr;
+	size = 0;
 }
 
 }

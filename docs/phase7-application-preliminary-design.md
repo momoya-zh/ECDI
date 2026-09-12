@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.5 Application 解耦 — 初步设计
 
-> 状态：v1.0（2026-08-16）｜待确认后进详细设计
+> 状态：v1.3（2026-09-11）｜✅ 已实现（2026-08-16）——7.1.5 Application 解耦（7.1 平台抽象闭环），见 phase7-application-detailed-design.md v1.1（V1 编译零警告 + 功能正常 + Application.h/cpp 零 Win32 实证）
 > 相关：phase7-application-requirements.md（职责确认，v1.0）
 > 目标：**7.1 平台抽象完全闭环**——Framework 层可脱离 Windows 独立存在（Application.h + Application.cpp 零 Win32）
 
@@ -163,3 +163,4 @@ void Win32PlatformApplication::RequestExit(){
   - **P2 接口形态（采纳评审"清理语义"）**：`PumpMessages(onMessageProcessed)` → **`SetDeferredCleanup` + `Run()` + `PerformDeferredCleanup`**——清理时机由平台循环控制（Run 内每条消息后调用），清理逻辑由框架注册（SetDeferredCleanup）；命名表达"Deferred Cleanup（资源生命周期管理）"语义，彻底消除事件/帧歧义；Run() 无参（评审 原提案形态）
   - **技术债新增（评审 目录组织建议——声明不属 7.1.5 职责）**：后端实现头（GDIBackend/GDITextMeasurer）归位候选（Render/Backend/Win32/ 或 Platform/Win32/）——第二后端出现时评估，V4 当前豁免
   - **7.1 核心洞察记录（评审）**：整个 7.1 不是"增加抽象"而是"**给每一个 Win32 依赖找到唯一归属**"（HWND→PlatformWindow、WindowProc→PlatformWindow、IME→PlatformWindow、GDI→RenderingBackend、RegisterClassW→Win32WindowClass、GetMessageW→PlatformApplication）——架构原则写入 MEMORY.md
+- v1.3（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进详细设计」，实际 7.1.5 Application 解耦（7.1 平台抽象闭环）已于 2026-08-16 实现并验证通过（见 phase7-application-detailed-design.md v1.1（V1 编译零警告 + 功能正常 + Application.h/cpp 零 Win32 实证））（且原头部版本 v1.0 滞后于修订记录 v1.2）。

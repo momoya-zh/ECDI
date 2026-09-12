@@ -1,6 +1,6 @@
 ﻿# Phase 7.5 事件回调（std::function 回调注册 API）职责确认
 
-> 状态：v1.2（2026-08-19）｜职责确认待审（评审 二轮评审整合）
+> 状态：v1.3（2026-08-19）｜职责确认——✅ 已实现（2026-08-19，Button::SetOnClick / TextBox::SetOnTextChanged + RaiseXxx 分离）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅
 > 相关文档：phase6.2-checkboxradio-requirements.md（C4 契约）/ phase7.2-testing-requirements.md（测试边界）/ roadmap-deferred.md（#9）
 
@@ -193,6 +193,7 @@ MEMORY 决策原文（2026-08-15）：
 
 ## 6. 修订记录
 
+- v1.3（2026-09-11）实现落地状态同步（补记）：7.5 已于 2026-08-19 实现（继承 override 基座 + 回调便利层两套并存）；头部状态由「职责确认待审」回写为「已实现」。
 - **v1.2（2026-08-19）整合 评审 二轮评审**：
   - **D3 修订**：`NotifyTextChanged()` → `RaiseTextChanged()` + `OnTextChanged()`（统一命名，与 Button/CheckBox 完全对齐）
   - **D4 统一范式**：`RaiseXxx`(private) → `OnXxx`(protected virtual) → `callback`(独立通道) 三段式，整个框架统一

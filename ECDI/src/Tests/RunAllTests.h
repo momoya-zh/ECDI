@@ -24,5 +24,6 @@ void RegisterProgressBarTests();
 void RegisterChildProcessTests();
 void RegisterModelProbeTests();
 void RegisterImageDecodeTests();
+void RegisterAntiAliasingTests();   ///< Phase 8.6：圆角覆盖度抗锯齿（L1 掩码数学 + L2 GDI 集成）
 
 } // namespace ECDI::Test

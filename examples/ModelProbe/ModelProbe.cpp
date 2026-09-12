@@ -575,6 +575,12 @@ void ModelProbePage::HandleLine(const std::vector<std::string>& fields){
 	const std::string& tag = fields[0];
 	if (tag == "OK" && fields.size() >= 2 && fields[1] == "FETCH"){
 		// OK\tFETCH\t<base>\t<count>——后续 MODEL 行逐条到达
+		// ⚠️ 后端已确认接受请求 → 丢弃上一轮结果。不在此清空的话，随后的 MODEL 行会
+		//    push_back 追加在旧结果之后，列表变成「上次 + 本次」。
+		//    放在此分支而非 StartFetch：ERR / 进程无响应时保留上次结果，用户仍可继续操作。
+		m_models.clear();
+		RebuildRows();   // m_models 为空 → 旧行全部隐藏（行池保留待复用）
+		UpdateStat();    // 统计归零（"共 0 个模型 · 已选 0"）
 		return;
 	}
 	if (tag == "MODEL" && fields.size() >= 2){

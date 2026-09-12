@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.2 翻译器契约改造 — 初步设计
 
-> 状态：v1.1（2026-08-15，评审 二轮修订）｜待确认后进详细设计
+> 状态：v1.2（2026-09-11）｜✅ 已实现（2026-08-15）——7.1.2 翻译器契约改造，见 phase7-messagehandler-detailed-design.md v1.2（V1 编译零警告 + V3/V4 事件/IME 回归正常）
 > 相关：phase7-messagehandler-requirements.md（职责确认 C1-C6）
 > 目标（评审 验收）：**`Platform/` 目录零 `Application*` 依赖**——依赖链 Win32 → PlatformWindowHost → Window → Application
 
@@ -93,3 +93,4 @@ void Window::OnEvent(const Event& event){
 
 - v1.0（2026-08-15）初步设计定稿：P1-P5。核心：翻译器物理迁移 + 构造 Application* → Host& + 10 处派发目标替换；Win32PlatformWindow 去 Application*；Window +OnEvent 过渡转发。**V2 grep 验收 = Platform 零 Application 依赖**（评审 验收标准）。
 - v1.1（2026-08-15，评审 二轮）：① **V2.1 验收新增**——Platform 下 Window.h 引用仅允许一处（WM_IME 技术债；明示"Platform 零依赖"说法不成立，实际为"零 Application 依赖 + Window.h 唯一残留"）② **WM_IME 定位明示**——不属于事件系统，属于输入法子系统（TSF/IMM/Candidate/System Caret 独立状态机），暂时借道 WindowMessageHandler ③ OnEvent 注释升级为 **Transitional adapter**（临时代码标记）。
+- v1.2（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进详细设计」，实际 7.1.2 翻译器契约改造已于 2026-08-15 实现并验证通过（见 phase7-messagehandler-detailed-design.md v1.2（V1 编译零警告 + V3/V4 事件/IME 回归正常））。

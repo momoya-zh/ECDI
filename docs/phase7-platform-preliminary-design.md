@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.1 PlatformWindow 骨架 — 初步设计
 
-> 状态：v1.1（2026-08-15，评审 边界守则修订）｜待确认后进详细设计
+> 状态：v1.2（2026-09-11）｜✅ 已实现（2026-08-15）——7.1.1 PlatformWindow 骨架，见 phase7-platform-detailed-design.md v1.1（V1-V5：编译零警告 + 事件/渲染/焦点/IME 回归正常）
 > 相关：phase7-platform-requirements.md（职责确认 D1-D8，v1.0.1 决策点已定稿）
 > 原则：**平台负责"窗口存在"，框架负责"窗口里面发生什么"**
 
@@ -136,3 +136,4 @@ public:
 
 - v1.0（2026-08-15）初步设计定稿：P1-P8。基于实现前置事实 F1-F3（翻译器派发一体 / HandleMessage 同 switch / IME 用 m_handle）——7.1.1 实际 = 骨架 + 消息处理整体搬迁 + IME 平台调用下沉，7.1.2/7.1.3 为契约层改造。P4 WindowClass 归属为决策点（方案 A 倾向）。
 - v1.1（2026-08-15，评审 边界守则）核心修订——**守边界：7.1.1 = "让 Window 不再认识 Win32"，非"一次性完成平台抽象"**：① 新增第 0 节目标与验收标准（Window.h 零 Win32 类型：HWND/HDC/UINT/WPARAM/LPARAM/LRESULT/RECT/IME API）② F1 翻译器 7.1.1 保持现状整体搬入（不拆 Translate/Dispatch，7.1.2 再拆）③ P3 记账 Win32IME 未来独立类（CreateCaret/Imm 职责属 Win32IME）④ **P4 方案 A 定稿**（评审 明确支持：不同时改两个入口；WindowClass/MessageLoop 标记 7.1.5）⑤ P5 明示 dynamic_cast\<TextBox\> 遗留债务 7.1.1 不处理 ⑥ P8 加 V2 验收（Window.h 零 Win32 grep 验证）。
+- v1.2（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进详细设计」，实际 7.1.1 PlatformWindow 骨架已于 2026-08-15 实现并验证通过（见 phase7-platform-detailed-design.md v1.1（V1-V5：编译零警告 + 事件/渲染/焦点/IME 回归正常））。

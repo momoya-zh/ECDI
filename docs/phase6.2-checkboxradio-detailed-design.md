@@ -1,6 +1,6 @@
 ﻿# Phase 6.2 CheckBox / Radio 详细设计
 
-> 状态：v1.2（2026-08-25）｜详细设计定稿（评审 最终审：**✅ APPROVED — 可以进入实现**；无必改项）
+> 状态：v1.3（2026-08-25）｜详细设计定稿（评审 ✅ APPROVED）——✅ 已实现（2026-08-25）
 > 前序：Phase 6.2 职责确认 v1.1（D1-D5 架构对齐）/ Phase 8 渲染增强 ✅（DrawLine/DrawRoundedRect）/ Phase 9 主题系统 ✅（StyleField/Theme/DefaultTheme——CheckBoxStyle/RadioStyle 直接纳入）
 > 相关：phase6.2-checkboxradio-requirements.md（职责确认 v1.1）/ phase6.2-checkboxradio-preliminary-design.md（初步设计 v1.0：P1-P8）/ phase9-theme-system-detailed-design.md（Phase 9 主题 v1.4——StyleField/ApplyTheme/SetStyle 机制）
 
@@ -548,6 +548,7 @@ void CheckBox::SetStyle(CheckBoxStyleOverride override){
 
 ## 11. 修订记录
 
+- v1.3（2026-09-11）实现落地状态同步（补记）：实现在评审通过后于 2026-08-25 落地（含绘制断言 S11-S14）；头部状态由「可以进入实现」回写为「已实现」。
 - v1.2（2026-08-25）评审 最终审（**✅ APPROVED — 可以进入实现**，无必改）：**🟠 几何输入防御补全**——CheckBox/Radio OnPaint 入口 `size = max(0, style.size)` + `if (size <= 0.0f) return`（负值/0 尺寸直接跳过，不产生 0×0 RenderCommand）+ `bw = max(0, style.borderWidth)`（防负 borderWidth 使内层大于外层）——Style 是用户可改 API，绘制入口统一防御；**S2/S3 测试名称精确化**（OnCheckedChanged 虚方法 vs SetOnCheckedChanged 用户回调区分）；**回调生命周期契约注明**（回调中销毁 Widget 未定义——沿用 7.5 全局规则，6.2 不新增）；拒绝清单重申（RadioGroup/Toggle/StateWidgetStyle/dotSize/三态/ThemeManager/Path 系统/S11 全不加）。
 - v1.1（2026-08-25）外部评审整合（"修掉 virtual 硬错误 + 补几何防御 + 明确回调顺序后可进入实现"）：**🔴 StateWidget::SetChecked 改 virtual**（Radio override 编译必须——否则 C2259）；**🟠 CheckBox OnPaint 内背景圆角化**（cornerRadius>0 时内层 DrawRoundedRect(max(0, radius-bw))——否则方形填充越界圆角边框区，与 Radio 统一）+ **innerSize 几何防御**（max(0, size-2*bw)——borderWidth 用户可改）；**🟠 冻结 Radio 通知顺序契约**（SetChecked(true) → 兄弟先 OnCheckedChanged(false) → 自身后 OnCheckedChanged(true)——先释放旧选择再建立新选择）；"唯一入口"措辞精化（所有状态修改最终经过 StateWidget::SetChecked——sibling->StateWidget::SetChecked(false) 显式基类限定符合契约）；**S11 明确不加**（SetChecked(true) 自身 no-op 已被 S1 覆盖 + S7 交互路径覆盖——评审 判定可选）；DrawTextContent 偏移布局确认（x 参数 = 相对控件原点绝对偏移，"控件内部自定义文字位置"场景 TextWidget 接口支持）。
 - v1.0（2026-08-25）详细设计初稿（**此前从未有 detailed-design**——6.2 因 7.2 优先级挂起时只到初步设计）：StateWidget 行为复用基类（无视觉 Style）+ CheckBox/Radio 专属 Style（Phase 9 机制直接消费——路线 B/D1，评审 路线 A 讨论已过时：Phase 9 今日落地）+ 真实勾（DrawLine）/圆（DrawRoundedRect）绘制（Phase 8 约束消解）+ Radio 同父互斥精确语义（直接父直接子节点）+ 程序可取消/交互不可取消 + CheckBoxStyle/RadioStyle 进 Theme + S1-S10 TestCase。

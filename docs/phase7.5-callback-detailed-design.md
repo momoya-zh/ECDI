@@ -1,6 +1,6 @@
 ﻿# Phase 7.5 事件回调（std::function 回调注册 API）详细设计
 
-> 状态：v1.0（2026-08-20）｜详细设计待审
+> 状态：v1.2（2026-08-19）｜详细设计——✅ 已实现（2026-08-19）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / 职责确认 v1.2 ✅ / 初步设计 v1.2 ✅
 > 相关文档：phase7.5-callback-requirements.md（职责确认）/ phase7.5-callback-preliminary.md（初步设计）/ phase6.2-checkboxradio-requirements.md（C4 契约）
 
@@ -612,6 +612,7 @@ void ECDI::Test::RunTextBoxTests()
 
 ## 7. 修订记录
 
+- v1.2（2026-09-11）实现落地状态同步（补记）：7.5 已于 2026-08-19 实现；同时将状态行版本由 v1.0 同步至 v1.2（此前滞后于修订记录 v1.1）。
 - **v1.1（2026-08-20）整合 外部评审**：
   - **必改①**：文件数量修正 4 → **5**（Button.h/.cpp、TextBox.h/.cpp、TextBoxTests.cpp；RunAllTests.h/.cpp 明确不修改）——§1.2 / §5 / §6 全部同步
   - **必改②**：TC1b 注释修正——"删选中区路径" → "普通删除路径"（实际无 Selection，走单码点删除）

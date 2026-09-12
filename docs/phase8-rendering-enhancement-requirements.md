@@ -1,6 +1,6 @@
 ﻿# Phase 8 渲染增强（能力层）职责确认
 
-> 状态：v1.1（2026-08-20）｜职责确认待审（外部评审整合）
+> 状态：v1.2（2026-08-20）｜职责确认——✅ 已实现（2026-08-24）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / Phase 7.5 事件回调 ✅
 > 相关：phase6.2-checkboxradio-requirements.md（6.2 消费 DrawLine/DrawRoundedRect）/ roadmap-deferred.md（Phase 8 延期项）/ MEMORY.md（Alpha 归属决策）
 
@@ -122,6 +122,7 @@ Phase 7 完成平台抽象与测试体系后，Framework 层接口已稳定。Ph
 
 ## 6. 修订记录
 
+- v1.2（2026-09-11）实现落地状态同步（补记）：Phase 8 已于 2026-08-24 实现（DrawLine / DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect——GDI/msimg32，无 GDI+）。
 - v1.1（2026-08-20）整合 外部评审：
   - R1 明确 DrawingContext 是调用入口，RenderingBackend 是能力抽象接口，具体实现位于 GDIBackend
   - R4 "渲染浮点化/亚像素" → "渲染坐标浮点化"，亚像素作为未来收益

@@ -1,8 +1,8 @@
-﻿# Phase 11 图片解码详细设计（v1.1）
+﻿# Phase 11 图片解码详细设计（v1.2）
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-07
-> 状态：**v1.1 外部评审通过（基本通过，修订 7 项——可进实施）**
+> 状态：**✅ 已实现（2026-09-07）**——Decode 模块 + WIC 后端（src/Platform/Win32/WicImageDecoder.cpp）+ ImageDecodeTests，158 全绿
 > 前置：phase11-image-decode-requirements.md v1.1 / phase11-image-decode-preliminary-design.md **v1.1**（评审「通过，可进详设」）
 > 一句话：收口 6 个开放点 + 落成实施规格（ComScope 定稿 / 溢出检查定稿 / 内存流与链接库定稿 / 测试资产生成策略 / 验收命令）——实施零决策
 
@@ -218,5 +218,6 @@ T1 PNG 精确像素 + 契约 / T2 半透明预乘 + 契约 / T3 JPEG 契约 / T4
 
 ## 9. 修订记录
 
+- v1.2（2026-09-11）**实现落地状态同步**（补记）：本阶段已于 2026-09-07 实施收口——6 开放点定稿方案全部落地（ComScope / 溢出检查 / SH 内存流 / 链接最小集）+ 测试 8 用例（158 全绿）；头部状态由「可进实施」回写为「✅ 已实现（2026-09-07）」。
 - v1.1（2026-09-07）**外部评审：基本通过，允许进入实施——实施前修订 7 项全采纳**：① 🔴 **ComPtr 定稿 ReleaseAndGetAddressOf()**（删裸 operator&——对已持有对象重取址覆盖旧指针致泄漏）+ 移动语义 + 失败输出指针假设明示；② 🔴 **CopyPixels UINT 参数域检查**（cbStride/cbBufferSize 是 UINT——仅 SIZE_MAX 不够，加 kUintMax 域）；③ 🔴 **int/UINT/size_t 三尺寸域显式转换**（constexpr kIntMax/kUintMax/kSizeMax + 显式 static_cast，Image 构造显式转换）；④ 🔴 **JPEG 资产策略升级**——「已知有效 JPEG → 脚本只做二进制转 hex」升主案（手工构造最小 JFIF = 自己实现 JPEG 编码器，不合理）；⑤ **Logger 契约勘察定稿方案 B**——`Log(LogLevel, wstring_view)` 无格式化 → 实现 `LogDecoderError(step, hr)` swprintf 组装（不顺手改 Logger）；⑥ **DecodeImpl 拆三函数**（DecodeFileImpl/DecodeMemoryImpl/DecodeFromDecoder 共同后段——消除 bool 隐含约束 + factory 创建不重复）；⑦ **计数规则明确**（Public 81 / Internal 9 / version.h.in 模板不计入）+ **kMaxDecodedBytes 256MB 资源上限**（防恶意图片/解压炸弹——独立于溢出检查）+ **T8 标半自动**（不纳入全自动全绿计数）+ **initguid 表述谨慎化**（完整 include 顺序 + 以链接结果为准）+ 链接库分组注释。**状态：评审通过——可进实施**。
 - v1.0（2026-09-07）详细设计初稿：**6 开放点全收**（① 内存流主案 SH + IStream 预案 §3.5/§5；② ComRAII 轻量模板 + ComScope 显式状态机构造 §3.2；③ JPEG 资产生成策略 §5.2；④ initguid + IID_PPV_ARGS 零 uuid.lib §3.1；⑤ palette=Custom 定稿 §3.6；⑥ 链接最小集 windowscodecs/ole32/shlwapi §4）+ ComScope 显式状态机构造（评审建议）+ 溢出检查定稿（两步 uint64 数学界，无魔法数）+ 日志文案定稿表 + 测试资产生成策略（Python 手写 PNG chunk + JPEG 降级预案）+ 用例 8 条 + 验收 6 项 + 实施顺序 6 步。待评审。

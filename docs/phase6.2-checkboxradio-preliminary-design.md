@@ -1,6 +1,6 @@
 ﻿# Phase 6.2 CheckBox / Radio 初步设计
 
-> 状态：v1.0（2026-08-15）｜初步设计（待确认后实现）
+> 状态：v1.1（2026-08-15）｜初步设计——✅ 已实现（2026-08-25，P1-P8 方案落地）
 > 相关：phase6.2-checkboxradio-requirements.md（职责确认 v1.0：StateWidget 契约 6 条 + C1-C8）
 
 ## 1. 定稿决策（P1-P8）
@@ -99,3 +99,4 @@ vcxproj 注册 6 新文件（StateWidget/CheckBox/Radio × .h/.cpp）；CMake GL
 
 - v1.0（2026-08-15）初步设计定稿：P1-P8。核心：抽 StateWidget 基类（TextWidget 抽取先例）+ **渲染现实约束（勾/圆等 Phase 8，v0.1 填充色块）** + Radio 互斥（SetChecked override 同父遍历）。
 - **v1.0.1（2026-08-15）延期**：CheckBox/Radio **整体延期 Phase 8 后**（用户决策——勾/圆依赖 Phase 8 渲染能力，不做填充版）。本设计存档，Phase 8 后直接进详细设计（P3 渲染约束届时自动消解：真实勾/圆）。
+- v1.1（2026-09-11）实现落地状态同步（补记）：实现在 Phase 8 能力就绪后于 2026-08-25 完成；头部状态由「待确认后实现」回写为「已实现」。

@@ -1,8 +1,8 @@
-﻿# Phase 9.7 自适应布局 需求确认（v1.0）
+﻿# Phase 9.7 自适应布局 需求确认（v1.1）
 
 > 阶段：职责确认（五阶段法 ①）
 > 日期：2026-09-01
-> 状态：待确认（决策 1/2/3 已由 外部评审定死倾向，其余决策点待逐项拍板）
+> 状态：**✅ 已完成（2026-09-02）**——决策 1/2/3 与其余决策点已在详设 v1.2 全部落定并实现（详见 phase9.7-adaptive-layout-detailed-design.md v1.2）
 > 前置分析：Zcode 三层断点诊断 + 外部评审通过（2026-09-01——"总体方向通过，职责确认把三个决策定死后进初步设计"）
 
 ## 背景
@@ -67,3 +67,7 @@
 3. **Arrange 触发点精确位置**：`OnResized` 内直接调 vs `RootWidget::SetSize` override 挂钩；重排后 Invalidate 归谁（Window 还是 Arrange 链路自带）
 4. **根容器跟随窗口**（真实缺口，诊断时未展开）：ModelProbe 根容器是 RootWidget 的子，RootWidget 自身无 Layout——根容器怎么吃满窗口？方向：给 RootWidget 设 V Layout + 根容器 stretch=1（新系统自然表达，零特例）——初步设计验证
 5. **Layout 测试基线更新**：Layout.HorizontalLayout/VerticalLayout 既有期望在 stretch=0/spacing=0 下不变（决策 6 兜底）——新增 stretch/spacing 分配用例清单
+
+## 修订记录
+
+- v1.1（2026-09-11）**实现落地状态同步**（补记）：9.7 已于 2026-09-02 实现收口（SetStretch/spacing/fillCrossAxis + OnResized→Arrange 触发链 + 测试 141 全绿 + ModelProbe 消费验证）；头部状态由「待确认」回写为「✅ 已完成」。

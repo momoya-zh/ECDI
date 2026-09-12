@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.5 Application 解耦 — 职责确认
 
-> 状态：v1.0（2026-08-16）｜待确认后进初步设计
+> 状态：v1.1（2026-09-11）｜✅ 已实现（2026-08-16）——7.1.5 Application 解耦（7.1 平台抽象闭环），见 phase7-application-detailed-design.md v1.1（V1 编译零警告 + 功能正常 + Application.h/cpp 零 Win32 实证）
 > 相关：phase7-platform-requirements.md（D5 Application 挂起——7.1.1-7.1.4 后回看）/ phase7-platform-detailed-design.md（WindowClass 标记 7.1.5）
 > 目标：**7.1 平台抽象完全闭环**——Framework 层可脱离 Windows 独立存在（Window + Application 双零残留）
 > 触发：用户 2026-08-16 决策——"我们既然决定平台解耦，那就不应该在框架里残留"（E2/E4 从记账改为实施）
@@ -93,3 +93,4 @@ public:
 ## 6. 修订记录
 
 - v1.0（2026-08-16）职责确认定稿：职责边界定义（框架编排/事件循环/窗口系统三分）+ 7.1.5.1 WindowClass 下沉 + 7.1.5.2 PlatformApplication 抽象。评审 深化：E2 从"记账"改"实施"（闭环目标）+ 窗口系统/事件循环分离 + 职责边界先行（防 7.1.5 返工）。用户决策：框架零残留（E4 窗口类注册下沉）。
+- v1.1（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进初步设计」，实际 7.1.5 Application 解耦（7.1 平台抽象闭环）已于 2026-08-16 实现并验证通过（见 phase7-application-detailed-design.md v1.1（V1 编译零警告 + 功能正常 + Application.h/cpp 零 Win32 实证））。

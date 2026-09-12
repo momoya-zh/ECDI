@@ -1,7 +1,7 @@
 ﻿# Phase 12 WindowChrome 需求确认（v1.2）
 
 > 阶段：需求确认（五阶段法 ①）
-> 日期：2026-09-08（v1.1：2026-09-11 追加 R9/R10；v1.2：2026-09-11 外部评审 14 条全采纳）
+> 日期：2026-09-08（v1.1：2026-09-11 追加 R9/R10；v1.2：2026-09-11 外部评审 14 条全采纳；2026-09-12 §7 影响面措辞回写）
 > 状态：**v1.2 外部评审通过——可进初设**（6 决策已拍板；R10 `Desktop` 档 spike 前置）
 > 前置：Phase 10 库化 ✅ / Phase 11 图片解码 ✅（81 Public 头）
 > 一句话：自定义标题栏/无边框窗口——应用不再受系统灰标题栏限制，客户区即整窗
@@ -194,7 +194,7 @@ window.SetWindowLayer(WindowLayer::Desktop);
 |---|---|
 | include/ECDI/Platform/ | PlatformWindow 虚接口扩展（chrome API + R10 `SetWindowLayer`）；R9 消息接缝（形态待定，见决策点 5） |
 | include/ECDI/Window/ | Window 公共 API 透传 + ChromeMode/事件 + R10 `WindowLayer` |
-| src/Platform/Win32/ | Win32PlatformWindow + WindowMessageHandler（NCCALCSIZE/NCHITTEST/NCACTIVATE 拦截 + R10 WINDOWPOSCHANGING 持续强制 + R9 消息分发）+ Dwmapi 链接 |
+| src/Platform/Win32/ | Win32PlatformWindow（NCCALCSIZE/NCHITTEST/NCACTIVATE 拦截 + R10 WINDOWPOSCHANGING 持续强制 + R9 消息分发——**均落 `HandleMessage` 状态同步区，不进 `WindowMessageHandler`**，见初设 §3.0 裁决）+ Dwmapi 链接 |
 | Widget（若 R5 选 b） | CaptionBar 控件 + 样式 |
 | 链接依赖 | 新增 `Dwmapi.lib`；R10 的 reparent 路线另需 `User32`（已在） |
 | docs/ | phase12-windowchrome-* 三件套 + 索引；跨引用 `desktopnest-roadmap.md` |
@@ -202,6 +202,7 @@ window.SetWindowLayer(WindowLayer::Desktop);
 ## 8. 修订记录
 
 - v1.2（2026-09-11）**外部评审（14 条）全采纳——可进初设**：① R5 **MVP 不做 CaptionBar Widget**（推翻 v1.1「倾向 b」——防 Chrome 阶段膨胀成 Chrome+Widget+Theme+状态同步；待二次用例再抽象）；② R7 **Window 状态 API + WindowStateChanged 事件**（否决「CaptionBar 内部直调」——状态不属于标题栏）；③ R9 **定案能力式扩展点，否决裸消息注册**（Win32 消息号不得进公共 API——Phase 10 分层律）；④ R10 `Bottom` 语义措辞修正（「持续维持底部」而非「绝对最底」——不承诺阻止外部窗口管理的瞬时变化）；⑤ R3 `captionHeight`/`resizeInset` 明确**逻辑坐标**（禁设备像素）；⑥ R4 最大化验收基准锁定 `MONITORINFO.rcWork`（禁 rcMonitor 简化）；⑦ R6 DWM 需求层去实现参数（归初设）；⑧ R8 系统交互手测矩阵（Alt+Space 单独验证）；⑨ R1 补 ChromeMode 运行时切换决策项；⑩ §6 测试增强（Normal/Chrome 对照 + NCHITTEST 九宫格）；⑪ §4 决策点全部拍板（7 项）。**R10 `Desktop` 档 spike 前置——未出结果前不承诺**。
+- v1.2 后续（2026-09-12）**§7 影响面措辞回写**：初设 §3.0 裁决「四个 NC 消息**不进** `WindowMessageHandler`」（非 Event，落 `Win32PlatformWindow::HandleMessage` 状态同步区）⇒ §7 原表述「Win32PlatformWindow + WindowMessageHandler（…拦截）」已修正为该裁决的写法（初设 §3.0 末行原注「应在详设/实现阶段回写修正」由此兑现）。
 
 - v1.0（2026-09-08）需求确认初稿：现状勘察（抽象面零 chrome/消息零拦截/像素测试先例）+ 技术路线（保留 WS_OVERLAPPEDWINDOW + NCCALCSIZE/HITTEST 拦截——非 WS_POPUP）+ R1-R8（chrome API/无边框/命中/最大化修正/CaptionBar 分歧/DWM/事件/兼容底线）+ 4 决策点（范围/DWM/API 形态/事件形态）+ 非目标（MDI/毛玻璃/跨平台）+ 测试方向 + 影响面。待评审。
 - v1.1（2026-09-11）DesktopNest 规划回灌：① 追加 §1 勘察两项（窗口 z 序控制缺失、应用层消息不可达——均 grep/读头文件实证）；② 新增 **R9 平台消息扩展接缝**（Phase 13 前置，托盘与拖入的唯一通路）与 **R10 窗口层级能力**（`Normal`/`Bottom`/`Desktop` 三档，`Desktop` 档路线未验证须前置 spike）；③ 决策点 4 → 6（新增接缝形态、Desktop 档是否进 MVP）；④ 非目标补 OLE 完整拖放与 Desktop 档实现细节；⑤ 测试方向补 R10 spike 与 R9 零回归；⑥ 影响面表补 R10 接口与链接依赖。

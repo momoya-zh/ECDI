@@ -1,6 +1,6 @@
 ﻿# Phase 8.5 文本系统 2.0 初步设计
 
-> 状态：v1.2（2026-08-24）｜初步设计待审（评审 两轮评审整合）
+> 状态：v1.3（2026-08-24）｜初步设计——✅ 已实现（2026-08-24/25）
 > 前序：Phase 8.5 职责确认 v1.1（外部评审整合）/ Phase 7.2 测试体系补强 ✅
 > 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase5.5-textbox-detailed-design.md（5.5）/ phase5.6-ime-detailed-design.md（5.6）
 
@@ -472,6 +472,7 @@ Phase 8.5.3 高级功能（B6）
 
 ## 7. 修订记录
 
+- v1.3（2026-09-11）实现落地状态同步（补记）：8.5 三个子阶段均已实现（08-24/08-25）；头部状态由「初步设计待审」回写为「已实现」。
 - v1.2（2026-08-24）评审 第二轮评审整合（通过，成熟度 90%）：B1 锁定**模型 B**（Composition 覆盖 m_text 临时区间，Commit = 区间替换）；B8 **代码事实确认**（Core/Font.h 已是纯数据值语义 struct，SetFont 值拷贝成立）；新增 **B9 多行坐标→Caret 映射**（CaretIndexFromX → CaretIndexFromPosition(Point)，Y 定行 → X 定行内 → 全局索引）；新增 **B10 索引单位契约**（所有内部索引 API 单位 = code point，禁 substr(m_caret)）。
 - v1.1（2026-08-24）外部评审整合：C1 剪贴板不做 Event；C2 Timer 接口通用化（StartTimer/StopTimer）；B1 Composition 数据模型扩展（start+length+caret）；B4 缓存失效责任明确；B6 Undo Push 时机契约 + IME Commit 入历史；B7 Emoji 措辞（不引入 grapheme cluster）；B8 Font 值语义确认；实施方式改逐项 TestCase。
 - v1.0（2026-08-24）初步设计初稿：B1-B8 边界问题解答 + 模块划分 + 实施顺序。

@@ -2,7 +2,7 @@
 |---|---|
 | 版本 | v1.1 |
 | 日期 | 2026-08-30 |
-| 状态 | **已收敛（2026-08-30），进入初步设计（建议方案全过）** |
+| 状态 | **✅ 已实现（2026-08-31）**——需求已收敛并实现落地（ProgressBar + ProgressBarStyle + ProgressBarTests 11 条，110/110 全绿） |
 | 前置 | Phase 9.6 Animation ✅（per-Window AnimationManager + easing + 单值驱动 token）/ Phase 9 Theme ✅（Style/ApplyTheme/SetStyle D7） |
 
 ---
@@ -147,3 +147,4 @@ ProgressBar 是第一个**连续值动画**控件（之前只有二值状态 + �
 |---|---|---|
 | v1.0 | 2026-08-30 | 初版：determinate only / float 0..1 + int 0..100 双层 / 默认平滑过渡（时长常数）/ 高度走 Geometry / 不内置文本 / 圆角 height/2 / EaseOut |
 | v1.1 | 2026-08-30 | 用户评审全过：① 双层 API（float + int 包装）② 默认平滑（常数时长）③ Geometry（`SetSize(w,h)` 设宽高）④ 无内置文本（外部 Label）⑤ 圆角 height/2 全圆角 ⑥ EaseOut。进入初步设计 |
+| v1.2 | 2026-09-11 | **实现落地状态同步**（补记）：ProgressBar 已于 2026-08-31 实现（详设 v1.2 落地 + v1.3 方案 D）；头部状态由「已收敛，进入初步设计」回写为「✅ 已实现」。 |

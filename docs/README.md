@@ -2,7 +2,7 @@
 
 > 本文档是 `docs/` 的索引。设计文档随代码提交 git，从 Phase4 起为强制约定（职责确认 / 初步设计 / 详细设计 各阶段文档正常写入本目录）。
 
-## 开发进度（2026-09-04 更新）
+## 开发进度（2026-09-12 更新）
 
 ### ✅ 已完成
 
@@ -40,7 +40,7 @@
 
 ### 🔄 当前
 
-- **Phase 10 库化（ECDI 0.1.0）✅ 2026-09-06 收口**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；初设 v1.2 / 详设 v1.1 / 实施全部完成（9 头下沉 + 80 Public 头 + install/export + MinimalApp）——库化闭环
+- **Phase 10 库化（ECDI 0.1.0）✅ 2026-09-06 收口**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；初设 v1.2 / 详设 v1.1 / 实施全部完成（9 头下沉 + 80 Public 头 + install/export + MinimalApp）——库化闭环（**收口时点为 80 头；Phase 11 新增 `Decode/ImageDecoder.h` 后为 81——当前值**）
 
 ### 🔲 未来
 
@@ -130,6 +130,14 @@
 | [phase8.5.2-text-system2.0-detailed-design.md](phase8.5.2-text-system2.0-detailed-design.md) | 8.5.2 多行与滚动（行缓存/滚动/双击/跨行） | ✅ 已实现（2026-08-24） |
 | [phase8.5.3-text-system2.0-detailed-design.md](phase8.5.3-text-system2.0-detailed-design.md) | 8.5.3 Undo/Redo（快照 + Composition 一次撤销） | ✅ 已实现（2026-08-25） |
 
+## Phase8.6 渲染抗锯齿（✅ 已实现，2026-09-11）
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase8.6-render-antialiasing-requirements.md](phase8.6-render-antialiasing-requirements.md) | 职责确认（圆角/圆弧覆盖度 AA：**两层拆分**——覆盖度生成 ⇄ 形状装配；掩码按半径缓存 + `ScratchDIB` 职责独立；**正式修订 9.5「约束 2」**；公共 API 与全部控件零改动；11 决策点含 D1 约束修订 / D9 L1+L2 两层测试 / **D11 `a==1` 语义一致性（R3 升 P0）**） | ✅ v1.1 封版 |
+| [phase8.6-render-antialiasing-preliminary-design.md](phase8.6-render-antialiasing-preliminary-design.md) | 初步设计（`CornerCoverageMask` **pixel-square coverage 离散模型 + 9 项定义** / **D8 选 A** + 「钳制已消除退化」证明 + 三形状无分支 / **D11 语义统一 + `a==1` 等价性证明** / **D3 定 S=8** / **canonical 几何原则** / effective 半径缓存键 / L1 七用例含归一化域面积守恒 + L2 五用例 / 3 新建 + 4 修改） | ✅ v1.1 封版 |
+| [phase8.6-render-antialiasing-detailed-design.md](phase8.6-render-antialiasing-detailed-design.md) | 详细设计（**11 项待定项全部形成实施决策** / `CornerCoverageMask.h` 全文 + 生成算法 8 条规则 + **精确字节锚点表（R=1..4）** + 浮点精确性论证 / 缓存 `SetSamples` 必须清空 / `GDIBackend` 三条路径全文 + `PatchSurface` fail-safe 降级 / L1 **15 条**用例含 `tol=0.5·√R/S`（**参考实现实测重写**）+ L2 精确坐标期望值 / CMake 零改动已核实 / 验收 A1–A11 / 10 步实施顺序） | ✅ v1.4 已实现（**174/174 通过**：158 既有零回归 + 15 AA 新增 + 1 ModelProbe 回归；含 `PatchSurface` 行宽缺陷修复 + `DrawFocusRect` 四角弧心对齐修复） |
+
 ## Phase9 主题系统（✅ 已实现，2026-08-25）
 
 | 文档 | 内容 | 状态 |
@@ -148,7 +156,7 @@
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [phase9.6-animation-requirements.md](phase9.6-animation-requirements.md) / [preliminary](phase9.6-animation-preliminary-design.md) / [detailed](phase9.6-animation-detailed-design.md) | 动画系统三件套（per-Window AnimationManager + 插值/Easing + 时钟与脏标记契约） | ✅ 已实现（2026-08-30） |
-| [phase9.6-progressbar-requirements.md](phase9.6-progressbar-requirements.md) / [preliminary](phase9.6-progressbar-preliminary-design.md) / [detailed](phase9.6-progressbar-detailed-design.md) | ProgressBar 三件套（ResolveAnimationManager 接缝 + 主题化） | ✅ 已实现（2026-08-29） |
+| [phase9.6-progressbar-requirements.md](phase9.6-progressbar-requirements.md) / [preliminary](phase9.6-progressbar-preliminary-design.md) / [detailed](phase9.6-progressbar-detailed-design.md) | ProgressBar 三件套（ResolveAnimationManager 接缝 + 主题化） | ✅ 已实现（2026-08-31） |
 | [phase9.6-collapsiblepanel-requirements.md](phase9.6-collapsiblepanel-requirements.md) / [preliminary](phase9.6-collapsiblepanel-preliminary-design.md) / [detailed](phase9.6-collapsiblepanel-detailed-design.md) | CollapsiblePanel 三件套（四向折叠 + 单动画值驱动） | ✅ 已实现（2026-08-30） |
 | [phase9.6-panel-container-semantics-detailed-design.md](phase9.6-panel-container-semantics-detailed-design.md) | Panel 容器语义详设（背景透明契约变更） | ✅ 已实现（v1.1） |
 
@@ -171,7 +179,7 @@
 |------|------|------|
 | [phase10-library-requirements.md](phase10-library-requirements.md) | 需求确认（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install-export / 自包含测试 / 外部消费者验收） | ✅ v1.1（外部评审 7 项采纳） |
 | [phase10-library-preliminary-design.md](phase10-library-preliminary-design.md) | 初步设计（89→80 Public / 9 Internal 逐头审查 / 下沉 src/ + PRIVATE src / install-export 布局 / ExactVersion / 依赖方向单向律） | ✅ v1.2 定稿（评审「可进详设」） |
-| [phase10-library-detailed-design.md](phase10-library-detailed-design.md) | 详细设计（分类修正：RenderServices/BackendFactory 升 Public / 9 头移动清单 / 18 文件引用改写 / install 全文 / MinimalApp 全文 / 验收清单 10 项） | ✅ v1.1 已实施（2026-09-06——9 头下沉、80 Public 头零平台泄漏、MinimalApp 就位） |
+| [phase10-library-detailed-design.md](phase10-library-detailed-design.md) | 详细设计（分类修正：RenderServices/BackendFactory 升 Public / 9 头移动清单 / 18 文件引用改写 / install 全文 / MinimalApp 全文 / 验收清单 10 项） | ✅ v1.1 已实施（2026-09-06——9 头下沉、80 Public 头零平台泄漏、MinimalApp 就位；**Phase 11 后 Public 头为 81**） |
 
 ## Phase11 图片解码（✅ 完成，2026-09-07）
 
@@ -181,12 +189,25 @@
 | [phase11-image-decode-preliminary-design.md](phase11-image-decode-preliminary-design.md) | 初步设计（头全文草案 / WIC 管线九步 / COM RAII per-call / 链接库 PUBLIC 传播 / 测试 7 用例） | ✅ v1.1（评审「修改后通过」） |
 | [phase11-image-decode-detailed-design.md](phase11-image-decode-detailed-design.md) | 详细设计（6 开放点全收：initguid+IID_PPV_ARGS 零 uuid.lib / ComRAII 模板 / 溢出两步数学界 / SH 主案+IStream 预案 / 测试资产生成策略 / 验收 6 项） | ✅ v1.1 已实施（2026-09-07——Decode 模块 + WIC 后端 + 8 用例，158 全绿） |
 
-## Phase12 WindowChrome（🚧 需求 v1.2 ✅ → 待初设）
+## Phase12 WindowChrome（🚧 需求 v1.2 ✅ → 初设 v1.1 ✅ → 待详设）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [phase12-windowchrome-requirements.md](phase12-windowchrome-requirements.md) | 需求确认（无边框 NCCALCSIZE/HITTEST 拦截 / 保留 WS_OVERLAPPEDWINDOW / R9 能力式扩展点 / R10 WindowLayer Bottom+Desktop / 7 决策全拍板） | ✅ v1.2（外部评审通过——可进初设） |
+| [phase12-windowchrome-preliminary-design.md](phase12-windowchrome-preliminary-design.md) | 初步设计（4 新头 81→85 / NC 消息归平台状态同步区非翻译器 / 配置期·运行期 API 分组 / 最大化 rcWork 收缩 / R9「惯例非抽象」/ R10 spike 规格 / 决策 7 降级配置期） | ✅ v1.1（评审「修改后通过」——可进详设） |
 | [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase） | 🚧 v1.1 待评审 |
+
+## ModelProbe Demo（✅ P1/P2 已实现，2026-09-01/11）
+
+> 第一个真实消费者（Phase 10 起从框架移出至 `examples/ModelProbe/`）。**文档独立子目录 `docs/model-probe/`**，与框架 `phaseN-*` 区隔；2026-09-11 从仓库根 `model-probe-docs/` 移入 docs/ 体系（统一文档入口）。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [modelprobe-p1-preliminary-design.md](model-probe/modelprobe-p1-preliminary-design.md) | P1 初步设计（6 项框架能力：ChildProcess / GetExecutableDirectory / TextBox echo·只读·形态 / Button hover / Panel 形态 + demo 组装 ModelProbePage；9 开放点全部收敛） | ✅ v1.4（P1 已实现） |
+| [modelprobe-p1-detailed-design.md](model-probe/modelprobe-p1-detailed-design.md) | P1 详细设计（ChildProcess 句柄继承矩阵 + 描边环几何冻结 + hover 三态 + 22 条测试用例 + **§10 P2 演进补记 7 项**） | ✅ v1.2（P1 已实现） |
+
+- **代码**：`examples/ModelProbe/`（ECDI GUI 工具 + `probe.exe` Go 后端 RCDATA 资源嵌入 + `app.ico`）
+- ⚠️ **P2 演进无独立设计文档**（未走五阶段法）——资源嵌入 / `SetSingleLine` / 二次查询修复等 7 项补记于详设 §10，**不可当作设计依据**
 
 ## 文档约定
 

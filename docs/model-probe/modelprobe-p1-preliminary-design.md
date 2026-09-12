@@ -1,10 +1,10 @@
 ﻿# ModelProbe P1 初步设计（v1.3）
 
 > 阶段：初步设计（五阶段法 ②）
-> 日期：2026-09-01（v1.3 修订 2026-09-01）
-> 状态：待评审（用户 / GPT）
+> 日期：2026-09-01（v1.3 修订 2026-09-01；v1.4 状态回写 2026-09-11）
+> 状态：**✅ P1 已实现**（2026-09-01/05 落地；本版 6 项框架能力全部进框架，demo 组装落于 `examples/ModelProbe/`）
 > 前置：P0 Go 后端已验证（`probe-go/main.go`——协议/真实网络全通，2026-09-01）/ 职责确认已收敛（2026-09-01 会话）
-> 文档目录：本 demo 文档独立存 `model-probe-docs/`，不与框架 `docs/`（phaseN-*）混放
+> 文档目录：`docs/model-probe/`（2026-09-11 从仓库根的 `model-probe-docs/` 移入 docs/ 体系）
 > v1.1：并入「QSS 观感 90%」视觉范围（用户 2026-09-01 拍板）——TextBox 圆角/恒显边框、Button hover 绘制、Panel 圆角/边框 4 个小能力入 P1；滚动条挂账
 > v1.2：TextBox 新增**只读模式**（JSON 预览防误改——用户 2026-09-01 提问确认）
 > v1.3：§5 补**大列表/搜索机制**（用户 2026-09-01 提问确认——查询后全量显示 + 搜索过滤 + 多选滚动）
@@ -148,7 +148,7 @@ PanelStyle 新增：
 ## 5. Demo 组装（不入框架）
 
 ```
-ECDI/src/Demo/ModelProbe.h / ModelProbe.cpp     （Showcase 同目录先例）
+examples/ModelProbe/ModelProbe.h / ModelProbe.cpp   （Phase 10 库化后移出框架 src/；独立 CMake 目标）
 class ModelProbePage : public Panel              状态型控件（持 ChildProcess + 模型列表 + 选中集 + 行缓冲）
 ```
 
@@ -192,16 +192,16 @@ class ModelProbePage : public Panel              状态型控件（持 ChildProc
 | 框架 | `ECDI/include/ECDI/Theme/PanelStyle.h` + `ECDI/include/ECDI/Widget/Panel.h` / `ECDI/src/Widget/Panel.cpp`（圆角/边框） | 修改 |
 | 框架 | `ECDI/src/Theme/DefaultTheme.cpp`（新字段默认值） | 修改 |
 | 框架 | 测试文件（ChildProcessTests / TextBoxTests / ButtonTests / PanelTests 扩展 / 解析单测） | 新增/修改 |
-| demo | `ECDI/src/Demo/ModelProbe.{h,cpp}` | 新增 |
-| 入口 | `ECDI/main.cpp`（新窗口 + OnTimer 覆写 + 启动后端） | **单独授权** |
-| 工程 | `ECDI/ECDI.vcxproj`（登记新文件） | 修改 |
-| 文档 | `model-probe-docs/`（本目录） | 新增 |
+| demo | `examples/ModelProbe/ModelProbe.{h,cpp}`（实现时落位于此） | 新增 |
+| 入口 | `examples/ModelProbe/main.cpp`（新窗口 + OnTimer 覆写 + 启动后端） | **单独授权** |
+| 工程 | `examples/ModelProbe/CMakeLists.txt` + `ECDI/ECDI.vcxproj`（登记新文件） | 修改 |
+| 文档 | `docs/model-probe/`（本目录） | 新增 |
 
-## 9. 开放决策点（评审时定）
+## 9. 开放决策点（**已于 2026-09-01/11 全部收敛**）
 
-1. **窗口策略**：独立窗口与 Showcase 并存（推荐——工具完整形态）vs 替换 Showcase。
-2. **GetExecutableDirectory**：新增平台查询（推荐——P2 嵌入也要用）vs P1 先用相对路径 `networkbackend\probe.exe`（依赖 CWD，脆弱）。
-3. **文档目录名**：`model-probe-docs/`（与 `probe-go/`、`model-probe-gui/` 同前缀并列）是否满意。
+1. ~~窗口策略~~：**已决 = 独立窗口**——实现期进一步演进为 Phase 10 库化的**独立 exe**（不再与 Showcase 并存于同一进程）。
+2. ~~GetExecutableDirectory~~：**已决 = 新增平台查询**（`ExecutablePath.h` + Win32 实现已落地；P2 的 RCDATA 资源释放也复用该能力）。
+3. ~~文档目录名~~：**已决**——2026-09-01 定 `model-probe-docs/`（与 `probe-go/`、`model-probe-gui/` 同前缀并列）；**2026-09-11 改为 `docs/model-probe/`**（用户决策：统一文档入口 + 保留 demo 与框架文档的区隔）。
 4. ~~滚动条~~：**已定挂账**（用户 2026-09-01 拍板——GUI 后续阶段再考虑）。
 
 ## 10. 修订记录
@@ -210,3 +210,4 @@ class ModelProbePage : public Panel              状态型控件（持 ChildProc
 - v1.1（2026-09-01）并入视觉范围（用户拍板「QSS 观感 90%，滚动条挂账」）：§2 增视觉目标/滚动条决策；§4 扩展为 6 项能力——TextBox 增形态（cornerRadius/borderWidth/borderColor，双矩形描边环，焦点点线框不动）、**Button hover 绘制**（hoverBackground 新字段 + 三态目标色复用 9.6 S1；pressedBackground 已消费核实）、**Panel 圆角/边框**（同构扩展）；§5 布局对齐 QSS（圆角输入框/ghost 按钮/列表容器圆角）；§7/§8 测试与授权清单同步扩展。
 - v1.2（2026-09-01）TextBox 新增**只读模式**（用户提问确认——JSON 预览防误改）：`SetReadOnly/IsReadOnly`；编辑门禁 = 五个编辑操作 + Undo/Redo + IME 组合 no-op；导航/选区/复制照常；视觉无差异；只读下 `SetText` 仍可程序写入（预览刷新）。§2 导出行、§5 预览标注、§7 测试、§8 授权同步。
 - v1.3（2026-09-01）§5 补**大列表/搜索机制**（用户提问确认——查询后全量显示 + 搜索过滤 + 多选滚动）：全量建行 + PushClip 裁切（demo 规模可行）；搜索 = 逐行 `SetVisible(子串命中)`（Paint/HitTest 均跳过 invisible——Widget.cpp:108/201 实证）；性能兜底 = 视口裁剪（可选，仅卡顿时启用）；多选/全选/清空复用 Showcase Selection 页机制。
+- v1.4（2026-09-11）**状态回写 + 目录迁移**：① 状态由「待评审」改为**已实现**（6 项框架能力与 demo 组装均已落地）② 文档由 `model-probe-docs/` 移入 **`docs/model-probe/`** ③ §5/§8 的 demo 与入口路径修正为实际落位（`examples/ModelProbe/`，独立 exe）④ §9 四个开放决策点全部标注收敛结论（原第 3 项「文档目录名」随本次迁移再次变更）。

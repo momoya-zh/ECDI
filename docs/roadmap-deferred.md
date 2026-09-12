@@ -1,7 +1,8 @@
 ﻿# ECDI 延期事项排期总表（roadmap-deferred）
 
-> 状态：v1.0（2026-08-15）｜确认排期
+> 状态：v1.2（2026-09-11）｜确认排期
 > 作用：汇总全部"记账/延期/TODO/推迟"决策 → 对应实现阶段。README 技术债表的完整展开。
+> ⚠️ **已知缺口（2026-09-11 声明）**：本表内容主体停留在 v1.1（2026-08-15），**9.6 / 9.7 / 9.8 / 10 / 11 / 12 的延期项尚未批量补记**（含 9.6 的 Fade→PushOpacity / DrawArc / PushTransform / DoubleClick / Dirty Region 等记账项）。v1.2 仅补登记抗锯齿一项（#29）——**不要把本表当作完整清单**。
 
 ## 1. Phase 7 平台抽象 + 测试体系（v1.0 转库前硬性前置；2026-08-15 裁决拆 7.1/7.2）
 
@@ -68,7 +69,14 @@
 | 24 | Hover / DoubleClick / MouseEnter / Leave | 5.4 架构债务 | ✅ R4 已实现（2026-08-27，commit 7d97d6c/0a11c2d）；DoubleClick 记账 |
 | 25 | Shortcut System / 键盘入口统一 / InputManager | 架构回顾 R2 + 触发条件 | ✅ 评估关闭（2026-08-28）：三子项全部不做——键盘入口不对称=设计决策（Tab 导航只需 KeyDown）；无全局快捷键消费场景；InputManager 收益未证。重启：框架级快捷键消费场景出现 |
 
-## 7. 修订记录
+## 7. Phase 8.6 渲染抗锯齿（新立——2026-09-11）
+
+| # | 延期项 | 来源 | 备注 |
+|---|---|---|---|
+| 29 | 抗锯齿升级（圆角/圆弧覆盖度） | `phase9.5-alpha-primitive-detailed-design.md` §4「明确不做（YAGNI）」 | ✅ **已实现（2026-09-11）**——三件套齐备（`docs/phase8.6-render-antialiasing-{requirements,preliminary-design,detailed-design}.md`，详设 v1.4），`ecdi_tests` **174/174 通过**（158 既有零回归 + 15 AA 新增 + 1 ModelProbe 回归）；**正式修订 9.5「约束 2（圆角无抗锯齿）」**——改为「alpha 合成与几何抗锯齿正交」；两层拆分（覆盖度生成 ⇄ 形状装配）+ 掩码按 radius 缓存 + `PatchSurface` 复用；公共 API 与全部控件零改动（消费方 Button/CheckBox/Panel/ProgressBar/Radio/TextBox/焦点框自动获益）。斜线（`DrawLine` AA）**另起**——`DrawLine` 连 alpha 路径都没有 |
+
+## 8. 修订记录
 
 - v1.0（2026-08-15）总表定稿：全部延期项分组到阶段（7/7.5/8/8.5/9/9.5）；确认 SetFont 入 8.5、21-25 入 9.5。
 - v1.1（2026-08-15）**Phase 7 拆 7.1/7.2**（用户决策）：测试体系入 7.2（新增 #28——5.5.2 P8 承诺的 Selection 单元测试补测；Phase 10 转库前测试保障）。
+- v1.2（2026-09-11）新增 **§7 Phase 8.6 渲染抗锯齿**（条目 #29）——把 `phase9.5-alpha-primitive-detailed-design.md` §4 的「抗锯齿升级」正式纳入总表并立项（该延期项此前只存在于 9.5 详设清单，总表零记录，属登记遗漏）。本次**仅补登记 AA 一项**；9.6 / 9.7 / 9.8 / 10 / 11 / 12 的延期项批量回填仍待单独授权（见头部已知缺口声明）。

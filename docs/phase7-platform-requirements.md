@@ -1,6 +1,6 @@
 ﻿# Phase 7.1 平台抽象 — 职责确认
 
-> 状态：v1.0（2026-08-15）｜待确认后进初步设计
+> 状态：v1.0.2（2026-09-11）｜✅ 已实现（2026-08-15）——7.1.1 PlatformWindow 骨架，见 phase7-platform-detailed-design.md v1.1（V1-V5：编译零警告 + 事件/渲染/焦点/IME 回归正常）
 > 相关：MEMORY.md「Window 平台抽离（正式决策）」/ roadmap-deferred.md #1-8
 > 目标（契约语言）：**让 Window 不再知道 Win32——而不是让 Win32 不再存在**（评审 概括，已采纳）
 
@@ -84,3 +84,4 @@ PlatformWindow → PlatformWindowHost（抽象接口）← Window（实现）
 
 - v1.0（2026-08-15）职责确认定稿：D1-D8 + 核心原则。外部评审修订全采纳：D2 Host 接口核心化 / D3 PlatformRenderContext 替代 void*（c-2 决策点）/ D6 CaretGeometry 命名（e-2 决策点）/ D8 子步骤重排（窗口线 3 步 + 渲染线 1 步）。**用户决策：Application 挂起（D5，不设计不排期，前四步实现后回看）**。
 - v1.0.1（2026-08-15）两个决策点定稿（确认）：**c-2 = PlatformRenderContext 抽象基类**（否决 void* 类型擦除）；**e-2 = CaretGeometry{ Rect }**（语义放大，否决 TextInputContext）。全部决策点关闭，进入初步设计。
+- v1.0.2（2026-09-11）实现落地状态同步（补记）：原头部记「待确认后进初步设计」，实际 7.1.1 PlatformWindow 骨架已于 2026-08-15 实现并验证通过（见 phase7-platform-detailed-design.md v1.1（V1-V5：编译零警告 + 事件/渲染/焦点/IME 回归正常））（且原头部版本 v1.0 滞后于修订记录 v1.0.1）。

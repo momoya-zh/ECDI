@@ -1,6 +1,6 @@
 ﻿# Phase 5.6 IME 职责确认
 
-> 状态：v1.0（2026-08-14）｜职责确认完成，待初步设计
+> 状态：v1.1（2026-08-14）｜职责确认完成——✅ 已实现（2026-08-15，系统 caret + ImmSetCompositionWindow 双通道）
 > 相关：phase5.5-textbox-requirements.md（5.5）/ phase5.5.2-selection-requirements.md（5.5.2）
 
 ## 1. 代码事实（5.6 起点）
@@ -58,3 +58,4 @@
 ## 5. 修订记录
 
 - v1.0（2026-08-14）职责确认：I1-I5 定稿。I1 A（评审：B 是文本系统 2.0，6 问题论证）；I2 Window 中介；I3 GetCaretClientPosition（评审 修正——Client 职责归控件、Screen 归 Window）；I4 不加 InsertText；I5 最小范围 + END 通道预留（评审）；与 Phase 7 关系澄清（同 GDIBackend 性质，Phase 7 下沉）。
+- v1.1（2026-09-11）实现落地状态同步（补记）：5.6 已于 2026-08-15 实现（详设 v1.0.4 已实现 + 验证通过）；头部状态由「待初步设计」回写为「已实现」。

@@ -182,6 +182,43 @@ void TestJsonEscape()
 	EXPECT_EQ(Demo::EscapeJson("plain"), "plain");
 }
 
+/// @brief 回归（2026-09-11）：连续两次 FETCH —— 第二次必须【替换】而非累加
+/// @details 曾因 `m_models` 只 push_back、从不清空，二次查询的 MODEL 行追加在旧结果之后，
+/// 列表变成「上次 + 本次」。本用例**分包注入**，同时验证【清空时机】——
+/// 在 `OK FETCH` 到达时即清空（而非等 DONE 时替换），故中间态模型数为 0。
+void TestModelProbeFetchReplaces()
+{
+	FakeChildProcess* fake = nullptr;
+	auto page = MakePage(fake);
+
+	// 第一轮：2 个模型
+	fake->SetResponses({
+		"OK\tFETCH\thttps://x\t2\n"
+		"MODEL\tm1\t\n"
+		"MODEL\tm2\t\n"
+		"DONE\tFETCH\n",
+	});
+	page->OnQueryClick();
+	page->PollProbe();
+	EXPECT_EQ(page->GetModelCount(), 2);
+
+	// 第二轮：3 个模型（数量不同 ⇒ 累加会得到 5、替换才是 3，便于区分两种行为）
+	fake->SetResponses({
+		"OK\tFETCH\thttps://x\t3\n",                             // 包 1：仅 OK
+		"MODEL\tn1\t\nMODEL\tn2\t\nMODEL\tn3\t\nDONE\tFETCH\n",  // 包 2：MODEL 行 + DONE
+	});
+	page->OnQueryClick();
+
+	page->PollProbe();                     // 处理包 1 → 仅 OK FETCH
+	EXPECT_EQ(page->GetModelCount(), 0);   // ← 清空时机：OK FETCH 时即清（尚未收到 MODEL 行）
+	EXPECT_TRUE(page->IsBusy());           // 仍在途（未 DONE）
+
+	page->PollProbe();                     // 处理包 2
+	EXPECT_EQ(page->GetModelCount(), 3);   // ← 替换而非累加（修复前此处为 5）
+	EXPECT_EQ(page->GetSelectedCount(), 0);
+	EXPECT_FALSE(page->IsBusy());
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterModelProbeTests()
@@ -189,6 +226,7 @@ void ECDI::Test::RegisterModelProbeTests()
 	GetTestRegistry().Add("ModelProbePage.FetchFlow",             &TestModelProbeFetchFlow);
 	GetTestRegistry().Add("ModelProbePage.FetchFragmentedOutput", &TestModelProbeFetchFragmented);
 	GetTestRegistry().Add("ModelProbePage.FetchError",            &TestModelProbeFetchError);
+	GetTestRegistry().Add("ModelProbePage.FetchReplacesPrevious", &TestModelProbeFetchReplaces);
 	GetTestRegistry().Add("ModelProbePage.TestFlow",              &TestModelProbeTestFlow);
 	GetTestRegistry().Add("ModelProbePage.BusyGuard",             &TestModelProbeBusyGuard);
 	GetTestRegistry().Add("ModelProbePage.Shutdown",              &TestModelProbeShutdown);

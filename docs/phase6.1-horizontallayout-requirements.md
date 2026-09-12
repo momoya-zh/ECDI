@@ -1,6 +1,6 @@
 ﻿# Phase 6 布局系统完善 — HorizontalLayout 职责确认
 
-> 状态：v1.0（2026-08-15）｜职责确认定稿（外部评审 + 确认），待初步设计
+> 状态：v1.1（2026-08-15）｜职责确认定稿（外部评审 + 确认）——✅ 已实现（2026-08-15，HorizontalLayout 随 6.1 落地）
 > 相关：phase3-layout-design.md（5.4 布局）/ VerticalLayout（已实现）
 > 命名说明：原路线图"Phase 6 控件完善"精化为"**Phase 6 布局系统完善**"——本轮实际范围 = VerticalLayout → HorizontalLayout（评审 2026-08-15 建议，控件生态名称名不副实）
 
@@ -69,3 +69,4 @@ y+=childHeight
 ## 4. 修订记录
 
 - v1.0（2026-08-15）职责确认定稿：H1-H8 + 决策点 a/b/c/d（评审 全赞成）+ Layout 纯坐标原则 + 命名精化"布局系统完善" + 范围纪律（Clipboard 等另立）。
+- v1.1（2026-09-11）实现落地状态同步（补记）：6.1 HorizontalLayout 已于 2026-08-15 实现（VerticalLayout 水平镜像 + diff 同构 + 10 条设计契约）；头部状态由「待初步设计」回写为「已实现」。

@@ -1,6 +1,6 @@
 ﻿# Phase 7.1.3 输入层抽象 — 职责确认
 
-> 状态：v1.0（2026-08-15，评审 修订融入）｜已确认，进初步设计
+> 状态：v1.1（2026-09-11）｜✅ 已实现（2026-08-16）——7.1.3 输入层抽象（CaretGeometry 插入点模型），见 phase7-textinput-detailed-design.md v1.1（V1 编译零警告 + V2 IME 候选窗跟随回归正常）
 > 相关：phase7-platform-requirements.md（e-2 CaretGeometry 定稿）/ phase7-messagehandler-detailed-design.md（7.1.2 完成）
 > 本质（评审）：**不是"IME 抽象"，是"文本插入点（Insertion Point）模型升级"**——光标不是点，是矩形区域
 
@@ -44,3 +44,4 @@ CreateCaret/Imm 留 Win32PlatformWindow。
 ## 修订记录
 
 - v1.0（2026-08-15）职责确认定稿：D1-D5。评审 修订全采纳：D1 CaretGeometry 放 Widget/ 领域目录（非 Core，迁 Core 条件 = 3~4 子系统使用）/ D2 可扩展结构（rect + visible，非 Rect 空包装；baseline 注释预留）/ D3 不抽 TextInputInterface（YAGNI，动态图保留）/ D4 不拆 Win32IME。本质定位：文本插入点模型升级（光标 = 矩形区域，非点）。
+- v1.1（2026-09-11）实现落地状态同步（补记）：原头部记「已确认，进初步设计」，实际 7.1.3 输入层抽象（CaretGeometry 插入点模型）已于 2026-08-16 实现并验证通过（见 phase7-textinput-detailed-design.md v1.1（V1 编译零警告 + V2 IME 候选窗跟随回归正常））。

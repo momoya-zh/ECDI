@@ -1,6 +1,6 @@
 ﻿# Phase 5.5.2 TextBox Selection + 修饰键 职责确认
 
-> 状态：v1.0（2026-08-14）｜职责确认完成，待初步设计
+> 状态：v1.1（2026-08-14）｜职责确认完成——✅ 已实现（2026-08-14，拖选 / Shift+方向键 / KeyModifier / Shift+Tab 反向）
 > 相关：phase5.5-textbox-requirements.md（5.5 总）/ phase5.4-interaction-requirements.md（5.4 交互）
 
 ## 1. 代码事实（5.5.2 起点）
@@ -70,3 +70,4 @@
 ## 3. 修订记录
 
 - v1.0（2026-08-14）职责确认：M1-M2 + S1-S7 定稿。S1 anchor/active 语义（评审修订——光标=active，Shift 反向收缩标准行为）；S2 m_mouseDown（评审：控件内部状态与 Window 机制解耦）；S3 anchor 固定 active 移动（评审）；S4 DeleteSelection 返回新 caret（评审）；S6 Ctrl+A 推迟（评审：用户预期一致性）；M1 HasModifier 辅助（评审）。
+- v1.1（2026-09-11）实现落地状态同步（补记）：5.5.2 已于 2026-08-14 实现；头部状态由「待初步设计」回写为「已实现」。

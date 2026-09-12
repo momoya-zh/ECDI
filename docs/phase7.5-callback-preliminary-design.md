@@ -1,6 +1,6 @@
 ﻿# Phase 7.5 事件回调（std::function 回调注册 API）初步设计
 
-> 状态：v1.2（2026-08-19）｜初步设计待审（评审 二轮评审修复）
+> 状态：v1.3（2026-08-19）｜初步设计——✅ 已实现（2026-08-19）
 > 前序：Phase 7.1 平台抽象 ✅ / Phase 7.2 无窗口单元测试体系 ✅ / 职责确认 v1.2 ✅
 > 相关文档：phase7.5-callback-requirements.md（职责确认）/ phase7.2-testing-requirements.md（测试边界）/ phase6.2-checkboxradio-requirements.md（C4 契约）
 
@@ -456,6 +456,7 @@ private:
 
 ## 8. 修订记录
 
+- v1.3（2026-09-11）实现落地状态同步（补记）：7.5 已于 2026-08-19 实现；头部状态由「初步设计待审」回写为「已实现」。
 - **v1.2（2026-08-19）整合 评审 二轮评审（3 问题 + 1 建议）**：
   1. **问题 1/2（TC1-TC4 无法编译——前后矛盾）**：统一测试策略——**删除 Button 回调测试**（原 TC1-TC4），7.5 只保留 TextBox 回调测试（现 TC1-TC4）
   2. **问题 3（Button 测试耦合 MouseEvent）**：Button 回调唯一真实路径依赖事件链（OnMouseButtonUp → 坐标/命中/Window），违背 7.2 无窗口测试初衷——**Button 回调测试推迟到集成测试**；机制正确性由 TextBox 测试覆盖（同一套 RaiseXxx）

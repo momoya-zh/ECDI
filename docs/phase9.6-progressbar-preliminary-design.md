@@ -1,8 +1,8 @@
-﻿# Phase 9.6 ProgressBar 初步设计（v1.2）
+﻿# Phase 9.6 ProgressBar 初步设计（v1.3）
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-08-30（v1.2 修订 2026-08-31）
-> 状态：评审通过（评审 全项授权，2026-08-31）——待确认进入详细设计
+> 状态：**✅ 已实现（2026-08-31）**——详设 v1.2 实现落地（ProgressBar + ProgressBarStyle + 测试 11 条，110/110 全绿），v1.3 方案 D（填充同心圆角）已合入
 > 前置：需求确认 v1.1（已收敛）/ Animation ✅ / Theme ✅
 
 ---
@@ -176,3 +176,4 @@ v1.2 吸收的实现级注意点：① no-op 判断键恒为 `target ↔ m_progr
 | v1.1 | 2026-08-30 | 吸收 外部评审：**fill 方案 C**（track rounded + fill rect——最 YAGNI、零新增能力、低进度无 artifact）；**状态分离**（`m_progress` 目标/逻辑状态 + `m_displayProgress` 呈现/视觉状态——与 CollapsiblePanel m_expanded/s 同构）；**测试 8→11**（新增 AnimationProgresses / AnimationReplacement / IdempotentTarget / ResizeFillGeometry）；**同目标 no-op**（fabs epsilon 比较，避免无意义重启） |
 | v1.2 | 2026-08-31 | 吸收 评审 终审：**cornerRadius 语义冻结**（`0 = 自动圆角 height/2`，不引入 optional——YAGNI）；**no-op 判断键明确**（恒为 `target ↔ m_progress`，绝不用 m_displayProgress）；**动画测试不绑 easing 数值**（只断言区间/终值）；**AnimateTo 职责写死**（只启动动画、不改逻辑状态）；状态分离原则冻结；状态更新为评审通过 |
 | v1.3 | 2026-08-31 | **方案 C → D 变更标注**（授权，详见详设 v1.3）：填充 `DrawRect` → `DrawRoundedRect` 同心圆角——demo 实测「高进度 fill 盖满圆角轨道 → bar 呈矩形」观感缺陷修复；§5 填充策略段同步标注；fill 圆角挂账兑现 |
+| v1.4 | 2026-09-11 | **实现落地状态同步**（补记）：本阶段已于 2026-08-31 实现收口（详设 v1.2 落地 + v1.3 方案 D）；标题版本由 v1.2 同步至 v1.4（此前滞后于修订记录 v1.3）；头部状态由「待确认进入详细设计」回写为「✅ 已实现（2026-08-31）」。 |
