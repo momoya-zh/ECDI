@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-09-12 更新）
 
+> **当前规模锚点（防止各处历史数字误读）**：测试 **174** 用例（`GetTestRegistry().Add` 求和，16 个测试文件）｜Public 头 **81**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **107** 篇（`docs/**/*.md`）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
+
 ### ✅ 已完成
 
 | 阶段 | 内容 | 状态 |
@@ -32,37 +34,44 @@
 | Phase 8.5.1 | 文本系统 2.0 核心升级（IME 组合串内嵌模型 B + 剪贴板 Ctrl+A/C/V/X + 光标闪烁 Timer + SetFont；Update≠Commit 双通道；三连修复：双写/组合层/候选窗） | ✅ 2026-08-24 |
 | Phase 8.5.2 | 多行与滚动（行缓存 + 垂直滚动 + 双击选词 + Up/Down 跨行 preferred column；文本区原点统一三路） | ✅ 2026-08-24 |
 | Phase 8.5.3 | Undo/Redo（快照模式 + 编辑前 Push + Composition 一次撤销 + Cancel 恢复） | ✅ 2026-08-25 |
+| Phase 8.6 | 渲染抗锯齿（圆角覆盖度**两层拆分**——覆盖度生成 ⇄ 形状装配 + `S=8` 超采样 + 按半径缓存掩码 + 预乘 alpha 合成；正式修订 9.5「约束 2」；公共 API 与全部控件**零改动**） | ✅ 2026-09-11 |
 | Phase 9 | 主题系统（**决策层落地**：StyleField\<T\> D7 契约 + Theme/DefaultTheme + TextStyle 单一视觉真相 + Button/TextBox/Panel 迁移 + cornerRadius 消费） | ✅ 2026-08-25 |
 | Phase 9.5 | 收尾补充（R1 Clip 管线 + TextBox 横向滚动 / R4 Hover 状态机；R2 LinearLayout、R3 WM_MOVE、R5 Shortcut 关闭记账） | ✅ 2026-08-28 |
 | Phase 9.6 | 动画系统（per-Window AnimationManager + 插值/Easing 四种 + CollapsiblePanel 四向折叠 + ProgressBar + Button S1 色过渡） | ✅ 2026-08-30 |
 | Phase 9.7 | 自适应布局（SetStretch 权重分配 + spacing + fillCrossAxis + OnResized→Arrange 触发链；契约 10 修订） | ✅ 2026-09-02 |
 | Phase 9.8 | AutoSize（GetPreferredSize/AutoSize + ResolveMeasurer 接缝 + 尺寸意图三分「后调用者赢」+ §3.5 交互冻结） | ✅ 2026-09-02 |
+| Phase 10 | 库化 0.1.0（Public API 边界 + 9 头下沉 `src/` + install/export `ECDI::ECDI` + Public Header 自包含测试 + `MinimalApp` 外部消费者验收 + ExactVersion） | ✅ 2026-09-06 |
+| Phase 11 | 图片解码（WIC 后端 `Decode` 模块——`DecodeFile`/`DecodeMemory`，输出**预乘 BGRA**；Public 头 80→81） | ✅ 2026-09-07 |
 
 ### 🔄 当前
 
-- **Phase 10 库化（ECDI 0.1.0）✅ 2026-09-06 收口**——需求确认 v1.1 完成（Public API 三层判定 / 测试接缝稳定性边界 / 下沉 src/ / install/export + ECDIConfig / Public Header 自包含测试 / 外部消费者 find_package 验收）；Demo 已独立 examples/ModelProbe/（2026-09-03，CMake 拆 ECDI 静态库 + modelprobe exe）；初设 v1.2 / 详设 v1.1 / 实施全部完成（9 头下沉 + 80 Public 头 + install/export + MinimalApp）——库化闭环（**收口时点为 80 头；Phase 11 新增 `Decode/ImageDecoder.h` 后为 81——当前值**）
+- **Phase 12 WindowChrome（进行中）**——需求 **v1.2 ✅**（2026-09-11 外部评审 14 条全采纳）→ 初步设计 **v1.1 ✅**（评审「修改后通过」）→ **待详细设计**。范围：无边框窗口（保留 `WS_OVERLAPPEDWINDOW` + 拦截 `WM_NCCALCSIZE`/`WM_NCHITTEST`/`WM_NCACTIVATE`/`WM_WINDOWPOSCHANGING`）+ 最大化按 `MONITORINFO.rcWork` 收缩 + DWM 集成；**4 新头**（Public 头 81→85）。R10 `Desktop` 档 spike 前置（未出结果前不承诺）。详见下方 Phase12 段。
 
 ### 🔲 未来
 
+- **Phase 12 后能力路线**：基础控件补齐 / 渲染能力增强 / 跨平台（Linux/Android 远期）→ 接近 1.0
+- **Phase 13 托盘与拖入**（前置 = Phase 12 的 R9 平台消息扩展接缝）——`Shell_NotifyIcon` 图标回调 + `WM_DROPFILES`；同时支撑 DesktopNest 桌面常驻方向（`desktopnest-roadmap.md`）
 - **Phase 9.5 收尾补充**：~~局部更新/裁剪系统 + Hover/MouseEnter/Leave~~（✅ R1/R4 已落地 2026-08-28）；~~LinearLayout 抽象、WM_MOVE 场景、Shortcut System~~（✅ 关闭记账——二次用例未出现）；详见 roadmap-deferred.md
-- Phase 10 后能力路线：WindowChrome / 基础控件补充 / 渲染能力增强 / 跨平台（Linux/Android 远期）→ 接近 1.0
 
 ### 📋 技术债务（记账）
 
 > 完整延期排期见 **[roadmap-deferred.md](roadmap-deferred.md)**（全部延期项 → 阶段总表）。
+> ⚠️ **「解决时机」列已重审（2026-09-12）**：Phase 10（0.1.0）已收口，原定「Phase 10 转库前」的条目**均未纳入该次收口**——统一顺延至 **v1.0 API 审查**。另：roadmap-deferred 的总表内容主体停留在 v1.1，9.6/9.7/9.8/10/11/12 的延期项尚未批量回填（见该表头部已知缺口声明）。
 
 | 债务 | 位置 | 解决时机 |
 |------|------|---------|
-| Invalidate 解耦（两层结构 Internal+API） | TextBox 编辑操作 | Phase 7 API 审查 |
+| Invalidate 解耦（两层结构 Internal+API） | TextBox 编辑操作 | 原定节点（Phase 7）已过——**待重审**（是否仍需解耦） |
 | ~~文本裁切用字符串截断（O(n²)）~~ | TextBox::OnPaint | ✅ 已解决——Phase 9.5 R1 Clip 管线落地（PushClip/PopClip），替换逐行截断 |
-| **输入层抽象（TextInputInterface/TextInputContext）**——5.6/7.1.3 的 UpdateTextInputCaret + CaretGeometry 是半抽象（Window 中介），完整契约层 + 跨平台 adapter 待转库前 | Window::UpdateTextInputCaret | Phase 10 转库前评估 |
-| **DPI 感知**——框架当前无 DPI 缩放，IME 坐标用逻辑像素 | 全局 | Phase 10 评估 |
+| **输入层抽象（TextInputInterface/TextInputContext）**——5.6/7.1.3 的 UpdateTextInputCaret + CaretGeometry 是半抽象（Window 中介），完整契约层 + 跨平台 adapter 待转库前 | Window::UpdateTextInputCaret | v0.1.0 收口**未纳入** → 顺延 **v1.0 API 审查** |
+| **DPI 感知**——框架当前无 DPI 缩放，IME 坐标用逻辑像素 | 全局 | v0.1.0 收口**未纳入** → 顺延 **v1.0 评估** |
 | 键盘入口不对称（OnKeyDown 走 Window / OnKeyUp+CharInput 直派，3 入口）——已回顾保持现状（Tab 拦截必需 Window），未来全局快捷键时统一 | Application | 未来全局输入需求出现时（详见 phase5-architecture-review.md） |
-| 多窗口焦点语义（应用级 vs 窗口级焦点） | Window/Application | Phase 10 平台抽象收尾时评估（详见 phase5-architecture-review.md） |
-| 编辑操作可见性（临时 public） | TextBox | Phase 10 API 审查 |
-| **RenderingBackend::DrawText 命名与 Win32 宏冲突**（skill 13 历史遗留违反——现用防御性 undef 兜底，用户零负担） | RenderingBackend/RecordingBackend/GDIBackend | Phase 10 v1.0 API 审查改名（如 DrawTextContent）
+| 多窗口焦点语义（应用级 vs 窗口级焦点） | Window/Application | v0.1.0 收口**未纳入** → 顺延 **v1.0 平台抽象审查**（详见 phase5-architecture-review.md） |
+| 编辑操作可见性（临时 public） | TextBox | v0.1.0 收口**未纳入** → 顺延 **v1.0 API 审查** |
+| **RenderingBackend::DrawText 命名与 Win32 宏冲突**（skill 13 历史遗留违反——现用防御性 undef 兜底，用户零负担） | RenderingBackend/RecordingBackend/GDIBackend | **v1.0 API 审查改名**（如 DrawTextContent）——Phase 10 未改名，已确认仍为防御性 `#undef` |
 | **光标色未主题化**（TextBox 光标 Color::Black 硬编码——Phase 9 迁移时 YAGNI 未纳入） | TextBox::OnPaint | Phase 9+（需求出现时进 TextStyle/TextBoxStyle） |
 | **IME 结果 WM_CHAR 吞字符 pending 计数**（若某 IME 结果不走 WM_CHAR 会残留吞后续字符——注释已记） | Win32PlatformWindow | 真实输入法兼容性需求出现时 |
+| **Phase 8.6 抗锯齿遗留验收**——A7 性能基线 / A8 其余三工具链（MSVC/Clang/ClangCL）/ A9 目视 `S=8` vs `S=16` 对比 / A4 AA 关闭人工抽查（均已实现但未人工验收） | GDIBackend AA 路径 | 用户在 VS/CLion 执行（功能不阻塞） |
+| **跨半径角补丁测试缺口**——`PatchSurface` stride 缺陷（同 backend 先大后小半径）未被既有用例捕获（L2 每例独立 backend + 单一半径） | AntiAliasingTests L2 | AA 后续补测（已两次提议，未落地） |
 
 ## Phase3 Widget System
 
@@ -212,6 +221,7 @@
 ## 文档约定
 
 - 命名：`phaseX.Y-<module>-<type>.md`（子阶段编号 + 模块名 + 阶段类型；2026-08-25 全量规范化：Phase 5/6/7 按内容编号对齐，如 `phase5.3-button-requirements.md`、`phase6.2-checkboxradio-detailed-design.md`、`phase7.5-callback-requirements.md`；阶段级评审文档保留 `phaseN-<module>.md`）
+- 子目录：demo / 非框架文档放独立子目录（如 `docs/model-probe/`），与框架 `phaseN-*` 区隔但统一在 `docs/` 入口下
 - 五阶段法：职责确认 → 初步设计 → 详细设计 → 实现 → 测试，设计文档在实现前评审通过
 - 文档内附修订记录（v1.0 → v1.1...），实现中发现的与文档出入必须回写
 - 所有文档带 UTF-8 BOM（`ef bb bf`——MSVC 源码同规范）
