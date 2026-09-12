@@ -1,11 +1,13 @@
-﻿# Phase 12 WindowChrome 初步设计（v1.1）
+﻿# Phase 12 WindowChrome 初步设计（v1.3）
 
 > 阶段：初步设计（五阶段法 ②）
-> 日期：2026-09-11（v1.1 同日外部评审修订）
-> 状态：**v1.1 外部评审通过（修改后通过——可进详设）**
+> 日期：2026-09-11（v1.1 同日外部评审修订）／2026-09-12（v1.2 第二轮、v1.3 第三轮外部评审修订）
+> 状态：**v1.3 外部评审 PASS（可进入详细设计）**——"前置小修 2 P1" 已完成
 > 前置：`phase12-windowchrome-requirements.md` **v1.2**（外部评审通过——可进初设）
-> 一句话：把「保留 WS_OVERLAPPEDWINDOW + 拦截四个 NC 消息」落成「Public 头全文草案 + 消息拦截分层归属 + 最大化收缩算法 + R9 能力式接缝骨架 + R10 双档语义」——工程细节归详设
+> 一句话：把「保留 WS_OVERLAPPEDWINDOW + 拦截四个 NC 消息」落成「Public 头全文草案 + 消息拦截分层归属 + 最大化客户区处理 + R9 能力式接缝骨架 + R10 双档语义」——工程细节归详设
 > v1.1 修订：8 项评审意见全采纳（2 必改 + 4 建议拍板 + 2 措辞收紧）——**API 统计口径 / 配置期与运行期分组 / `WindowState` 独立成头（84→85）/ Bottom 语义收紧 / Desktop 纯语义不绑实现 / T2·T3 测试目的修正 / DWM 参数归实现细节 / dwmapi PUBLIC 限定静态库模型**
+> **v1.2 修订（第二轮评审——1 P0 + 3 P1 + 4 P2 全采纳）**：① **P0 §3.4**——删去方向错误的 `dx/dy` 对称补偿，改为「`rcWork` 唯一基准 + 补偿只能正内缩」双不变量（附数值实证）；② P1 配置期判据由 `IsWindowVisible` 改为 `m_shown`（`Show()+Hide()` 后二者分歧）；③ P1 `SetChromeMode` 补 `m_hwnd` 防御并明确「构造即建 HWND」前提；④ P1 最大化态 NCHITTEST 的 `IsZoomed` 门控落入代码（原仅见于文字）；⑤ P2 T1 明确坐标系不可直接比较 / T7b 新增非 API 路径手测 / §3.5 收紧「1px = 阴影」表述 / §2.4 清理重复残块（代码围栏失衡）
+> **v1.3 修订（第三轮评审——2 P1 + 2 P2 全采纳）**：① **P1 运行期 API 生命周期闭合**——`Minimize`/`Maximize`/`Restore` 补 `if (!m_shown)` → Warning + 忽略，与配置期四件套**对称**（原「Show 前调用无意义、系统会忽略」的说法既不准确也未实现）；② **P1 T3 断言逻辑修正**——「同坐标一律不同」在角点必然失败，改为「预期不同 / 预期相同」两类点；③ P2 DIP→像素的**换算点与 DPI 来源**列为详设必锁项（§8 决策点 8）；④ P2 `Desktop` **语义状态 ≠ 实现路径**正式写成契约（§8 决策点 9）。另：修正 §9.2 生命周期表**表头与分隔线挤在同一行**的 markdown 缺陷。
 
 ---
 
@@ -17,7 +19,7 @@
 | R1 切换时机（决策 7） | **运行时切换 → 降级为配置期**（初设拍板） | §9.1 | ✅ 拍板 |
 | R2 无边框客户区 | `WM_NCCALCSIZE` 拦截 | §3.2 | ✅ |
 | R3 命中测试 | `WM_NCHITTEST` 九宫格 + 单位换算 | §3.3 | ✅ |
-| R4 最大化修正 | 收缩算法（基于 `MONITORINFO.rcWork`） | §3.4 | ✅ 算法全文 |
+| R4 最大化修正 | 客户区处理（`MONITORINFO.rcWork` 为唯一基准 + 补偿不变量） | §3.4 | ✅ 实现全文（补偿量**归详设标定**——v1.2 修订） |
 | R5 CaptionBar 范围 | 不做 Widget——仅验证「应用自绘标题栏可行」 | §7.4 | ✅ |
 | R6 DWM 增强 | `DwmExtendFrameIntoClientArea` + 圆角属性 + 失败容忍 | §3.5 | ⚠️ 参数待实测（§9.3） |
 | R7 窗口状态 API 与事件 | `Minimize/Maximize/Restore` + `WindowStateChangedEvent` | §2.5 / §2.6 | ✅ |
@@ -40,7 +42,7 @@
     SetChromeMode()      SetCaptionHeight()
     SetResizeInset()     SetWindowLayer()
 
-  运行期（Show() 后可调用）───────────────── 3 个
+  运行期（Show() **之后**有效）──────────────── 3 个
     Minimize()           Maximize()           Restore()
 
 总计 4 + 3 = 7
@@ -165,16 +167,21 @@ enum class WindowLayer{
 	/// 交系统自然演化）。
 	virtual void SetWindowLayer(WindowLayer layer) = 0;
 
-	// ── Phase 12：窗口状态（运行期——Show() 后可调用）──────────────
+	// ── Phase 12：窗口状态（运行期——**Show() 之后**才有效）──────────
+	// @pre 运行期契约（v1.3——评审 §三）：Show() 之前调用记 Warning 并忽略；
+	//      与配置期四件套**对称**（配置期 = Show 前有效 / 运行期 = Show 后有效）。
 
 	/// @brief 最小化窗口（R7）——薄封装 ShowWindow(SW_MINIMIZE)
+	/// @pre Show() 之前调用记 Warning 并忽略（运行期 API——见初设 §9.2）
 	virtual void Minimize() = 0;
 
 	/// @brief 最大化窗口（R7）——薄封装 ShowWindow(SW_MAXIMIZE)
+	/// @pre 同 Minimize
 	virtual void Maximize() = 0;
 
 	/// @brief 还原窗口（R7）——薄封装 ShowWindow(SW_RESTORE)
 	/// @details 最小化态 → 还原到原尺寸；最大化态 → 还原到最大化前尺寸（系统语义）。
+	/// @pre 同 Minimize
 	virtual void Restore() = 0;
 ```
 
@@ -214,40 +221,22 @@ enum class WindowLayer{
 		/// reparent / WinEventHook）为平台细节，公共 API 不承诺任何具体机制。
 		void SetWindowLayer(WindowLayer layer);
 
-		// ── Phase 12：窗口状态（运行期——Show() 后可调用）──────────────
+		// ── Phase 12：窗口状态（运行期——**Show() 之后**才有效）────────
 
 		/// @brief 最小化窗口——状态变化经 WindowStateChanged 事件回流
+		/// @pre Show() 之前调用记 Warning 并忽略（运行期 API——见初设 §9.2）
 		void Minimize();
 
 		/// @brief 最大化窗口
+		/// @pre 同 Minimize
 		void Maximize();
 
 		/// @brief 还原窗口（最小化态/最大化态通用）
+		/// @pre 同 Minimize
 		void Restore();
 ```
 
 **为什么 `SetWindowLayer` 也归配置期（v1.1 说明）**：它虽然技术上可在运行期安全调用（改强制标志 + 一次 `SetWindowPos`），但**与其他三个配置项保持同一生命周期**能让 API 语义整齐——「窗口生命周期内的形态由创建期一次决定」是一条比「哪些能改哪些不能改」更容易记忆、更少误用的契约。若未来真出现运行期切层需求（如 DesktopNest 从托盘切换常驻），再单独立项放宽（API 签名零变更）。
-
-		void SetCaptionHeight(int height);
-
-		/// @brief 设置缩放热区宽度（R3；逻辑坐标 DIP）
-		/// @details 八向 resize 的命中宽度（四边 + 四角各向内 inset）。
-		void SetResizeInset(int inset);
-
-		/// @brief 设置窗口层级档位（R10）
-		void SetWindowLayer(WindowLayer layer);
-
-		// ── 窗口状态 API（R7——最小化/最大化/还原是 Window 状态，不是标题栏状态）──
-
-		/// @brief 最小化窗口——状态变化经 WindowStateChanged 事件回流
-		void Minimize();
-
-		/// @brief 最大化窗口
-		void Maximize();
-
-		/// @brief 还原窗口（最小化态/最大化态通用）
-		void Restore();
-```
 
 **include 追加**：`#include "ECDI/Window/ChromeMode.h"` + `"ECDI/Window/WindowLayer.h"`。
 
@@ -414,11 +403,33 @@ class WindowStateChangedEvent;
 	int m_resizeInset = 8;	///< 缩放热区宽度（R3；逻辑坐标 DIP——默认 8）
 	WindowLayer m_windowLayer = WindowLayer::Normal;	///< 层级档位（R10）
 
+	bool m_shown = false;	///< 是否已调用过 Show()（配置期判据——v1.2：区别于「当前是否可见」）
+
 	bool m_borderlessApplied = false;	///< Borderless 是否已 application（防重复派发 SWP_FRAMECHANGED）
 	bool m_inSizeMove = false;	///< 是否处于拖动/缩放循环（WM_ENTERSIZEMOVE~WM_EXITSIZEMOVE）
 ```
 
 **边界检查（构造期）**：`m_captionHeight` / `m_resizeInset` 为负时 clamp 到 0（契约：「<= 0 视为 0」）。
+
+**配置期判据 `m_shown`（v1.2 新增——评审 P1）**：4 个配置期 API 的「是否仍在配置期」判据统一为 `m_shown`，**在 `Win32PlatformWindow::Show()` 内置位**：
+
+```cpp
+void Win32PlatformWindow::Show() {
+
+	if (m_hwnd) {
+
+		m_shown = true;   // 配置期 → 运行期 的分界线（与 Window::Show() 一一对应）
+
+		ShowWindow(m_hwnd, SW_SHOW);
+
+	}
+
+}
+```
+
+> **为什么不复用 `IsWindowVisible`（v1.1 的做法）**：二者**不等价**。`Show()` → `Hide()` 之后 `IsWindowVisible()` 为假，但契约上「已调用过 `Show()`」已成立——v1.1 用可见性做判据，会出现「契约说 Show 后拒绝、实现却仍允许」的不一致。
+>
+> **它不是「第二真相源」**：`m_shown` 表达的是「**框架 API 是否调用过 `Show()`**」，而 `IsWindowVisible` 表达的是「**系统当前是否可见**」——**这是两个不同的事实**，不是同一事实的两份副本。第二真相源禁令针对的是后者被复制（如自行维护「现在可见吗」），本项不属该禁令范围。
 
 ### 3.2 R2：`WM_NCCALCSIZE`
 
@@ -473,7 +484,11 @@ class WindowStateChangedEvent;
 
 		const int y = pt.y - rcWin.top;
 
-		// 逻辑坐标 → 设备像素（当前 DPI 缩放未落地 = 1:1；未来 DPI 落地只需改此处，
+		// 逻辑坐标 → 设备像素（**当前 DPI 缩放未落地 = 1:1**；公共 API 语义恒为 DIP，不受未来 DPI 落地影响）
+		// ⚠️ v1.3（评审 §八）：换算点在此，但 **DPI 来源尚未锁死**——详设必须拍板：
+		//   ① 用 `GetDpiForWindow(hwnd)`（窗口所在显示器）？还是鼠标所在显示器？还是未来统一 DPI 服务？
+		//   ② 窗口跨 DPI 显示器、且鼠标位于**另一台**显示器时的命中规则。
+		//   见 §8 开放决策点 8（v1.3 新增）。
 		// 公共 API 语义不变——R3 §单位契约）
 		const int inset = m_resizeInset;
 
@@ -484,13 +499,19 @@ class WindowStateChangedEvent;
 		const int h = rcWin.bottom - rcWin.top;
 
 		// 四角优先（角命中优先级高于边——否则角落会被边的判定吃掉）
-		const bool left = x < inset;
+		// 最大化态：系统不会进入 resize 循环，返回 HTLEFT/HTTOP 等会让人误以为可拖宽——
+		// 故四边四角 resize 判据整体跳过（v1.2：把 §契约要点 第 2 条落实进代码，避免「文字说了代码没体现」）。
+		// ⚠️ caption 判据**不走这条门**——最大化时仍允许从顶部往下拖还原（系统行为）。
+		const bool resizable = !IsZoomed(hwnd);
 
-		const bool right = x >= w - inset;
+		// 四角优先（角命中优先级高于边——否则角落会被边的判定吃掉）
+		const bool left = resizable && x < inset;
 
-		const bool top = y < inset;
+		const bool right = resizable && x >= w - inset;
 
-		const bool bottom = y >= h - inset;
+		const bool top = resizable && y < inset;
+
+		const bool bottom = resizable && y >= h - inset;
 
 		if (top && left)     return HTTOPLEFT;
 
@@ -524,10 +545,40 @@ class WindowStateChangedEvent;
 **契约要点**：
 
 - 命中顺序 `四角 → 四边 → 标题栏 → 客户区` 是**不可调换**的——否则 8px 角落在 `caption` 区内会被判成 `HTCAPTION`（顶部两角将无法缩放）
-- 最大化态**不应返回 caption 区以外的 resize 命中**：系统在最大化时不会进入 resize 循环，返回 HTLEFT 等值会让人误以为能拖宽。**处理**：最大化时若 `top` 判定命中，`caption` 判定仍生效（允许从顶部往下拖还原，这是系统行为），但四边四角 resize 判据在 `IsZoomed` 时全部跳过。**详设定稿**（§9.2）
+- 最大化态**不应返回 caption 区以外的 resize 命中**：系统在最大化时不会进入 resize 循环，返回 HTLEFT 等值会让人误以为能拖宽。**处理（v1.2 已落入代码）**：`resizable = !IsZoomed(hwnd)` 统一门控四边四角判据；`caption` 判据**不走该门**（最大化时仍允许从顶部往下拖还原——系统行为）。
 - `WM_NCHITTEST` 对触摸/笔输入同样生效——无需额外处理
 
-### 3.4 R4：最大化收缩算法（基于 `MONITORINFO.rcWork`）
+### 3.4 R4：最大化客户区处理（`rcWork` 为唯一基准）
+
+**v1.2 关键修订（外部评审 P0——必须修）**：v1.1 曾以「`rcWork` 为基准 + 用 `rcWindow` 与 `rcMonitor` 的偏移做对称补偿」给出算法全文。**该补偿的方向是反的。**
+
+最大化窗口的 `rcWindow` 被系统撑到 `rcMonitor` 之外（`rcWindow.left < rcMonitor.left`），故 `dx = rcWindow.left - rcMonitor.left` **恒为负**；代入 `rcClient.left = rcWork.left + dx` 会使客户区**向左越出工作区**，`rcClient.right = rcWork.right - dx` 同理向右越出。**它实际是「扩大」而非「收缩」，直接违反 `ClientRectScreen ⊆ rcWork` 不变量。**
+
+**数值实证**（1920×1080 显示器 / 任务栏 40px / 边框 8px）：
+
+| 量 | 值 |
+|---|---|
+| `rcMonitor` | (0, 0, 1920, 1080) |
+| `rcWork` | (0, 0, 1920, 1040) |
+| 最大化 `rcWindow` | (−8, −8, 1928, 1048) |
+| `dx` / `dy` | **−8 / −8** |
+| v1.1 公式产出 `rcClient` | **(−8, −8, 1928, 1048)**——1936×1056，**比整块显示器还大** |
+| 不变量 `⊆ rcWork` | **★违反★**（四边全部越出） |
+| 仅取 `rcClient = rcWork` | (0, 0, 1920, 1040)——**满足** |
+
+**v1.2 定案**：初设**只锁两件事**，不再给「补偿算法全文」。
+
+- **① 唯一基准（锁死）**——客户区以 `MONITORINFO.rcWork` 为基准。`rcClient = mi.rcWork` 本身即满足 `ClientRectScreen == rcWork`，**无需任何补偿**。
+- **② 补偿不变量（锁死）**——若详设真机实测发现仍需补偿，**补偿只能让客户区从 `rcWork` 进一步收缩，绝不允许扩大到 `rcWork` 之外**。形式只能是「加正内缩量」（`ix` / `iy` 必须 `>= 0`）：
+
+  ```cpp
+  rcClient.left   += ix;   // 只能让窗口更小
+  rcClient.top    += iy;
+  rcClient.right  -= ix;
+  rcClient.bottom -= iy;
+  ```
+
+- **③ 归详设**——**是否需要补偿 / 补偿多少 / X-Y 是否对称 / 混合 DPI 下是否对称**，一律交详设真机标定（§8 开放决策点 1）。
 
 ```cpp
 void Win32PlatformWindow::AdjustMaximizedClientRect(HWND hwnd, RECT& rcClient){
@@ -545,37 +596,19 @@ void Win32PlatformWindow::AdjustMaximizedClientRect(HWND hwnd, RECT& rcClient){
 
 	}
 
-	// ① 客户区 = 显示器工作区（屏幕坐标）
+	// 客户区 = 显示器工作区（屏幕坐标）。
+	// 最大化时系统已把 rcWindow 撑到 rcWork 之外（按边框量外扩）；此处直接把客户区取为
+	// rcWork，即得「可见范围 == 工作区」。**无需补偿，也就不会出现方向性错误。**
 	rcClient = mi.rcWork;
 
-	// ② 扣除边框厚度（样式保留 WS_OVERLAPPEDWINDOW → 最大化时系统仍不绘边框，
-	//    但窗口矩形的"视觉边框厚度"会体现在 rcClient 与窗口矩形的差值上——
-	//    窗口矩形在最大化时已被系统撑到 rcMonitor 之外，此处以"窗口矩形 - 工作区"
-	//    的实际偏移反推需要补偿的量，而非硬编码 SM_CXSIZEFRAME）
-	RECT rcWindow{};
-
-	GetWindowRect(hwnd, &rcWindow);
-
-	// 窗口矩形（含边框区）与工作区的相对偏移——这是边框在屏幕坐标下的实际表现
-	int dx = rcWindow.left - mi.rcMonitor.left;
-
-	int dy = rcWindow.top - mi.rcMonitor.top;
-
-	// 系统把窗口撑出屏幕的量的对称补偿（MAXIMIZEDBORDER 语义的实测标定，
-	// 不用 GetSystemMetrics(SM_CXSIZEFRAME) 硬拼——多显示器/不同缩放比下
-	// 标称值与实际膨胀量不一致）
-	rcClient.left   = rcClient.left + dx;
-
-	rcClient.top    = rcClient.top + dy;
-
-	rcClient.right  = rcClient.right - dx;
-
-	rcClient.bottom = rcClient.bottom - dy;
+	// ⚠️ v1.2：此处刻意**不引入**任何基于 (rcWindow - rcMonitor) 差值的补偿。
+	//    最大化时该差值为负，任何「正负代入」的对称补偿都会把客户区推出 rcWork。
+	//    若详设真机标定确认需要补偿，必须用「正内缩量」且只能收缩（见本节 ②）。
 
 }
 ```
 
-> ⚠️ **本节算法为初设倾向，标定方式必须实测**（§9.5）：`dx`/`dy` 的取值在多显示器混合 DPI 场景下可能不对称。初设给出**可收敛的算法骨架**（「rcWork 为基准 + 以窗口矩形与 rcMonitor 的实际偏移做对称补偿」），具体形式由详设在真机上标定后定稿。**核心不变量已锁定：基准必须是 `rcWork`；补偿量必须实测而非查表硬编码。**
+> **纪律条款（v1.2 新增）**：`ClientRectScreen ⊆ rcWork` 是**不变量**，不是「验收倾向」。详设若引入补偿量，必须给出真机实测数据（含混合 DPI 场景）并证明补偿后仍满足该不变量。**不得为「让初设看起来完整」而提前锁死未经验证的补偿公式。**
 
 ### 3.5 R6：DWM 增强
 
@@ -603,8 +636,10 @@ void Win32PlatformWindow::ApplyDwmEnhancements(HWND hwnd){
 	// 下方全部数值参数（1px / DWMWCP_ROUND）属实现细节，不是公共 API 语义。
 
 	// ① 保留系统阴影/层次：minimal frame extension
-	//    （全 0 会失去系统阴影；过大则玻璃延伸进客户区——1px 是业界常用的"只要阴影"值，
-	//     详设按真机视觉实测标定）
+	//    （全 0 会失去系统阴影；过大则玻璃延伸进客户区——当前 Win32 MVP 倾向取 1px。
+	//     ⚠️ v1.2 措辞收紧（评审 §18）：不宣称「1px = 阴影」是普适数学关系——DWM frame
+	//        extension 在不同 Windows 版本/窗口状态/视觉效果下并非固定映射。1px 只是本实现
+	//        **当前选取的参数**，最终值由详设真机视觉实测确定，可能微调。）
 	MARGINS margins{ 1, 1, 1, 1 };
 
 	const HRESULT hrExtend = DwmExtendFrameIntoClientArea(hwnd, &margins);
@@ -712,7 +747,7 @@ void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
 	// 理由：让「窗口形态由创建期一次决定」成为一条统一契约（比「哪些能改哪些不能改」
 	// 更易记忆、更少误用）。API 签名不因此锁死——未来若出现运行期切层需求，
 	// 只需松开此判据（零签名变更）。
-	if (m_hwnd != nullptr && IsWindowVisible(m_hwnd)){
+	if (m_shown){
 
 		Logger::Log(LogLevel::Warning,
 			"WindowChrome: SetWindowLayer ignored after Show() - layer is config-time only");
@@ -731,9 +766,16 @@ void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
 
 	if (layer == WindowLayer::Desktop){
 
-		// ⚠️ spike 未通过前：Desktop 不承诺可用——降级为 Bottom 语义并告警
+		// ⚠️ spike 未通过前：Desktop 不承诺可用——**状态不降级**，仅当前 Win32 实现
+		// 按 Bottom 语义执行（v1.2——评审 §7：保留用户请求的 Desktop，降级的是「实现如何执行」，
+		// 不是「状态是什么」；spike 通过后 m_windowLayer 无需改动）。
+
+		// ★ 原则（v1.3 正式化——评审 §十二）：**语义状态 ≠ 当前实现路径**。
+		//   请求语义（m_windowLayer == Desktop）与实现手段（走 Bottom 路径）是两个层次；
+		//   降级的是「实现如何执行」，不是「状态是什么」。故未来若新增 GetWindowLayer()，
+		//   在 spike 未通过时它仍须返回 Desktop，**不得**返回 Bottom。
 		Logger::Log(LogLevel::Warning,
-			"WindowChrome: WindowLayer::Desktop not yet validated (spike pending) - degraded to Bottom");
+			"WindowChrome: WindowLayer::Desktop not yet validated (spike pending) - executed as Bottom");
 
 	}
 
@@ -763,9 +805,10 @@ void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
 void Win32PlatformWindow::SetChromeMode(ChromeMode mode){
 
 	// 决策 D1（§9.1）：仅配置期生效——已显示窗口拒绝切换。
-	// 判据 IsWindowVisible：窗口已 Show 即视为「运行期」（不引额外状态标记——
-	// 状态标记会与系统真实可见性产生第二真相源）
-	if (m_hwnd != nullptr && IsWindowVisible(m_hwnd)){
+	// 判据 m_shown：在 Show() 内置位——它表达的是「框架 API 是否调用过 Show()」，
+	// 而不是「系统当前是否可见」。二者**本来就不同**：Show()+Hide() 后 IsWindowVisible 为假，
+	// 但契约上已进入运行期（v1.2——评审 P1：修掉 v1.1「契约说 Show 后拒绝、实现按可见性判」的不一致）。
+	if (m_shown){
 
 		Logger::Log(LogLevel::Warning,
 			"WindowChrome: SetChromeMode ignored after Show() - mode is config-time only");
@@ -785,6 +828,16 @@ void Win32PlatformWindow::SetChromeMode(ChromeMode mode){
 	if (mode != ChromeMode::Borderless){
 
 		return;   // Normal：无需任何处理（默认样式即 Normal）
+
+	}
+
+	// HWND 生命周期前提（v1.2——评审 P1 明确）：本框架**窗口构造即建 HWND**
+	//（Win32PlatformWindow 构造体 CreateWindowExW，失败抛 std::system_error），
+	// 故 Window 构造完成后 m_hwnd 恒非空。此处仍做防御，与 SetWindowLayer 对齐，
+	// 避免前提失效时把 nullptr 交给 Win32 API。
+	if (m_hwnd == nullptr){
+
+		return;   // 无窗口：仅记录状态（Show 后由消息流自然生效）
 
 	}
 
@@ -808,11 +861,33 @@ void Win32PlatformWindow::SetChromeMode(ChromeMode mode){
 ```cpp
 void Win32PlatformWindow::Minimize(){
 
+	// 运行期契约（v1.3——评审 §三）：与配置期 API 对称，Show() 前拒绝。
+	// 理由：ShowWindow(SW_MINIMIZE) 本身就是显示状态操作，**不能靠「系统会忽略」**来成立
+	//       「Show 前调用无意义」这一说法——必须在框架侧显式闭合契约。
+	if (!m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			"WindowChrome: Minimize ignored before Show() - state API is runtime-only");
+
+		return;
+
+	}
+
 	if (m_hwnd) ShowWindow(m_hwnd, SW_MINIMIZE);
 
 }
 
 void Win32PlatformWindow::Maximize(){
+
+	// 运行期契约（v1.3——评审 §三）：同 Minimize
+	if (!m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			"WindowChrome: Maximize ignored before Show() - state API is runtime-only");
+
+		return;
+
+	}
 
 	if (m_hwnd) ShowWindow(m_hwnd, SW_MAXIMIZE);
 
@@ -820,8 +895,19 @@ void Win32PlatformWindow::Maximize(){
 
 void Win32PlatformWindow::Restore(){
 
+	// 运行期契约（v1.3——评审 §三）：同 Minimize
+	if (!m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			"WindowChrome: Restore ignored before Show() - state API is runtime-only");
+
+		return;
+
+	}
+
 	if (m_hwnd) ShowWindow(m_hwnd, SW_RESTORE);
 
+}
 }
 ```
 
@@ -1017,14 +1103,16 @@ spike 失败（任一路线不可行 或 副作用不可接受）
 
 | 用例 | 手法 | 断言 |
 |---|---|---|
-| **T1 Normal vs Borderless 客户区对照**（需求 §6 核心） | 创建两个真窗口（`WS_OVERLAPPEDWINDOW`），一个默认、一个 `SetChromeMode(Borderless)`，各自 `GetClientRect` / `GetWindowRect` | Normal：`clientRect != windowRect`（差 = 标题栏+边框）；Borderless：`clientRect == windowRect`（尺寸完全相等）。**对照才有意义**——单独断言 Borderless 无法证明是 chrome 拦截在起作用（可能窗口本来就无边框） |
+| **T1 Normal vs Borderless 客户区对照**（需求 §6 核心） | 创建两个真窗口（`WS_OVERLAPPEDWINDOW`），一个默认、一个 `SetChromeMode(Borderless)`，各自 `GetClientRect` / `GetWindowRect` | Normal：`clientRect != windowRect`（差 = 标题栏+边框）；Borderless：客户区与窗口矩形**四边重合**。**对照才有意义**——单独断言 Borderless 无法证明是 chrome 拦截在起作用（可能窗口本来就无边框）。<br>⚠️ **坐标系不可直接比较（v1.2——评审 §12）**：`GetClientRect` 返回 `(0,0,w,h)`（**客户区局部坐标**），`GetWindowRect` 返回 `(screenL,screenT,screenR,screenB)`（**屏幕坐标**）——两者坐标系不同，**禁止** `GetClientRect() == GetWindowRect()`。正确做法二选一：① `GetClientRect` → `ClientToScreen` 左上角 → 得 `ClientRectScreen` 再与 `GetWindowRect` 逐边比较；② 只比较 `client 宽/高 == window 宽/高` |
 | **T2 NCHITTEST 九宫格 + resize 优先级**（v1.1 明确测试目的——评审 §8） | 真窗口 + `SetChromeMode(Borderless)` + `SetCaptionHeight(32)` + `SetResizeInset(8)`；`SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(screenX, screenY))` 逐点查询 | **测试目的（必须写进用例名/注释）：「resize 命中优先级覆盖 caption 命中」**——`(w/2, 4)` 同时落在 `inset`（4 < 8）与 `caption`（4 < 32）两个区内，期望 `HTTOP` 而非 `HTCAPTION`。其余九宫格：`(4,4)→HTTOPLEFT`、`(w-4,4)→HTTOPRIGHT`、`(4,h-4)→HTBOTTOMLEFT`、`(w-4,h-4)→HTBOTTOMRIGHT`、`(4,h/2)→HTLEFT`、`(w-4,h/2)→HTRIGHT`、`(w/2,4)→HTTOP`、`(w/2,h-4)→HTBOTTOM`、`(w/2,20)→HTCAPTION`、`(w/2,h/2)→HTCLIENT` |
-| **T3 NCHITTEST 模式隔离（双窗口对照）**（v1.1 改为双窗口——评审 §9） | **窗口 A = Normal、窗口 B = Borderless，同几何位置**（两个独立 HWND——不依赖运行时切换，符合配置期契约） | 对同一组坐标点，分别向 A / B 发 `WM_NCHITTEST`，**断言两者返回不同的命中值**（证明 Borderless 拦截确实生效）。⚠️ **不得**用 `result != HTCAPTION` 这类断言——Normal 窗口的系统结果**本来就可能是** `HTCAPTION`/`HTTOP`/`HTLEFT`（系统标题栏与边框命中），单值不等断言不可靠 |
+| **T3 NCHITTEST 模式隔离（双窗口对照）**（v1.1 改双窗口；**v1.3 修断言逻辑**——评审 §四） | **窗口 A = Normal、窗口 B = Borderless，同几何位置**（两个独立 HWND——不依赖运行时切换，符合配置期契约）。B 的配置须**刻意取小**：`SetCaptionHeight(4)` + `SetResizeInset(4)`——以便与 Normal 的系统非客户区（顶部约 31px @100% DPI）拉开**可判定**的差异区间 | **断言分两类（v1.3 关键修订）**：<br>**A. 预期「不同」的点**——`(w/2, 20)`：Normal → `HTCAPTION`（20 < 系统非客户区高度），Borderless → `HTCLIENT`（20 ≥ `captionHeight` 4）。**这才是「Borderless 拦截生效」的证据**。<br>**B. 预期「相同」的点**——`(2,2)` → 两边**均** `HTTOPLEFT`；`(w-2,2)` → 均 `HTTOPRIGHT`（证明 Borderless **没有破坏** resize 九宫格）。<br>⚠️ **不得**断言「同一组坐标一律不同」——`(2,2)` 这类角点在两种模式下**本来就都返回** `HTTOPLEFT`，等值→不等断言**必然失败**；也不得用 `result != HTCAPTION` 单值断言（Normal 的系统结果本来就可能含 `HTCAPTION`）。<br>⚠️ **两类点必须留余量**：Normal 的非客户区高度是**系统度量**（随 DPI / 主题变化），**不可假设为定值**——故 B 的 caption/inset 取小值，使 A/B 两类点在各自主张的区间内都有 ≥8px 余量 |
 | **T4 最大化客户区在 rcWork 内**（R4 验收基准） | 真窗口 Borderless + `Maximize()` + 消息泵处理一轮 → `GetClientRect` + `ClientToScreen` | **不变量：`ClientRectScreen ⊆ rcWork`**（子集，非相等——边框/DWM/Windows 版本差异可能让边界处理方式不同；用相等断言会引入脆弱性）。即：不覆盖任务栏、不超出工作区。**注意**：断言前必须让消息循环处理 `WM_NCCALCSIZE`/`WM_SIZE` |
 | **T5 单位契约（`captionHeight` = 逻辑坐标）** | `SetCaptionHeight(32)` → 查询 `(w/2, 31)` 与 `(w/2, 33)` | 31 → HTCAPTION；33 → HTCLIENT（当前 DPI 1:1，边界精确可断言） |
 | **T6 边界值 clamp** | `SetCaptionHeight(0)` / `SetResizeInset(0)` | `caption 0`：无 HTCAPTION 区（`(w/2, 4)` → HTCLIENT，但 `(2,2)` 仍 HTTOPLEFT 如果 inset>0）；`inset 0`：无 resize 区（`(2,2)` → HTCAPTION 或 HTCLIENT） |
-| **T7 状态事件** | 注册一个捕获 `WindowStateChangedEvent` 的测试 `Application`（或直接测 `Win32PlatformWindow` 经 Host 回调） | `Minimize()` → 收到 `minimized`；`Restore()` → 收到 `restored`；`Maximize()` → 收到 `maximized`。**去重验证**：连续两次 `Maximize()` 只产生 1 个事件 |
-| **T8 R9 未消费消息零回归** | 既有全部测试通过（158 条） | 无需新用例——**回归即证明** |
+| **T7a 运行期契约边界（v1.3 新增——评审 §三）** | 构造后**不调用 `Show()`**，直接调 `Minimize()` / `Maximize()` / `Restore()` | 三者均**不产生** `WindowStateChangedEvent`、窗口不可见状态**不变**（被 Warning 拒绝）；随后 `Show()` + `Maximize()` → 正常产生 `maximized`。**证明运行期 API 的 Show 前拒绝是框架行为、不依赖系统** |
+| **T7 状态事件（API 路径）** | 注册一个捕获 `WindowStateChangedEvent` 的测试 `Application`（或直接测 `Win32PlatformWindow` 经 Host 回调） | `Minimize()` → 收到 `minimized`；`Restore()` → 收到 `restored`；`Maximize()` → 收到 `maximized`。**去重验证**：连续两次 `Maximize()` 只产生 1 个事件 |
+| **T7b 状态事件（非 API 路径）**（v1.2 新增——评审 §19） | **手测/视觉**（不适合自动化——需真实输入） | 通过系统行为触发最大化：**拖标题栏到屏幕顶部**（Aero Snap）/ **Win+↑** / 双击标题栏，确认仍收到 `WindowStateChangedEvent(maximized)`。**这是本设计最核心命题的验收落点**——事件由**系统真实状态**产生，而非由 ECDI 某个 API 被调用产生（若只测 T7，无法区分「事件真的来自系统」还是「`Maximize()` 自己发了个事件」） |
+| **T8 R9 未消费消息零回归** | 既有全部测试通过（截至 2026-09-12 为 **174** 条） | 无需新用例——**回归即证明** |
 
 **窗口创建规格**（复用 `RendererTests.cpp` 先例，但**必须区分样式**）：
 
@@ -1066,13 +1154,15 @@ spike 失败（任一路线不可行 或 副作用不可接受）
 
 | # | 项 | 初设倾向 | 归属 |
 |---|---|---|---|
-| 1 | 最大化收缩的 `dx`/`dy` 标定方式 | rcWork 基准 + 窗口矩形与 rcMonitor 实际偏移的对称补偿（**不用 SM_CXSIZEFRAME 硬拼**）——真机标定 | 详设 §3.4 |
-| 2 | 最大化态 NCHITTEST 是否返回 resize 命中 | 倾向「`IsZoomed` 时跳过四边四角 resize 判据，但保留 caption 判据」（允许从顶部往下拖还原） | 详设 §3.3 |
+| 1 | 最大化**是否需要补偿**、补偿量多少 | **基准已锁死**：`rcClient = rcWork` 即满足 `⊆` 不变量，**无需补偿**；是否需要额外补偿 / 量值 / X-Y 与混合 DPI 对称性**全部归真机标定**。**纪律**：补偿只能「正内缩」（只收缩、不扩大），且须附实测数据（§3.4） | 详设 §3.4 |
+| 2 | 最大化态 NCHITTEST 是否返回 resize 命中 | **已在初设落到代码**：`resizable = !IsZoomed(hwnd)` 门控四边四角，caption 保留（允许顶部下拖还原）——详设复核即可 | 详设 §3.3 |
 | 3 | `dwmapi` / Win11 圆角常量在 MinGW 的可用性 | 头缺失则文件内自定义常量兜底；库缺失则 R6 整体降级为「仅日志」 | 详设 §4 |
 | 4 | `WindowLayer::Desktop` 的 spike 结果与后续实现 | 倾向路线 A（reparent）；判据 3（桌面图标可点性）一票否决 | spike 产出 |
 | 5 | 测试窗口创建/销毁的合并策略 | 倾向「一次创建多断言共享」降低开销——但**对照类测试（T1/T3）必须独立窗口**（否则状态污染） | 详设 §7.1 |
 | 6 | DWM margin 值（1px vs 其他）的视觉效果 | 倾向 1px；不同 Windows 版本视觉效果不保证一致，须实测（需求 R6 已声明） | 详设 §3.5 |
 | 7 | `PlatformWindow.h` 类注释中「平台能力扩展惯例」的措辞 | 需写清「加能力 = 加虚接口 + 公共方法 + 消息在平台内消化」三步，作为 Phase 13 的模板 | 详设 §3.11 |
+| 8 | **DIP → 物理像素的换算点与 DPI 来源**（v1.3 新增——评审 §八） | 公共 API 语义为 **DIP**（`captionHeight`/`resizeInset`）；当前 DPI 未落地 = 1:1。**详设必须锁死**：① 换算点（`WM_NCHITTEST` 内 DIP→px）② **DPI 来源**（`GetDpiForWindow` / 鼠标所在 monitor / 未来统一 DPI 服务）③ **窗口跨 DPI 显示器且鼠标在另一台**时的规则。**不做 = 留一个不可判定边界** | 详设 §3.3 |
+| 9 | **`Desktop` 语义状态 ≠ 当前实现路径**（v1.3 新增——评审 §十二） | 已倾向「保留 `m_windowLayer == Desktop`，仅 Win32 实现按 Bottom 执行」；详设须把它**正式写成契约**：若未来出现 `GetWindowLayer()`，spike 未通过时它仍应返回 `Desktop`（请求语义），而非 `Bottom`（实现路径） | 详设 §3.8 |
 
 ---
 
@@ -1101,11 +1191,13 @@ spike 失败（任一路线不可行 或 副作用不可接受）
 
 1. **收益极低**：真实用例（ModelProbe / DesktopNest / Demo）都是**创建时决定形态**——没有一个需要在窗口生命周期中途改形态。这是典型的「没有消费者的灵活性」。
 2. **成本集中在几何迁移**（第 2 项）——而这一项**无法用工程手段消除**，只能选择一种「跳变」方式。强行承诺会给 API 留下一个「行为不确定」的语义。
-3. **可逆性**：API 形态（`SetChromeMode`）**不因降级而改变**——未来若真出现运行期切换用例，只需松开 `IsWindowVisible` 判据并补齐上述 6 项，**API 零变更**。降级只影响**当前契约的承诺强度**，不锁死未来。
+3. **可逆性**：API 形态（`SetChromeMode`）**不因降级而改变**——未来若真出现运行期切换用例，只需松开 `m_shown` 判据并补齐上述 6 项，**API 零变更**。降级只影响**当前契约的承诺强度**，不锁死未来。（v1.2：判据由 `IsWindowVisible` 改为 `m_shown`——见 §3.1；后者才精确表达「`Show()` 是否调用过」。）
 
 **契约措辞（写入头注释）**：
 
-> `SetChromeMode` / `SetCaptionHeight` / `SetResizeInset` / `SetWindowLayer` **必须在本窗口 `Show()` 之前调用**（配置期 API）。`Show()` 之后调用记 Warning 日志并忽略（不抛异常，不做运行时切换）。理由见初设 §9.1。
+> `SetChromeMode` / `SetCaptionHeight` / `SetResizeInset` / `SetWindowLayer` **必须在本窗口 `Show()` 之前调用**（配置期 API）。`Show()` 之后调用记 Warning 日志并忽略（不抛异常，不做运行时切换）。理由见初设 §9.1
+> 
+> 对称地，`Minimize` / `Maximize` / `Restore` **必须在本窗口 `Show()` 之后调用**（运行期 API）。`Show()` 之前调用记 Warning 日志并忽略（不抛异常）。**两侧互为镜像**——见 §9.2 生命周期表。
 
 **替代方案（若应用确实需要切换）**：销毁旧窗口 + 创建新窗口（Phase 12 不提供便利 API，但应用层完全可自行这样做——`Window::Release()` + `Application::Create()` 已有）。
 
@@ -1130,15 +1222,20 @@ window.Restore();
 window.Minimize();
 ```
 
-| 组 | API | 生命周期 | Show 后调用 ||---|---|---|---|
-| **配置期** | `SetChromeMode` / `SetCaptionHeight` / `SetResizeInset` / `SetWindowLayer` | 构造后 ~ Show 前 | ⚠️ Warning + 忽略 |
-| **运行期** | `Minimize` / `Maximize` / `Restore` | Show 后全程 | ✅ 正常生效 |
+| 组 | API | 生命周期窗口 | `Show()` **之前** | `Show()` **之后** |
+|---|---|---|---|---|
+| **配置期**（窗口**形态**） | `SetChromeMode` / `SetCaptionHeight` / `SetResizeInset` / `SetWindowLayer` | 构造后 ~ `Show()` 前 | ✅ 正常生效 | ⚠️ Warning + 忽略 |
+| **运行期**（窗口**状态**） | `Minimize` / `Maximize` / `Restore` | `Show()` 后全程 | ⚠️ Warning + 忽略 | ✅ 正常生效 |
+
+> **对称性（v1.3 新增——评审 §三）**：两组 API **互为镜像**——各自只在自己的生命周期区间内有效，越过边界一律 `Warning + 忽略`。
+>
+> ⚠️ v1.2 及以前**只约束了配置期一侧**；运行期一侧仅以「`Show()` 之前调用无意义（且系统会忽略）」作说明——该说法**既不准确也未实现**：`ShowWindow(SW_MAXIMIZE)` 本身就是显示状态操作，**并非「会被忽略」**，契约必须在框架侧显式闭合（`if (!m_shown)` → Warning + return，见 §3.10）。
 
 **为什么这个分组重要**：
 
 1. **语义整齐**——「窗口形态由创建期决定，窗口状态可随时变化」是一句能记住的话；比「哪些能改哪些不能改」的清单式契约更少误用
-2. **判据统一**——全部用 `IsWindowVisible` 一个判据实现，不需要额外的状态标记（避免第二真相源）
-3. **`Minimize/Maximize/Restore` 天然属运行期**——它们改变的是**状态**而非**形态**，`Show()` 之前调用无意义（且系统会忽略）
+2. **判据统一**——全部用 `m_shown` 一个判据实现（**v1.2 修订**：v1.1 用 `IsWindowVisible`，但它表达的是「系统当前可见性」而非「`Show()` 是否调用过」，两者在 `Show()+Hide()` 后分歧——见 §3.1 说明。`m_shown` 不是第二真相源：它记录的是框架 API 调用事实，与系统可见性是两个不同事实）
+3. **`Minimize/Maximize/Restore` 天然属运行期**——它们改变的是**状态**而非**形态**；`Show()` 之前调用**由框架显式拒绝**（Warning + 忽略），**不依赖系统行为**（v1.3——评审 §三：原「系统会忽略」的说法不成立）
 4. **API 不锁死**——未来若出现「运行期切层级」的真实需求，只需把 `SetWindowLayer` 从配置期组移到运行期组（签名零变更）
 
 ### 9.3 ~ 9.8
@@ -1149,6 +1246,21 @@ window.Minimize();
 
 ## 10. 修订记录
 
+- v1.3（2026-09-12）**第三轮外部评审全采纳（2 P1 + 2 P2）——评审结论 PASS，可进入详细设计**：
+  - **P1 运行期 API 的 Show 前行为未闭合**（评审 §三）：§9.2 只说「运行期 API，`Show()` 后可调用」，并以「`Show()` 之前调用无意义（且系统会忽略）」作说明；但 §3.10 实现只有 `if (m_hwnd) ShowWindow(...)`，**无 `m_shown` 检查**。该说法**既不准确也未实现**——`ShowWindow(SW_MAXIMIZE)` 本身就是显示状态操作，并非「会被忽略」。**修订**：三个运行期方法统一补 `if (!m_shown)` → `Warning + return`；§2.3/§2.4 头草案加 `@pre`；§9.2 生命周期表改为**对称**两列（`Show()` 之前 / 之后）；新增 **T7a** 用例（构造后不 `Show()` 直接调三者 → 无事件、状态不变）。
+  - **P1 T3 断言逻辑错误**（评审 §四）：v1.1–v1.2 写「同一组坐标分别向 A/B 发 `WM_NCHITTEST`，断言两者返回**不同的**命中值」——但 `(2,2)` 这类角点在 Normal（系统边框）与 Borderless（自定义九宫格）下**本来就都返回** `HTTOPLEFT`，该断言**必然失败**。**修订**：断言分两类——**A. 预期「不同」的点**（`(w/2,20)`：Normal `HTCAPTION` vs Borderless `HTCLIENT`，这才是「拦截生效」的证据）；**B. 预期「相同」的点**（`(2,2)`/`(w-2,2)` 均 `HTTOPLEFT`/`HTTOPRIGHT`，证明九宫格未被破坏）。并标注**必须留余量**：Normal 非客户区高度是系统度量（随 DPI/主题变化），故 B 的 `captionHeight`/`resizeInset` 取小值（4/4）以拉开可判定区间。
+  - **P2 DIP → 物理像素的换算点与 DPI 来源**（评审 §八）：初设「当前 1:1，未来只需改这里」作为初设可以，但**详设必须锁死**换算点与 DPI 来源。**修订**：§3.3 换算点注释扩展为三问（换算点 / DPI 来源 / 跨 DPI 显示器且鼠标在另一台时的规则），并在 §8 新增**开放决策点 8**。
+  - **P2 `Desktop` 语义状态 ≠ 实现路径**（评审 §十二）：**修订**：§3.8 在 `Desktop` 降级处新增 ★ 原则注释，并在 §8 新增**开放决策点 9**——若未来出现 `GetWindowLayer()`，spike 未通过时仍返回 `Desktop`（请求语义），不得返回 `Bottom`（实现路径）。
+  - **自行发现并修正（评审未提）**：§9.2 生命周期表的**表头行与分隔线 `|---|---|---|---|` 挤在同一行**（markdown 表格缺陷，渲染时整表失效）——v1.3 一并拆为两行。
+  - **评审确认保留不动**：§五 `WM_NCCALCSIZE`（含 `wParam==FALSE` 放行）、§六 最大化 `rcWork`「不要再过度设计」、§七 九宫格优先级、§九 事件源自 `WM_SIZE`（并特别肯定 **T7b** 的价值）、§十 `WindowState` 独立成头、§十一 R9 能力式接缝、§十三 `WM_WINDOWPOSCHANGING`、§十四 DWM 范围控制、§十五 `dwmapi PUBLIC`、§十六 测试矩阵整体、§十七 影响面（81→85）。
+- v1.2（2026-09-12）**第二轮外部评审全采纳（1 P0 必改 + 3 P1 + 4 P2）——修正 P0 后可进详设**：
+  - **P0（必改）§3.4 最大化补偿方向错误**（评审 §二）：v1.1 的 `dx = rcWindow.left - rcMonitor.left` 在最大化时**恒为负**（窗口被系统撑到 `rcMonitor` 之外），代入 `rcClient.left = rcWork.left + dx` 会使客户区**越出工作区**——实际是「扩大」而非「收缩」。**数值实证**（1920×1080 / 任务栏 40 / 边框 8）：公式产出 `rcClient = (−8,−8,1928,1048)` = 1936×1056，**比整块显示器还大**，违反 `ClientRectScreen ⊆ rcWork`。**修订**：初设**只锁两条**——① 唯一基准 `rcClient = mi.rcWork`（本身即满足不变量，**无需补偿**）；② **补偿不变量**（若详设实测仍需补偿，只能「正内缩」、只收缩不扩大）；是否需要补偿/量值/对称性全部**降为详设真机标定**（§8 决策点 1）。同时新增**纪律条款**：不得为「让初设看起来完整」而提前锁死未经验证的补偿公式。
+  - **P1 配置期判据 `IsWindowVisible` → `m_shown`**（评审 §四）：二者不等价——`Show()`→`Hide()` 后可见性为假但契约上已进运行期，造成「契约说拒绝、实现仍允许」的不一致。**修订**：§3.1 新增 `bool m_shown`（在 `Show()` 内置位），§3.8/§3.9 判据统一改用它，§9.1 可逆性说明与 §9.2「判据统一」同步。并说明它**不是第二真相源**（记录的是「API 是否调用过 Show」而非「系统是否可见」，两者是不同的两个事实）。
+  - **P1 `SetChromeMode` 缺 `m_hwnd` 防御 + HWND 生命周期前提未明**（评审 §五）：§3.8 有 `m_hwnd == nullptr` 早退而 §3.9 没有。**修订**：§3.9 补同款防御；并**明确前提**——源码核实 `Win32PlatformWindow` 构造体即 `CreateWindowExW`（失败抛 `std::system_error`）、`Window` 构造体持有该对象（`Window.cpp:47`），故 **Window 构造完成后 `m_hwnd` 恒非空**（评审倾向的选项 A 成立）。
+  - **P1 最大化态 NCHITTEST「文字说了代码没体现」**（评审 §九）：§3.3 契约要点写了 `IsZoomed` 时跳过四边四角，但代码无此判定。**修订**：代码引入 `const bool resizable = !IsZoomed(hwnd)` 统一门控四边四角，**caption 判据刻意不走该门**（保留顶部下拖还原）；契约要点同步改为「已落入代码」。
+  - **P2（4 项）**：⑩ **T1 坐标系说明**（评审 §十二）——`GetClientRect`（客户区局部坐标）与 `GetWindowRect`（屏幕坐标）**不可直接比较**，须 `ClientToScreen` 后比较或只比宽高；⑪ **T7b 新增非 API 路径**（评审 §十九）——拖标题栏到顶 / Win+↑ / 双击标题栏触发最大化，手测确认事件仍到（这是「事件来自系统真实状态」的验收落点，原 T7 只覆盖 API 路径）；⑫ **§3.5「1px」表述收紧**（评审 §十八）——不宣称「1px = 阴影」是普适数学关系，仅是本实现当前选取的参数；⑬ **§2.4 清理重复残块**（评审 §二十）——删除重复的 `SetCaptionHeight`/`SetResizeInset`/`SetWindowLayer`/`Minimize`/`Maximize`/`Restore` 片段与其失衡代码围栏。
+  - **评审确认保留不动**：§六/§七 `Desktop` 语义抽象与分层（并采纳措辞收紧——**状态不降级，仅实现按 Bottom 语义执行**，日志文案随之改为 `executed as Bottom`）、§八 `WM_WINDOWPOSCHANGING` 设计、§十 T2 设计、§十一 T3 双窗口对照、§十三 T4 `⊆` 不变量、§十四 `WindowState` 独立成头、§十五 事件源自 `WM_SIZE`、§十六 R9 不造抽象、§十七 `dwmapi PUBLIC` 措辞、§二十一 影响面统计（81 + 4 = 85）。
+  - **另：T8 的既有用例数由「158 条」更新为「174 条」**（截至 2026-09-12 实测）。
 - v1.1（2026-09-11）**外部评审通过（修改后通过——可进详设），8 项全采纳**：
   - **必改 4 项**：① **API 统计口径明确化**（评审 §1）——新增 §1.1，定义「7 个 API = Window 公共 API 方法数（配置期 4 + 运行期 3）」，明确枚举/事件/`PlatformWindow` virtual 不计入，并写清计数边界规则；② **配置期 / 运行期 API 分组**（评审 §3）——新增 §9.2，4 个配置期 API（`SetChromeMode`/`SetCaptionHeight`/`SetResizeInset`/`SetWindowLayer`）统一「必须 Show 前调用」契约（含 `SetWindowLayer` 归入配置期），3 个运行期 API 可随时调用，§2.3/§2.4 头草案同步加分组注释与 `@pre`；③ **`Bottom` 语义收紧**（评审 §4）——「持续强制置底」→「**持续维护普通窗口层底部位置**」，明写「不承诺阻止第三方 `SetWindowPos` 造成的瞬时 z 序变化，那种瞬时变化不构成契约违反」（§2.2 头注释 + §3.7 + §3.7 措辞纪律对照表）；④ **`Desktop` 纯语义不绑实现**（评审 §5）——§2.2 新增三层分工对照表（语义层/平台抽象层/Win32 实现层），显式声明 `WorkerW`/`Progman`/`SetParent`/`SetWinEventHook` 全属实现层，Windows 版本变更只改实现不改 API。
   - **建议拍板 4 项**：⑤ **`WindowState` 独立成头**（评审 §2）——从 `WindowStateChangedEvent.h` 拆出为 `Window/WindowState.h`（84 头），修正依赖方向为「事件 → 状态」而非「状态 → 事件」；Public 头计数 **84 → 85**（§1/§2/§5/§10 全量同步）；⑥ **T3 改双窗口对照**（评审 §9）——不再用「Normal 结果 != HTCAPTION」这类不可靠断言，改为 **窗口 A（Normal）+ 窗口 B（Borderless）同坐标结果对比**，且明确不用运行时切换（符合配置期契约）；⑦ **T2 明确测试目的**（评审 §8）——用例名/注释写明「验证 resize 优先级覆盖 caption」，并标注 `(w/2,4)` 的重叠语义；⑧ **DWM `1px` 归实现细节**（评审 §11）——§3.5 拆为「契约层承诺（保留阴影/圆角 + 失败容忍）」与「实现层参数（MARGINS/DWMWCP_ROUND）」，指明 `1px` 是 Win32 MVP 的具体选取值而非 API 语义。

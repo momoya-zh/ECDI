@@ -4,6 +4,7 @@
 #include "ECDI/EventSystem/Window/WindowCreatedEvent.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
+#include "ECDI/EventSystem/Window/WindowStateChangedEvent.h"
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
 #include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
@@ -39,6 +40,12 @@ void EventRouter::OnEvent(const Event& event){
 	dispatcher.Dispatch<WindowResizedEvent>([this](const WindowResizedEvent& e){
 
 			OnWindowResized(e);
+
+		});
+
+	dispatcher.Dispatch<WindowStateChangedEvent>([this](const WindowStateChangedEvent& e){
+
+			OnWindowStateChanged(e);
 
 		});
 

@@ -45,7 +45,7 @@
 
 ### 🔄 当前
 
-- **Phase 12 WindowChrome（进行中）**——需求 **v1.2 ✅**（2026-09-11 外部评审 14 条全采纳）→ 初步设计 **v1.1 ✅**（评审「修改后通过」）→ **待详细设计**。范围：无边框窗口（保留 `WS_OVERLAPPEDWINDOW` + 拦截 `WM_NCCALCSIZE`/`WM_NCHITTEST`/`WM_NCACTIVATE`/`WM_WINDOWPOSCHANGING`）+ 最大化按 `MONITORINFO.rcWork` 收缩 + DWM 集成；**4 新头**（Public 头 81→85）。R10 `Desktop` 档 spike 前置（未出结果前不承诺）。详见下方 Phase12 段。
+- **Phase 12 WindowChrome（✅ 实施完成，跨工具链已确认）**——需求 **v1.2 ✅** → 初步设计 **v1.3 ✅**（三轮评审 PASS）→ 详细设计 **v1.5 ✅ 已实施**（v1.1 外部评审 → v1.2 内部复核 → v1.3 AI 核验 → v1.4 实施期回写 → **v1.5 实施后缺陷修复**：测试替身绕过 `Create()` 致 `Application.cpp:92` 断言，MSVC 构建暴露）；**`ecdi_tests` 183/183 通过**——**含一次带 `-D_DEBUG` 的构建**（`FRAMEWORK_ASSERT` 真正生效；不带 `_DEBUG` 的构建下该断言层被编译为空操作）。**后续**：`Application`/`Window` 所有权契约不对称（public 构造器 + 「必在册」断言）→ **B 已实施**：独立契约文档 [window-ownership.md](window-ownership.md)（初设 v1.1）+ [详设 v1.2](window-ownership-detailed-design.md)（`ecdi_tests` 183/183，MinGW + `-D_DEBUG`）。 交付：4 新头（Public 头 **81→85**）+ 7 个 Window 公共 API + `WindowStateChangedEvent`；无边框窗口（保留 `WS_OVERLAPPEDWINDOW` + 拦截 4 个 NC 消息）+ 最大化 `rcWork` 校正 + DWM 集成。**待办剩余**：手测矩阵（A7）、R10 `Desktop` spike（A8）——**四工具链构建 + 断言运行已全部确认**（2026-09-12 用户实测）。
 
 ### 🔲 未来
 
@@ -72,6 +72,8 @@
 | **IME 结果 WM_CHAR 吞字符 pending 计数**（若某 IME 结果不走 WM_CHAR 会残留吞后续字符——注释已记） | Win32PlatformWindow | 真实输入法兼容性需求出现时 |
 | **Phase 8.6 抗锯齿遗留验收**——A7 性能基线 / A8 其余三工具链（MSVC/Clang/ClangCL）/ A9 目视 `S=8` vs `S=16` 对比 / A4 AA 关闭人工抽查（均已实现但未人工验收） | GDIBackend AA 路径 | 用户在 VS/CLion 执行（功能不阻塞） |
 | **跨半径角补丁测试缺口**——`PatchSurface` stride 缺陷（同 backend 先大后小半径）未被既有用例捕获（L2 每例独立 backend + 单一半径） | AntiAliasingTests L2 | AA 后续补测（已两次提议，未落地） |
+| **`~Application` 残留活窗口 → 潜在析构序隐患**——成员析构逆序使 `m_deferredDestroy` **先于** `m_windows` 销毁；若有活窗口，`OnWindowDestroyed` 会向已结束生命周期的容器写入。实测（独立探针 N=1/2/3/5 窗口 × O0/-O2）**无可观测异常** ⇒ 记「**潜在析构序隐患**」，**不得**写成"已确认 UB"（UB 判据 = 是否访问已结束生命周期的对象，非"跑几次没崩"） | `Application` 成员析构序（`Application.h:116/118/120/122`） | **独立记账（Deferred）**——见 `window-ownership.md` §7 |
+| **`m_running` / `Run`-`Exit` 语义未定义**——初值 `true` ⇒ `Exit()` 在 `Run()` 之前也生效（真发 `PostQuitMessage`）；其语义实为「`Exit()` 未被调用过」 | `Application.h:122` | **独立记账**（属 Application 生命周期，已从 B 范围剥离）——见 `window-ownership.md` §7 |
 
 ## Phase3 Widget System
 
@@ -198,13 +200,24 @@
 | [phase11-image-decode-preliminary-design.md](phase11-image-decode-preliminary-design.md) | 初步设计（头全文草案 / WIC 管线九步 / COM RAII per-call / 链接库 PUBLIC 传播 / 测试 7 用例） | ✅ v1.1（评审「修改后通过」） |
 | [phase11-image-decode-detailed-design.md](phase11-image-decode-detailed-design.md) | 详细设计（6 开放点全收：initguid+IID_PPV_ARGS 零 uuid.lib / ComRAII 模板 / 溢出两步数学界 / SH 主案+IStream 预案 / 测试资产生成策略 / 验收 6 项） | ✅ v1.1 已实施（2026-09-07——Decode 模块 + WIC 后端 + 8 用例，158 全绿） |
 
-## Phase12 WindowChrome（🚧 需求 v1.2 ✅ → 初设 v1.1 ✅ → 待详设）
+## Phase12 WindowChrome（🚧 需求 v1.2 ✅ → 初设 v1.3 ✅ → 详设 v1.5 ✅ 已实施 → 跨工具链确认中）
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [phase12-windowchrome-requirements.md](phase12-windowchrome-requirements.md) | 需求确认（无边框 NCCALCSIZE/HITTEST 拦截 / 保留 WS_OVERLAPPEDWINDOW / R9 能力式扩展点 / R10 WindowLayer Bottom+Desktop / 7 决策全拍板） | ✅ v1.2（外部评审通过——可进初设） |
-| [phase12-windowchrome-preliminary-design.md](phase12-windowchrome-preliminary-design.md) | 初步设计（4 新头 81→85 / NC 消息归平台状态同步区非翻译器 / 配置期·运行期 API 分组 / 最大化 rcWork 收缩 / R9「惯例非抽象」/ R10 spike 规格 / 决策 7 降级配置期） | ✅ v1.1（评审「修改后通过」——可进详设） |
+| [phase12-windowchrome-preliminary-design.md](phase12-windowchrome-preliminary-design.md) | 初步设计（4 新头 81→85 / NC 消息归平台状态同步区非翻译器 / **配置期·运行期 API 对称生命周期**（判据 `m_shown`；运行期三方法 Show 前 Warning+忽略）/ 最大化 `rcWork` 唯一基准 + 补偿不变量 / R9「惯例非抽象」/ R10 spike 规格 / 决策 7 降级配置期） | ✅ v1.3（三轮外部评审——**PASS，可进详设**：v1.2 修 P0 补偿方向；v1.3 修 P1 运行期生命周期 + P1 T3 断言逻辑） |
+| [phase12-windowchrome-detailed-design.md](phase12-windowchrome-detailed-design.md) | 详细设计（**9 开放决策点全收** + 平台实现全文 6 case + **10 方法**（7 override + 3 私有辅助）；`TestWindow::Handle()` 三跳取 HWND；dwmapi 双构建系统；测试 **9** 自动用例含 spike 全文） | ✅ **v1.5 已实施（2026-09-12）**：v1.1 外部评审 → v1.2 内部复核 → v1.3 AI 核验补正 → v1.4 **实施期回写 4 处缺口**（D-DWM-1 零兜底 / `NCCALCSIZE_PARAMS` / 2 个测试替身补 override / Handle() include）→ **v1.5 实施后缺陷修复**（`TestWindow` 改持非拥有 `Window*` + `Create()`——原直构窗口未登记，销毁时触发 `Application.cpp:92` 断言；**仅 MSVC 构建暴露**，因 `FRAMEWORK_ASSERT` 只在 `_DEBUG` 下存在）；`ecdi_tests` **183/183**（MinGW，含带 `-D_DEBUG` 的一次；MSVC/Clang/ClangCL 待用户确认） |
 | [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase） | 🚧 v1.1 待评审 |
+
+## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
+
+> **独立契约文档**——不属任何 Phase，故不用 `phaseN-*` 命名（阶段由文档头部 / §8 跟踪）。
+> **来源**：Phase 12 WindowChrome 实施后 `Application.cpp:92` 断言（测试替身绕过 `Application::Create()`）；**A（测试替身止血）已关闭**，本节为 **B** 范围。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [window-ownership.md](window-ownership.md) | **契约主体（初步设计）**：三层归属（对象 / HWND / 注册表）· 三条闭环链（线性全链 + 源码锚点）· **5 条不变量** · 决策 B1–B5 + 关键陷阱（`make_unique` 与 `default_delete` 均无法访问私有成员）· **契约条款原文**（`Release ≠ delete Window`、回收依赖消息泵、断言与容错的双层含义、`PlatformWindowHost` 注释改写）· 验收（含 `static_assert` 编译期契约） | ✅ **v1.1 已实施（2026-09-12）**——契约落地，证据见详设 v1.2（183/183 + 编译期契约 + 静态检查） |
+| [window-ownership-detailed-design.md](window-ownership-detailed-design.md) | **详细设计（实施规格）**：逐文件 diff 级改动（`Window.h` 访问权限布局前/后 + `friend` 粒度说明 / `Application.h` 删友元 + 双向访问关系复核表 / `Application.cpp` `Create` 全文 + B1-t 陷阱 / `PlatformWindowHost.h` 注释改写 / 测试 `static_assert` ×3）· 编译期契约测试方案（**双工具链实证** + 中立上下文性质 + 四工具链待验 + 兜底负向探针）· 注释落点清单 · 实施 6 步 · 验收 A1–A6 | ✅ **v1.2 已实施（2026-09-12）**：`ecdi_tests` **183 passed / 0 failed**（MinGW + `-D_DEBUG`，断言层生效）；**A1** 编译期契约（`static_assert` ×3 + 人工反例实测编译失败）/ **A4** 静态检查（`new Window` 代码 1 处、`make_unique<Window>` 代码 0 处）通过；**A2/A6 ✅ 全部通过**——**四工具链**（MinGW / MSVC / Clang / ClangCL）实测运行、**无断言错误**；附带 `ECDI/ECDI开发规范.md:143` 过期措辞（「m_application 指针」→引用）已修；3 处实测偏差（`static_assert` 落点 / 连带过期注释 / 排版）已记录 |
 
 ## ModelProbe Demo（✅ P1/P2 已实现，2026-09-01/11）
 
@@ -222,6 +235,7 @@
 
 - 命名：`phaseX.Y-<module>-<type>.md`（子阶段编号 + 模块名 + 阶段类型；2026-08-25 全量规范化：Phase 5/6/7 按内容编号对齐，如 `phase5.3-button-requirements.md`、`phase6.2-checkboxradio-detailed-design.md`、`phase7.5-callback-requirements.md`；阶段级评审文档保留 `phaseN-<module>.md`）
 - 子目录：demo / 非框架文档放独立子目录（如 `docs/model-probe/`），与框架 `phaseN-*` 区隔但统一在 `docs/` 入口下
+- **非阶段文档**（跨阶段的长期契约 / 规划类，如 `window-ownership.md`、`desktopnest-roadmap.md`）：**不用** `phaseN-*` 前缀——阶段由文档头部与 §修订记录跟踪，命名取 `<主题>.md`；在「开发进度」之外单列章节索引
 - 五阶段法：职责确认 → 初步设计 → 详细设计 → 实现 → 测试，设计文档在实现前评审通过
 - 文档内附修订记录（v1.0 → v1.1...），实现中发现的与文档出入必须回写
 - 所有文档带 UTF-8 BOM（`ef bb bf`——MSVC 源码同规范）

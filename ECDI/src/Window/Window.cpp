@@ -38,7 +38,7 @@ void CollectFocusables(Widget* node, std::vector<Widget*>& out){
 
 }
 
-Window::Window(Application* app,const std::string& title, int width, int height,
+Window::Window(Application& app,const std::string& title, int width, int height,
                RenderServices services)
 	: m_application(app)
 	, m_renderBackend(std::move(services.renderer))
@@ -151,6 +151,52 @@ PlatformWindow& Window::GetPlatformWindow() noexcept{
 
 	// 8.5.1：平台能力入口（剪贴板/Timer 等）——薄返回抽象接口，实现是 Win32PlatformWindow
 	return *m_platformWindow;
+
+}
+
+// ── Phase 12 WindowChrome（配置期四件套 + 运行期三方法）──────────────
+// 全部为纯转发——契约判据（m_shown / m_chromeConfigured）在平台层，
+// Window 不重复实现（单一真相源；与既有 Invalidate 转发同风格）。
+
+void Window::SetChromeMode(ChromeMode mode){
+
+	m_platformWindow->SetChromeMode(mode);
+
+}
+
+void Window::SetCaptionHeight(int height){
+
+	m_platformWindow->SetCaptionHeight(height);
+
+}
+
+void Window::SetResizeInset(int inset){
+
+	m_platformWindow->SetResizeInset(inset);
+
+}
+
+void Window::SetWindowLayer(WindowLayer layer){
+
+	m_platformWindow->SetWindowLayer(layer);
+
+}
+
+void Window::Minimize(){
+
+	m_platformWindow->Minimize();
+
+}
+
+void Window::Maximize(){
+
+	m_platformWindow->Maximize();
+
+}
+
+void Window::Restore(){
+
+	m_platformWindow->Restore();
 
 }
 
@@ -364,7 +410,7 @@ void Window::OnEvent(const Event& event){
 
 	// 事件转发（框架内，7.1.5 注释转正）：Application 是事件最终入口（EventRouter 基类）——
 	// 平台事件 → Host::OnEvent → Window → Application 分发链（HitTest/Bubbling/焦点）
-	m_application->OnEvent(event);
+	m_application.OnEvent(event);
 
 }
 

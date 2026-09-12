@@ -51,6 +51,9 @@ if(WIN32)
     target_link_libraries(ECDI PUBLIC user32 imm32 msimg32)
     # Phase 11 image decoding dependencies（WIC/COM——组内以实际符号收敛，linker 验证收尾）
     target_link_libraries(ECDI PUBLIC windowscodecs ole32 shlwapi)
+    # Phase 12 WindowChrome dependencies（R6 DWM——静态库模型下 PUBLIC 传播；
+    # 未来切换 SHARED 模型时重新评估传播属性）
+    target_link_libraries(ECDI PUBLIC dwmapi)
 endif()
 
 # ── R5：version.h 生成（三宏——configure 注入 SemVer）──

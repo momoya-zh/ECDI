@@ -7,6 +7,7 @@ namespace ECDI{
 class WindowCreatedEvent;
 class WindowDestroyedEvent;
 class WindowResizedEvent;
+class WindowStateChangedEvent;
 class WindowCloseRequestedEvent;
 class TimerEvent;
 class MouseMoveEvent;
@@ -45,6 +46,13 @@ protected:
 
 	virtual void OnWindowResized(
 		const WindowResizedEvent&event
+	){}
+
+	/// @brief 窗口状态变化（Phase 12 R7——minimized/maximized/restored）
+	/// @details 源 = 平台层 WM_SIZE 的 IsIconic/IsZoomed 判定——即「系统真实状态」，
+	/// 非「某个 API 被调用」，故鼠标拖拽 / Win+↑ / Aero Snap 等非 API 路径同样到达。
+	virtual void OnWindowStateChanged(
+		const WindowStateChangedEvent& event
 	){}
 
 	virtual void OnWindowCloseRequested(

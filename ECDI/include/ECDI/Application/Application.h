@@ -39,8 +39,6 @@ class Application : public EventRouter{
 
 public :
 
-	friend class Window;
-
 	Application();
 
 	/// @brief 显式析构（7.1.5：unique_ptr\<PlatformApplication\> 不完整类型成员——

@@ -2,6 +2,8 @@
 
 #include "ECDI/Core/Size.h"
 #include "ECDI/Widget/CaretGeometry.h"
+#include "ECDI/Window/ChromeMode.h"
+#include "ECDI/Window/WindowLayer.h"
 
 #include <string>
 
@@ -15,6 +17,14 @@ class PlatformRenderContext;   // 前置声明（GetRenderContext 返回 const&�
 /// 生命周期 + 平台能力（重绘请求/客户区查询/文本输入插入点）下沉。
 /// 唯一实现：Win32PlatformWindow（X11/Wayland 只留接口，YAGNI）。
 /// 零 Win32 类型——接口全部用框架层类型（Size/CaretGeometry），平台细节封装在实现内。
+///
+/// ★ 平台能力扩展惯例（Phase 12 R9 定稿——后续阶段加能力的模板，D-SEAM-1）：
+///   ① PlatformWindow 加一个能力 virtual（本文件——接口即契约，零消息号）；
+///   ② Window 加公共方法透传（Window.h——应用层唯一入口）；
+///   ③ 平台消息在具体实现的消息循环内消化（如 Win32PlatformWindow::HandleMessage
+///      状态同步区——不进 WindowMessageHandler 翻译器，除非它产生 Framework Event）。
+/// 三步都不新建接缝类/消息注册机制——「惯例而非抽象」（R9 裁决）。
+/// 先例：Phase 12 的 SetChromeMode/SetWindowLayer/Minimize/Maximize/Restore。
 class PlatformWindow{
 public:
 	virtual ~PlatformWindow() = default;
@@ -58,6 +68,48 @@ public:
 
 	/// @brief 停止定时器（幂等——未启动/已停止返回无动作）
 	virtual void StopTimer(int timerId) = 0;
+
+	// ── Phase 12：WindowChrome / 窗口层级（配置期——Window 构造后 / Show() 前）──
+
+	/// @brief 设置窗口 chrome 形态（R1）
+	/// @param mode 目标形态
+	/// @details **仅配置期生效**（初设决策 D1，见 §9.1）——
+	/// Show() 之后调用记 Warning 日志并忽略（不抛异常）。
+	/// ⚠️ **一次确定**（详设 D-CHROME-1）：配置期内重复调用（无论同值异值）一律
+	/// Warning + 忽略——避免「Borderless → Normal」这类会与 frame 状态失同步的切换。
+	virtual void SetChromeMode(ChromeMode mode) = 0;
+
+	/// @brief 设置自定义标题栏高度（R3；逻辑坐标 DIP）
+	/// @param height 标题栏高度（逻辑坐标；<= 0 视为 0——允许应用完全放弃 HTCAPTION 拖动区）
+	virtual void SetCaptionHeight(int height) = 0;
+
+	/// @brief 设置缩放热区宽度（R3；逻辑坐标 DIP）
+	/// @param inset 四边/四角的命中测试宽度（逻辑坐标；<= 0 视为 0——完全禁用边缘缩放）
+	virtual void SetResizeInset(int inset) = 0;
+
+	/// @brief 设置窗口层级档位（R10）
+	/// @param layer 目标档位
+	/// @details Bottom/Desktop 档持续维护普通窗口层底部位置（Win32 实现经
+	/// WM_WINDOWPOSCHANGING）；切回 Normal 时停止维护（不主动改变当前 z 序——
+	/// 交系统自然演化）。
+	virtual void SetWindowLayer(WindowLayer layer) = 0;
+
+	// ── Phase 12：窗口状态（运行期——**Show() 之后**才有效）──────────
+	// @pre 运行期契约（初设 v1.3）：Show() 之前调用记 Warning 并忽略；
+	//      与配置期四件套**对称**（配置期 = Show 前有效 / 运行期 = Show 后有效）。
+
+	/// @brief 最小化窗口（R7）——薄封装 ShowWindow(SW_MINIMIZE)
+	/// @pre Show() 之前调用记 Warning 并忽略（运行期 API——见初设 §9.2）
+	virtual void Minimize() = 0;
+
+	/// @brief 最大化窗口（R7）——薄封装 ShowWindow(SW_MAXIMIZE)
+	/// @pre 同 Minimize
+	virtual void Maximize() = 0;
+
+	/// @brief 还原窗口（R7）——薄封装 ShowWindow(SW_RESTORE)
+	/// @details 最小化态 → 还原到原尺寸；最大化态 → 还原到最大化前尺寸（系统语义）。
+	/// @pre 同 Minimize
+	virtual void Restore() = 0;
 };
 
 }

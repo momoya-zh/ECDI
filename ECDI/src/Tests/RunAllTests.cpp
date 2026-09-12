@@ -23,6 +23,7 @@ int ECDI::Test::RunAllTests()
     RegisterModelProbeTests();
     RegisterImageDecodeTests();
     RegisterAntiAliasingTests();   // Phase 8.6：圆角覆盖度抗锯齿
+    RegisterWindowChromeTests();   // Phase 12：WindowChrome
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

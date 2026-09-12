@@ -11,8 +11,11 @@ class Event;    // 前置声明——OnEvent 引用参数（不需要完整定�
 /// @details Window 实现此接口；Win32PlatformWindow 持 Host& 回调。
 /// 平台事件 → Host 回调 → 框架响应（契约语言：平台层"发生了窗口事件"，框架层"响应"）。
 ///
-/// 接口收敛说明（YAGNI，2026-08-15）：
-/// - 无 OnDestroyed：WM_DESTROY 后 Win32PlatformWindow 内部置空句柄，框架层无需动作
+/// 接口收敛说明（YAGNI，2026-08-15；2026-09-12 按 window-ownership.md §4.5 改写）：
+/// - 无 OnDestroyed：**PlatformWindowHost 不负责 Window 对象的生命周期**。
+///   Win32 平台层在 WM_DESTROY 后清空 HWND 并置空句柄，同时经既有事件通道上报
+///   WindowDestroyedEvent；Window 对象的延迟销毁与注册表维护由 Application 负责。
+///   （原文「框架层无需动作」写于 7.1——当时 Application 侧尚无窗口注册表语义，已过期。）
 class PlatformWindowHost{
 public:
 	virtual ~PlatformWindowHost() = default;

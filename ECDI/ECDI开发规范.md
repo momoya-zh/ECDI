@@ -140,7 +140,7 @@ Window& operator=(Window&& other) noexcept;
 
 **例外：若资源与对象地址绑定，则禁止移动。**
 
-`Window` 的 `HWND` 通过 `GWLP_USERDATA` 与 C++ 对象地址绑定，移动对象会破坏句柄与对象的对应关系，并丢失 `m_application` 指针，导致消息分发崩溃。因此 `Window` 同时禁用复制和移动，仅通过 `Application` 持有的 `unique_ptr` 管理生命周期：
+`Window` 的 `HWND` 通过 `GWLP_USERDATA` 与 C++ 对象地址绑定，移动对象会破坏句柄与对象的对应关系，并使 `m_application` 引用失效，导致消息分发崩溃。因此 `Window` 同时禁用复制和移动，仅通过 `Application` 持有的 `unique_ptr` 管理生命周期（**构造权限经 `friend class Application` 授予 `Application`**——`Application::Create()` 是当前唯一实际构造入口；详见 `docs/window-ownership.md`）：
 
 ```cpp
 // 禁止复制

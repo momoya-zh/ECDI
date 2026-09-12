@@ -1,14 +1,29 @@
 ﻿#include "Platform/Win32/Win32PlatformWindow.h"
 
 #include "Platform/Win32/Win32WindowClass.h"
+#include "ECDI/Core/Logger.h"          // Phase 12：chrome/层级/状态契约的 Warning 日志
 #include "ECDI/Core/String.h"
+#include "ECDI/EventSystem/Window/WindowStateChangedEvent.h"   // Phase 12 R7：WM_SIZE 状态事件
 
 #include <Windows.h>
+#include <dwmapi.h>                    // Phase 12 R6：DwmExtendFrameIntoClientArea / DwmSetWindowAttribute
 #include <imm.h>
+#include <windowsx.h>                  // Phase 12 R3：GET_X_LPARAM / GET_Y_LPARAM（NCHITTEST 屏幕坐标提取）
+
+#ifdef DrawText
+#undef DrawText   // Win32 宏防护（dwmapi.h / windowsx.h 展开链也可能带入 Windows.h）
+#endif
 
 #include <cstring>
 #include <string>
 #include <system_error>
+
+// ── Phase 12 D-DWM-1（实现期修正）：Win11 圆角常量**无需兜底** ──────────
+// 实测取证：MinGW-w64 的 <dwmapi.h> 把 DWMWA_WINDOW_CORNER_PREFERENCE 定义为
+//   DWMWINDOWATTRIBUTE 枚举**成员**（= 33），DWM_WINDOW_CORNER_PREFERENCE 与
+//   DWMWCP_* 亦为枚举定义——**它们都不是宏**，故 `#ifndef <宏>` 守卫恒真、必与既有
+//   定义冲突（详设 D-DWM-1 原「#ifndef 兜底」的前提不成立）。MSVC SDK 同样为枚举。
+// ⇒ 直接用头里的定义，零兜底代码。
 
 namespace ECDI{
 
@@ -80,6 +95,8 @@ Win32PlatformWindow::~Win32PlatformWindow(){
 void Win32PlatformWindow::Show() {
 
 	if (m_hwnd != nullptr) {
+
+		m_shown = true;   // 配置期 → 运行期分界线（与 Window::Show() 一一对应）
 
 		ShowWindow(m_hwnd, SW_SHOW);
 
@@ -168,6 +185,149 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 	// ── 内部状态同步（在 Event 翻译前完成，经 Host 回调保证框架层看到最新状态）──
 	switch (msg){
 
+	// ── Phase 12 R2：无边框客户区（必须先于其它 NC 相关处理）────────────
+	case WM_NCCALCSIZE:
+
+		// 仅 Borderless 且 wParam == TRUE（客户区矩形需重算）时拦截。
+		// wParam == FALSE 时 lParam 是 RECT 而非 NCCALCSIZE_PARAMS——不能解释（必须走 DefWindowProc）。
+		if (m_chromeMode == ChromeMode::Borderless && wParam == TRUE){
+
+			// 非最大化：客户区 = 整窗 → 返回 0 且不改 rect（系统按 rect 直接采用）
+			if (!IsZoomed(hwnd)){
+
+				return 0;
+
+			}
+
+			// 最大化：系统会把窗口外扩一圈（边框 + 阴影），客户区若原样采用会盖住任务栏。
+			// 按 rcWork 校正（R4——见 AdjustMaximizedClientRect）
+			AdjustMaximizedClientRect(hwnd,
+				reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam)->rgrc[0]);
+
+			return 0;
+
+		}
+
+		break;   // Normal 或 wParam == FALSE → DefWindowProc
+
+	// ── Phase 12 R3：命中测试（自定义九宫格 + IsZoomed 门控）──────────
+	case WM_NCHITTEST: {
+
+		// Normal 模式不干预（系统标题栏/边框行为完全不变——零回归底线）
+		if (m_chromeMode != ChromeMode::Borderless){
+
+			break;
+
+		}
+
+		// 屏幕坐标 → 窗口坐标（GET_X_LPARAM 带符号提取——多显示器负坐标安全）
+		POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+
+		RECT rcWin{};
+
+		GetWindowRect(hwnd, &rcWin);
+
+		const int x = pt.x - rcWin.left;
+
+		const int y = pt.y - rcWin.top;
+
+		// DIP → 物理像素（D-DPI-1：换算点唯一在此——公共 API 语义恒为 DIP）
+		const int inset = DipToPixels(m_resizeInset, hwnd);
+
+		const int caption = DipToPixels(m_captionHeight, hwnd);
+
+		const int w = rcWin.right - rcWin.left;
+
+		const int h = rcWin.bottom - rcWin.top;
+
+		// 最大化态：系统不会进入 resize 循环，返回 HTLEFT/HTTOP 等会让人误以为可拖宽——
+		// 故四边四角 resize 判据整体跳过（D-HIT-1）。
+		// ⚠️ caption 判据不走这条门——最大化时仍允许从顶部往下拖还原（系统行为）。
+		const bool resizable = !IsZoomed(hwnd);
+
+		// 四角优先（角命中优先级高于边——否则角落会被边的判定吃掉）
+		const bool left = resizable && x < inset;
+
+		const bool right = resizable && x >= w - inset;
+
+		const bool top = resizable && y < inset;
+
+		const bool bottom = resizable && y >= h - inset;
+
+		if (top && left)     return HTTOPLEFT;
+
+		if (top && right)    return HTTOPRIGHT;
+
+		if (bottom && left)  return HTBOTTOMLEFT;
+
+		if (bottom && right) return HTBOTTOMRIGHT;
+
+		if (left)   return HTLEFT;
+
+		if (right)  return HTRIGHT;
+
+		if (top)    return HTTOP;
+
+		if (bottom) return HTBOTTOM;
+
+		// 标题栏区 → HTCAPTION（拖动移动 / 双击最大化 / Aero Snap 系统免费获得）
+		// ⚠️ 判定顺序：先 resize 边（上一条），后 caption——保证窗口最上缘是缩放手感
+		if (y < caption && caption > 0){
+
+			return HTCAPTION;
+
+		}
+
+		break;   // 客户区 → DefWindowProc（返回 HTCLIENT，交框架派发鼠标事件）
+
+	}
+
+	// ── Phase 12 R8：激活切换防闪烁（Borderless）+ 最小化态放行 ─────────
+	case WM_NCACTIVATE: {
+
+		if (m_chromeMode != ChromeMode::Borderless){
+
+			break;   // Normal：系统标题栏行为完全不变
+
+		}
+
+		// 最小化态按 Win32 语义放行 DefWindowProc——minimized 窗口对该消息有特殊
+		// 处理路径，lParam = -1 抑制重绘的模式不覆盖该状态。
+		if (IsIconic(hwnd)){
+
+			break;
+
+		}
+
+		// 防闪烁标准做法：以 lParam = -1 调 DefWindowProcW 表示「不重绘非客户区」，
+		// 但保留其返回值的语义（激活状态变更的内部处理照常执行）。
+		// ⚠️ 返回值必须原样透传——不能返回固定 TRUE（会破坏系统对激活链的维护）。
+		return DefWindowProcW(hwnd, WM_NCACTIVATE, wParam, -1);
+
+	}
+
+	// ── Phase 12 R10：持续维护普通窗口层底部位置（Bottom / Desktop 档）────
+	case WM_WINDOWPOSCHANGING: {
+
+		// ⚠️ 必须是「持续维护」而非一次性 SetWindowPos（其他程序会把我们顶下来）；
+		// ⚠️ 只改 hwndInsertAfter，不碰 x/y/cx/cy/flags（否则会干扰最大化/还原几何）；
+		// ⚠️ 契约边界：不承诺阻止第三方 SetWindowPos 造成的瞬时 z 序变化（Windows z 序是动态的）
+		if (m_windowLayer != WindowLayer::Normal){
+
+			auto* wp = reinterpret_cast<WINDOWPOS*>(lParam);
+
+			if ((wp->flags & SWP_NOZORDER) == 0){
+
+				wp->hwndInsertAfter = HWND_BOTTOM;
+
+			}
+
+		}
+
+		break;   // 走 DefWindowProc（几何变更仍由系统处理）
+
+	}
+
 	case WM_PAINT:
 		// 决策 39：绘制不走翻译器（不是 Event），经 Host 回调编排整帧
 		m_host.OnPaint();
@@ -177,10 +337,39 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		m_hwnd = nullptr;   // 句柄失效（框架层无需动作——YAGNI，无 OnDestroyed 回调）
 		break;
 
-	case WM_SIZE:
+	case WM_SIZE: {
 		// 窗口大小变化 → Host 回调同步 RootWidget 尺寸；随后 fall-through 翻译器（WindowResizedEvent）
 		m_host.OnResized(LOWORD(lParam), HIWORD(lParam));
-		break;
+
+		// Phase 12 R7：窗口状态变化 → 事件（尺寸同步已在 OnResized 完成——顺序契约：
+		// 消费者收到事件时 RootWidget 已是新尺寸）。
+		// ⚠️ 判定来源是 IsIconic/IsZoomed（系统真实状态），不是我们调了哪个 API——
+		// 鼠标拖拽最大化 / Win+↑ / Aero Snap / 双击标题栏等非 API 路径同样产生事件。
+		WindowState state = WindowState::restored;
+
+		if (IsIconic(hwnd)){
+
+			state = WindowState::minimized;
+
+		}
+		else if (IsZoomed(hwnd)){
+
+			state = WindowState::maximized;
+
+		}
+
+		// 去重：仅状态真正变化时派发（WM_SIZE 在拖拽缩放时高频到达——
+		// 不去重会以同一状态淹没消费者；连续两次 Maximize 只产生 1 个事件）
+		if (state != m_lastWindowState){
+
+			m_lastWindowState = state;
+
+			m_host.OnEvent(WindowStateChangedEvent(m_host.GetWindow(), state));
+
+		}
+
+		break;   // 既有行为：继续走翻译器（WindowResizedEvent——零回归）
+	}
 
 	case WM_EXITSIZEMOVE:
 		// 7.1.1 职责：窗口移动/缩放结束 → 通知 Host（框架层决定如何响应）。
@@ -460,6 +649,280 @@ void Win32PlatformWindow::StopTimer(int timerId){
 	if (m_hwnd)
 
 		KillTimer(m_hwnd, timerId);
+
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Phase 12 WindowChrome / 层级 / 状态
+// ══════════════════════════════════════════════════════════════════
+
+void Win32PlatformWindow::SetChromeMode(ChromeMode mode){
+
+	// 配置期契约（与其它 chrome 配置同判据）。
+	// 判据 m_shown：在 Show() 内置位——表达「框架 API 是否调用过 Show()」，
+	// 而非「系统当前是否可见」（Show()+Hide() 后 IsWindowVisible 为假，但契约上已进运行期）。
+	if (m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: SetChromeMode ignored after Show() - mode is config-time only");
+
+		return;
+
+	}
+
+	// ★ D-CHROME-1：ChromeMode 一次确定——配置期内重复调用（无论同值异值）一律忽略。
+	// 根因：Borderless→Normal 不派发 SWP_FRAMECHANGED ⇒ frame 与状态失同步，
+	// 且「已应用」标记残留会把第三次 Borderless 调用挡在幂等分支外。
+	// 采用「一次确定」而非「配置期动态重配置」：后者需要双向 frame 重算状态机——
+	// 无消费者（YAGNI），且与「窗口形态由创建期一次决定」的配置期语义更一致。
+	if (m_chromeConfigured){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: SetChromeMode ignored - chrome mode is decided once (config-time)");
+
+		return;
+
+	}
+
+	m_chromeConfigured = true;
+
+	m_chromeMode = mode;
+
+	if (mode != ChromeMode::Borderless){
+
+		return;   // Normal：无需任何处理（默认样式即 Normal——不走 SWP_FRAMECHANGED）
+
+	}
+
+	// HWND 生命周期前提：本框架窗口构造即建 HWND（构造体 CreateWindowExW，失败抛异常），
+	// 故 Window 构造完成后 m_hwnd 恒非空。此处仍做防御，与 SetWindowLayer 对齐。
+	if (m_hwnd == nullptr){
+
+		return;
+
+	}
+
+	// Borderless 应用流程：
+	// ① 样式本身不变（保留 WS_OVERLAPPEDWINDOW——技术路线核心）
+	// ② 通知系统重算非客户区：SWP_FRAMECHANGED（必须在窗口显示前派发——否则闪一次边框）
+	SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+	// ③ DWM 增强（阴影/圆角——失败容忍）
+	ApplyDwmEnhancements(m_hwnd);
+
+}
+
+void Win32PlatformWindow::SetCaptionHeight(int height){
+
+	if (m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: SetCaptionHeight ignored after Show() - chrome config is config-time only");
+
+		return;
+
+	}
+
+	// 边界契约：「<= 0 视为 0」——允许应用完全放弃 HTCAPTION 拖动区
+	m_captionHeight = height < 0 ? 0 : height;
+
+}
+
+void Win32PlatformWindow::SetResizeInset(int inset){
+
+	if (m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: SetResizeInset ignored after Show() - chrome config is config-time only");
+
+		return;
+
+	}
+
+	m_resizeInset = inset < 0 ? 0 : inset;
+
+}
+
+void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
+
+	// 配置期契约：与 chrome 三件套同一生命周期。
+	// API 签名不因此锁死——未来若出现运行期切层需求，只需松开此判据（零签名变更）。
+	if (m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: SetWindowLayer ignored after Show() - layer is config-time only");
+
+		return;
+
+	}
+
+	if (m_windowLayer == layer){
+
+		return;   // 幂等
+
+	}
+
+	m_windowLayer = layer;   // 语义状态恒记录用户请求（D-DESK-1：不随实现路径降级）
+
+	if (layer == WindowLayer::Desktop){
+
+		// ⚠️ spike 未通过前：Desktop 不承诺可用——状态不降级，仅当前 Win32 实现
+		// 按 Bottom 语义执行（D-DESK-1：降级的是「实现如何执行」，不是「状态是什么」）。
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: WindowLayer::Desktop not yet validated (spike pending) - executed as Bottom");
+
+	}
+
+	if (m_hwnd == nullptr){
+
+		return;   // 无窗口：仅记录状态（Show 后由 WM_WINDOWPOSCHANGING 自然生效）
+
+	}
+
+	// 切到 Bottom/Desktop：立即派发一次（后续由 WM_WINDOWPOSCHANGING 持续维护）
+	// 切回 Normal：不主动改变当前 z 序（交系统自然演化——避免「突然跳到最前」的反直觉效果）
+	if (m_windowLayer != WindowLayer::Normal){
+
+		SetWindowPos(m_hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	}
+
+}
+
+void Win32PlatformWindow::Minimize(){
+
+	// 运行期契约：与配置期 API 对称，Show() 前拒绝。
+	// ⚠️ 不能靠「系统会忽略」成立契约——ShowWindow 本身就是显示状态操作。
+	if (!m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: Minimize ignored before Show() - state API is runtime-only");
+
+		return;
+
+	}
+
+	if (m_hwnd) ShowWindow(m_hwnd, SW_MINIMIZE);
+
+}
+
+void Win32PlatformWindow::Maximize(){
+
+	if (!m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: Maximize ignored before Show() - state API is runtime-only");
+
+		return;
+
+	}
+
+	if (m_hwnd) ShowWindow(m_hwnd, SW_MAXIMIZE);
+
+}
+
+void Win32PlatformWindow::Restore(){
+
+	if (!m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: Restore ignored before Show() - state API is runtime-only");
+
+		return;
+
+	}
+
+	if (m_hwnd) ShowWindow(m_hwnd, SW_RESTORE);
+
+}
+
+void Win32PlatformWindow::AdjustMaximizedClientRect(HWND hwnd, RECT& rcClient){
+
+	// R4 验收基准：客户区不覆盖任务栏、不残留系统边框空白。
+	// ⚠️ 不能用 rcMonitor（含任务栏区，客户区会盖住任务栏）；必须用 rcWork。
+	MONITORINFO mi{};
+
+	mi.cbSize = sizeof(MONITORINFO);
+
+	if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)){
+
+		return;   // 查询失败：保持系统原值（fail-safe——宁可留系统空白也不盖任务栏）
+
+	}
+
+	// 客户区 = 显示器工作区（屏幕坐标）。
+	// 最大化时系统已把 rcWindow 撑到 rcWork 之外（按边框量外扩）；此处直接把客户区取为
+	// rcWork，即得「可见范围 == 工作区」。无需补偿，也就不会出现方向性错误（D-COMP-1）。
+	rcClient = mi.rcWork;
+
+	// ⚠️ D-COMP-1：刻意不引入任何基于 (rcWindow - rcMonitor) 差值的补偿——最大化时该
+	// 差值为负，「正负代入」的对称补偿会把客户区推出 rcWork。若 T4 在某 Windows 版本
+	// 失败，另起 R 立项修订（补偿只能「正内缩」：left += ix / right -= ix，ix >= 0）。
+
+}
+
+int Win32PlatformWindow::DipToPixels(int dip, HWND hwnd){
+
+	// D-DPI-1：DPI 来源 = GetDeviceCaps(LOGPIXELSX)（窗口 DC——非鼠标所在显示器）。
+	// 理由：caption/inset 描述窗口自身 UI 的几何语义，跟随窗口比跟随鼠标更一致。
+	// 公式：整数 half-up —— px = (dip * dpi + 48) / 96（dpi = 96 时恒等于 dip，无误差）。
+	// 当前项目未声明 PerMonitorV2 → 系统 DPI 虚拟化下 dpi 恒 96 → 现状 1:1。
+	// 未来启用 Per-Monitor V2 时仅替换 DPI 来源（GetDeviceCaps → GetDpiForWindow），
+	// 不改变调用位置、参数语义与换算公式。
+	// 溢出防护：dip 是公共 API 直收的 int，理论可传 INT_MAX——中间量升 long long。
+	HDC hdc = GetDC(hwnd);
+
+	if (hdc == nullptr){
+
+		return dip;   // DC 获取失败：1:1 降级（与「DPI 未落地」现状一致——fail-safe）
+
+	}
+
+	const int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+
+	ReleaseDC(hwnd, hdc);
+
+	const long long scaled = static_cast<long long>(dip) * dpi;
+
+	return static_cast<int>((scaled + 48) / 96);
+
+}
+
+void Win32PlatformWindow::ApplyDwmEnhancements(HWND hwnd){
+
+	// R6 失败容忍契约：DWM 不可用/属性不被支持 → 仅日志 Warning，绝不中断。
+	// 本函数整体属「Win32 实现细节」——数值参数不是公共 API 语义。
+	// （老系统优雅降级：视觉层次缺失，功能完整）
+
+	// ① 保留系统阴影/层次：minimal frame extension（MARGINS{1,1,1,1}——起步值；
+	//    全 0 失去系统阴影，过大则玻璃延伸进客户区。真机标定观察项：
+	//    [a] 阴影是否保留 [b] 客户区顶部是否出现玻璃条 [c] Win10 / Win11 各一遍）
+	MARGINS margins{ 1, 1, 1, 1 };
+
+	const HRESULT hrExtend = DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+	if (FAILED(hrExtend)){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: DwmExtendFrameIntoClientArea failed - DWM enhancements skipped");
+
+	}
+
+	// ② Win11 圆角：DWMWA_WINDOW_CORNER_PREFERENCE（build 22000+）
+	//    ⚠️ Win10 及更早返回 E_INVALIDARG——被失败容忍吸收（预期路径，非异常）
+	DWM_WINDOW_CORNER_PREFERENCE pref = DWMWCP_ROUND;
+
+	const HRESULT hrCorner = DwmSetWindowAttribute(hwnd,
+		DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
+
+	if (FAILED(hrCorner)){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowChrome: corner preference unsupported - rounded corners skipped");
+
+	}
 
 }
 

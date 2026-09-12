@@ -42,12 +42,11 @@ int Application::Run() {
 }
 
 Window& Application::Create(const std::string& title, int width, int height) {
-	m_windows.emplace_back(std::make_unique<Window>(
-		this,
-		title,
-		width,
-		height
-	));
+	// ⚠️ B1-t：必须写作 unique_ptr(new Window(...))，**不可**用 std::make_unique<Window>(...)。
+	//    原因：构造器为 private（B1），而 make_unique 的函数体**不是 Application 的成员**——
+	//    friend 授权只在"访问发生处"生效，make_unique 内部会因无权访问而编译失败。
+	//    此处 new 表达式就在本成员函数体内，friend 生效；所有权**立即**交给 unique_ptr（非裸指针）。
+	m_windows.emplace_back(std::unique_ptr<Window>(new Window(*this, title, width, height)));
 	Window& window = *m_windows.back();
 
 	// 手动派发 WindowCreatedEvent（不是 Win32 消息翻译的产物，是框架层语义事件）
@@ -68,6 +67,13 @@ void Application::Exit(){
 
 void Application::ProcessDeferredDestroy() {
 	// 清空延迟销毁列表（unique_ptr 析构，Window 资源释放）
+	//
+	// ⚠️ 契约（window-ownership.md §4.3——本前提此前从未表达）：**Window 对象的回收时机依赖消息循环**。
+	// 本函数由平台消息循环在**每条消息后**调用（Win32PlatformApplication::PerformDeferredCleanup
+	// → SetDeferredCleanup 注入的回调，见构造体）；若消费者不调用 Application::Run()（如测试），
+	// 清理永不发生，对象将延后到 ~Application 的成员析构。—— 消费者**不得**假设
+	// 「窗口关闭后 Window 对象立即析构」。
+	// 注：以上是**当前实现路径**，非「设计保证的固定顺序」（~Application 残留窗口隐患另案记账）。
 	m_deferredDestroy.clear();
 }
 
@@ -89,6 +95,9 @@ void Application::OnWindowDestroyed(
 				event.GetWindow();
 		});
 
+	// 容器成员关系是**内部不变量**（B1/B2 之后，框架外已无法产生未登记窗口）。
+	// Debug 构建以断言暴露框架自身的缺陷；Release 构建保留下面的运行时分支，
+	// 避免不变量一旦被违反时「无效迭代器解引用」进一步演化为未定义行为。
 	FRAMEWORK_ASSERT(it != m_windows.end());
 
 	if (it == m_windows.end()){

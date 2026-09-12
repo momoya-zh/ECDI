@@ -61,6 +61,22 @@ public:
 
 	}
 
+	// ── Phase 12：新增 7 个纯虚（本替身不关心 chrome/层级/状态——空实现）──
+
+	void SetChromeMode(ChromeMode) override{}
+
+	void SetCaptionHeight(int) override{}
+
+	void SetResizeInset(int) override{}
+
+	void SetWindowLayer(WindowLayer) override{}
+
+	void Minimize() override{}
+
+	void Maximize() override{}
+
+	void Restore() override{}
+
 	PlatformRenderContext m_context;	///< 空基类可实例化（无纯虚）——测试替身直接持有
 
 	int startCount = 0;
