@@ -70,6 +70,7 @@ CTestTestfile.cmake
 *.cmake.stamp
 
 # ===== 工具目录（私有，不提交）=====
+.workbuddy-ai/
 .workbuddy/
 .mimocode/
 .vscode/
