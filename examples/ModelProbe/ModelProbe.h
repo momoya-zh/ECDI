@@ -14,6 +14,7 @@ class Button;
 class Label;
 class CheckBox;
 class Radio;
+class Window;   // 前置声明（Phase 12 实测接缝——非拥有指针）
 
 namespace Demo{
 
@@ -64,6 +65,14 @@ public:
 	/// @brief 界面测试（对称 public——demo 按钮/测试共用）
 	void OnTestClick();
 
+	// ── 窗口控制（Phase 12 实测入口——运行期 API + 状态事件显示）──
+
+	/// @brief 设置目标窗口（**非拥有**指针——B 契约：Window 对象归 Application，本页只触发运行期 API）
+	void SetWindow(Window* window) noexcept;
+
+	/// @brief 窗口状态事件显示（DemoApplication::OnWindowStateChanged 转发——winRow 右侧单行显示最近一条）
+	void AppendWindowState(const std::string& stateName);
+
 	// ── 测试/调用驱动 API（demo 控件公开接口——构造界面与测试共用）──
 
 	void SetBaseUrl(const std::string& url);        ///< 设置 base URL 输入框
@@ -105,6 +114,8 @@ private:
 	Radio* m_fmtIds = nullptr;
 	Radio* m_fmtFull = nullptr;
 	Radio* m_fmtCfg = nullptr;
+	Window* m_window = nullptr;           ///< 非拥有——运行期 API 实测接缝（SetWindow 注入）
+	Label* m_windowEventLabel = nullptr;  ///< 最近一条窗口状态事件（winRow 右侧）
 
 	// ── 模型行池（复用——避免反复 AddChild 抖动树；idx 稳定 = model 序）──
 	struct RowWidgets{

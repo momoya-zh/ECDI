@@ -30,6 +30,9 @@ public:
 
 	bool CanFocus() const noexcept override { return true; }
 
+	// Phase 13 D9：交互控件消费鼠标输入——命中本控件时 caption 区返回 HTCLIENT（默认 false 见 Widget.h）
+	bool ConsumesMouseInput() const noexcept override { return true; }
+
 	// ── P1：echo 掩码（Key 输入打点；显示层打点、数据层不变——GetText 永远真实值）──
 
 	enum class EchoMode{ Normal, Password };

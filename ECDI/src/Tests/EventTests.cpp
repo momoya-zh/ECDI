@@ -49,6 +49,9 @@ public:
     void OnPaint() override {}
     void OnResized(int, int) override {}
     void OnExitSizeMove() override {}
+
+    // ── Phase 13：新增纯虚（本替身不关心客户区命中——恒定「不可交互」）──
+    bool IsClientInteractiveAt(int, int) const noexcept override { return false; }
     Window* GetWindow() const noexcept override { return nullptr; }
 
     void OnEvent(const Event& event) override

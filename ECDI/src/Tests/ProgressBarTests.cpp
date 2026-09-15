@@ -7,6 +7,7 @@
 #include "ECDI/Core/Size.h"
 #include "ECDI/Platform/PlatformRenderContext.h"
 #include "ECDI/Platform/PlatformWindow.h"
+#include "ECDI/Window/WindowState.h"
 #include "ECDI/Render/PaintContext.h"
 #include "ECDI/Render/RenderCommand.h"
 #include "Render/RecordingBackend.h"
@@ -67,6 +68,8 @@ public:
 	void Maximize() override{}
 
 	void Restore() override{}
+
+	WindowState GetWindowState() const noexcept override{ return WindowState::restored; }	// Phase 13：stub
 
 	PlatformRenderContext m_context;   ///< 空基类可实例化（无纯虚）——测试替身直接持有
 

@@ -6,7 +6,7 @@
 
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 100+ design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 113 design documents in Chinese).
 
 ## How this was built
 
@@ -43,7 +43,8 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Text**: text measuring, selection, IME composition, clipboard, undo/redo
 - **Imaging**: WIC-backed decoding (`Decode::DecodeFile` / `Decode::DecodeMemory`) producing premultiplied BGRA, ready for `DrawImage`
 - **Anti-aliasing**: supersampled corner coverage masks for rounded rects (`S=8`), cached per radius — GDI has no native AA, so arcs are composited through a premultiplied alpha path that composes with the theme's corner radius
-- **Testing**: self-hosted test framework (170+ cases, zero dependencies) with a recording backend for paint assertions
+- **Window chrome**: borderless mode (`WM_NCCALCSIZE` interception) with a self-drawn caption bar — title plus vector min/max/close buttons — and `NCHITTEST` delegated into the widget tree, so interactive controls inside the caption stay clickable while the rest drags the window
+- **Testing**: self-hosted test framework (188 cases, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -58,7 +59,7 @@ Targets:
 
 | Target | Type | Description |
 |---|---|---|
-| `ECDI` | static library | The framework (`include/ECDI/*.h` — 81 public headers; internal implementation lives in `src/`) |
+| `ECDI` | static library | The framework (`include/ECDI/*.h` — 86 public headers; internal implementation lives in `src/`) |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
 
@@ -115,10 +116,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ## Project layout
 
 ```
-ECDI/       framework sources (include/ = 81 public headers, src/ = implementation + tests)
+ECDI/       framework sources (include/ = 86 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       design documents (100+ files; requirements → preliminary → detailed, per phase)
+docs/       design documents (113 files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
@@ -132,6 +133,8 @@ docs/       design documents (100+ files; requirements → preliminary → detai
 | 8–9 | Rendering extensions, theme, hover, clip, animation, AutoSize | ✅ |
 | **10** | **Library-ization (v0.1.0): public API boundary, install/export, external consumer** | ✅ |
 | 11 | Image decoding (WIC backend, `Decode` module, premultiplied-BGRA contract) | ✅ |
+| 12 | Window chrome (borderless mode, `WM_NCCALCSIZE` / `NCHITTEST` interception, maximize work-area correction, DWM integration) | ✅ |
+| 13 | Caption bar (self-drawn title bar, `NCHITTEST` → widget-tree delegation, window-state query API) | ✅ |
 
 ## License
 

@@ -4,6 +4,7 @@
 #include "ECDI/Widget/CaretGeometry.h"
 #include "ECDI/Window/ChromeMode.h"
 #include "ECDI/Window/WindowLayer.h"
+#include "ECDI/Window/WindowState.h"
 
 #include <string>
 
@@ -110,6 +111,13 @@ public:
 	/// @details 最小化态 → 还原到原尺寸；最大化态 → 还原到最大化前尺寸（系统语义）。
 	/// @pre 同 Minimize
 	virtual void Restore() = 0;
+
+	// ── Phase 13：窗口状态查询（R3——**事实来源在本层**）────────────────
+
+	/// @brief 查询当前窗口状态（Phase 13 R3）
+	/// @details 与 `WindowStateChangedEvent` 互补：事件回答「变成了什么」，本查询回答「现在是什么」。
+	/// 事实的唯一来源在平台层（`WM_SIZE` 时由 `IsIconic` / `IsZoomed` 判定并缓存）——**纯虚**。
+	virtual WindowState GetWindowState() const noexcept = 0;
 };
 
 }

@@ -13,6 +13,7 @@
 #include "ECDI/Render/TextMeasurer.h"
 #include "ECDI/Window/ChromeMode.h"
 #include "ECDI/Window/WindowLayer.h"
+#include "ECDI/Window/WindowState.h"
 
 #include <string>
 #include <memory>
@@ -123,6 +124,23 @@ class Window : public PlatformWindowHost {
 		/// @pre 同 Minimize
 		void Restore();
 
+		/// @brief 查询当前窗口状态（Phase 13 R3——转发平台层；**事实唯一来源在平台层**）
+		/// @details 与 `Minimize/Maximize/Restore` 同组为「运行期状态面」；查询本身无 @pre
+		/// （未 Show 时返回平台缓存的初始态 restored——即「现在是什么」的诚实回答）。
+		/// @note 无状态缓存：本方法不做 Window 侧影子状态（避免双份维护——D6 / O4）。
+		WindowState GetWindowState() const noexcept;
+
+		/// @brief 请求关闭本窗口（Phase 13 R4——**框架侧关闭请求入口**）
+		/// @details 语义 = 「用户请求关闭」：构造 `WindowCloseRequestedEvent` 派发给 Application，
+		/// 与系统 X（`WM_CLOSE` → 平台翻译同一事件）**完全同路径** ⇒ 应用的 `OnWindowCloseRequested`
+		/// 拦截逻辑对自绘关闭按钮同样生效（D8）。
+		/// **同步派发**：调用即完成派发与全部 handler 执行，返回时拦截逻辑已跑完（无队列 / 无延迟）
+		/// ——与 `Application::Create` 手动派发 `WindowCreatedEvent` 同款先例。
+		/// ⚠️ 与 `Release()` 的区别：`Release()` 是**销毁句柄**（资源层，幂等），
+		/// `RequestClose()` 是**请求**（语义层，可被拦截 / 可被拒绝——拦截方不调 `Release()` 即可）。
+		/// @pre 无（Show 前后均可调用——语义层请求不依赖窗口可见性）
+		void RequestClose();
+
 		/// @brief 动画统一 tick 到达入口（9.6；Application::OnTimer 保留 timerId 分支直调——不经焦点派发链）
 		/// @details 计算 steady_clock 真实 elapsed（d3）转调 m_animationManager.Tick(elapsed)（d9 参数化）；
 		/// Window 纯转发，零动画逻辑
@@ -213,6 +231,10 @@ class Window : public PlatformWindowHost {
 		/// @details Transitional adapter——当前转发 m_application.OnEvent；
 		/// 最终派发目标可能随 7.1.5 Application 解耦变化（可能直接 EventRouter）
 		void OnEvent(const Event& event) override;
+
+		/// @brief 客户区可交互命中查询（Phase 13 R2——PlatformWindowHost 契约实现）
+		/// @details 转 RootWidget::HitTest → Widget::ConsumesMouseInput（平台层不认识 Widget）
+		bool IsClientInteractiveAt(int x, int y) const noexcept override;
 
 		/// @brief IME 组合发生（7.1.2 方案 B：平台层状态同步区上报，非事件系统成员）
 		/// @details 转发既有框架逻辑 NotifyIMEComposition（候选窗定位）

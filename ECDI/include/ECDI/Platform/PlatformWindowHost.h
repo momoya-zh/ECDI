@@ -53,6 +53,15 @@ public:
 	/// @details 平台实现（Win32）在 WM_IME_COMPOSITION 且 lParam & GCS_RESULTSTR 时提取上报；
 	/// 框架层 Window 转发焦点控件——组合区间转正式文本（进 Undo 历史）。
 	virtual void OnIMECompositionCommit(const std::string& resultText) = 0;
+
+	/// @brief 客户区可交互命中查询（Phase 13 R2 / D2——NCHITTEST 委托）
+	/// @param x,y 窗口局部坐标（Borderless 下客户区 = 整窗，两者坐标系一致）
+	/// @return true  = 该点落在**消费鼠标输入的控件**上 → 平台层让本次命中走客户区（HTCLIENT）
+	///         false = 交 caption 区语义（HTCAPTION——拖拽 / 双击最大化·还原 / 系统菜单）
+	/// @details 平台层**不认识 Widget**（分层律）——只问本契约；实现方（Window）转
+	/// RootWidget::HitTest → Widget::ConsumesMouseInput。
+	/// **纯虚**：遗漏实现 = 编译期暴露（与 Phase 12 的 7 个纯虚同规格）。
+	virtual bool IsClientInteractiveAt(int x, int y) const noexcept = 0;
 };
 
 }

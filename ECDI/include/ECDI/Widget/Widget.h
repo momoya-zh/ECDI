@@ -174,6 +174,16 @@ public:
 	/// @details 只声明能力，visible/enabled 判断由事件系统前置处理
 	virtual bool CanFocus() const noexcept { return false; }
 
+	/// @brief 该控件是否消费鼠标输入（Phase 13 D9——NCHITTEST 委托判据）
+	/// @details 语义：「被 HitTest 命中」**不等于**「应阻止系统的标题栏拖拽」。默认 false（纯显示控件）——
+	/// Label / Panel / ProgressBar / CollapsiblePanel 命中后，caption 区仍返回 HTCAPTION
+	/// （保证「拖标题文字可移动窗口」）；交互控件（Button / StateWidget / TextBox，及内部 CaptionButton）
+	/// override 返回 true。
+	/// ⚠️ **坐标无关**：HitTest 只返回控件指针、不返回局部坐标（若做成点查询需二次坐标换算）⇒
+	/// 局部可交互需求由**复合控件**表达（如 CaptionBar 把按钮做成子控件——子命中拿到的就是按钮自身）。
+	/// ⚠️ **与 CanFocus() 无关**：后者是键盘焦点语义，两者恰好近似但不可互推（复用会让概念互相绑架）。
+	virtual bool ConsumesMouseInput() const noexcept { return false; }
+
 	/// @brief 获得键盘焦点通知（5.4.3；由 Window::SetFocusedWidget 触发）
 	/// @details 子类 override 响应——TextBox 显示光标 / Button 画焦点框等；默认空实现
 	virtual void OnFocusGained() {}

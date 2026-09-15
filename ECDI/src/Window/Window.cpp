@@ -8,6 +8,7 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/String.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
+#include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
 #include "ECDI/Render/PaintContext.h"
 
 #include <string>
@@ -197,6 +198,44 @@ void Window::Maximize(){
 void Window::Restore(){
 
 	m_platformWindow->Restore();
+
+}
+
+// ── Phase 13：窗口状态查询（R3）──────────────────────────────────
+
+WindowState Window::GetWindowState() const noexcept{
+
+	return m_platformWindow->GetWindowState();
+
+}
+
+// ── Phase 13：关闭请求入口（R4——语义层/可拦截；与系统 X 同路径）────
+
+void Window::RequestClose(){
+
+	WindowCloseRequestedEvent event(this);
+
+	// 同步派发（先例：Application::Create 手动派发 WindowCreatedEvent）
+	m_application.OnEvent(event);
+
+}
+
+// ── Phase 13：客户区可交互命中（R2——Host 契约实现）──────────────
+
+bool Window::IsClientInteractiveAt(int x, int y) const noexcept{
+
+	// 防御：RootWidget 尚未就绪时早退（与 OnResized 的既有守卫同款）。
+	// 可达性：WM_NCHITTEST 需要窗口可见才有鼠标命中，此时 RootWidget 必已构造（构造期不产生鼠标命中）。
+	if (!m_rootWidget){
+
+		return false;
+
+	}
+
+	Widget* hit = m_rootWidget->HitTest(x, y);
+
+	// D9 判据：命中「消费鼠标输入的控件」才算可交互——命中纯显示控件（如标题 Label）仍走 HTCAPTION
+	return hit != nullptr && hit->ConsumesMouseInput();
 
 }
 

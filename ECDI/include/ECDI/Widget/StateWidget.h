@@ -22,6 +22,9 @@ public:
 
 	bool CanFocus() const noexcept override { return true; }
 
+	// Phase 13 D9：交互控件消费鼠标输入——命中本控件时 caption 区返回 HTCLIENT（默认 false 见 Widget.h）
+	bool ConsumesMouseInput() const noexcept override { return true; }
+
 	/// @brief 设置选中状态（唯一状态入口——契约 2；virtual——Radio override 扩展互斥必须）
 	/// @details 值变化才触发通知（m_checked != checked 时：OnCheckedChanged + 回调 + Invalidate）；
 	/// 相同值 no-op（Radio 交互不可取消的保证基础）。

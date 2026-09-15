@@ -185,6 +185,8 @@
     <ClCompile Include="src\Widget\Widget.cpp" />
     <ClCompile Include="src\Platform\Win32\WindowMessageHandler.cpp" />
     <ClCompile Include="src\Window\Window.cpp" />
+    <ClCompile Include="src\Window\CaptionBar.cpp" />
+    <ClCompile Include="src\Window\CaptionButton.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32WindowClass.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32PlatformApplication.cpp" />
     <ClCompile Include="src\Tests\EventTests.cpp" />
@@ -212,6 +214,7 @@
     <ClCompile Include="src\Tests\ImageDecodeTests.cpp" />
     <ClCompile Include="src\Tests\AntiAliasingTests.cpp" />
     <ClCompile Include="src\Tests\WindowChromeTests.cpp" />
+    <ClCompile Include="src\Tests\CaptionBarTests.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32ChildProcess.cpp" />
     <ClCompile Include="src\Platform\Win32\WicImageDecoder.cpp" />
     <ClCompile Include="src\Platform\Win32\ExecutablePath.cpp" />
@@ -318,6 +321,8 @@
     <ClInclude Include="include\ECDI\Window\WindowLayer.h" />
     <ClInclude Include="include\ECDI\Window\WindowState.h" />
     <ClInclude Include="include\ECDI\EventSystem\Window\WindowStateChangedEvent.h" />
+    <ClInclude Include="include\ECDI\Window\CaptionBar.h" />
+    <ClInclude Include="src\Window\CaptionButton.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ECDI开发规范.md" />

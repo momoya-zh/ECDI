@@ -83,6 +83,7 @@ Window
 ```
 
 - **CaptionBar 控件推迟**：待真实项目（ModelProbe / DesktopNest / Demo）重复实现标题栏 ≥2 次后再立项（「二次用例出现再抽象」）
+  - → **已于 2026-09-13 解锁立项为 Phase 13**（`phase13-captionbar-requirements.md` v1.0）——ModelProbe Borderless 缺关闭按钮（实测）+ DesktopNest = 二次用例成立；解锁条件复核见其 §1.2 / D0
 - 这也更能体现 ECDI 定位：**框架负责窗口行为，应用决定 UI**
 
 ### R6：DWM 增强（决策点 §3.2）

@@ -274,6 +274,16 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		// ⚠️ 判定顺序：先 resize 边（上一条），后 caption——保证窗口最上缘是缩放手感
 		if (y < caption && caption > 0){
 
+			// ★ Phase 13 R2：caption 区内**先问 Host**——命中「消费鼠标输入的控件」（如 CaptionBar 按钮）
+			//   则让本次命中走客户区（break → DefWindowProc → HTCLIENT，与「非 caption 区」同一出口），
+			//   鼠标事件正常派发给控件；否则维持 HTCAPTION（拖拽 / 双击最大化 / 系统菜单）。
+			//   委托范围**仅限本分支**（非全窗口每点）——命中测试高频调用，成本与既有判定同级。
+			if (m_host.IsClientInteractiveAt(x, y)){
+
+				break;
+
+			}
+
 			return HTCAPTION;
 
 		}
@@ -835,6 +845,16 @@ void Win32PlatformWindow::Restore(){
 	}
 
 	if (m_hwnd) ShowWindow(m_hwnd, SW_RESTORE);
+
+}
+
+// ── Phase 13：窗口状态查询（R3）──────────────────────────────────
+
+WindowState Win32PlatformWindow::GetWindowState() const noexcept{
+
+	// 事实来源：WM_SIZE 时由 IsIconic / IsZoomed 判定并写入（Phase 12 既有去重锚）——
+	// 本方法只读取缓存，不重新查询系统（避免与事件流判定不一致）。
+	return m_lastWindowState;
 
 }
 

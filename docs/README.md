@@ -2,9 +2,9 @@
 
 > 本文档是 `docs/` 的索引。设计文档随代码提交 git，从 Phase4 起为强制约定（职责确认 / 初步设计 / 详细设计 各阶段文档正常写入本目录）。
 
-## 开发进度（2026-09-12 更新）
+## 开发进度（2026-09-15 更新）
 
-> **当前规模锚点（防止各处历史数字误读）**：测试 **174** 用例（`GetTestRegistry().Add` 求和，16 个测试文件）｜Public 头 **81**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **107** 篇（`docs/**/*.md`）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
+> **当前规模锚点（防止各处历史数字误读）**：测试 **188** 用例（`GetTestRegistry().Add` 求和，**18 个含用例的测试文件**——`src/Tests/*.cpp` 共 21 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **86**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **113** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 111 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
 
 ### ✅ 已完成
 
@@ -50,7 +50,8 @@
 ### 🔲 未来
 
 - **Phase 12 后能力路线**：基础控件补齐 / 渲染能力增强 / 跨平台（Linux/Android 远期）→ 接近 1.0
-- **Phase 13 托盘与拖入**（前置 = Phase 12 的 R9 平台消息扩展接缝）——`Shell_NotifyIcon` 图标回调 + `WM_DROPFILES`；同时支撑 DesktopNest 桌面常驻方向（`desktopnest-roadmap.md`）
+- **Phase 13 CaptionBar 自绘标题栏（✅ 已实现并验收 2026-09-14 ~ 09-15）**——Phase 12 R5 推迟项解锁（ModelProbe Borderless 缺关闭按钮实测 + DesktopNest = 二次用例）；核心 = **NCHITTEST ↔ Widget 树委托**（含 **D9「可交互」判定**——HitTest 命中 ≠ 应阻止拖拽：标题 Label 命中仍须 `HTCAPTION`）+ CaptionBar Widget + 状态查询 API。详见下方 Phase13 段。
+- **Phase 14 托盘与拖入**（前置 = Phase 12 的 R9 平台消息扩展接缝）——`Shell_NotifyIcon` 图标回调 + `WM_DROPFILES`；同时支撑 DesktopNest 桌面常驻方向（`desktopnest-roadmap.md`）
 - **Phase 9.5 收尾补充**：~~局部更新/裁剪系统 + Hover/MouseEnter/Leave~~（✅ R1/R4 已落地 2026-08-28）；~~LinearLayout 抽象、WM_MOVE 场景、Shortcut System~~（✅ 关闭记账——二次用例未出现）；详见 roadmap-deferred.md
 
 ### 📋 技术债务（记账）
@@ -218,6 +219,16 @@
 |------|------|------|
 | [window-ownership.md](window-ownership.md) | **契约主体（初步设计）**：三层归属（对象 / HWND / 注册表）· 三条闭环链（线性全链 + 源码锚点）· **5 条不变量** · 决策 B1–B5 + 关键陷阱（`make_unique` 与 `default_delete` 均无法访问私有成员）· **契约条款原文**（`Release ≠ delete Window`、回收依赖消息泵、断言与容错的双层含义、`PlatformWindowHost` 注释改写）· 验收（含 `static_assert` 编译期契约） | ✅ **v1.1 已实施（2026-09-12）**——契约落地，证据见详设 v1.2（183/183 + 编译期契约 + 静态检查） |
 | [window-ownership-detailed-design.md](window-ownership-detailed-design.md) | **详细设计（实施规格）**：逐文件 diff 级改动（`Window.h` 访问权限布局前/后 + `friend` 粒度说明 / `Application.h` 删友元 + 双向访问关系复核表 / `Application.cpp` `Create` 全文 + B1-t 陷阱 / `PlatformWindowHost.h` 注释改写 / 测试 `static_assert` ×3）· 编译期契约测试方案（**双工具链实证** + 中立上下文性质 + 四工具链待验 + 兜底负向探针）· 注释落点清单 · 实施 6 步 · 验收 A1–A6 | ✅ **v1.2 已实施（2026-09-12）**：`ecdi_tests` **183 passed / 0 failed**（MinGW + `-D_DEBUG`，断言层生效）；**A1** 编译期契约（`static_assert` ×3 + 人工反例实测编译失败）/ **A4** 静态检查（`new Window` 代码 1 处、`make_unique<Window>` 代码 0 处）通过；**A2/A6 ✅ 全部通过**——**四工具链**（MinGW / MSVC / Clang / ClangCL）实测运行、**无断言错误**；附带 `ECDI/ECDI开发规范.md:143` 过期措辞（「m_application 指针」→引用）已修；3 处实测偏差（`static_assert` 落点 / 连带过期注释 / 排版）已记录 |
+
+## Phase13 CaptionBar 自绘标题栏（✅ 已实现并验收，2026-09-14 ~ 09-15）
+
+Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着」标题栏（标题文本 + min/max/close 三按钮，矢量自绘）；核心缺口 = **NCHITTEST ↔ Widget 树委托**（R9 惯例第三次应用）。不动 B 契约 / 渲染四层 / NCCALCSIZE。**验收**：四构建 **188 passed / 0 failed**（183 既有零回归 + 5 新增）；ModelProbe `--borderless` 手测 6 项 + Normal 零回归通过。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase13-captionbar-requirements.md](phase13-captionbar-requirements.md) | 需求确认（R1–R8 + **D0–D9**：D1 独立 Widget / D2 Host 虚方法委托 / **D7 职责二分定案**（`captionHeight` 行为区 vs Bar 实体区 + 三层判定顺序）/ **D9「可交互」判定来源**（倾向 A 控件自声明，非纯虚 ⇒ 零破坏）/ D8 close 走关闭请求；非目标圈定 Snap Layouts 等） | ✅ **v1.1**（已实现并验收） |
+| [phase13-captionbar-preliminary-design.md](phase13-captionbar-preliminary-design.md) | 初步设计（**头草案 6 处** + 命中委托链 + 三处初设新发现：`Window::RequestClose()` 入口缺失 / 第三个 Host 实现者 `FakeHost` / `ConsumesMouseInput` 坐标无关；**v1.1 评审 5 条确认**：`HitTest` 最深命中为前提 · `RequestClose` 同步派发 · T13-4 用 `RecordingBackend` 不加测试 API · 固定 `break → DefWindowProc → HTCLIENT` · §6 留详设） | ✅ **v1.1**（已实现并验收） |
+| [phase13-captionbar-detailed-design.md](phase13-captionbar-detailed-design.md) | 详细设计（**逐文件最小 diff 规格**：2 新建 + 8 修改 + **3 处测试替身同步**；**初设→详设 6 处精化**：P1 `SetSize` 内重排 / P2 标题越界天然被自身 PushClip 裁切 / P3 标题前景色须构造注入 / P4 T13-4 命令缓冲直接断言零产品测试缝 / P5 命令路径走合成 Event + `Application::OnEvent` / P6 ModelProbe 须把 bar 加在 page 之前；**glyph 坐标表**；T13-1 **八态**含禁用落回拖拽；§4 **6 条已知局限**含 L6 坐标系；A1–A6 + R1–R6 + 最小回滚） | ✅ **v1.4 已实现并验收**：P0-1 替身返回类型 `void`→`WindowState` · P0-2 原 L4 移出局限 · P1-3 负坐标表述收紧 · P1-5 A6 实现者枚举化 · P1-2 L2 措辞精确化 · **P1-4 否决**（`m_closeButton` 被 `RelayoutChildren` 使用）· 补 `SetSize` 可重复调用契约 + T13-4 断言分层；**A1–A6 全通过** + `AntiAliasing.GDIRadiusZeroBitwise` flaky 根因（Window Ghosting）修复 |
 
 ## ModelProbe Demo（✅ P1/P2 已实现，2026-09-01/11）
 

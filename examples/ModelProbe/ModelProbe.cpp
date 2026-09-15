@@ -410,6 +410,43 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	fmtRow->AddChild(std::move(fmtCfg));
 	AddChild(std::move(fmtRow));
 
+	// ── 窗口控制（Phase 12 运行期 API 实测——Show 后可用；状态事件回流显示于右侧）──
+	auto winRow = std::make_unique<Panel>();
+	winRow->SetSize(600, 36);
+	winRow->SetLayout(std::make_unique<HorizontalLayout>(8, false));
+
+	auto makeWinBtn = [&](const char* text){
+		auto btn = std::make_unique<Button>(text);
+		btn->SetSize(90, 36);
+		btn->SetStyle(ButtonStyleOverride{
+			.background = kSecondary(),
+			.cornerRadius = kRadius,
+			.hoverBackground = kSecondaryHover(),
+		});
+		btn->SetTextColor(kText());
+		return btn;
+	};
+
+	auto maxBtn = makeWinBtn("最大化");
+	maxBtn->SetOnClick([this]{ if (m_window) m_window->Maximize(); });
+
+	auto restoreBtn = makeWinBtn("还原");
+	restoreBtn->SetOnClick([this]{ if (m_window) m_window->Restore(); });
+
+	auto minBtn = makeWinBtn("最小化");
+	minBtn->SetOnClick([this]{ if (m_window) m_window->Minimize(); });
+
+	auto winEventLabel = std::make_unique<Label>("窗口事件：—");
+	winEventLabel->SetSize(280, 36);
+	winEventLabel->SetTextColor(kHint());
+	m_windowEventLabel = winEventLabel.get();
+
+	winRow->AddChild(std::move(maxBtn));
+	winRow->AddChild(std::move(restoreBtn));
+	winRow->AddChild(std::move(minBtn));
+	winRow->AddChild(std::move(winEventLabel));
+	AddChild(std::move(winRow));
+
 	// ── 生成 JSON ──
 	// H 布局行包裹（fillCrossAxis 默认 false）——按钮保持固定宽，不被 page V 布局的跨轴填充拉宽（Qt 原版 actRow 同构）
 	auto actRow = std::make_unique<Panel>();
@@ -446,6 +483,19 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	});
 	m_previewBox = preview.get();
 	AddChild(std::move(preview));
+}
+
+void ModelProbePage::SetWindow(Window* window) noexcept{
+
+	m_window = window;   // 非拥有——B 契约：Window 对象归 Application，本页只触发运行期 API
+
+}
+
+void ModelProbePage::AppendWindowState(const std::string& stateName){
+
+	if (m_windowEventLabel)
+		m_windowEventLabel->SetText("窗口事件：" + stateName);
+
 }
 
 int ModelProbePage::GetSelectedCount() const noexcept{

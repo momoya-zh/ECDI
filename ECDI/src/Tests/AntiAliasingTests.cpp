@@ -274,12 +274,18 @@ struct AAWindow
 };
 
 /// @brief 创建 200×200 测试窗口
-/// @details 屏幕右下角短暂显示——**屏幕外窗口的窗口 DC 裁剪区域为空 → GetPixel 恒返
-/// CLR_INVALID**（RendererTests.cpp 已注释该实测坑）；SW_SHOWNOACTIVATE 不抢焦点。
+/// @details **右上角**短暂显示，`SW_SHOWNOACTIVATE` 不抢焦点。取右上是为了避开任务栏一类常驻遮挡物
+///          ——**但注意**：遮挡并**不是**本用例历史失败的成因（真因见下），改位置对当时的症状零改善，
+///          保留右上只是因为它无害且更稳。
+/// @note **屏幕外窗口的窗口 DC 裁剪区域为空 → `GetPixel` 恒返 `CLR_INVALID`**（`RendererTests.cpp` 已注释该实测坑）。
+/// @note **历史 flaky 真因（2026-09-14 定性）**：窗口线程长时间不取消息 ⇒ DWM 判定其无响应 ⇒ 以类名
+///       `Ghost` 的替身窗口（同 z-order / 位置 / 大小）替换原窗口 ⇒ 原窗口不再被合成绘制 ⇒ 其 DC 可见区
+///       变 `NULLREGION` ⇒ 整帧读不到。修复见 `test_main.cpp` 的 `DisableProcessWindowsGhosting()`。
 bool CreateAAWindow(const wchar_t* className, const wchar_t* title, AAWindow& out)
 {
     const int screenW = GetSystemMetrics(SM_CXSCREEN);
-    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+
+    const int kTopMargin = 10;   // 顶部避开任务栏（非历史失败成因，见上方 @note）
 
     WNDCLASSW wc{};
     wc.lpfnWndProc = DefWindowProcW;
@@ -291,7 +297,7 @@ bool CreateAAWindow(const wchar_t* className, const wchar_t* title, AAWindow& ou
     }
 
     out.hwnd = CreateWindowExW(0, className, title, WS_POPUP,
-                               screenW - 210, screenH - 210, 200, 200,
+                               screenW - 210, kTopMargin, 200, 200,
                                nullptr, nullptr, wc.hInstance, nullptr);
     EXPECT_TRUE(out.hwnd != nullptr);
     if (out.hwnd == nullptr)
@@ -334,6 +340,109 @@ void DrawOneFrame(HWND hwnd, bool antiAliasing, const Rect& target, float radius
     backend.DrawRect(Rect{ 0, 0, 200, 200 }, Color::Blue());
     backend.DrawRoundedRect(target, radius, color);
     backend.EndFrame();
+}
+
+/// @brief 捕获一帧：绘制后整帧逐像素读出（**单次，无重试**）
+/// @details 索引顺序 = y 外层、x 内层（`index = y * 200 + x`）——诊断里的坐标还原依赖此约定。
+/// @note 这里**刻意不做重试**：早期（2026-09-14）曾用「重试至整帧可读」去吸收所谓的「瞬时噪声」，
+///       后经实测证明真因是 DWM 幽灵窗口（窗口长时间不取消息被系统替换）——重试既消不掉它，反而把
+///       阻塞时长推过触发阈值、使偶发失败变成必然失败。修复已移至测试入口
+///       （`test_main.cpp` 的 `DisableProcessWindowsGhosting()`），故此处恢复单次读取。
+void CaptureFrame(HWND hwnd, bool antiAliasing, const Rect& target, std::vector<COLORREF>& out)
+{
+    DrawOneFrame(hwnd, antiAliasing, target, 0.0f, Color::Red());
+
+    out.clear();
+    out.reserve(200 * 200);
+
+    HDC dc = GetDC(hwnd);
+    for (int y = 0; y < 200; ++y)
+    {
+        for (int x = 0; x < 200; ++x)
+        {
+            out.push_back(GetPixel(dc, x, y));
+        }
+    }
+    ReleaseDC(hwnd, dc);
+}
+
+/// @brief 失败诊断①：打印窗口可见区状态与窗口中心点处**真正**的那个窗口
+/// @details 三件套：`IsWindowVisible`（窗口是否可见）· `GetClipBox`（**`NULLREGION=1` 即可见区为空**
+///          ——典型成因是 DWM 幽灵窗口或窗口被最小化）· `WindowFromPoint` + `GetClassNameW`（点名中心处是谁）。
+/// @warning 中心处是**别的窗口 ≠ 读取会失败**：实测 `SunAwtFrame`（Java 窗口）覆盖时测试仍全绿——DWM
+///          redirection 让窗口表面照旧可读。真正的杀手只有 `clipType == NULLREGION`。
+/// @note 仅在断言失败时调用——正常路径零输出。
+void DumpWindowState(HWND hwnd, const char* where)
+{
+    HDC dc = GetDC(hwnd);
+
+    RECT clip{};
+    const int clipType = GetClipBox(dc, &clip);   // NULLREGION=1 / SIMPLEREGION=2 / COMPLEXREGION=3 / ERROR=0
+
+    ReleaseDC(hwnd, dc);
+
+    RECT wr{};
+    GetWindowRect(hwnd, &wr);
+
+    const POINT center{ (wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2 };
+    const HWND cover = WindowFromPoint(center);
+
+    wchar_t cls[128] = L"";
+    if (cover != nullptr)
+    {
+        GetClassNameW(cover, cls, 128);
+    }
+
+    std::printf("[AA/R0/%s] visible=%d clipType=%d clip=(%ld,%ld,%ld,%ld) 中心窗口=%p[%ls] self=%p rect=(%ld,%ld,%ld,%ld)\n",
+                where, IsWindowVisible(hwnd) ? 1 : 0, clipType,
+                clip.left, clip.top, clip.right, clip.bottom,
+                static_cast<const void*>(cover), cls,
+                static_cast<const void*>(hwnd),
+                wr.left, wr.top, wr.right, wr.bottom);
+}
+
+/// @brief 失败诊断②：两帧差异概览 + 前 5 处不匹配坐标 + 窗口状态
+/// @details 判读：① 差异**全是**「真实像素 vs `CLR_INVALID`」⇒ 属读取 / 可见性问题（窗口层面），
+///          **不是**渲染差异；② 两帧**都有真实值**却不同 ⇒ 那才是真渲染差异（须查 `GDIBackend`）。
+/// @note 仅在断言失败时调用。
+void DumpFrameMismatch(HWND hwnd, const std::vector<COLORREF>& off, const std::vector<COLORREF>& on)
+{
+    std::size_t invalidOff = 0;
+    std::size_t invalidOn = 0;
+    std::size_t diffCount = 0;
+    for (std::size_t i = 0; i < off.size(); ++i)
+    {
+        if (off[i] == CLR_INVALID) { ++invalidOff; }
+    }
+    for (std::size_t i = 0; i < on.size(); ++i)
+    {
+        if (on[i] == CLR_INVALID) { ++invalidOn; }
+    }
+    for (std::size_t i = 0; i < off.size() && i < on.size(); ++i)
+    {
+        if (off[i] != on[i]) { ++diffCount; }
+    }
+
+    std::printf("[AA/R0] diffCount=%zu / %zu   CLR_INVALID: off=%zu on=%zu\n",
+                diffCount, off.size(), invalidOff, invalidOn);
+
+    int shown = 0;
+    for (std::size_t i = 0; i < off.size() && i < on.size() && shown < 5; ++i)
+    {
+        if (off[i] == on[i]) { continue; }
+
+        const int px = static_cast<int>(i % 200);
+        const int py = static_cast<int>(i / 200);
+        std::printf("[AA/R0] #%d (%3d,%3d) off=%08lX%s on=%08lX%s\n",
+                    shown, px, py,
+                    static_cast<unsigned long>(off[i]),
+                    off[i] == CLR_INVALID ? " [INVALID]" : "",
+                    static_cast<unsigned long>(on[i]),
+                    on[i] == CLR_INVALID ? " [INVALID]" : "");
+        ++shown;
+    }
+
+    DumpWindowState(hwnd, "diff");
 }
 
 /// @brief AA 开/关在同一角区产生差异（详设 §6.2 L2-a）
@@ -434,25 +543,10 @@ void TestGDIRadiusZeroBitwise()
 
     const Rect target{ 50, 50, 100, 100 };
 
-    auto capture = [&](bool antiAliasing, std::vector<COLORREF>& out)
-    {
-        DrawOneFrame(win.hwnd, antiAliasing, target, 0.0f, Color::Red());
-
-        HDC dc = GetDC(win.hwnd);
-        for (int y = 0; y < 200; ++y)
-        {
-            for (int x = 0; x < 200; ++x)
-            {
-                out.push_back(GetPixel(dc, x, y));
-            }
-        }
-        ReleaseDC(win.hwnd, dc);
-    };
-
     std::vector<COLORREF> offFrame;
     std::vector<COLORREF> onFrame;
-    capture(false, offFrame);
-    capture(true, onFrame);
+    CaptureFrame(win.hwnd, false, target, offFrame);   // AA 关
+    CaptureFrame(win.hwnd, true, target, onFrame);     // AA 开
 
     EXPECT_EQ(offFrame.size(), onFrame.size());
 
@@ -464,6 +558,13 @@ void TestGDIRadiusZeroBitwise()
             ++diffCount;
         }
     }
+
+    // 诊断只在失败路径付出成本——正常路径零输出（2026-09-14 收口：原「重试」与「AA-off 复查帧」已移除）
+    if (diffCount > 0)
+    {
+        DumpFrameMismatch(win.hwnd, offFrame, onFrame);
+    }
+
     EXPECT_EQ(diffCount, std::size_t(0));
 }
 

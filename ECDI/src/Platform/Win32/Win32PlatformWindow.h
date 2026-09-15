@@ -58,6 +58,10 @@ public:
 	void Maximize() override;
 	void Restore() override;
 
+	// ── Phase 13：窗口状态查询（R3——返回 WM_SIZE 缓存的事实）──────────
+
+	WindowState GetWindowState() const noexcept override;
+
 	/// @brief 静态窗口过程（应用层注册 WindowClass 用；GWLP_USERDATA 绑定本实例）
 	static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 

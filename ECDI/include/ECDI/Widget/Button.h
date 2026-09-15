@@ -29,6 +29,9 @@ public:
 
 	bool CanFocus() const noexcept override { return true; }
 
+	// Phase 13 D9：交互控件消费鼠标输入——命中本控件时 caption 区返回 HTCLIENT（默认 false 见 Widget.h）
+	bool ConsumesMouseInput() const noexcept override { return true; }
+
 	// ── Phase 9：主题与样式（using 防名字隐藏——保留基类 SetStyle(TextStyleOverride)，可分别设置两 Style）──
 
 	using TextWidget::SetStyle;
