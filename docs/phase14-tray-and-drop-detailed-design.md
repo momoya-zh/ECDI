@@ -1,4 +1,4 @@
-﻿# Phase 14 托盘与拖入接缝 详细设计（v1.0）
+﻿# Phase 14 托盘与拖入接缝 详细设计（v1.1）
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-16
@@ -6,6 +6,7 @@
 > 前置：`phase14-tray-and-drop-preliminary-design.md` **v1.1**（外部评审「通过，可进详设」· 2026-09-16）
 > 一句话：把初设的 3 新头 + 7 头修改落成**可直接施工的逐文件最小 diff 规格**（每处标注动哪几行 / 不动哪些行）+ 平台实现全文规格 + 状态机完整转移表（含失败分支）+ 测试规格与工程注册——**不换初设路线**（不动渲染四层 / Window 所有权契约 / Phase 12 拦截骨架 / Phase 13 命中委托）。
 > v1.0：初稿（§1 实施前核实与精化 · §2 逐文件改动清单 · §3 关键实现规格 · §4 工程注册 · §5 测试规格 · §6 契约汇总 · §7 已知局限 · §8 验收清单 · §9 修订记录）
+> v1.1（2026-09-16）外部评审「**通过，可进实现**——4 项施工前收口」全部处理：① §2.10 补 `m_trayIconNeedsDestroy` 成员（§3.2 已用而类定义漏列——评审抓到）；② §3.4 补齐 `SetTrayIcon` / `RemoveTrayIcon` / `HandleTrayCallback` / `HandleDropFiles` 实现骨架（`BuildIconData` 参数化）；③ 测试 seam 拍板**函数指针**（保 `final`）；④ HICON 替换「**成功才提交**」契约（旧 owned 句柄在 Shell 成功前不可销毁）
 
 ---
 
@@ -203,6 +204,11 @@ private 区（`AdjustMaximizedClientRect` 之后）追加：
 ```cpp
 	/// @brief WM_DROPFILES 处理（Phase 14——解析 HDROP → DragFinish → 抛事件，R9/R10/R11）
 	void HandleDropFiles(HDROP hDrop);
+
+	/// @brief DragFinish 测试缝（v1.1 拍板：函数指针——不出实现层、保 final）
+	using DragFinishFn = void (*)(HDROP hDrop);
+	static void DragFinishAdapter(HDROP hDrop);
+	DragFinishFn m_dragFinish = &DragFinishAdapter;
 ```
 
 **Win32.cpp**（四处）：
@@ -305,21 +311,29 @@ private:
 	/// @brief 托盘回调消息翻译（v4 语义 → TrayEvent，D5 终版规则见 §3.3）
 	void HandleTrayCallback(WPARAM wParam, LPARAM lParam);
 
-	/// @brief 以当前 m_trayIcon / tooltip 构造 NOTIFYICONDATAW（ADD / 自愈共用）
-	NOTIFYICONDATAW BuildIconData();
+	/// @brief 构造 NOTIFYICONDATAW（v1.1 参数化——SetTrayIcon 传新值、自愈/析构传当前值）
+	NOTIFYICONDATAW BuildIconData(HICON icon, const std::wstring& tooltip);
 
-	/// @brief Shell 调用统一入口（测试缝——条 51 纪律：不出实现层）
-	BOOL NotifyShell(UINT action, NOTIFYICONDATAW& nid);
+	/// @brief Shell 调用测试缝（v1.1 拍板：函数指针形态——不出实现层、保 final，条 51）
+	using NotifyShellFn = BOOL (*)(UINT action, NOTIFYICONDATAW* nid);
+	using DragFinishFn = void (*)(HDROP hDrop);
+
+	static BOOL NotifyShellAdapter(UINT action, NOTIFYICONDATAW* nid);
+	static void DragFinishAdapter(HDROP hDrop);
 
 	HWND m_trayHostHwnd = nullptr;         ///< 隐藏顶层宿主（内部资源——永不进 Application::m_windows）
 	std::unique_ptr<WindowClass> m_trayHostClass;   ///< 宿主窗口类（独立实例、懒创建——析构顺序见 §3.4）
 	UINT m_taskbarCreatedMsg = 0;          ///< RegisterWindowMessageW(L"TaskbarCreated")
 	HICON m_trayIcon = nullptr;            ///< 当前图标（平台持有；失败降级系统默认——§3.2）
+	bool m_trayIconNeedsDestroy = false;   ///< 当前句柄是否 owned（LoadImageW=true / LoadIconW 共享=false）
 	bool m_trayDesired = false;            ///< desired state（D9——应用意图）
 	bool m_trayRegistered = false;         ///< shell registration state（D9——Shell 实际）
 	std::wstring m_trayTooltip;            ///< 提示文本缓存（UTF-16——MODIFY 重建用）
 	int m_lastAnchorX = 0;                 ///< 最近有效锚点（菜单定位）
 	int m_lastAnchorY = 0;
+
+	NotifyShellFn m_notifyShell = &NotifyShellAdapter;   ///< Shell 测试缝（默认真实 API——测试注入替身）
+	DragFinishFn m_dragFinish = &DragFinishAdapter;      ///< DragFinish 测试缝（同上）
 };
 
 }
@@ -385,7 +399,7 @@ private:
 	// 用 m_trayIconNeedsDestroy 标记区分（bool 成员，详设新增）
 ```
 
-> 成员补记：`bool m_trayIconNeedsDestroy = false;`——`LoadImageW` 成功 ⇒ true；降级 `LoadIconW` ⇒ false（共享句柄）。`~Win32PlatformApplication` 据此决定是否 `DestroyIcon`。
+> 成员 `m_trayIconNeedsDestroy` 已列入 §2.10 类定义（v1.1 修正——评审收口项 ①）；语义不变：`LoadImageW` 成功 ⇒ `true`、降级 `LoadIconW` ⇒ `false`（共享句柄，不销毁）。
 
 ### 3.3 v4 回调翻译规则（终版——O-5 已核实）
 
@@ -439,6 +453,175 @@ void Win32PlatformApplication::EnsureTrayHost(){
 }
 ```
 
+**SetTrayIcon（核心状态机操作——§3.1 表 #1–#5 的代码化，含 ④ HICON 替换契约）**：
+
+```cpp
+void Win32PlatformApplication::SetTrayIcon(const TrayIconOptions& options){
+
+	m_trayDesired = true;   // 意图先行（表 #1–#5 ⇒ desired=true，无论成败）
+
+	// ① 宿主就位（失败 ⇒ 不崩溃——§6.7；registered 不动，等重试/自愈）
+	EnsureTrayHost();
+
+	if (m_trayHostHwnd == nullptr){
+
+		Logger::Log(LogLevel::Error, L"Tray: SetTrayIcon failed - host unavailable");
+
+		return;
+
+	}
+
+	// ② 先加载新图标（「成功才提交」——失败时旧资源完整有效）
+	HICON newIcon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
+		MAKEINTRESOURCEW(options.iconResourceId), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
+
+	bool newNeedsDestroy = false;
+
+	if (newIcon == nullptr){
+
+		Logger::Log(LogLevel::Warning, L"Tray: LoadImageW failed - fallback to system default icon");
+
+		newIcon = LoadIconW(nullptr, IDI_APPLICATION);   // 共享句柄——不销毁
+
+	} else {
+
+		newNeedsDestroy = true;
+
+	}
+
+	m_trayTooltip = UTF8ToWide(options.tooltip);
+
+	// ③ Shell 操作：ADD/MODIFY 判据 = m_trayRegistered（Shell 实际——非 desired）
+	const UINT action = m_trayRegistered ? NIM_MODIFY : NIM_ADD;
+
+	NOTIFYICONDATAW nid = BuildIconData(newIcon, m_trayTooltip);
+
+	if (m_notifyShell(action, &nid)){
+
+		// ④ 成功 ⇒ 先销旧 owned 句柄再提交新值（旧句柄在 Shell 成功前被引用——不可提前销毁）
+		if (m_trayIcon != nullptr && m_trayIconNeedsDestroy){
+
+			DestroyIcon(m_trayIcon);
+
+		}
+
+		m_trayIcon = newIcon;
+
+		m_trayIconNeedsDestroy = newNeedsDestroy;
+
+		m_trayRegistered = true;
+
+	} else {
+
+		// ⑤ 失败 ⇒ 销毁刚加载的新句柄（owned 才销），旧值全部保持（§3.1 #2/#5）
+		if (newIcon != nullptr && newNeedsDestroy){
+
+			DestroyIcon(newIcon);
+
+		}
+
+		Logger::Log(LogLevel::Warning,
+			(action == NIM_ADD) ? L"Tray: NIM_ADD failed"
+			                    : L"Tray: NIM_MODIFY failed (kept old state)");
+
+	}
+
+}
+```
+
+**RemoveTrayIcon（表 #6–#8 的代码化）**：
+
+```cpp
+void Win32PlatformApplication::RemoveTrayIcon(){
+
+	m_trayDesired = false;   // 意图先行（表 #6–#8 ⇒ desired=false）
+
+	if (!m_trayRegistered){
+
+		return;   // 幂等（D11 表 #8）——不调 Shell、不记错误
+
+	}
+
+	NOTIFYICONDATAW nid = BuildIconData(m_trayIcon, m_trayTooltip);
+
+	const BOOL ok = m_notifyShell(NIM_DELETE, &nid);
+
+	m_trayRegistered = false;   // 向「已移除」收敛（表 #6/#7——无论成败）
+
+	if (ok){
+
+		Logger::Log(LogLevel::Info, L"Tray: icon removed");
+
+		// DELETE 成功 ⇒ shell 无引用 ⇒ 立即销毁 owned 句柄
+		if (m_trayIcon != nullptr && m_trayIconNeedsDestroy){
+
+			DestroyIcon(m_trayIcon);
+
+		}
+
+		m_trayIcon = nullptr;
+
+		m_trayIconNeedsDestroy = false;
+
+	} else {
+
+		// DELETE 失败 ⇒ 保守保留句柄（shell 可能仍引用），析构步骤 2.2 兜底销毁
+		Logger::Log(LogLevel::Warning, L"Tray: NIM_DELETE failed (converge to removed)");
+
+	}
+
+}
+```
+
+**HandleTrayCallback（§3.3 终版规则的代码化——含 ContextMenu 兜底）**：骨架与初设 v1.1 §3.2 一致（switch 翻译 + `WM_CONTEXTMENU` 走 `GetCursorPos()` 兜底、失败用最近锚点；其余经 `GET_X/Y_LPARAM(wParam)`），翻译后经 `EmitTrayEvent(...)` 上行——不再重复展开。
+
+**ShowTrayMenu（D6/D10——初设 v1.0 §3.4 全文为准施工）**，实施期补两条失败点：
+
+1. `CreatePopupMenu` 失败 ⇒ 直接返回 0（与「未选中」天然兼容——§6.7）；
+2. `AppendMenuW` 逐项失败（罕见）⇒ 跳过该项继续（部分菜单可用优于整体失败）。
+
+**HandleDropFiles（R9/R10/R11——v1.1 补全文，v1.0 引用缺口）**：
+
+```cpp
+void Win32PlatformWindow::HandleDropFiles(HDROP hDrop){
+
+	// ① 路径列表（UTF-8——边界转换在本层，R9）
+	const UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+
+	std::vector<std::string> paths;
+
+	paths.reserve(count);
+
+	for (UINT i = 0; i < count; ++i){
+
+		const UINT len = DragQueryFileW(hDrop, i, nullptr, 0);   // 不含终止符
+
+		std::wstring buf(len + 1, L'\0');
+
+		DragQueryFileW(hDrop, i, buf.data(), static_cast<UINT>(buf.size()));
+
+		buf.resize(len);
+
+		paths.push_back(WideToUTF8(buf));
+
+	}
+
+	// ② 落点（客户区坐标——DragQueryPoint 既有语义，与鼠标事件同系）
+	POINT pt{};
+
+	DragQueryPoint(hDrop, &pt);
+
+	// ③ ★ DragFinish 先于事件抛出（R10）——经测试缝（v1.1 拍板：函数指针）
+	m_dragFinish(hDrop);
+
+	// ④ 抛 Framework Event（O-6：Window* 经既有 GetWindow——PlatformWindowHost.h:32-34）
+	DropFilesEvent event(m_host.GetWindow(), std::move(paths), pt.x, pt.y);
+
+	m_host.OnEvent(event);   // → Window::OnEvent → Application::OnEvent → HitTest → Bubbling
+
+}
+```
+
 **析构序列（四步不变量——R1 / O-1 / K10）**：
 
 ```cpp
@@ -447,9 +630,9 @@ Win32PlatformApplication::~Win32PlatformApplication(){
 	// 2.1 幽灵图标防线（R1 硬要求）：registered 才删——无论 desired
 	if (m_trayRegistered && m_trayHostHwnd != nullptr){
 
-		NOTIFYICONDATAW nid = BuildIconData();
+		NOTIFYICONDATAW nid = BuildIconData(m_trayIcon, m_trayTooltip);
 
-		NotifyShell(NIM_DELETE, nid);   // 失败仅 Warning（§6.7）——不阻塞析构
+		m_notifyShell(NIM_DELETE, &nid);   // 失败仅 Warning（§6.7）——不阻塞析构
 
 		m_trayRegistered = false;
 
@@ -479,15 +662,19 @@ Win32PlatformApplication::~Win32PlatformApplication(){
 }
 ```
 
-**NotifyShell（测试缝——条 51 纪律：不出实现层）**：
+**测试缝 adapter 定义（cpp——头内仅声明）**：
 
 ```cpp
-BOOL Win32PlatformApplication::NotifyShell(UINT action, NOTIFYICONDATAW& nid){
-	return Shell_NotifyIconW(action, &nid);
+BOOL Win32PlatformApplication::NotifyShellAdapter(UINT action, NOTIFYICONDATAW* nid){
+	return Shell_NotifyIconW(action, nid);
+}
+
+void Win32PlatformApplication::DragFinishAdapter(HDROP hDrop){
+	DragFinish(hDrop);
 }
 ```
 
-> 测试替身经「子类 override NotifyShell」或注入函数指针实现（实施期择一——两者都不产生公开抽象；§5.2）。
+> v1.1 拍板：**函数指针形态**（`m_notifyShell` / `m_dragFinish`，默认指向上述 adapter）——`Win32PlatformApplication` 保持 `final`、继承结构零改动；测试注入替身即记录调用序列（§5.1）。
 
 ### 3.5 `Application` 侧新实现（全文）
 
@@ -587,9 +774,7 @@ Hide 路径（新增，正交）：
 | **T14-11** | ApplicationTests 或新 | 退出开关两态 | 默认：销毁最后窗口 ⇒ `RequestExit` 被调（替身平台）；false ⇒ 不调。显式 `Exit()` 两态下均有效 |
 | **回归** | 全部既有 | 188 用例 | 零回归（重点：窗口销毁 / `PlatformApplication` 契约 / 事件分派） |
 
-**测试缝设计（Shell seam——不出实现层）**：`Win32PlatformApplication::NotifyShell` 设为 **protected virtual**（本文 §3.4 已按此写）——测试子类 override 记录调用序列；`DragFinish` 同款（`HandleDropFiles` 内经 protected `DoDragFinish(HDROP)`）。两缝均为实现层细节，**不进 Public 头**（条 51）。
-
-> ⚠️ **替身注意**：测试子类 override 虚方法**不破坏**「Win32PlatformApplication final」——测试子类需移除 final 或经函数指针注入。**拍板**：`Win32PlatformApplication` 保留 `final`，`NotifyShell` / `DoDragFinish` 改为**受保护的函数指针成员**（默认指向真实 API，测试注入替身）——零 final 冲突、零公开抽象。实施期二选一，倾向后者。
+**测试缝设计（Shell seam——v1.1 拍板：函数指针形态，条 51 纪律：不出实现层、保 `final`）**：`Win32PlatformApplication` 内部持 `NotifyShellFn m_notifyShell` / `DragFinishFn m_dragFinish`（默认指向静态 adapter——真实 API；测试注入替身记录调用序列）；`Win32PlatformWindow` 同款持 `m_dragFinish`。两缝均为实现层细节，**不进 Public 头**、继承结构零改动。
 
 ### 5.2 手测（A 项——真环境）
 
@@ -650,6 +835,12 @@ Hide 路径（新增，正交）：
 
 ## 9. 修订记录
 
+- v1.1（2026-09-16）**外部评审「通过，可进实现」——4 项施工前收口全部处理**：
+  - **① §2.10 补成员**：`bool m_trayIconNeedsDestroy = false;`（§3.2 已用而类定义漏列——评审抓到；§3.2 补记段同步改指向）。
+  - **② §3.4 补齐四个平台方法骨架**：`SetTrayIcon`（含 ④ HICON 替换契约）/ `RemoveTrayIcon` / `HandleTrayCallback`（引用 §3.3 终版）/ **`HandleDropFiles` 全文**（v1.0 写「见 §3.4」但 §3.4 未含——引用缺口补齐）；`BuildIconData` 参数化（`(HICON, const std::wstring&)`——SetTrayIcon 传新值、自愈/析构传当前值）。
+  - **③ 测试 seam 拍板（函数指针）**：`NotifyShellFn` / `DragFinishFn` + 静态 adapter，成员默认指向真实 API；`Win32PlatformApplication` / `Win32PlatformWindow` 均保持 `final`、继承零改动；§5.1 同步定稿（原「实施期二选一」删除）。
+  - **④ HICON 替换所有权**：并入 SetTrayIcon 骨架——**「成功才提交」**：新图标先加载、Shell 成功后才销旧 owned 句柄并提交新值，失败销新保旧（旧资源在 MODIFY 失败时完整有效）；`RemoveTrayIcon` DELETE 失败时保守保留句柄（shell 可能仍引用），析构 2.2 兜底。
+  - 评审确认部分（DropFiles 链条闭环 / `Widget::OnDropFiles` 补全定性 / 状态机可施工 / 生命周期·sink·Hide-R13 正交 / 测试纪律）无需改动。
 - v1.0（2026-09-16）**详细设计初稿**：
   - **§1.1 实施前核实（重大更正）**：O-6 的载体 `PlatformWindowHost::GetWindow()` **早已存在**（`PlatformWindowHost.h:32-34`，注释明言"翻译器构造 Event 需 Window*"）——初设 v1.0 的 O-6 前提（"平台层拿不到 Window*"）为**未验证的错误断言**，v1.1 据此新增的 §2.10 纯虚**作废**；影响面修正：修改 Public 头 7 → **6**（`PlatformWindowHost.h` 零改动）、测试替身 3 → **2 处**（FakeHost 零改动）。**记因**：接口存在性必须 grep 接口头本身，实现者清点（条 33）不覆盖此项。
   - **§1.2 / §1.3 精化**：O 拍板逐项落点；`Application` 不 override `OnTrayEvent`（初设 §2.7 有误——无默认动作）；**新增初设漏记的一处**：`Widget.h` +1 虚方法 `OnDropFiles`（bubbling 调用点，默认空实现零破坏）。
