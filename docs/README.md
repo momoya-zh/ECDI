@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-09-15 更新）
 
-> **当前规模锚点（防止各处历史数字误读）**：测试 **188** 用例（`GetTestRegistry().Add` 求和，**18 个含用例的测试文件**——`src/Tests/*.cpp` 共 21 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **86**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **113** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 111 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
+> **当前规模锚点（防止各处历史数字误读）**：测试 **188** 用例（`GetTestRegistry().Add` 求和，**18 个含用例的测试文件**——`src/Tests/*.cpp` 共 21 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **86**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **114** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 112 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
 
 ### ✅ 已完成
 
@@ -51,7 +51,7 @@
 
 - **Phase 12 后能力路线**：基础控件补齐 / 渲染能力增强 / 跨平台（Linux/Android 远期）→ 接近 1.0
 - **Phase 13 CaptionBar 自绘标题栏（✅ 已实现并验收 2026-09-14 ~ 09-15）**——Phase 12 R5 推迟项解锁（ModelProbe Borderless 缺关闭按钮实测 + DesktopNest = 二次用例）；核心 = **NCHITTEST ↔ Widget 树委托**（含 **D9「可交互」判定**——HitTest 命中 ≠ 应阻止拖拽：标题 Label 命中仍须 `HTCAPTION`）+ CaptionBar Widget + 状态查询 API。详见下方 Phase13 段。
-- **Phase 14 托盘与拖入**（前置 = Phase 12 的 R9 平台消息扩展接缝）——`Shell_NotifyIcon` 图标回调 + `WM_DROPFILES`；同时支撑 DesktopNest 桌面常驻方向（`desktopnest-roadmap.md`）
+- **Phase 14 托盘与拖入接缝（🚧 需求稿 v1.0 待评审，2026-09-15 立项）**——`Shell_NotifyIcon` 图标回调 + `WM_DROPFILES`；**R9「惯例而非抽象」的首次真正消费**（原「前置 = R9 平台消息扩展接缝」表述已过期——R9 定稿为不新建注册接口的三步惯例），并**首次为「应用级平台能力」定形态**（托盘是应用级、拖入是窗口级——两条通道分层形态不同）；另含**隐性前置 R12/R13**（`Hide()` + 退出策略）。详见下方 Phase14 段。同时支撑 DesktopNest 桌面常驻方向（`desktopnest-roadmap.md`）
 - **Phase 9.5 收尾补充**：~~局部更新/裁剪系统 + Hover/MouseEnter/Leave~~（✅ R1/R4 已落地 2026-08-28）；~~LinearLayout 抽象、WM_MOVE 场景、Shortcut System~~（✅ 关闭记账——二次用例未出现）；详见 roadmap-deferred.md
 
 ### 📋 技术债务（记账）
@@ -208,7 +208,7 @@
 | [phase12-windowchrome-requirements.md](phase12-windowchrome-requirements.md) | 需求确认（无边框 NCCALCSIZE/HITTEST 拦截 / 保留 WS_OVERLAPPEDWINDOW / R9 能力式扩展点 / R10 WindowLayer Bottom+Desktop / 7 决策全拍板） | ✅ v1.2（外部评审通过——可进初设） |
 | [phase12-windowchrome-preliminary-design.md](phase12-windowchrome-preliminary-design.md) | 初步设计（4 新头 81→85 / NC 消息归平台状态同步区非翻译器 / **配置期·运行期 API 对称生命周期**（判据 `m_shown`；运行期三方法 Show 前 Warning+忽略）/ 最大化 `rcWork` 唯一基准 + 补偿不变量 / R9「惯例非抽象」/ R10 spike 规格 / 决策 7 降级配置期） | ✅ v1.3（三轮外部评审——**PASS，可进详设**：v1.2 修 P0 补偿方向；v1.3 修 P1 运行期生命周期 + P1 T3 断言逻辑） |
 | [phase12-windowchrome-detailed-design.md](phase12-windowchrome-detailed-design.md) | 详细设计（**9 开放决策点全收** + 平台实现全文 6 case + **10 方法**（7 override + 3 私有辅助）；`TestWindow::Handle()` 三跳取 HWND；dwmapi 双构建系统；测试 **9** 自动用例含 spike 全文） | ✅ **v1.5 已实施（2026-09-12）**：v1.1 外部评审 → v1.2 内部复核 → v1.3 AI 核验补正 → v1.4 **实施期回写 4 处缺口**（D-DWM-1 零兜底 / `NCCALCSIZE_PARAMS` / 2 个测试替身补 override / Handle() include）→ **v1.5 实施后缺陷修复**（`TestWindow` 改持非拥有 `Window*` + `Create()`——原直构窗口未登记，销毁时触发 `Application.cpp:92` 断言；**仅 MSVC 构建暴露**，因 `FRAMEWORK_ASSERT` 只在 `_DEBUG` 下存在）；`ecdi_tests` **183/183**（MinGW，含带 `-D_DEBUG` 的一次；MSVC/Clang/ClangCL 待用户确认） |
-| [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase） | 🚧 v1.1 待评审 |
+| [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase） | 🚧 v1.6 待评审（R10 已出清 · 判据①–⑥全通过 · Phase 14 已立项） |
 
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
@@ -228,7 +228,15 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 |------|------|------|
 | [phase13-captionbar-requirements.md](phase13-captionbar-requirements.md) | 需求确认（R1–R8 + **D0–D9**：D1 独立 Widget / D2 Host 虚方法委托 / **D7 职责二分定案**（`captionHeight` 行为区 vs Bar 实体区 + 三层判定顺序）/ **D9「可交互」判定来源**（倾向 A 控件自声明，非纯虚 ⇒ 零破坏）/ D8 close 走关闭请求；非目标圈定 Snap Layouts 等） | ✅ **v1.1**（已实现并验收） |
 | [phase13-captionbar-preliminary-design.md](phase13-captionbar-preliminary-design.md) | 初步设计（**头草案 6 处** + 命中委托链 + 三处初设新发现：`Window::RequestClose()` 入口缺失 / 第三个 Host 实现者 `FakeHost` / `ConsumesMouseInput` 坐标无关；**v1.1 评审 5 条确认**：`HitTest` 最深命中为前提 · `RequestClose` 同步派发 · T13-4 用 `RecordingBackend` 不加测试 API · 固定 `break → DefWindowProc → HTCLIENT` · §6 留详设） | ✅ **v1.1**（已实现并验收） |
-| [phase13-captionbar-detailed-design.md](phase13-captionbar-detailed-design.md) | 详细设计（**逐文件最小 diff 规格**：2 新建 + 8 修改 + **3 处测试替身同步**；**初设→详设 6 处精化**：P1 `SetSize` 内重排 / P2 标题越界天然被自身 PushClip 裁切 / P3 标题前景色须构造注入 / P4 T13-4 命令缓冲直接断言零产品测试缝 / P5 命令路径走合成 Event + `Application::OnEvent` / P6 ModelProbe 须把 bar 加在 page 之前；**glyph 坐标表**；T13-1 **八态**含禁用落回拖拽；§4 **6 条已知局限**含 L6 坐标系；A1–A6 + R1–R6 + 最小回滚） | ✅ **v1.4 已实现并验收**：P0-1 替身返回类型 `void`→`WindowState` · P0-2 原 L4 移出局限 · P1-3 负坐标表述收紧 · P1-5 A6 实现者枚举化 · P1-2 L2 措辞精确化 · **P1-4 否决**（`m_closeButton` 被 `RelayoutChildren` 使用）· 补 `SetSize` 可重复调用契约 + T13-4 断言分层；**A1–A6 全通过** + `AntiAliasing.GDIRadiusZeroBitwise` flaky 根因（Window Ghosting）修复 |
+| [phase13-captionbar-detailed-design.md](phase13-captionbar-detailed-design.md) | 详细设计（**逐文件最小 diff 规格**：2 新建 + 8 修改 + **3 处测试替身同步**；**初设→详设 6 处精化**：P1 `SetSize` 内重排 / P2 标题越界天然被自身 PushClip 裁切 / P3 标题前景色须构造注入 / P4 T13-4 命令缓冲直接断言零产品测试缝 / P5 命令路径走合成 Event + `Application::OnEvent` / P6 ModelProbe 须把 bar 加在 page 之前；**glyph 坐标表**；T13-1 **八态**含禁用落回拖拽；§4 **6 条已知局限**含 L6 坐标系；A1–A6 + R1–R6 + 最小回滚） | ✅ **v1.5 已实现并验收**：P0-1 替身返回类型 `void`→`WindowState` · P0-2 原 L4 移出局限 · P1-3 负坐标表述收紧 · P1-5 A6 实现者枚举化 · P1-2 L2 措辞精确化 · **P1-4 否决**（`m_closeButton` 被 `RelayoutChildren` 使用）· 补 `SetSize` 可重复调用契约 + T13-4 断言分层；**A1–A6 全通过** + `AntiAliasing.GDIRadiusZeroBitwise` flaky 根因（Window Ghosting）修复；**v1.5（2026-09-15）ModelProbe 默认形态翻转为自绘标题栏**（新增 `--native` 回退系统标题栏）——**A4 复跑命令随之变为 `modelprobe.exe --native`** |
+
+## Phase14 托盘与拖入接缝（🚧 需求 v1.0 待评审，2026-09-15 立项）
+
+让框架从「窗口框架」迈向「**桌面常驻应用框架**」——补上托盘图标（**应用级**）与文件拖入（**窗口级**）两条 shell 集成通道。本阶段真正的价值不是「多两个 API」，而是**第一次为「应用级平台能力」定形态**——R9 三步惯例此前只覆盖窗口级，而托盘是「一个应用一个图标位」的进程级语义。立项勘察得出四条**带出处**的事实，其中两条直接改形态：**message-only window 不接收广播消息**（MSDN + Raymond Chen ⇒ 承载窗口必须用普通隐藏顶层窗口，否掉"最干净"的方案）、**`TaskbarCreated` 只广播给顶层窗口**（MSDN ⇒ explorer 重建后托盘可**自愈**——与桌面层 A 路线被"**层级式**"杀死形成对照：**注册式可自愈、层级式不可**）。另发现两条**隐性前置**：当前「最后一个窗口关闭 ⇒ `Exit()`」（`Application.cpp:116`）且**无 `Window::Hide()`** ⇒ **「最小化到托盘」这一最基本的托盘用法当前走不通**（需求稿 R12/R13）。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase14-tray-and-drop-requirements.md](phase14-tray-and-drop-requirements.md) | 需求确认（**四条勘察事实 F1–F4**：message-only 不接收广播 / `TaskbarCreated` 广播语义 / UIPI 阻塞提权进程拖入 / 无 `Hide()` + 关窗即退出；**两条通道分层形态不同**的结构判断 + 三个硬骨头；**R1–R13 三组**——托盘 R1–R7（含**幽灵图标硬要求** + 与 `Window` 解耦）· 拖入 R8–R11（**`HDROP` 绝不出现在公共 API** + 走既有派发路径）· 常驻前置 R12–R13；**D0–D9 全部给倾向待拍板**（范围与顺序 / 挂载点 / 承载窗口 / 事件上行通道 / 图标来源 / 消息版本 / 菜单边界 / UIPI 立场 / 前置归属 / 自愈归属）；非目标 9 项） | 🚧 **v1.0 待评审** |
 
 ## ModelProbe Demo（✅ P1/P2 已实现，2026-09-01/11）
 
