@@ -20,6 +20,13 @@
 #include <memory>
 #include <utility>
 
+namespace {
+
+/// @brief 窗口标题（单一来源——任务栏/Alt-Tab 取自 application.Create，自绘标题栏取自 CaptionBar 构造）
+constexpr const char* kWindowTitle = "ECDI 模型探测工具";
+
+}
+
 /// @brief ModelProbe 工具 Application：轮询接线（timerId=100 → PollProbe）+ 关窗清理（详设 §7.3/§7.4）
 /// @details OnTimer：100 已消费（不转发基类）；其余（1=光标 2=动画）转发基类。
 /// OnWindowCloseRequested：ShutdownBackend（StopTimer → CloseInput → Wait/Terminate）→ 转发基类关窗。
@@ -86,15 +93,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	// 9.7 自适应：RootWidget 设 VLayout(fillCrossAxis) → page SetStretch(1) 铺满全窗（D4——Window 不替用户
 	// 决定 RootWidget 布局，显式设于 demo 入口）；窗口拉伸 → OnResized → Arrange → 页面整体跟随。
 	// 原 bg 垫底层（页面 640×710 外露白底补丁）已随铺满化废弃——page 自身 #0f1115 背景即覆盖全窗（D3 必要改造）。
-	ECDI::Window& win = application.Create("ECDI 模型探测工具", 680, 780);
+	ECDI::Window& win = application.Create(kWindowTitle, 680, 780);
 
-	// ── Phase 12 实测开关（配置期 API 只能在 Show 前生效——ChromeMode 一次确定，故经命令行选择）──
-	// 用法：modelprobe.exe [--borderless [caption inset]] [--layer bottom|desktop]
-	//   --borderless          无边框（客户区扩满整窗；caption 32 / inset 8 默认）
-	//   --borderless 40 12    自定义标题栏高度与缩放热区
-	//   --layer bottom        置底档；--layer desktop 桌面档（spike 未通过 → 降级 Bottom + Warning）
-	bool borderless = false;
-	int captionHeight = 32;
+	// ── chrome 形态（默认自绘标题栏；配置期 API 只能在 Show 前生效——ChromeMode 一次确定，故经命令行选择）──
+	// 用法：modelprobe.exe [--native] [--borderless [caption inset]] [--layer bottom|desktop]
+	//   （无参数）             自绘标题栏（Borderless + CaptionBar；caption 32 / inset 8）
+	//   --native               系统标题栏（Normal——零回归对照）
+	//   --borderless 40 12     自绘 + 自定义标题栏高度与缩放热区
+	//   --layer bottom         置底档；--layer desktop 桌面档（spike 未通过 → 降级 Bottom + Warning）
+	bool borderless = true;    // 默认自绘标题栏（--native 回退系统标题栏）
+	int captionHeight = ECDI::CaptionBar::kDefaultHeight;   // D7：行为区与实体区建议同值
 	int resizeInset = 8;
 	ECDI::WindowLayer layer = ECDI::WindowLayer::Normal;
 	{
@@ -121,6 +129,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 				const std::wstring v = nextToken();
 				if (v == L"bottom")       layer = ECDI::WindowLayer::Bottom;
 				else if (v == L"desktop") layer = ECDI::WindowLayer::Desktop;   // spike 未通过 → 降级 Bottom + Warning
+			} else if (tok == L"--native"){
+				borderless = false;   // 系统标题栏（Normal——零回归对照）
 			}
 		}
 	}
@@ -130,7 +140,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	// ⚠️ 顺序约束：必须在 page 之前 AddChild —— VerticalLayout 按 children 顺序排布竖直次序（先前 = 上方）；
 	//    bar 保持 SetStretch(0)（主轴固定高度），page 保持 stretch=1。
 	if (borderless){
-		auto bar = std::make_unique<ECDI::CaptionBar>(win, "ECDI 模型探测工具");
+		auto bar = std::make_unique<ECDI::CaptionBar>(win, kWindowTitle);
 		bar->SetSize(680, captionHeight);   // 初始宽度（Arrange 会以真实宽度再次 SetSize）
 		root.AddChild(std::move(bar));
 

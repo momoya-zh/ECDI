@@ -1,13 +1,15 @@
-﻿# Phase 13 CaptionBar 自绘标题栏 详细设计（v1.4）
+﻿# Phase 13 CaptionBar 自绘标题栏 详细设计（v1.5）
 
 > 阶段：详细设计（五阶段法 ③）
-> 日期：2026-09-14（v1.3 同日：实现落地 → 消费者集成 → A5 判据修正；**v1.4 2026-09-15：A 项收口 + flaky 根因修复**）
-> 状态：**✅ 已实现并验收（2026-09-14 ~ 09-15）**——2 新建 + 8 修改 + 3 处替身同步全部落地；**A1–A6 全部通过**：四构建 **188 passed / 0 failed**、ModelProbe 手测 6 项 + Normal 零回归通过、静态自查（A6）通过（`IsClientInteractiveAt` override = **2**（`Window` / `FakeHost`）、`GetWindowState` override = **3**（`Win32PlatformWindow` / 2×`TestPlatformWindow`）、触碰文件 BOM 全绿）；测试用例 **183 → 188**（17 → 18 测试文件）。**收口**：`AntiAliasing.GDIRadiusZeroBitwise` flaky 根因定性为 Window Ghosting 并修复（`DisableProcessWindowsGhosting()`），诊断脚手架收进失败分支。原状态「✅ v1.1 外部评审通过（可进入实现）」见 §12 修订记录
+> 日期：2026-09-14（v1.3 同日：实现落地 → 消费者集成 → A5 判据修正；**v1.4 2026-09-15：A 项收口 + flaky 根因修复**；**v1.5 2026-09-15：ModelProbe 默认形态翻转为自绘标题栏**）
+> 状态：**✅ 已实现并验收（2026-09-14 ~ 09-15）**——2 新建 + 8 修改 + 3 处替身同步全部落地；**A1–A6 全部通过**：四构建 **188 passed / 0 failed**、ModelProbe 手测 6 项 + Normal 零回归通过、静态自查（A6）通过（`IsClientInteractiveAt` override = **2**（`Window` / `FakeHost`）、`GetWindowState` override = **3**（`Win32PlatformWindow` / 2×`TestPlatformWindow`）、触碰文件 BOM 全绿）；测试用例 **183 → 188**（17 → 18 测试文件）。**收口**：`AntiAliasing.GDIRadiusZeroBitwise` flaky 根因定性为 Window Ghosting 并修复（`DisableProcessWindowsGhosting()`），诊断脚手架收进失败分支。原状态「✅ v1.1 外部评审通过（可进入实现）」见 §12 修订记录。**v1.5（2026-09-15）**：ModelProbe 默认形态翻转为**自绘标题栏**（新增 `--native` 回退系统标题栏）——**A4 的 Normal 复跑命令随之变为 `modelprobe.exe --native`**（§8 A4 行已注明），详见 §12 v1.5
 > 前置：`phase13-captionbar-requirements.md` **v1.1** ✅ / `phase13-captionbar-preliminary-design.md` **v1.1** ✅（外部评审通过，可进详设）
 > 一句话：把初设的 6 处头草案与命中委托链，落成**可直接照做的逐文件改动规格**（每处标注「动哪几行 / 不动哪些行」）+ 精确到坐标的测试规格 + 工程注册与验收清单——**不换 Phase 12 路线**（不动 NCCALCSIZE / NCACTIVATE / WINDOWPOSCHANGING，不动 B 契约与渲染四层）。
 > v1.1 修订：**P0-1 修正** §2.3 述语替身返回类型（`void` → `WindowState`，确凿编译错误）· **P0-2 改写** 原 L4（`minimized` 不是 CaptionBar 可达交互路径 → 移出「已知局限」，改述为实现语义说明）· **P1-3 收紧** §4.3「负坐标无害」的绝对化表述 · **P1-5 明确** A6 实现者枚举（1 生产 + N 替身）· **P1-2 精确化** L2 措辞（`m_title` private ⇒ 「无公开标题样式入口」）· **新增** `SetSize` 可重复调用契约与 T13-4 断言分层原则 · **P1-4 否决**（`m_closeButton` 被 `RelayoutChildren` 使用——附依据）
 > v1.2 修订：**实现落地状态同步（补记）**——实施期 6 项偏差/发现已列于 §12 v1.2 条目；新增 **L6 坐标系局限**（`WM_NCHITTEST` 物理像素 vs widget 逻辑像素，非 100% DPI 时命中委托坐标偏移）；T13-1 探针 ⑦ 改为客户区中部（`kWinH/2`）以避开 DPI 相关的条带边界
 > v1.3 修订：**A5 判据修正**（原「`grep -c _DEBUG`」对 MSVC / ClangCL **会误判**——二者靠 debug CRT 选项 `-MDd` 隐含定义 `_DEBUG`，ninja 文本中仅 1 处命中；修正为**按工具链二分**）· **§7 消费者集成已实施**（`examples/ModelProbe/main.cpp`，用户 2026-09-14 单独授权）· §8 A5 附四构建实测
+> v1.4 修订：**A 项收口 + `AntiAliasing.GDIRadiusZeroBitwise` flaky 根因修复**（Window Ghosting ⇒ `DisableProcessWindowsGhosting()`）——详见 §12 v1.4 条目；本行系事后补记（头部当时未单列 v1.4 修订行）
+> v1.5 修订：**ModelProbe 默认形态翻转为自绘标题栏**（`bool borderless = false → true`）+ 新增 `--native` 回退系统标题栏（保住 A4 零回归手测可复跑）；顺带收掉两处标题串硬编码（提为 `kWindowTitle` 常量）与 `captionHeight` 魔数（改用 `ECDI::CaptionBar::kDefaultHeight`）；**A4 复跑命令由 `modelprobe.exe` 变为 `modelprobe.exe --native`**（§8 A4 行已同步注明）；**未验证**：编译与手测待用户执行（AI 侧仅静态自查：BOM / diff 逐行 / 常量唯一性 / 括号配平全绿）
 
 ---
 
@@ -965,6 +967,8 @@ CaptionBar::OnPaint  → Window::GetWindowState()  → m_platformWindow->GetWind
 > ⚠️ **手测关注点**：page 高度减少 `captionHeight`（默认 32）——若其内部为固定像素布局，底部可能被裁（→ §9 风险 R3；必要时把窗口高度 +32 或调整 page 内部布局）。本项列入 A3 手测。
 
 > ✅ **已实施（2026-09-14，用户单独授权）**：`main.cpp` 已按本节插入（含 `#include "ECDI/Window/CaptionBar.h"`）。**实施期风格对齐**：用 `if (borderless){`（沿用该文件既有的紧贴大括号风格，非本节示意里的空行版）。
+>
+> ✅ **默认形态变更（2026-09-15，v1.5，用户单独授权）**：ModelProbe **默认改为自绘标题栏**——`bool borderless = false → true`，新增 `--native` **回退系统标题栏**（保住 §8 A4 的 Normal 零回归手测可复跑）；`--borderless [caption inset]` 保留，语义变为「显式重复确认默认态 + 调参」（幂等，仍可自定义标题栏高度与缩放热区；解析为「最后一个赢」）。**同批收掉两处「默认化后必踩」的重复**：窗口标题串原先在 `application.Create(...)`（决定任务栏 / Alt-Tab 显示）与本节 `CaptionBar(...)` 构造（决定自绘标题栏显示）**各自硬编码**——原先仅在 `--borderless` 时可能不一致，默认自绘后成为**每台机器的必经路径** ⇒ 提为文件级 `namespace { constexpr const char* kWindowTitle = "ECDI 模型探测工具"; }`；`captionHeight` 初值由 `32` 改为 `ECDI::CaptionBar::kDefaultHeight`（把 D7「行为区 / 实体区建议同值」从注释约定升为代码事实）。**本节规格代码块保持原样**——本次属实施后形态调整，非设计变更（`git diff --stat` = 20 insertions / 10 deletions，单文件 `examples/ModelProbe/main.cpp`）。⚠️ 页面高度影响见上文「手测关注点」——**A3 手测 ⑥ 已实测页面底部无裁切**。
 
 ---
 
@@ -975,7 +979,7 @@ CaptionBar::OnPaint  → Window::GetWindowState()  → m_platformWindow->GetWind
 | **A1** | MSVC Debug 构建 + `ecdi_tests` 全量 | 失败数 **0**；报告须写明**断言是否启用**（MSVC + CMake Debug 带 `_DEBUG`）。用例总数 = 183 + 新增（T13-1 八态按 1 用例计 ⇒ 预计 **+5**） | ✅ **188 passed / 0 failed** |
 | **A2** | 四工具链构建（MSVC / ClangCL / Clang / MinGW） | 全部编译通过；**MinGW 欲验断言须加 `-DCMAKE_CXX_FLAGS=-D_DEBUG`**（skill 条 35——默认 MinGW Debug 下断言是死代码） | ✅ **四构建全绿 188/188** |
 | **A3** | 手测 `modelprobe.exe --borderless` | ① 拖标题文字能移窗；② 三按钮各生效；③ hover 高亮（close 变红）；④ close 触发后端清理日志；⑤ 最大化后 max 图标变「还原」；⑥ 页面底部无裁切异常 | ✅ **6 项通过**（含 ⑥ 底部无被裁 32px） |
-| **A4** | 手测 `modelprobe.exe`（Normal） | 系统标题栏行为**完全不变**（无 CaptionBar、无命中变化）——零回归 | ✅ **通过**（含 ④ 关窗后 `probe.exe` 随之退出） |
+| **A4** | 手测 `modelprobe.exe`（Normal） | 系统标题栏行为**完全不变**（无 CaptionBar、无命中变化）——零回归 | ✅ **通过**（含 ④ 关窗后 `probe.exe` 随之退出）。⚠️ **复跑命令已变（v1.5）**：2026-09-15 起 ModelProbe 默认自绘标题栏 ⇒ Normal 复跑请用 **`modelprobe.exe --native`** |
 | **A5** | 断言启用核验 | ⚠️ **判据按工具链二分**（v1.3 修正——原判据「`grep -c _DEBUG`」对 MSVC / ClangCL **会误判**）：**MSVC 系查 `-MDd` / `/MDd`**（debug CRT 隐含定义 `_DEBUG`，ninja 文本中仅 1 处命中）；**GNU 系查 `-D_DEBUG`**。**实测（2026-09-14）**：`debug-visual-studio` = `-MDd` ✅ 断言启用 · `debug-clangcl` = `-MDd` ✅ · `debug-clang` = `-D_DEBUG` ✅ · **`debug-mingw` = 0 命中 ⇒ 断言是死代码**（欲验须加 `-DCMAKE_CXX_FLAGS=-D_DEBUG`，skill 条 35） |
 | **A6** | 静态自查（AI 侧） | 4 处述语替身全部补齐（`FakeHost` + 2×`TestPlatformWindow`）；`grep -rn "IsClientInteractiveAt"` → **override 实现 = 2（1 生产 + 1 替身）**：`Window` / `EventTests::FakeHost`；`grep -rn "GetWindowState"` → **override 实现 = 3（1 生产 + 2 替身）**：`Win32PlatformWindow` / `AnimationTests::TestPlatformWindow` / `ProgressBarTests::TestPlatformWindow`（**勿读成「3 个生产实现」**） | ✅ 通过 |
 
@@ -993,7 +997,7 @@ CaptionBar::OnPaint  → Window::GetWindowState()  → m_platformWindow->GetWind
 |---|---|---|---|
 | **R1** | **NCHITTEST 新增分支**——T2/T3/T5/T6 全依赖该消息 | ★★★ | 只加**前置分支**、命中复用同一 `break` 出口；新增 T13-1 八态（含「Label 命中仍 HTCAPTION」「resize 优先」「超界 HTCLIENT」）+ 全量回归 |
 | **R2** | `ConsumesMouseInput` 默认值若写成 `true` | ★★★ | **默认必须是 `false`**——这是 T2 `(w/2,20)==HTCAPTION` 不回归的**唯一**原因（§5 T13-1 注）；T13-1 #1 是该默认值的回归锚 |
-| **R3** | ModelProbe 页面高度 -32px 导致底部裁切 | ★★ | A3 手测；必要时窗口高度 +`captionHeight` |
+| **R3** | ModelProbe 页面高度 -32px 导致底部裁切 | ★★ → ✅ **已缓解** | A3 手测（**⑥ 实测通过：页面底部无被裁 32px**）；必要时窗口高度 +`captionHeight`。⚠️ v1.5 默认自绘后本风险从「仅 `--borderless` 时」变为**默认路径**——A3 ⑥ 的结论直接适用 |
 | **R4** | 委托引入每点递归成本 | ★ | 仅限 caption 条带（32 DIP 高）；`HitTest` 为纯遍历（无分配 / 无事件 / 无绘制） |
 | **R5** | 替换 `PlatformWindow` / `PlatformWindowHost` 纯虚遗漏替身 ⇒ 编译失败 | ★ | 已全库 grep 预检（§2.2 / §2.3）——**3 处替身**列入改动清单 |
 | **R6** | 标题色在黑字默认下不可读 | ★★ | 构造注入浅色（P3）；局限 L2 已记账 |
@@ -1022,6 +1026,12 @@ CaptionBar::OnPaint  → Window::GetWindowState()  → m_platformWindow->GetWind
 
 ## 12. 修订记录
 
+- **v1.5（2026-09-15）ModelProbe 默认形态翻转（实施后调整，非设计变更）**：
+  - **变更**：`examples/ModelProbe/main.cpp` 默认改为**自绘标题栏**（`bool borderless = false` → `true`），新增 **`--native` 回退系统标题栏**；`--borderless [caption inset]` 保留为显式重复确认 + 调参入口（解析语义 = 「最后一个赢」）。**单文件 20 insertions / 10 deletions**。
+  - **收掉的重复（默认化让暴露面从「偶尔」变「每台机器」）**：窗口标题串原先在 `application.Create(...)`（任务栏 / Alt-Tab 显示）与 `CaptionBar` 构造（自绘标题栏显示）**两处硬编码**——原先仅在 `--borderless` 时可能不一致，默认自绘后成为必经路径 ⇒ 提为文件级 `namespace { constexpr const char* kWindowTitle }`。另：`captionHeight` 初值 `32` → `ECDI::CaptionBar::kDefaultHeight`（D7「行为区 / 实体区建议同值」由注释约定升为代码事实）。
+  - **A4 复跑命令已变**（§8 A4 行同步注明）：Normal 复跑由 `modelprobe.exe` 改为 **`modelprobe.exe --native`**。**A3 的 `--borderless` 手测 6 项属历史记录（记当时如何测、结果如何），不改写**——仅操作指引随形态变更更新。
+  - **动机**：Phase 13 的客户价值是「Borderless 窗口有看得见摸得着的标题栏」，而 ModelProbe 是首个（当前唯一）消费者；默认态停在 Normal 会使其长期停留在「需显式开关才能见到」的状态。**回退开关必须保留**的硬性理由：否则 A4「Normal 零回归」验收项将**永久失去复跑能力**。
+  - **未验证**：编译与手测待用户执行；AI 侧仅静态自查（BOM `efbbbf` / `git diff` 逐行核对 / `kWindowTitle` 计数 3（1 声明 + 2 使用）· 中文字面量仅剩常量定义 1 处 / 大括号 22-22 配平 / 无 `bool borderless = false` 残留）。
 - **v1.4（2026-09-14 ~ 09-15）A 项收口 + flaky 根因修复**：
   - **A1–A6 全部通过**（§8 表新增「实测结果」列）：**四构建 188 passed / 0 failed**；ModelProbe `--borderless` 手测 6 项 + Normal 零回归手测通过。
   - **`AntiAliasing.GDIRadiusZeroBitwise` flaky 修复（判定性）**：根因 = **Windows Window Ghosting**（线程 >5 s 不取消息 ⇒ DWM 以 `Ghost` 替身窗口替换 ⇒ 原窗口 DC 可见区 `NULLREGION` ⇒ `GetPixel` 恒 `CLR_INVALID`）。**修法** = `test_main.cpp` 调 `DisableProcessWindowsGhosting()`（12 insertions / 0 deletions）。已否证：任务栏遮挡 / 窗口位置 / AA 渲染差异 / 工具链差异（详见 §8 A 项执行摘要）。
