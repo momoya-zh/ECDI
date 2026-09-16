@@ -1,12 +1,13 @@
-﻿# Phase 14 托盘与拖入接缝 需求确认（v1.0）
+﻿# Phase 14 托盘与拖入接缝 需求确认（v1.1）
 
 > 阶段：需求确认（五阶段法 ①）
 > 日期：2026-09-15
-> 状态：待评审（**决策点 D0–D9 全部给倾向待拍板**）
+> 状态：待评审（**决策点 D0–D11 全部给倾向待拍板**）
 > 前置：`phase12-windowchrome-detailed-design.md` v1.5（**R9 惯例定稿 `D-SEAM-1`**）· `desktopnest-roadmap.md` v1.5（§5 Phase 14 规格 · §7.1 R-1 取证结论）
 > 一句话：让框架从「窗口框架」迈向「桌面常驻应用框架」——补上**托盘图标（应用级）**与**文件拖入（窗口级）**两条 shell 集成通道，全部落在平台层内部，公共 API **零 Win32 类型**。
 > 一句话补充：本阶段真正的价值不是「多两个 API」，而是**第一次为「应用级平台能力」定形态**——R9 三步惯例此前只覆盖窗口级。
 > v1.0：初稿（§1 四条勘察事实 · §2 技术路线 · §3 R1–R13 三组 · §4 决策点 D0–D9 · §5 非目标 · §6 测试方向 · §7 影响面）
+> v1.1（2026-09-16）外部评审「**方向通过，补齐契约后进初设**」——**6 项建议全部采纳**（① R11 按**完整事件链路**重写，原漏 `PlatformWindow → Window` 段且把 `EventRouter` 基类关系写成顺序；② UIPI 由「预期失败」改为「平台约束验证」；③ R1 补生命周期归属；④ D9 显式化为**双态模型**；⑤ D3 补 sink 生命周期前置；⑥ D6 拆出**同步/异步**为独立决策点 **D10**）；另补 D2 硬契约（隐藏 HWND 永不入 `Application::m_windows`）、D4 的 `HICON` 归属、**新增 D11**（托盘状态机语义）、R13 命名倾向、§6 测试分层原则
 
 ---
 
@@ -66,7 +67,7 @@
 
 ### 3.1 托盘（应用级）· R1–R7
 
-**R1 · 托盘图标生命周期**：添加 / 更新 / 移除；**析构与退出时必须移除**（`NIM_DELETE`）——**幽灵图标**（进程已退出但图标滞留、需鼠标划过才消失）是托盘实现的经典缺陷，本阶段列为**硬要求**。重复 Add 同 id 的语义、Remove 未添加的幂等性，归初设。
+**R1 · 托盘图标生命周期**：添加 / 更新 / 移除；**析构与退出时必须移除**（`NIM_DELETE`）——**幽灵图标**（进程已退出但图标滞留、需鼠标划过才消失）是托盘实现的经典缺陷，本阶段列为**硬要求**。**所有权归属（v1.1 补）**：图标生命周期**由 `PlatformApplication` 拥有**——应用销毁时必须在**承载窗口销毁之前**同步尝试对每个活跃图标 `NIM_DELETE`（责任主体在平台层，非消费者）。**幂等要求（v1.1 补）**：移除必须容忍「Shell 实际状态与框架内部状态不一致」（正常退出 / explorer 重建 / 应用主动移除 都会造成错位）⇒ **移除未注册项为 no-op**（不抛异常、不记错误）；重复 Add 的语义见 **D11**。
 
 **R2 · 图标来源**：概念形如「设置托盘图标（资源 / 文件二选一）」。来源选项见 **D4**。图标尺寸由系统按通知区 DPI 选取（多尺寸 ico 自动命中）。
 
@@ -74,7 +75,7 @@
 
 **R4 · 交互事件**：左键单击 / 左键双击 / 右键（含键盘激活路径）。事件**携带锚点坐标**（用于右键菜单定位与"就地弹窗"）。回调消息版本影响事件语义（见 **D5**）。
 
-**R5 · 右键菜单**：概念形如「在托盘图标处弹出原生菜单，返回被选中的项 ID」。范围见 **D6**。
+**R5 · 右键菜单**：概念形如「在托盘图标处弹出原生菜单，返回被选中的项 ID」。范围见 **D6**；**调用形态（同步返回 vs 事件驱动）见 D10**。
 
 **R6 · explorer 重建自愈**：见 **D9**。
 
@@ -88,32 +89,49 @@
 
 **R10 · 生命周期闭合**：`DragFinish` 在平台层内完成，且**在事件抛出之前**——保证事件消费者拿到的是**已脱离系统资源**的纯数据（应用侧零释放责任）。
 
-**R11 · 派发路径**：走**既有** Event 系统（`EventRouter` → `Application` → `HitTest` → Bubbling），不新开通道。⇒ 拖到哪个控件上方，事件自然到达谁（例如拖到 TextBox 上 vs 拖到空白区）。**"拖拽经过"（drag-over）明确不支持**——那要 `IDropTarget`，已列为非目标。
+**R11 · 派发路径（v1.1 按实测链路重写）**：DropEvent 由平台层生成后必须走**既有事件上行链路**，不得建立独立 Drop 回调通道：
+
+```
+WM_DROPFILES
+  → Win32PlatformWindow::HandleMessage（解析 HDROP → UTF-8 路径列表 + DragFinish）
+  → Framework Event（拖入事件）
+  → PlatformWindowHost::OnEvent（Window 实现）
+  → Window::OnEvent → m_application.OnEvent(event)     [Window.cpp:448-452]
+  → Application::OnXxx（EventRouter 基类虚方法）
+  → HitTest（RootWidget::HitTest——按落点逆序）
+  → Dispatch → Bubbling（Application 内 while + GetParent）
+```
+
+> 📌 **v1.1 更正**：v1.0 原文写作「`EventRouter` → `Application` → `HitTest` → Bubbling」，有两处不准确——① **漏了 `PlatformWindow → Window` 整段**；② **`EventRouter` 是 `Application` 的基类（`Application` 继承 `EventRouter`），不是前驱环节**。此处已按源码实测（`Window.cpp:448-452` · `Application.cpp:181-226`）重写。
+
+⇒ 拖到哪个控件上方，事件自然到达谁（例如拖到 TextBox 上 vs 拖到空白区）。**"拖拽经过"（drag-over）明确不支持**——那要 `IDropTarget`，已列为非目标。
 
 ### 3.3 常驻语义前置（F4）· R12–R13
 
 **R12 · `Hide()`**：`Show()` 的对称补全（窗口级，走 R9 惯例标准三步）。
 
-**R13 · 退出策略**：当前"最后一个窗口关闭 ⇒ `Exit()`"（`Application.cpp:116`）使"最小化到托盘"无法实现。需要一个**显式开关**（概念形如「最后窗口关闭时是否退出」，默认 `true` = 零行为变更），让常驻应用能活到托盘交互结束。⇒ 归属见 **D8**。
+**R13 · 退出策略**：当前"最后一个窗口关闭 ⇒ `Exit()`"（`Application.cpp:116`）使"最小化到托盘"无法实现。需要一个**显式开关**（概念形如「最后窗口关闭时是否退出」，默认 `true` = 零行为变更），让常驻应用能活到托盘交互结束。⇒ 归属见 **D8**。**命名倾向（v1.1 补）**：采用**直接描述触发条件**的命名（概念形如 `SetQuitOnLastWindowClosed(bool)`，默认 `true`），**避免双重否定式命名**（如 `SetStayAlive(false)`——极易读错）。
 
 > ⚠️ **R12 / R13 是本阶段的"隐性前置"**：不做这两条，托盘做出来也无处可用——用户点关闭按钮，应用直接退出，托盘图标随之蒸发（而 R1 的"退出时必须移除"会让这个过程看起来"很正常"，掩盖问题）。**建议将它们纳入本阶段**，理由见 D8。
 
 ---
 
-## 4. 决策点（D0–D9——全部给倾向待拍板）
+## 4. 决策点（D0–D11——全部给倾向待拍板）
 
 | # | 决策 | 选项 | **倾向** | 理由 |
 |---|---|---|---|---|
 | **D0** | 范围与实现顺序 | **A** 一个 Phase 三组 R（拖入 → 常驻前置 → 托盘）/ **B** 拆两个 Phase（拖入 / 托盘）/ **C** 只做拖入，托盘另立 | **A（顺序：拖入 → R12/R13 → 托盘）** | 拖入是 R9 标准形态、最简，先做可验证惯例；常驻前置是托盘前提；托盘最难、放最后暴露风险。三组同属"shell 集成"，共享文档与测试设施，拆开反而重复 |
 | **D1** | 托盘能力挂载点 | **A** `PlatformApplication`（应用级）/ **B** `PlatformWindow`（窗口级，复用 R9）/ **C** 新建独立平台抽象（如 `PlatformTray`） | **A** | 托盘语义是"每个应用一个图标位"，挂窗口级语义错误（多窗口时谁持有？）；C 引入新抽象类＝R9 裁决明确拒绝的方向。A 同时把「应用级能力」这条惯例分支立起来（§2） |
-| **D2** | 承载窗口形态 | **A** 框架自建**隐藏顶层窗口**（独立窗口类 + WndProc）/ **B** 复用第一个 `Window` 的 HWND / **C** message-only window | **A** | **C 已被 F1 否证**（收不到 `TaskbarCreated` 广播 ⇒ 无法自愈）；**B 有双重缺陷**：承载者销毁即回调无门（且图标不自动消失 ⇒ 幽灵图标），多窗口时选择不确定。A 与窗口生命周期彻底解耦（R7） |
-| **D3** | 事件上行通道（Application 侧） | **A** 复刻 `SetDeferredCleanup` 的 `std::function` 注入（概念形如 `SetEventSink`）/ **B** 新建 `PlatformApplicationHost` 抽象类（对称 `PlatformWindowHost`） | **A** | 与既有先例**同款模式**（`PlatformApplication` 已有 `std::function` 注入），零新抽象类；B 违反 R9 裁决"不新建接缝类"，且为一个回调引入抽象类不成比例 |
-| **D4** | 托盘图标来源 | **A** exe 资源 ID（`int`）/ **B** `.ico` 文件路径（UTF-8）/ **C** 框架 `Image` → 转 HICON / **D** 复用窗口类图标 | **A（默认同 `kAppIconId`）** | 单文件产物友好（DesktopNest 目标形态）；与 `Win32WindowClass.cpp:58` 既有加载先例同源；零外部文件依赖（框架"无第三方/无外部资源"原则同源）。C 最"框架味"但成本高（`CreateIconIndirect` + 掩码/alpha），二次用例再说；B 引入文件依赖；D 语义受限（应用换图标要先 `WM_SETICON`） |
+| **D2** | 承载窗口形态 | **A** 框架自建**隐藏顶层窗口**（独立窗口类 + WndProc）/ **B** 复用第一个 `Window` 的 HWND / **C** message-only window | **A** | **C 已被 F1 否证**（收不到 `TaskbarCreated` 广播 ⇒ 无法自愈）；**B 有双重缺陷**：承载者销毁即回调无门（且图标不自动消失 ⇒ 幽灵图标），多窗口时选择不确定。A 与窗口生命周期彻底解耦（R7）。**★ 硬契约（v1.1 补）**：该隐藏顶层 HWND 是 `Win32PlatformApplication` 的**内部平台资源，不是 ECDI `Window`**——**永不进入 `Application::m_windows`**，不参与窗口枚举 / 所有权登记 / 事件派发，由 `Win32PlatformApplication` 自行创建、持有、销毁；**不新增独立平台对象类**（与 R9「接缝是惯例不是抽象」一致） |
+| **D3** | 事件上行通道（Application 侧） | **A** 复刻 `SetDeferredCleanup` 的 `std::function` 注入（概念形如 `SetEventSink`）/ **B** 新建 `PlatformApplicationHost` 抽象类（对称 `PlatformWindowHost`） | **A** | 与既有先例**同款模式**（`PlatformApplication` 已有 `std::function` 注入），零新抽象类；B 违反 R9 裁决"不新建接缝类"，且为一个回调引入抽象类不成比例。**★ 生命周期前置（v1.1 补，归初设闭合）**：sink 三问必须在初设回答——① 谁设置 / 何时设置（建议 `Application` 构造后、承载窗口创建前）；② 何时清空（建议 `PlatformApplication` 销毁、承载窗口销毁**之前**）；③ **保证 sink 被调用时 `Application` 必然存活**（**禁止异步回调访问已销毁的 `Application`**）。销毁顺序**不得留到实现阶段临时决定** |
+| **D4** | 托盘图标来源 | **A** exe 资源 ID（`int`）/ **B** `.ico` 文件路径（UTF-8）/ **C** 框架 `Image` → 转 HICON / **D** 复用窗口类图标 | **A（默认同 `kAppIconId`）** | 单文件产物友好（DesktopNest 目标形态）；与 `Win32WindowClass.cpp:58` 既有加载先例同源；零外部文件依赖（框架"无第三方/无外部资源"原则同源）。C 最"框架味"但成本高（`CreateIconIndirect` + 掩码/alpha），二次用例再说；B 引入文件依赖；D 语义受限（应用换图标要先 `WM_SETICON`）。**★ 资源生命周期（v1.1 补）**：`HICON` 的加载与销毁全部收在平台层内部——资源 ID → `LoadImageW` → 平台持有 → `NIM_DELETE` 后按 `LR_SHARED` 与否决定是否 `DestroyIcon`；**`HICON` 生命周期不得散落在 `Application` / 托盘状态 / 窗口类之间**，公共 API 只出现资源 ID |
 | **D5** | 回调消息版本 | **A** `NOTIFYICON_VERSION_4`（`NIM_SETVERSION`）/ **B** 传统版本（`wParam`=图标 ID、`lParam`=鼠标消息） | **A** | 版本 4 下 `lParam` 携带**通知事件码**（`NIN_SELECT` / `NIN_KEYSELECT` / `NIN_POPUPOPEN` / `WM_CONTEXTMENU`），`wParam` 携带**锚点坐标**——键盘激活路径与就地弹菜单都需要它；传统版本只有鼠标消息、无坐标。MSDN 明确两者语义差异 |
-| **D6** | 右键菜单边界 | **A** 框架提供"原生菜单 + 文本/ID 列表 + 返回选中 ID"（`TPM_RETURNCMD`）/ **B** 只抛事件、菜单交应用 / **C** 自绘菜单 | **A** | **B 物理上不可行**——应用层拿不到 HWND，无法调 `TrackPopupMenu`；C 是独立大工程（自绘菜单＝另一套命中/滚/键盘导航），YAGNI。A 中 `TPM_RETURNCMD` 让结果**不经 `WM_COMMAND`**，返回值语义干净。菜单**只支持一级 + 纯文本 + ID**（图标/勾选/子菜单不做） |
+| **D6** | 右键菜单边界 | **A** 框架提供"原生菜单 + 文本/ID 列表 + 返回选中 ID"（`TPM_RETURNCMD`）/ **B** 只抛事件、菜单交应用 / **C** 自绘菜单 | **A** | **B 物理上不可行**——应用层拿不到 HWND，无法调 `TrackPopupMenu`；C 是独立大工程（自绘菜单＝另一套命中/滚/键盘导航），YAGNI。A 中 `TPM_RETURNCMD` 让结果**不经 `WM_COMMAND`**，返回值语义干净。菜单**只支持一级 + 纯文本 + ID**（图标/勾选/子菜单不做）；**调用形态见 D10** |
 | **D7** | UIPI 立场（F3） | **A** 记录为已知约束、**不**做处理 / **B** 提供 `ChangeWindowMessageFilterEx` 白名单开关 / **C** A + 文档明示 | **C** | 官方立场明确（*"isn't recommended"*、*"best solution is to only use drag and drop between the same MIC levels"*）；白名单有**安全含义**，框架不该替应用做安全决策。⇒ 约束写进文档（非目标 + 记账），实现零负担 |
 | **D8** | R12/R13 归属 | **A** 纳入本阶段 / **B** 另立阶段 / **C** 不做（要求应用自己规避） | **A** | **C 不成立**：`Hide()` 缺失 + `Exit()` 自动触发，应用侧**无任何手段**规避（既不能隐藏窗口，也不能阻止退出）。B 会把托盘变成"做出来但不可用"；且 R12/R13 各自都是 R9 惯例标准三步、成本极低。⇒ 纳入本阶段 |
-| **D9** | explorer 重建自愈归属 | **A** 框架内建（自动 `NIM_ADD` + 停用状态同步）/ **B** 抛 Framework Event 让应用重加 | **A** | `TaskbarCreated` 是**平台细节**；要求应用处理＝把平台细节推给消费者（与"框架吸收平台细节"立场矛盾）。框架内建后应用**零感知**，且 R1 的"生命周期归框架"语义才自洽 |
+| **D9** | explorer 重建自愈归属 | **A** 框架内建（自动 `NIM_ADD` + 停用状态同步）/ **B** 抛 Framework Event 让应用重加 | **A** | `TaskbarCreated` 是**平台细节**；要求应用处理＝把平台细节推给消费者（与"框架吸收平台细节"立场矛盾）。框架内建后应用**零感知**，且 R1 的"生命周期归框架"语义才自洽。**★ 双态模型（v1.1 显式化）**：必须区分 **desired state**（应用意图）与 **shell registration state**（Shell 实际）——`TaskbarCreated` **只按 desired state 恢复**：desired=ON 且 shell=OFF（explorer 重建）⇒ 重新 `NIM_ADD` ✅；desired=ON 且 shell=ON ⇒ 幂等（按 D11）；**desired=OFF（应用已主动移除）且 shell=OFF ⇒ 绝不重加** ❌——这是最容易写错的分支，v1.0 记的「停用状态同步」即指此 |
+| **D10** | 托盘菜单调用形态（v1.1 新增） | **A** **同步 API**：`ShowTrayMenu(...)` 内部 `TrackPopupMenu(TPM_RETURNCMD)`，直接**返回选中项 ID**（`0` = 未选中 / 取消）/ **B** 事件驱动：抛「菜单请求」事件，应用弹菜单后回传结果 | **A** | `TPM_RETURNCMD` 使结果不经 `WM_COMMAND`，返回值语义干净；B 需「请求—回传」两段式协议 + 状态挂起，为一级菜单引入不成比例，且应用层拿不到 `HWND`（D6 已述）。⚠️ 同步语义的**限制**（非缺陷）：菜单显示期间消息循环由 `TrackPopupMenu` 接管 ⇒ 该期间不派发框架事件（系统模态菜单固有行为） |
+| **D11** | 托盘状态机语义（v1.1 新增） | **A** 宽容：`Add` 重复 = 隐式 `Update` · `Update` 未注册 = 自动 `Add` · `Remove` 未注册 = no-op / **B** 严格：三者均拒绝 + Warning | **A** | 托盘是**幂等配置**语义而非事务语义——应用常在「窗口重建 / 配置重载」路径上重复设置图标，宽容语义让这些路径无需自维护状态；B 会使 R7「与 Window 解耦」变成「应用必须自己跟踪图标状态」，与「框架吸收复杂度」立场矛盾。状态集 = `Absent` / `Active` 两态；**完整转移表归初设**（需求阶段只定语义边界——skill 条 6） |
 
 ---
 
@@ -144,7 +162,9 @@
 | **回归** | 既有全部用例 | **零回归**（重点：窗口销毁路径 / 事件分派 / `PlatformApplication` 契约） |
 | **手测** | ModelProbe 接入托盘（现成图标资源）+ 拖入日志 | DebugView 日志 + 通知区观察 |
 | **手测** | **explorer 重启后图标仍在**（任务管理器重启资源管理器） | 与 §7.1 的 E 路线手测同款方法——**这次预期是"自愈成功"**（F2） |
-| **手测** | 提权运行下的拖入行为（F3 约束复核） | 预期**失败**——验证约束描述与官方一致，而非实现缺陷 |
+| **手测** | 提权运行下的拖入行为（F3 约束复核） | **平台约束验证（v1.1 措辞修正）**：确认 ECDI 的行为描述与官方一致——即「不承诺跨完整性级别拖入成功」，结果以系统消息过滤行为为准；**不把「失败」写成硬验收判据**（平台行为变化时不应导致假失败） |
+
+> 📌 **测试分层原则（v1.1 补）**：托盘自动测试**不得依赖真实通知区域 / explorer 当前状态 / 桌面环境**——① 平台层托盘状态机（`Absent` / `Active` 转移）② Shell API 调用（`NIM_ADD` / `NIM_DELETE` 配对，走替身探针）③ `TaskbarCreated` 恢复逻辑（合成消息）三层各自可断言；**真实 explorer 重启保留为手测**。拖入的 `HDROP` 生命周期同理——自动测试断言「事件返回后 `HDROP` 已被 `DragFinish`」，必要时经**内部平台测试缝**计数，而非在测试里窥探系统堆。
 
 ---
 
@@ -163,6 +183,16 @@
 
 ## 8. 修订记录
 
+- v1.1（2026-09-16）**外部评审「方向通过，补齐契约后进初设」——6 项建议全部采纳（1 项含事实更正）+ 4 项补充**：
+  - **① R11 重写（含更正）**：按**源码实测链路**改写为 `WM_DROPFILES → Win32PlatformWindow::HandleMessage → Framework Event → PlatformWindowHost::OnEvent → Window::OnEvent → Application::OnEvent（EventRouter 基类）→ HitTest → Dispatch → Bubbling`。**v1.0 原文有两处不准确**——漏 `PlatformWindow → Window` 整段、把 `EventRouter`（`Application` 的基类）写成前驱环节。⚠️ 评审称原文「会绕过层次」——**方向对但论断不准确**：文档只是链路写不全，未主张绕过（本轮唯一需更正评审结论之处）。
+  - **② UIPI 测试判据**：由「预期失败」改为「**平台约束验证**」——不把平台约束写成硬验收（系统行为变化时不应假失败）。
+  - **③ R1**：补**所有权归属**（生命周期归 `PlatformApplication`，承载窗口销毁**之前**同步 `NIM_DELETE`）+ **幂等要求**（移除未注册项 = no-op）。
+  - **④ D9**：显式化为**双态模型**（`desired state` ≠ `shell registration state`），`TaskbarCreated` 只按 desired 恢复；**desired=OFF 时绝不重加**是最易写错分支。
+  - **⑤ D3**：补 **sink 生命周期前置**（设置/清空时点 + 禁止异步回调访问已销毁 `Application`），销毁顺序归初设且不得临时决定。
+  - **⑥ D6 → 拆出 D10**：托盘菜单**调用形态**（同步返回 ID vs 事件驱动）升为独立决策点（与 D6 的「范围边界」正交）。
+  - **补充 4 项**：D2 硬契约（隐藏 HWND **永不进入** `Application::m_windows`、不新增独立平台对象类）· D4 `HICON` 资源生命周期归属 · **D11 新增**（托盘状态机语义：宽容 vs 严格，状态集 `Absent`/`Active` 两态，完整转移表归初设）· R13 命名倾向（`SetQuitOnLastWindowClosed`，避开双重否定）· §6 测试分层原则。
+  - **保持不动的评审共识**：`PlatformApplication` 挂载点（D1）· 隐藏顶层窗口（D2）· `std::function` 注入（D3 方向）· EXE 资源 ID（D4）· `NOTIFYICON_VERSION_4`（D5）· 不处理 UIPI（D7）· R12/R13 纳入本阶段（D8）· 框架内建自愈（D9 方向）。
+  - **评审明确反对的扩张**（记为范围纪律）：不因已有 `PlatformApplication` 而顺手塞 全局热键 / 单实例 / 开机自启 / Toast / Shell 集成管理器——继续留在 §5 非目标。
 - v1.0（2026-09-15）**需求确认初稿**：
   - §1 背景与现状勘察——立项由来（R9 惯例首次消费）· **四条勘察事实 F1–F4**（message-only 不接收广播 / `TaskbarCreated` 只有顶层窗口收得到 / UIPI 阻塞拖入 / 「最后窗口关闭即退出」+ 无 `Hide()`）**全部带出处** · F2 与 §7.1 R-1 的「注册式 vs 层级式」对照 · 已有 vs 缺盘点。
   - §2 技术路线——**两条通道分层形态不同**（拖入窗口级走 R9 标准三步 / 托盘应用级需扩展惯例分支）· 三个硬骨头（承载窗口选型 / `HDROP` 生命周期 / explorer 重建自愈）。
