@@ -1,4 +1,4 @@
-﻿# Phase 14 托盘与拖入接缝 初步设计（v1.0）
+﻿# Phase 14 托盘与拖入接缝 初步设计（v1.1）
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-09-16
@@ -6,6 +6,7 @@
 > 前置：`phase14-tray-and-drop-requirements.md` **v1.1**（外部评审「通过，可进入初步设计」· 2026-09-16）
 > 一句话：把需求稿的 **R1–R13 + D0–D11** 落成**可评审的头全文草案 + 平台实现分解 + 生命周期时序**——两条通道（应用级托盘 / 窗口级拖入）各走一条与 R9 同构的惯例分支，公共 API 零 Win32 类型。
 > v1.0：初稿（§1 范围映射 · §2 Public 头全文草案 · §3 实现分解 · §4 链接库传播 · §5 影响面 · §6 生命周期与销毁顺序 · §7 测试方向 · §8 开放决策点 · §9 D0–D11 兑现表 · §10 修订记录）
+> v1.1（2026-09-16）外部评审「**通过，可进详设**——3 个详设前必须收敛项」全部处理：① **O-5 已核实**（MSDN 原文：v4 锚点 = `GET_X_LPARAM/GET_Y_LPARAM(wParam)`，与本稿逐字一致；**新发现 `WM_CONTEXTMENU` 不在坐标有效列表 ⇒ `GetCursorPos` 兜底**）；② **O-6 拍板 C**（`PlatformWindowHost` 加 `virtual Window& GetWindow()`——§2.10 新小节；影响面 = `FakeHost` 补 1 override）；③ **新增 §6.7 失败语义契约**（平台能力失败不抛异常，通过内部状态 + 日志反映）；④ §3.1 笔误修正（删残留成员 `m_trayHostClass`——评审抓到）；⑤ §8 收敛：7 项拍板 + 唯一遗留 O-3；⑥ §7.2 Shell seam 纪律；⑦ §9 D5 ⚠️→✅
 
 ---
 
@@ -164,6 +165,9 @@ enum class TrayEventType{
 /// @brief 托盘交互事件（Phase 14 R4）
 /// @details **应用级事件**：`GetWindow()` 恒为 `nullptr`（无来源窗口——与 `Window` 解耦，R7）。
 /// 锚点坐标用于菜单定位与「就地弹窗」（v4 携带；键盘激活时为图标左上角——MSDN 语义）。
+/// ⚠️ **ContextMenu 的锚点由框架兜底**（v1.1 核实 O-5：NOTIFYICON_VERSION_4 下
+/// WM_CONTEXTMENU 不在坐标有效列表内——MSDN：「For all other messages, wParam is undefined」）；
+/// 平台层以 GetCursorPos() 取右键时刻光标位置（Win32 对 WM_CONTEXTMENU 的标准做法）。
 class TrayEvent : public Event{
 
 public:
@@ -416,6 +420,26 @@ protected:
 
 ---
 
+### 2.10 修改：`PlatformWindowHost.h`（+`GetWindow`——v1.1 拍板 O-6 方案 C）
+
+```cpp
+	/// @brief 获取宿主 Window（v1.1 拍板 O-6 方案 C）
+	/// @details 表达**既有事实**——每个 PlatformWindow 必然对应一个宿主 Window
+	/// （构造注入 Host& 的对偶关系）。用途：平台层构造窗口级 Framework Event 时
+	/// 填充 `Event::m_window`（拖入事件为本阶段唯一消费者）。
+	/// @note 只读引用；**平台层不得经此调用 Window 的修改性 API**——平台层对
+	/// Window 的合法上行通道只有 OnEvent（访问面纪律）。
+	virtual Window& GetWindow() noexcept = 0;
+```
+
+**影响面（grep 实证）**：`PlatformWindowHost` 实现者 = **2 个**——`Window`（生产，`Window.h:43`，实现为 `return *this;`）+ `EventTests::FakeHost`（替身，`EventTests.cpp:44`，**补 1 个 override**——skill 条 33）。
+
+**同步**：§3.6 的 `DropFilesEvent` 构造改用 `&m_host.GetWindow()`；**O-6 三路径收敛为 C，B（const_cast）淘汰**；`Window::OnEvent` **零改动**。
+
+**头依赖**：`PlatformWindowHost.h` 需前置声明 `class Window;`（引用返回不需完整类型）。
+
+---
+
 ## 3. 实现分解（`src/Platform/Win32/`）
 
 > 实现顺序 = D0 的顺序（**拖入 → R12/R13 → 托盘**）：前者验证 R9 惯例在窗口级仍成立，后者是应用级新惯例。
@@ -426,8 +450,7 @@ protected:
 
 ```cpp
 	HWND m_trayHostHwnd = nullptr;          ///< 隐藏顶层宿主窗口（内部平台资源——永不进 Application::m_windows）
-	WindowClass m_trayHostClass;            ///< 宿主窗口类（独立实例——与主窗口类分离）
-	std::unique_ptr<WindowClass> m_trayHostClassPtr;  ///< 懒创建（避免无托盘应用付出窗口类注册成本）
+	std::unique_ptr<WindowClass> m_trayHostClass;  ///< 懒创建（避免无托盘应用付出窗口类注册成本）
 	UINT m_taskbarCreatedMsg = 0;           ///< RegisterWindowMessageW(L"TaskbarCreated") 的返回值
 	HICON m_trayIcon = nullptr;             ///< 当前托盘图标（平台持有——D4）
 	bool m_trayRegistered = false;          ///< **shell registration state**（D9 双态之一）
@@ -444,13 +467,13 @@ void Win32PlatformApplication::EnsureTrayHost(){
 	if (m_trayHostHwnd != nullptr) return;
 
 	// ① 注册独立窗口类（类名与主窗口类分离——析构时各自 UnregisterClassW）
-	m_trayHostClassPtr = std::make_unique<WindowClass>("ECDI TrayHost", &TrayHostProc);
+	m_trayHostClass = std::make_unique<WindowClass>("ECDI TrayHost", &TrayHostProc);
 
 	// ② 创建**隐藏顶层窗口**（F1：不能是 message-only——否则收不到 TaskbarCreated 广播）
 	//    ⚠️ 必须是顶层（parent = nullptr）：F2 的广播只发给顶层窗口
 	m_trayHostHwnd = CreateWindowExW(
-		0, m_trayHostClassPtr->GetClassName(), L"", WS_POPUP,   // 无样式可见性——不 Show
-		0, 0, 0, 0, nullptr, nullptr, m_trayHostClassPtr->GetInstance(), this);
+		0, m_trayHostClass->GetClassName(), L"", WS_POPUP,   // 无样式可见性——不 Show
+		0, 0, 0, 0, nullptr, nullptr, m_trayHostClass->GetInstance(), this);
 	// 失败 → 记 Error 日志（不抛异常——托盘失败不应杀应用；与图标加载失败同款降级）
 
 	// ③ 注册 shell 广播消息（explorer 重建通知——D9 自愈的触发源）
@@ -517,8 +540,12 @@ LRESULT CALLBACK Win32PlatformApplication::TrayHostProc(HWND hwnd, UINT msg, WPA
 ```cpp
 void Win32PlatformApplication::HandleTrayCallback(WPARAM wParam, LPARAM lParam){
 
-	// v4 语义：LOWORD(lParam) = 通知事件；HIWORD(lParam) = 图标 ID；wParam = 锚点
-	//   （MSDN「NOTIFYICONDATAW」：v4 下 wParam 携带坐标，低字 X、高字 Y，**屏幕坐标**）
+	// v4 语义（v1.1 已核实，O-5——MSDN「NOTIFYICONDATAW」原文）：
+	//   LOWORD(lParam) = 通知事件；HIWORD(lParam) = 图标 ID（16 位）；
+	//   "GET_X_LPARAM(wParam) returns the X anchor coordinate for notification events
+	//    NIN_POPUPOPEN, NIN_SELECT, NIN_KEYSELECT, and all mouse messages between
+	//    WM_MOUSEFIRST and WM_MOUSELAST"（键盘生成时 = 目标图标左上角）。
+	//   ⚠️ 其余消息的 wParam undefined —— 含 WM_CONTEXTMENU（见下方兜底分支）。
 	const UINT notifyEvent = LOWORD(lParam);
 	const int x = GET_X_LPARAM(wParam);
 	const int y = GET_Y_LPARAM(wParam);
@@ -531,6 +558,29 @@ void Win32PlatformApplication::HandleTrayCallback(WPARAM wParam, LPARAM lParam){
 		case WM_LBUTTONDBLCLK: type = TrayEventType::DoubleClick; break;
 		case WM_CONTEXTMENU:  type = TrayEventType::ContextMenu; break;
 		default: return;   // 其它通知（NIN_POPUPOPEN 等——非目标）静默忽略
+	}
+
+	// ★ v1.1（O-5 核实的新发现）：WM_CONTEXTMENU 不在 MSDN 坐标有效列表内
+	//   （"For all other messages, wParam is undefined"）⇒ 此处 x/y 无效，
+	//   以 GetCursorPos() 兜底（右键上下文菜单时光标必在图标处——Win32 标准做法）。
+	if (type == TrayEventType::ContextMenu){
+
+		POINT cursor{};
+
+		if (GetCursorPos(&cursor)){
+
+			m_lastAnchorX = cursor.x;
+
+			m_lastAnchorY = cursor.y;
+
+			EmitTrayEvent(TrayEvent(type, cursor.x, cursor.y));   // ← 上行（D3 的 sink）
+
+			return;
+
+		}
+
+		// GetCursorPos 失败（罕见）→ 落到下方用最近一次有效锚点
+
 	}
 
 	m_lastAnchorX = x;
@@ -679,7 +729,8 @@ void Win32PlatformWindow::SetFileDropEnabled(bool enabled){
 		DragFinish(hDrop);
 
 		// ④ 抛 Framework Event（走既有上行链路——R11）
-		DropFilesEvent event(nullptr /* window 由 Host 侧填 */, std::move(paths), pt.x, pt.y);
+		// v1.1（O-6 拍板 C）：Window* 经宿主引用直接获得——O-6 三路径收敛为 C
+		DropFilesEvent event(&m_host.GetWindow(), std::move(paths), pt.x, pt.y);
 		m_host.OnEvent(event);   // ← Window::OnEvent → Application::OnEvent
 
 		return 0;
@@ -687,7 +738,7 @@ void Win32PlatformWindow::SetFileDropEnabled(bool enabled){
 	}
 ```
 
-> ⚠️ **实现细节待详设**：`Window*` 无法在平台层获得（`Win32PlatformWindow` 只持 `PlatformWindowHost&`；`Host::OnEvent` 的既有实现是 `Window::OnEvent`，它转发给 `Application`，而 `Event::m_window` 由**构造方**填）。两条可选路径见 §8 **O-6**（倾向：由 `Window` 侧补填——即 `PlatformWindowHost` 增加一个"事件前置补窗"的机会，或 `Window::OnEvent` 对 `DropFilesEvent` 做 const_cast 补填）。**这是本阶段唯一需要触碰既有 `Window::OnEvent` 的改动点**，详设必须给最小修改面。
+> ✅ **v1.1 已解决（O-6 拍板 C）**：`PlatformWindowHost` 新增 `GetWindow()`（§2.10），构造处直接 `&m_host.GetWindow()`——`Window::OnEvent` **零改动**，O-6 三路径收敛为 C（B const_cast 淘汰）。
 
 ### 3.7 `Application`：退出策略（R13）
 
@@ -731,8 +782,8 @@ void Win32PlatformWindow::SetFileDropEnabled(bool enabled){
 | 类别 | 项 | 规模 |
 |---|---|---|
 | **新增 Public 头** | `Application/TrayIcon.h` · `EventSystem/Application/TrayEvent.h` · `EventSystem/Window/DropFilesEvent.h` | **+3（86 → 89）** |
-| **修改 Public 头** | `PlatformWindow.h`（+2 纯虚）· `PlatformApplication.h`（+3 纯虚 + 1 注入 + 1 上行）· `Window.h`（+2 透传）· `Application.h`（+4 透传 + 1 虚方法 override + 1 成员）· `EventType.h`（+2 枚举）· `EventRouter.h`（+2 虚方法） | **6 个** |
-| **⚠️ 测试替身同步** | `PlatformWindow` 加 2 纯虚 ⇒ `AnimationTests::TestPlatformWindow` / `ProgressBarTests::TestPlatformWindow` **各补 2 个 override**（K3） | **2 处** |
+| **修改 Public 头** | `PlatformWindow.h`（+2 纯虚）· `PlatformApplication.h`（+3 纯虚 + 1 注入 + 1 上行）· `PlatformWindowHost.h`（+1 纯虚 `GetWindow`——v1.1 O-6）· `Window.h`（+2 透传）· `Application.h`（+4 透传 + 1 虚方法 override + 1 成员）· `EventType.h`（+2 枚举）· `EventRouter.h`（+2 虚方法） | **7 个** |
+| **⚠️ 测试替身同步** | `PlatformWindow` 加 2 纯虚 ⇒ `AnimationTests::TestPlatformWindow` / `ProgressBarTests::TestPlatformWindow` **各补 2 个 override**（K3）；`PlatformWindowHost` 加 1 纯虚 ⇒ `EventTests::FakeHost` **补 1 个 override**（v1.1，O-6） | **3 处** |
 | ✅ **测试替身零影响** | `PlatformApplication` 加纯虚 ⇒ **零替身**（K2——全库仅 1 个生产实现）；`EventRouter` 加虚方法全默认空实现 ⇒ 零影响 | **0 处** |
 | **新增测试文件** | `src/Tests/TrayTests.cpp`（托盘状态机 + Shell 替身）· `src/Tests/DropFilesTests.cpp`（拖入 + HDROP 生命周期） | **+2 文件** |
 | **修改 Internal** | `Win32PlatformApplication.h/.cpp`（宿主窗口 + 托盘状态 + 回调消化 + 菜单 + 自愈）· `Win32PlatformWindow.h/.cpp`（`Hide()` + 拖入开关 + `WM_DROPFILES`）· `Application.cpp`（托盘透传 + sink 注册 + 退出开关）· `Window.cpp`（透传） | **4 文件** |
@@ -805,7 +856,7 @@ Application::Application()                       [Application.cpp:26-32]
   │      │
   │      ├─ 2.3 **DestroyWindow(m_trayHostHwnd)**   ← 先于窗口类反注册（K10：UnregisterClassW 要求无存活窗口）
   │      │
-  │      └─ 2.4 m_trayHostClassPtr 析构 ⇒ UnregisterClassW   ← 顺序不可颠倒
+  │      └─ 2.4 m_trayHostClass 析构 ⇒ UnregisterClassW   ← 顺序不可颠倒
   │
   └─ ③ m_windows / m_deferredDestroy 析构（既有路径不变）
 ```
@@ -853,6 +904,23 @@ WM_DROPFILES                                            [系统 → 窗口过程
 
 **这条推论需要在详设中落到文档/示例，否则 R13 会被误用为「常驻必须开关」**（见 §8 O-2 的取舍）。
 
+### 6.7 平台能力失败语义（v1.1 新增——评审 🔴 收敛项 ③）
+
+**统一原则**：**平台能力失败不抛异常，通过内部状态 + 日志反映**——与既有先例同源（`EnsureBackendExtracted` 失败仅记日志、`Win32WindowClass` 的 `LoadImageW` 失败 NULL 自动降级）。
+
+| 失败点 | 处置 | 内部状态 |
+|---|---|---|
+| `NIM_ADD` 失败 | Warning；不抛 | `desired` 保持 `true`；`registered` **保持 `false`**——下次 `TaskbarCreated` 或重试可恢复（**不得置 `true`**：否则内部状态与 Shell 状态分离，自愈失效） |
+| `NIM_MODIFY` 失败 | Warning；不抛 | **两态均不改**——单次失败不足以推断 Shell 状态；`TaskbarCreated` 是权威重置信号 |
+| `NIM_DELETE` 失败 | Warning；不抛 | `registered = false`（向「已移除」收敛）；**析构流程继续，不阻塞**（R1 已尽力——剩余风险 = 幽灵图标，记账） |
+| 宿主 `CreateWindowExW` 失败 | Error 日志；`SetTrayIcon` 直接返回 | `desired = true`、`registered = false`、**不崩溃**——下次调用重试 |
+| `LoadImageW` 失败 | Warning；**降级系统默认图标** `LoadIconW(nullptr, IDI_APPLICATION)` | 与 `Win32WindowClass.cpp` 既有先例同款 |
+| `CreatePopupMenu` 失败 | 直接返回 0 | 与「未选中 / 取消」语义天然兼容 |
+| `RegisterWindowMessageW` 返回 0 | Warning；自愈禁用 | 正常注册 / 移除路径不受影响 |
+| `GetCursorPos` 失败（§3.2 兜底） | 使用最近一次有效锚点 | 不影响事件抛出 |
+
+**与 O-5 的关系**：`TaskbarCreated` 自愈（§3.3）天然承担「失败后重试」的恢复职责——explorer 每次重建都会广播，失败状态（`registered = false`）恰是自愈的触发前提之一。
+
 ---
 
 ## 7. 测试方向
@@ -879,6 +947,10 @@ WM_DROPFILES                                            [系统 → 窗口过程
 | `PlatformApplication`（+3 纯虚） | 加一个**测试替身** `RecordingPlatformApplication`（记录 Shell 调用序列）——**本阶段新增**（K2：此前零替身） |
 | Shell 调用 | 经**内部测试缝**（`Win32PlatformApplication` 的虚方法或函数指针注入口，归详设）使 Shell 调用可替身——**不在测试里真的 `Shell_NotifyIconW`**（需求 §6 分层原则） |
 
+> ★ **Shell seam 纪律（v1.1）**：上述内部测试缝**停留在实现层**（`Win32PlatformApplication` 内部的函数指针 / 虚方法注入口），**不得演变为公开抽象**——分层保持 `Public API → PlatformApplication → Win32PlatformApplication → Internal Shell seam → Shell32`。
+
+> ★ **详设待办（v1.1）**：ModelProbe 演示 R13 的两种常驻模式——「模式 A：真关闭窗口但应用活着（`SetQuitOnLastWindowClosed(false)`）」与「模式 B：关闭按钮变成隐藏（`WindowCloseRequestedEvent` 处理为 `Hide()`）」——两者是不同机制，文档须防止混用（§6.6）。
+
 ### 7.3 手测（真环境——不经自动测试）
 
 | 项 | 判据 |
@@ -893,7 +965,25 @@ WM_DROPFILES                                            [系统 → 窗口过程
 
 ---
 
-## 8. 开放决策点（归用户拍板 / 详设）
+## 8. 开放决策点（v1.1 收敛：7 项拍板 + 1 项遗留）
+
+### 8.1 v1.1 拍板（7 项）
+
+| # | 决策 | 拍板 | 依据 |
+|---|---|---|---|
+| O-1 | sink 清理落点 | **A**（`~Application` 显式析构体先清 sink） | 「谁注册谁清理」——平台层不知道 owner 是否存活；外部评审同判 |
+| O-2 | R13 去留 | **保留**（默认 `true`） | 1 bool + 1 if 成本极低；与 `Hide()` 的分工见 §6.6；ModelProbe 演示两模式（§7.2 详设待办） |
+| O-4 | 托盘 API 形态 | **A** 两方法（`SetTrayIcon` / `RemoveTrayIcon`） | D11 宽容语义的必然推论（Add 重复 = 隐式 Update ⇒ Add/Update 是同一操作） |
+| O-5 | v4 坐标打包 | **已核实**（§3.2 / §2.2 落地） | MSDN 原文证实打包方式与本稿一致；**新发现 `WM_CONTEXTMENU` 无坐标 ⇒ `GetCursorPos` 兜底**；坐标空间按屏幕坐标设计（`TrackPopupMenu` 直接消费），详设实测一次确认 |
+| O-6 | `DropFilesEvent::Window*` 补填 | **C**（`PlatformWindowHost::GetWindow()`，§2.10） | 表达既有事实、不为拖入新造机制；影响面 = FakeHost 补 1 override（grep 实证）；B（const_cast）淘汰 |
+| O-7 | `WM_ENDSESSION` 清理 | **不做**（YAGNI） | 关机时 shell 自行清理托盘图标 |
+| O-8 | 多托盘图标 | **不做**（维持非目标） | 二次用例再抽象（YAGNI） |
+
+### 8.2 唯一遗留
+
+**O-3（拖入开关时机分组）**保留原判 **A（运行期，与 `Minimize` 同组）**——v1.1 注记：这是**架构一致性选择**而非 Win32 技术限制（`DragAcceptFiles` 本身两期皆可调）；第二个平台若发现 Drop 属配置期能力，可重新评估（外部评审同建议）。
+
+（以下为 v1.0 原始 8 项开放决策表，**保留供对照**——其「倾向」列已被 8.1 拍板取代或确认；O-3 仍开放。）
 
 | # | 决策 | 选项 | **倾向** | 理由 |
 |---|---|---|---|---|
@@ -917,7 +1007,7 @@ WM_DROPFILES                                            [系统 → 窗口过程
 | **D2** | A（自建隐藏顶层窗口） | §3.1 `EnsureTrayHost`（懒创建 + 独立 `WindowClass` 实例）；**硬契约写入 §2.5 注释**：永不进 `Application::m_windows`、不新增平台对象类 | ✅ 兑现 |
 | **D3** | A（`std::function` sink） | §2.5 `SetTrayEventSink` + `EmitTrayEvent`（复刻 `SetDeferredCleanup` 模式）；生命周期见 §6.3 | ✅ 兑现 |
 | **D4** | A（exe 资源 ID，默认同 `kAppIconId`） | §2.1 `TrayIconOptions::iconResourceId` 默认 102；HICON 生命周期见 §6.4 契约（2.2） | ✅ 兑现 |
-| **D5** | A（`NOTIFYICON_VERSION_4`） | §3.2 `NIM_SETVERSION` 调用 + 回调翻译表（`NIN_SELECT`/`NIN_KEYSELECT`/`DBLCLK`/`CONTEXTMENU` → `TrayEventType`）；**坐标打包待核实（O-5）** | ⚠️ 部分（O-5） |
+| **D5** | A（`NOTIFYICON_VERSION_4`） | §3.2 `NIM_SETVERSION` 调用 + 回调翻译表（`NIN_SELECT`/`NIN_KEYSELECT`/`DBLCLK`/`CONTEXTMENU` → `TrayEventType`）；**坐标打包已核实（v1.1，MSDN 原文）——新发现 `WM_CONTEXTMENU` 无坐标 ⇒ `GetCursorPos` 兜底** | ✅ 兑现 |
 | **D6** | A（原生一级菜单 + `TPM_RETURNCMD`） | §3.4 `CreatePopupMenu` + `AppendMenuW` + `TPM_RETURNCMD \| TPM_NONOTIFY`；范围限一级/纯文本/ID | ✅ 兑现 |
 | **D7** | C（记录约束 + 文档明示） | §5「明确不动」+ §7.3 手测判据改为「平台约束验证」；**实现零动作** | ✅ 兑现 |
 | **D8** | A（R12/R13 纳入本阶段） | §2.4/§2.6 `Hide()`；§2.7 `SetQuitOnLastWindowClosed`；§3.5/§3.7 实现 | ✅ 兑现 |
@@ -929,6 +1019,15 @@ WM_DROPFILES                                            [系统 → 窗口过程
 
 ## 10. 修订记录
 
+- v1.1（2026-09-16）**外部评审「通过，可进详设」——3 个详设前必须收敛项全部处理**：
+  - **O-5 核实（🔴→✅）**：MSDN `NOTIFYICONDATAW` 原文证实 v4 锚点 = `GET_X_LPARAM/GET_Y_LPARAM(wParam)`（与本稿 §3.2 逐字一致）；**核实挖出新问题**——`WM_CONTEXTMENU` 不在坐标有效列表（"For all other messages, wParam is undefined"）⇒ §3.2 补 `GetCursorPos()` 兜底分支、§2.2 头注释同步；坐标空间按屏幕坐标设计（`TrackPopupMenu` 直接消费），详设实测一次确认。
+  - **O-6 拍板 C（🔴→✅）**：`PlatformWindowHost` 新增 `virtual Window& GetWindow() noexcept = 0`（§2.10 新小节）——表达「每个 PlatformWindow 必然对应一个宿主 Window」的既有事实；影响面 grep 实证 = 2 实现者（`Window` 实现 `return *this;` + `EventTests::FakeHost` 补 1 override）；§3.6 构造改 `&m_host.GetWindow()`；`Window::OnEvent` 零改动；B（const_cast）淘汰。
+  - **失败语义契约（🔴→✅，评审新增点）**：§6.7 统一原则「平台能力失败不抛异常，通过内部状态 + 日志反映」+ 8 行失败处置表（ADD / MODIFY / DELETE / 宿主创建 / `LoadImageW` / `CreatePopupMenu` / `RegisterWindowMessageW` / `GetCursorPos`）。
+  - **§3.1 笔误修正**：删除残留成员 `WindowClass m_trayHostClass;`（与 `unique_ptr` 懒创建设计冲突——评审抓到；成员统一命名 `m_trayHostClass`）。
+  - **§8 收敛**：O-1 / O-2 / O-4 / O-5 / O-6 / O-7 / O-8 七项**拍板**；唯一遗留 O-3（保留 A 判 + 注记「架构一致性选择而非技术限制」）；v1.0 原表保留供对照。
+  - **§5 影响面更新**：修改 Public 头 6 → **7**（+`PlatformWindowHost.h`）；测试替身同步 2 → **3 处**（+FakeHost）。
+  - **§7.2** Shell seam 纪律（不得演变为公开抽象）；**详设待办**：R13 模式 A/B ModelProbe 演示。
+  - **§9**：D5 兑现状态 ⚠️ → ✅。
 - v1.0（2026-09-16）**初步设计初稿**：
   - §1 范围映射（R1–R13 × D0–D11 → 落点）+ **§1.1 勘察基线 K1–K14**（本文所有"现状"断言的代码证据，含行号）+ **§1.2 两条通道接缝形态对照**（本阶段结构核心）。
   - §2 **Public 头全文草案**：3 新增（`Application/TrayIcon.h` 86→87 · `EventSystem/Application/TrayEvent.h` 87→88 · `EventSystem/Window/DropFilesEvent.h` 88→89）+ 6 修改（`PlatformWindow.h` / `PlatformApplication.h` / `Window.h` / `Application.h` / `EventType.h` / `EventRouter.h`）——全部给**可评审的完整头代码**，含契约注释与 `@pre`。
