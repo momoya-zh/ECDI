@@ -6,7 +6,7 @@
 
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 113 design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 116 design documents in Chinese).
 
 ## How this was built
 
@@ -30,8 +30,8 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 ```
 
 - **Four-layer rendering contract**: Widget, PaintContext, CommandBuffer and Renderer never see each other's internals — a `Widget` only emits commands, the backend only consumes them. Swapping GDI for another backend means implementing one interface.
-- **Platform abstraction**: `PlatformWindow`, `PlatformApplication`, `ChildProcess` interfaces isolate all `Windows.h` usage; the framework core is platform-independent C++20.
-- **Zero third-party dependencies**: no external libraries, no GDI+, no UI framework — only the Windows SDK (`user32`, `imm32`, `msimg32`, `windowscodecs`, `ole32`, `shlwapi`). Rendering is GDI + `msimg32` (AlphaBlend); image decoding uses the system WIC.
+- **Platform abstraction**: `PlatformWindow`, `PlatformApplication`, `ChildProcess` interfaces isolate all `Windows.h` usage; the framework core is platform-independent C++20. Window-level capabilities (chrome, input, file drop) hang off `PlatformWindow`; application-level ones (tray icon) off `PlatformApplication` — two symmetric seams, neither of which grows its own platform object tree.
+- **Zero third-party dependencies**: no external libraries, no GDI+, no UI framework — only the Windows SDK (`user32`, `imm32`, `msimg32`, `windowscodecs`, `ole32`, `shlwapi`, `shell32`). Rendering is GDI + `msimg32` (AlphaBlend); image decoding uses the system WIC.
 
 ## Features
 
@@ -44,7 +44,8 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Imaging**: WIC-backed decoding (`Decode::DecodeFile` / `Decode::DecodeMemory`) producing premultiplied BGRA, ready for `DrawImage`
 - **Anti-aliasing**: supersampled corner coverage masks for rounded rects (`S=8`), cached per radius — GDI has no native AA, so arcs are composited through a premultiplied alpha path that composes with the theme's corner radius
 - **Window chrome**: borderless mode (`WM_NCCALCSIZE` interception) with a self-drawn caption bar — title plus vector min/max/close buttons — and `NCHITTEST` delegated into the widget tree, so interactive controls inside the caption stay clickable while the rest drags the window
-- **Testing**: self-hosted test framework (188 cases, zero dependencies) with a recording backend for paint assertions
+- **Shell integration**: tray icon (application-level — lives on `PlatformApplication`, not on any `Window`, so closing/rebuilding every window leaves it intact) with a native popup menu, plus window-level file drop (`WM_DROPFILES` → UTF-8 path list; the `HDROP` is released before the event is emitted). Both stay behind platform seams — the public API exposes no Win32 types.
+- **Testing**: self-hosted test framework (196 cases, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -59,7 +60,7 @@ Targets:
 
 | Target | Type | Description |
 |---|---|---|
-| `ECDI` | static library | The framework (`include/ECDI/*.h` — 86 public headers; internal implementation lives in `src/`) |
+| `ECDI` | static library | The framework (`include/ECDI/*.h` — 89 public headers; internal implementation lives in `src/`) |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
 
@@ -116,10 +117,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ## Project layout
 
 ```
-ECDI/       framework sources (include/ = 86 public headers, src/ = implementation + tests)
+ECDI/       framework sources (include/ = 89 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       design documents (113 files; requirements → preliminary → detailed, per phase)
+docs/       design documents (116 files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
@@ -135,6 +136,7 @@ docs/       design documents (113 files; requirements → preliminary → detail
 | 11 | Image decoding (WIC backend, `Decode` module, premultiplied-BGRA contract) | ✅ |
 | 12 | Window chrome (borderless mode, `WM_NCCALCSIZE` / `NCHITTEST` interception, maximize work-area correction, DWM integration) | ✅ |
 | 13 | Caption bar (self-drawn title bar, `NCHITTEST` → widget-tree delegation, window-state query API) | ✅ |
+| **14** | **Tray icon + file drop**: application-level platform seam (`PlatformApplication` + internal hidden top-level host window), `NOTIFYICON_VERSION_4` callback translation, self-healing after explorer restart, window-level `WM_DROPFILES` | ✅ |
 
 ## License
 
