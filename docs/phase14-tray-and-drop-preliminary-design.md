@@ -1,8 +1,8 @@
-﻿# Phase 14 托盘与拖入接缝 初步设计（v1.1）
+﻿# Phase 14 托盘与拖入接缝 初步设计（v1.2）
 
 > 阶段：初步设计（五阶段法 ②）
-> 日期：2026-09-16
-> 状态：待评审
+> 日期：2026-09-16（v1.2：2026-09-17）
+> 状态：✅ **已实施并验收**（A1–A7 全过，2026-09-17）
 > 前置：`phase14-tray-and-drop-requirements.md` **v1.1**（外部评审「通过，可进入初步设计」· 2026-09-16）
 > 一句话：把需求稿的 **R1–R13 + D0–D11** 落成**可评审的头全文草案 + 平台实现分解 + 生命周期时序**——两条通道（应用级托盘 / 窗口级拖入）各走一条与 R9 同构的惯例分支，公共 API 零 Win32 类型。
 > v1.0：初稿（§1 范围映射 · §2 Public 头全文草案 · §3 实现分解 · §4 链接库传播 · §5 影响面 · §6 生命周期与销毁顺序 · §7 测试方向 · §8 开放决策点 · §9 D0–D11 兑现表 · §10 修订记录）
@@ -1019,6 +1019,7 @@ WM_DROPFILES                                            [系统 → 窗口过程
 
 ## 10. 修订记录
 
+- v1.2（2026-09-17）**状态回写：已实施并验收**（A1–A7 全过）。实施期 5 处实测修正（左键 = `WM_LBUTTONUP` / 双击 = 系统 `DBLCLK` / `NIN_SELECT` 同源去重 / 尾部 `UP` 吞除 / 锚点缓存两分支统一）落在详设 §3.3 与 §9 v1.2 条目——**本稿的设计结论（3 新头 + 6 头修改、应用级接缝形态、状态机两态语义）未变**，仅事件映射按实测收敛。
 - v1.1（2026-09-16）**外部评审「通过，可进详设」——3 个详设前必须收敛项全部处理**：
   - **O-5 核实（🔴→✅）**：MSDN `NOTIFYICONDATAW` 原文证实 v4 锚点 = `GET_X_LPARAM/GET_Y_LPARAM(wParam)`（与本稿 §3.2 逐字一致）；**核实挖出新问题**——`WM_CONTEXTMENU` 不在坐标有效列表（"For all other messages, wParam is undefined"）⇒ §3.2 补 `GetCursorPos()` 兜底分支、§2.2 头注释同步；坐标空间按屏幕坐标设计（`TrackPopupMenu` 直接消费），详设实测一次确认。
   - **O-6 拍板 C（🔴→✅）**：`PlatformWindowHost` 新增 `virtual Window& GetWindow() noexcept = 0`（§2.10 新小节）——表达「每个 PlatformWindow 必然对应一个宿主 Window」的既有事实；影响面 grep 实证 = 2 实现者（`Window` 实现 `return *this;` + `EventTests::FakeHost` 补 1 override）；§3.6 构造改 `&m_host.GetWindow()`；`Window::OnEvent` 零改动；B（const_cast）淘汰。

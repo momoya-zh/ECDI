@@ -977,10 +977,10 @@ CaptionBar::OnPaint  → Window::GetWindowState()  → m_platformWindow->GetWind
 | # | 项 | 判据 | 实测结果 |
 |---|---|---|---|
 | **A1** | MSVC Debug 构建 + `ecdi_tests` 全量 | 失败数 **0**；报告须写明**断言是否启用**（MSVC + CMake Debug 带 `_DEBUG`）。用例总数 = 183 + 新增（T13-1 八态按 1 用例计 ⇒ 预计 **+5**） | ✅ **188 passed / 0 failed** |
-| **A2** | 四工具链构建（MSVC / ClangCL / Clang / MinGW） | 全部编译通过；**MinGW 欲验断言须加 `-DCMAKE_CXX_FLAGS=-D_DEBUG`**（skill 条 35——默认 MinGW Debug 下断言是死代码） | ✅ **四构建全绿 188/188** |
+| **A2** | 四工具链构建（MSVC / ClangCL / Clang / MinGW） | 全部编译通过；**MinGW 欲验断言须加 `-DCMAKE_CXX_FLAGS=-D_DEBUG`**（skill 条 35——默认 MinGW Debug 下断言是死代码）。⚠️ **2026-09-17 更新**：`CMakeLists.txt` 已为非 MSVC 模拟工具链按 Debug 配置自动补 `_DEBUG`，**无需再加 flag**（Phase 14 详设 §8 A2） | ✅ **四构建全绿 188/188** |
 | **A3** | 手测 `modelprobe.exe --borderless` | ① 拖标题文字能移窗；② 三按钮各生效；③ hover 高亮（close 变红）；④ close 触发后端清理日志；⑤ 最大化后 max 图标变「还原」；⑥ 页面底部无裁切异常 | ✅ **6 项通过**（含 ⑥ 底部无被裁 32px） |
 | **A4** | 手测 `modelprobe.exe`（Normal） | 系统标题栏行为**完全不变**（无 CaptionBar、无命中变化）——零回归 | ✅ **通过**（含 ④ 关窗后 `probe.exe` 随之退出）。⚠️ **复跑命令已变（v1.5）**：2026-09-15 起 ModelProbe 默认自绘标题栏 ⇒ Normal 复跑请用 **`modelprobe.exe --native`** |
-| **A5** | 断言启用核验 | ⚠️ **判据按工具链二分**（v1.3 修正——原判据「`grep -c _DEBUG`」对 MSVC / ClangCL **会误判**）：**MSVC 系查 `-MDd` / `/MDd`**（debug CRT 隐含定义 `_DEBUG`，ninja 文本中仅 1 处命中）；**GNU 系查 `-D_DEBUG`**。**实测（2026-09-14）**：`debug-visual-studio` = `-MDd` ✅ 断言启用 · `debug-clangcl` = `-MDd` ✅ · `debug-clang` = `-D_DEBUG` ✅ · **`debug-mingw` = 0 命中 ⇒ 断言是死代码**（欲验须加 `-DCMAKE_CXX_FLAGS=-D_DEBUG`，skill 条 35） |
+| **A5** | 断言启用核验 | ⚠️ **判据按工具链二分**（v1.3 修正——原判据「`grep -c _DEBUG`」对 MSVC / ClangCL **会误判**）：**MSVC 系查 `-MDd` / `/MDd`**（debug CRT 隐含定义 `_DEBUG`，ninja 文本中仅 1 处命中）；**GNU 系查 `-D_DEBUG`** | ✅ **通过（2026-09-14）**：`debug-visual-studio` = `-MDd` ✅ · `debug-clangcl` = `-MDd` ✅ · `debug-clang` = `-D_DEBUG` ✅ · **`debug-mingw` = 0 命中 ⇒ 断言是死代码**（欲验须加 `-DCMAKE_CXX_FLAGS=-D_DEBUG`，skill 条 35）。**2026-09-17 更新**：`CMakeLists.txt` 已按 Debug 配置为非 MSVC 模拟工具链自动补 `_DEBUG`，MinGW 复测 **7/7** ✅（Phase 14 详设 §8 A2） |
 | **A6** | 静态自查（AI 侧） | 4 处述语替身全部补齐（`FakeHost` + 2×`TestPlatformWindow`）；`grep -rn "IsClientInteractiveAt"` → **override 实现 = 2（1 生产 + 1 替身）**：`Window` / `EventTests::FakeHost`；`grep -rn "GetWindowState"` → **override 实现 = 3（1 生产 + 2 替身）**：`Win32PlatformWindow` / `AnimationTests::TestPlatformWindow` / `ProgressBarTests::TestPlatformWindow`（**勿读成「3 个生产实现」**） | ✅ 通过 |
 
 **A 项执行摘要（2026-09-14 收口）**：

@@ -1,8 +1,8 @@
-﻿# Phase 14 托盘与拖入接缝 详细设计（v1.1）
+﻿# Phase 14 托盘与拖入接缝 详细设计（v1.2）
 
 > 阶段：详细设计（五阶段法 ③）
-> 日期：2026-09-16
-> 状态：待评审
+> 日期：2026-09-16（v1.2：2026-09-17 实施并验收）
+> 状态：✅ **已实施并验收**（A1–A7 全过，2026-09-17）——实施期 5 处实测修正见 §3.3 与 §9
 > 前置：`phase14-tray-and-drop-preliminary-design.md` **v1.1**（外部评审「通过，可进详设」· 2026-09-16）
 > 一句话：把初设的 3 新头 + 7 头修改落成**可直接施工的逐文件最小 diff 规格**（每处标注动哪几行 / 不动哪些行）+ 平台实现全文规格 + 状态机完整转移表（含失败分支）+ 测试规格与工程注册——**不换初设路线**（不动渲染四层 / Window 所有权契约 / Phase 12 拦截骨架 / Phase 13 命中委托）。
 > v1.0：初稿（§1 实施前核实与精化 · §2 逐文件改动清单 · §3 关键实现规格 · §4 工程注册 · §5 测试规格 · §6 契约汇总 · §7 已知局限 · §8 验收清单 · §9 修订记录）
@@ -401,17 +401,22 @@ private:
 
 > 成员 `m_trayIconNeedsDestroy` 已列入 §2.10 类定义（v1.1 修正——评审收口项 ①）；语义不变：`LoadImageW` 成功 ⇒ `true`、降级 `LoadIconW` ⇒ `false`（共享句柄，不销毁）。
 
-### 3.3 v4 回调翻译规则（终版——O-5 已核实）
+### 3.3 v4 回调翻译规则（**实测定稿版**——v1.2 依 2026-09-17 手测重写）
 
-| `LOWORD(lParam)` | TrayEventType | 锚点来源 |
-|---|---|---|
-| `NIN_SELECT` | `Select` | `GET_X/Y_LPARAM(wParam)`（MSDN 有效列表内） |
-| `NIN_KEYSELECT` | `KeySelect` | 同上（键盘生成时 = 图标左上角） |
-| `WM_LBUTTONDBLCLK` | `DoubleClick` | 同上（∈ WM_MOUSEFIRST..LAST） |
-| `WM_CONTEXTMENU` | `ContextMenu` | **wParam undefined ⇒ `GetCursorPos()` 兜底**；失败用最近锚点 |
-| 其它（`NIN_POPUPOPEN` / balloon 系） | 忽略 | — |
+| `LOWORD(lParam)` | TrayEventType | 锚点来源 | 实测处置 |
+|---|---|---|---|
+| `WM_LBUTTONUP` | `Select` | `GET_X/Y_LPARAM(wParam)` | **左键单击的真实来源**（修正一：原稿认 `NIN_SELECT` ⇒ 左键**完全无反应**且静默） |
+| `NIN_SELECT` | **不翻译** | — | **与 `WM_LBUTTONUP` 同源重复**（修正三：两条都认会让单击上报两次——实测"点一下 #2、再点一下 #4"） |
+| `NIN_KEYSELECT` | `KeySelect` | 同上（键盘生成时 = 图标左上角） | 键盘激活独立路径——保留 |
+| `WM_LBUTTONDBLCLK` | `DoubleClick` | 同上（∈ WM_MOUSEFIRST..LAST） | **双击的权威来源**（修正二：原稿忽略它、改用 UP 配对自合成 ⇒ 双击不可达） |
+| `WM_CONTEXTMENU` | `ContextMenu` | **wParam undefined ⇒ `GetCursorPos()` 兜底** | 右键（v4 唯一明确列出的鼠标消息变化） |
+| 其它（`NIN_POPUPOPEN` / balloon 系） | 忽略 | — | — |
 
-坐标空间：**按屏幕坐标施工**（`TrackPopupMenu` 直接消费）；A5 手测打印 `GetCursorPos()` 与锚点对比确认（O-5 的最后一步）。
+**双击序列与尾部 UP 吞除（修正四）**：实测完整序列 = `WM_LBUTTONUP` + `WM_LBUTTONDBLCLK` + `WM_LBUTTONUP`（**6 组样本，`DBLCLK` 与尾部 `UP` 间隔恒 0 ms**）。尾部那个 `UP` 属双击序列本身 ⇒ 平台层在发出 `DoubleClick` 时**武装** `m_swallowNextUpTick`，其后 `GetDoubleClickTime()` 内的第一个 `UP` 被吞除（两次**独立**单击之间不存在 `DBLCLK` ⇒ 不会误吞；宿主不发尾部 UP 时标志自动失效、不粘连下一次单击）。不吞则一次双击报 **3 个**事件（`Select` / `DoubleClick` / `Select`）。
+
+**锚点缓存（修正五）**：`m_lastAnchorX/Y` 由**两个分支统一提交**（`ContextMenu` 用 `GetCursorPos`、其余用 v4 锚点）；`ShowTrayMenu` 在锚点为 `(0,0)` 时回退 `GetCursorPos()`——原稿只在鼠标消息分支更新 ⇒ **首次直接右键时菜单弹在屏幕左上角**（实测症状为诡异的"先点一次左键才正常"）。
+
+坐标空间：**屏幕坐标**（v1.2 由 **A5 实测确认**：`Select(x,y)` 与同刻 `cursor` 重合）。
 
 ### 3.4 `Win32PlatformApplication` 实现要点
 
@@ -772,7 +777,10 @@ Hide 路径（新增，正交）：
 | **T14-9** | DropFilesTests | 派发路径 | 拖到子控件 / 空白区 ⇒ HitTest 目标不同；bubbling 到达 RootWidget（与鼠标同族断言） |
 | **T14-10** | WindowChromeTests 或新 | `Hide()` 契约 | Hide 后 `IsWindowVisible=false` 但 `Release()` 前一切如常；Hide 不产生 `WindowDestroyedEvent` |
 | **T14-11** | ApplicationTests 或新 | 退出开关两态 | 默认：销毁最后窗口 ⇒ `RequestExit` 被调（替身平台）；false ⇒ 不调。显式 `Exit()` 两态下均有效 |
+| **T14-12** | TrayTests | 左键与双击路径（**修正一~四回归**） | `UP` ⇒ `Select`；`DBLCLK` ⇒ `DoubleClick` 并**武装吞除**、其后 `UP` 被吞；`NIN_SELECT` ⇒ **零事件**；`NIN_KEYSELECT` ⇒ `KeySelect`；`ContextMenu` 后锚点缓存被刷新 |
 | **回归** | 全部既有 | 188 用例 | 零回归（重点：窗口销毁 / `PlatformApplication` 契约 / 事件分派） |
+
+**实际落地（v1.2）**：**196 用例 = 188 + 8** —— `TrayTests` 5（状态机与 Shell 序列 / 自愈 / 失败语义 / 析构防线 / **左键与双击路径**）+ `DropFilesTests` 3（事件构造与派发 / HDROP 生命周期 / 默认关闭）。**T14-9**（Widget 级 bubbling 派发）需真实窗口树，按 §5.2 **降级归手测 A4** 覆盖（已由"拖标题栏条带 / 拖页面区"的派发差异实证）。
 
 **测试缝设计（Shell seam——v1.1 拍板：函数指针形态，条 51 纪律：不出实现层、保 `final`）**：`Win32PlatformApplication` 内部持 `NotifyShellFn m_notifyShell` / `DragFinishFn m_dragFinish`（默认指向静态 adapter——真实 API；测试注入替身记录调用序列）；`Win32PlatformWindow` 同款持 `m_dragFinish`。两缝均为实现层细节，**不进 Public 头**、继承结构零改动。
 
@@ -821,20 +829,30 @@ Hide 路径（新增，正交）：
 
 ## 8. 验收清单（A 项——由用户在 VS / CLion 执行）
 
-| # | 项 | 判据 |
-|---|---|---|
-| **A1** | MSVC Debug 构建 + 全量测试 | 失败数 0；报告写明断言是否启用（MSVC Debug 带 `_DEBUG`）；用例数 = 188 + 新增（T14-1..11 预计 +11 ⇒ **199**） |
-| **A2** | 四工具链 | MSVC / ClangCL / Clang / MinGW 全绿（MinGW 断言核验按条 35/50） |
-| **A3** | 托盘手测 | §5.2 A3 四行全过 |
-| **A4** | 拖入 + UIPI + 模式手测 | §5.2 A4 三行全过 |
-| **A5** | O-5 坐标实测 | §5.2 A5——**初设遗留的最后一步** |
-| **A6** | 静态自查（AI 侧） | 替身补齐（TestPlatformWindow ×2）；`grep "GetWindow"` 接口零改动确认；BOM；`git diff` 逐行 |
-| **A7** | ModelProbe 集成手测 | `--native` 模式下接入托盘（现成 `app.ico`）——Phase 13 A4 零回归路径仍可复跑 |
+| # | 项 | 判据 | 实测结果（2026-09-17） |
+|---|---|---|---|
+| **A1** | MSVC Debug 构建 + 全量测试 | 失败数 0；报告写明断言是否启用 | ✅ **196/196**（188 + 8；T14-9 降级归手测 A4，见 §5.1） |
+| **A2** | 四工具链 | MSVC / ClangCL / Clang / MinGW 全绿（断言核验按条 35/50） | ✅ 四链全绿。**断言启用三层取证**：MSVC / ClangCL（`-MDd` 隐含）、Clang（CMake 的 MSVC 模拟注入 `-D_DEBUG`）**7/7 命中** ✅；**MinGW 原 0/7（断言层死代码）⇒ 已由 `CMakeLists.txt` 按 Debug 配置补 `_DEBUG`（限非 MSVC 模拟工具链）修复，复测 7/7** |
+| **A3** | 托盘手测 | §5.2 A3 全过 | ✅ 通过（修正一~五后：图标与 tip · 单击 **1** 事件 · 双击 **2** 事件 · 右键菜单**首次即在图标处** · explorer 重启自愈 · 退出后图标立即消失） |
+| **A4** | 拖入 + UIPI + 模式手测 | §5.2 A4 全过 | ✅ 通过（UTF-8 **中文路径原样** · **派发差异**（标题栏条带无 `拖入：` 行 / 页面区有）· 句柄无泄漏 · UIPI 平台约束验证 · R13 模式 A·B） |
+| **A5** | O-5 坐标实测 | §5.2 A5 | ✅ 通过（`Select(x,y)` 与同刻 `GetCursorPos()` 重合 ⇒ 锚点为**屏幕坐标**） |
+| **A6** | 静态自查（AI 侧） | 替身补齐（`PlatformWindow` ×2）；接口零改动确认；BOM；`git diff` 逐行 | ✅ 通过 |
+| **A7** | ModelProbe 集成手测 | 接入托盘（现成 `app.ico`）——Phase 13 A4 零回归路径仍可复跑 | ✅ 已接线（3 文件 +151−2）：托盘 + 拖入 + **事件日志**（`modelprobe-events.log`）+ 4 开关（`--no-tray` / `--no-drop` / `--stay` / `--hide-on-close`）；`--native` 零回归路径保留 |
 
 ---
 
 ## 9. 修订记录
 
+- v1.2（2026-09-17）**实施并验收——5 处实测修正回写**（本阶段唯一在实施期改动设计语义的版本，逐条附实测依据）：
+  - **修正一（§3.3）**：v4 下左键单击走鼠标消息 `WM_LBUTTONUP`；原稿认 `NIN_SELECT` ⇒ 左键**完全无反应**且**静默**（落 `default`）。
+  - **修正二（§3.3）**：双击改由**系统 `WM_LBUTTONDBLCLK`** 上报；原稿"忽略 `DBLCLK` + 以 UP 配对自合成"方案弃用（`DBLCLK` 既权威又可用）。
+  - **修正三（§3.3）**：**删除 `NIN_SELECT` 分支**——实测它与 `WM_LBUTTONUP` **同源重复**（一次左键单击两条都到 ⇒ 单击被上报两次："点一下 #2、再点一下 #4"）。
+  - **修正四（§3.3）**：**吞除双击序列尾部的 `UP`**——实测双击 = `UP` + `DBLCLK` + `UP`，末段间隔恒 0 ms；不吞则一次双击报 3 个事件。
+  - **修正五（§3.3）**：锚点缓存 `m_lastAnchorX/Y` **两分支统一提交** + `ShowTrayMenu` 的 `(0,0)` 兜底——原稿只在鼠标消息分支更新 ⇒ **首次直接右键菜单弹在屏幕左上角**。
+  - **测试**：新增 **T14-12**（左键与双击路径，覆盖修正一~四 + 锚点缓存回归）；实测 **196/196**（188 + 8）。
+  - **构建**：`CMakeLists.txt` 为非 MSVC 模拟工具链按 Debug 配置补 `_DEBUG` ⇒ **MinGW 断言层不再是死代码**（条 35 / 50 的缺口闭合）。
+  - **ModelProbe（A7）**：接入托盘 + 拖入；新增 `modelprobe-events.log` **事件日志**（判别"一次操作来几个事件"的关键工具，也是本轮定案依据）；`AppendNotice` 补 `Invalidate()`（`TextWidget::SetText` 按契约不请求重绘——漏它会静默不刷新，极易误判成"事件没到达"）。
+  - §8 补「实测结果」列；§3.3 换为实测定稿版；§5.1 补 T14-12 与实际用例数。
 - v1.1（2026-09-16）**外部评审「通过，可进实现」——4 项施工前收口全部处理**：
   - **① §2.10 补成员**：`bool m_trayIconNeedsDestroy = false;`（§3.2 已用而类定义漏列——评审抓到；§3.2 补记段同步改指向）。
   - **② §3.4 补齐四个平台方法骨架**：`SetTrayIcon`（含 ④ HICON 替换契约）/ `RemoveTrayIcon` / `HandleTrayCallback`（引用 §3.3 终版）/ **`HandleDropFiles` 全文**（v1.0 写「见 §3.4」但 §3.4 未含——引用缺口补齐）；`BuildIconData` 参数化（`(HICON, const std::wstring&)`——SetTrayIcon 传新值、自愈/析构传当前值）。
