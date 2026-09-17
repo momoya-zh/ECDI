@@ -11,6 +11,7 @@
 #include "ECDI/Core/Font.h"
 #include "ECDI/Core/String.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
+#include "ECDI/EventSystem/Window/DropFilesEvent.h"   // Phase 14 A7：OnDropFiles override（Widget 级观测）
 #include "ECDI/Layout/HorizontalLayout.h"
 #include "ECDI/Layout/VerticalLayout.h"
 #include "ECDI/Platform/ExecutablePath.h"
@@ -493,8 +494,59 @@ void ModelProbePage::SetWindow(Window* window) noexcept{
 
 void ModelProbePage::AppendWindowState(const std::string& stateName){
 
-	if (m_windowEventLabel)
-		m_windowEventLabel->SetText("窗口事件：" + stateName);
+	AppendNotice("窗口事件：" + stateName);
+
+}
+
+void ModelProbePage::WriteLog(const std::string& text){
+
+	// ── 事件日志：标签只留最新一条（SetText 替换语义），日志保留**完整序列** ──
+	// 追加写 + 立即 flush ⇒ 随时可用记事本打开看；相对毫秒时间戳便于判断"间隔多久"
+	// 惰性打开（exe 同目录；每次启动截断）；打不开则静默跳过——观测设施不阻塞主流程
+	if (!m_eventLog.is_open()){
+		m_eventLog.open(Platform::GetExecutableDirectory() + "\\modelprobe-events.log",
+			std::ios::out | std::ios::trunc);
+		if (m_eventLog.is_open()){
+			m_logStartTick = GetTickCount64();
+		}
+	}
+	if (m_eventLog.is_open()){
+		m_eventLog << "[+" << (GetTickCount64() - m_logStartTick) << " ms] " << text << '\n';
+		m_eventLog.flush();
+	}
+
+}
+
+void ModelProbePage::LogEvent(const std::string& text){
+
+	// 只写日志、不动标签（A4/A5：一次操作有多行细节——拖入路径列表、光标坐标对照）
+	WriteLog(text);
+
+}
+
+void ModelProbePage::AppendNotice(const std::string& text){
+
+	WriteLog(text);
+
+	if (m_windowEventLabel){
+		m_windowEventLabel->SetText(text);
+
+		// ★ 必须显式请求重绘：TextWidget::SetText **只改数据、不 Invalidate**
+		//（Widget.h:109 契约——"不 Arrange、不 Invalidate、不挂钩 SetText，布局/重绘由调用方负责"）。
+		// 鼠标事件路径会捎带触发重绘因而看不出问题，但**托盘事件不经过 Widget**——
+		// 漏了这行会让界面静默停在旧文本上，极易被误判成"事件没到达"（2026-09-17 实测踩中）。
+		Invalidate();
+	}
+
+}
+
+void ModelProbePage::OnDropFiles(const DropFilesEvent& event){
+
+	// Phase 14 A4 手测观测：拖到**页面区域**才到达这里——拖到标题栏条带时 HitTest 命中 CaptionBar
+	//（root 的兄弟、非本页祖先），bubbling 不跨兄弟 ⇒ 本方法不被调用。
+	// 路径列表与 UTF-8 校验由 Application 级 OnDropFiles 打印（main.cpp）。
+	AppendNotice("拖入：" + std::to_string(event.GetPaths().size()) + " 个文件 ("
+		+ std::to_string(event.GetX()) + "," + std::to_string(event.GetY()) + ")");
 
 }
 

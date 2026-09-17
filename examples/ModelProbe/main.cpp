@@ -8,7 +8,11 @@
 #include "ECDI/Window/Window.h"
 #include "ECDI/Window/CaptionBar.h"   // Phase 13：自绘标题栏（CaptionBar Widget）
 #include "ECDI/Application/Application.h"
+#include "ECDI/Application/TrayIcon.h"   // Phase 14 A7：托盘图标/菜单（值类型——零 Win32 类型）
 #include "ECDI/Core/Logger.h"
+#include "ECDI/Core/String.h"   // Phase 14 A7：日志打印 UTF-8 路径需转 UTF-16
+#include "ECDI/EventSystem/Application/TrayEvent.h"   // Phase 14 A7：托盘交互事件（应用级）
+#include "ECDI/EventSystem/Window/DropFilesEvent.h"   // Phase 14 A7：文件拖入事件（窗口级）
 #include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"   // 文件名沿框架既有拼写（Requested → Requsted）
 #include "ECDI/EventSystem/Window/WindowStateChangedEvent.h"   // Phase 12 实测：状态事件回流
@@ -18,6 +22,7 @@
 #include "ModelProbe.h"   // examples/ModelProbe 同目录（2026-09-03：demo 独立文件夹——原 src/Demo/ 相对路径废弃）
 
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace {
@@ -36,6 +41,12 @@ public:
 
 	void SetProbePage(ECDI::Demo::ModelProbePage* page) noexcept{ m_probePage = page; }
 
+	/// @brief 设置目标窗口（Phase 14 A7——托盘菜单的运行期操作 + 模式 B 隐藏；非拥有——B 契约）
+	void SetWindow(ECDI::Window* window) noexcept{ m_window = window; }
+
+	/// @brief 模式 B（A4-Mode）：关闭按钮 → `Hide()` 隐藏到托盘（不销毁窗口、不关停后端）
+	void SetHideOnClose(bool enabled) noexcept{ m_hideOnClose = enabled; }
+
 protected:
 
 	void OnTimer(const ECDI::TimerEvent& event) override
@@ -49,11 +60,23 @@ protected:
 
 	void OnWindowCloseRequested(const ECDI::WindowCloseRequestedEvent& event) override
 	{
+		// Phase 14 模式 B（--hide-on-close）：关窗 = 隐藏到托盘——不 ShutdownBackend、不销毁窗口。
+		// 窗口仍在 Application::m_windows ⇒ 「最后窗口关闭」的隐式退出根本不会发生（详设 §6.6 三角关系）
+		if (m_hideOnClose && m_window){
+			m_window->Hide();
+			ECDI::Logger::Log(ECDI::LogLevel::Info, L"Phase14: close -> Hide (mode B; restore via tray menu)");
+			return;
+		}
+
 		// 关窗清理（详设 §7.4 ①②③④）：StopTimer → CloseInput(EOF→probe 自退) → Wait/Terminate 兜底
 		if (m_probePage){
 			m_probePage->ShutdownBackend();
 		}
 		ECDI::Application::OnWindowCloseRequested(event);
+
+		// 窗口已进入销毁（Release → deferred destroy）：置空非拥有指针，防托盘菜单再操作悬空对象
+		// （模式 A --stay：销毁后进程存活 ⇒ 菜单的显示/隐藏失效，仅「退出」有意义）
+		m_window = nullptr;
 	}
 
 
@@ -70,9 +93,94 @@ protected:
 			m_probePage->AppendWindowState(name);
 		}
 	}
+
+	// ── Phase 14 A7：托盘交互（应用级事件——无窗口上下文，不经 HitTest，直接到这里）──
+
+	void OnTrayEvent(const ECDI::TrayEvent& event) override
+	{
+		const char* kind = "Select";
+		switch (event.GetTrayType()){
+			case ECDI::TrayEventType::KeySelect:   kind = "KeySelect";   break;
+			case ECDI::TrayEventType::DoubleClick: kind = "DoubleClick"; break;
+			case ECDI::TrayEventType::ContextMenu: kind = "ContextMenu"; break;
+			default: break;
+		}
+
+		// 观测通道（A3）：**序号** + 种类 + 锚点（屏幕坐标）；日志用 ASCII（条 48），界面用中文
+		// 序号是判定"一次操作来了几个事件"的关键（标签是 SetText 替换语义，不带序号看不出次数）
+		++m_trayEventSeq;
+		if (m_probePage){
+			m_probePage->AppendNotice(std::string("托盘 #") + std::to_string(m_trayEventSeq) + "：" + kind
+				+ "(" + std::to_string(event.GetX()) + "," + std::to_string(event.GetY()) + ")");
+
+			// A5 判据：锚点坐标语义实测——记录**同一时刻的实时光标位置**做对照
+			//（两者基本重合 ⇒ 锚点是屏幕坐标；ContextMenu 走 GetCursorPos 兜底，必然重合）
+			POINT cursor{};
+			GetCursorPos(&cursor);
+			m_probePage->LogEvent("    cursor=(" + std::to_string(cursor.x) + ","
+				+ std::to_string(cursor.y) + ")");
+		}
+		ECDI::Logger::Log(ECDI::LogLevel::Info, ECDI::UTF8ToWide(std::string("TrayEvent: ") + kind));
+
+		if (event.GetTrayType() != ECDI::TrayEventType::ContextMenu){
+			return;
+		}
+
+		// 右键 ⇒ 弹菜单（D10：同步返回选中 ID；0 = 未选中/取消）
+		const int id = ShowTrayMenu(ECDI::TrayMenu{ .items = { { 1, "显示窗口" }, { 2, "隐藏窗口" }, { 3, "退出" } } });
+		ECDI::Logger::Log(ECDI::LogLevel::Info, ECDI::UTF8ToWide("TrayMenu id: " + std::to_string(id)));
+
+		switch (id){
+			case 1:
+				if (m_window){ m_window->Show(); }
+				else{ ECDI::Logger::Log(ECDI::LogLevel::Warning, L"TrayMenu: window already closed (use Quit)"); }
+				break;
+			case 2:
+				if (m_window){ m_window->Hide(); }
+				else{ ECDI::Logger::Log(ECDI::LogLevel::Warning, L"TrayMenu: window already closed (use Quit)"); }
+				break;
+			case 3:
+				if (m_probePage){
+					m_probePage->ShutdownBackend();   // 幂等（多调无害）——模式 B 下窗口未关，此处首次关停
+				}
+				Exit();
+				break;
+			default:
+				break;   // 0 = 取消 / 点击菜单外部
+		}
+	}
+
+	/// @brief 文件拖入（Phase 14 R11——观测后转发基类，保持 Widget 层 bubbling）
+	void OnDropFiles(const ECDI::DropFilesEvent& event) override
+	{
+		int index = 0;
+
+		for (const std::string& path : event.GetPaths()){
+			++index;
+			ECDI::Logger::Log(ECDI::LogLevel::Info, ECDI::UTF8ToWide("DropFiles path: " + path));
+			if (m_probePage){
+				// A4-1 判据：UTF-8 路径**原样**落日志（中文正常显示 = 平台层 UTF-8 边界正确）
+				m_probePage->LogEvent("    路径 " + std::to_string(index) + ": " + path);
+			}
+		}
+
+		if (m_probePage){
+			m_probePage->AppendNotice("拖入：" + std::to_string(event.GetPaths().size()) + " 个文件 ("
+				+ std::to_string(event.GetX()) + "," + std::to_string(event.GetY()) + ")");
+		}
+
+		ECDI::Application::OnDropFiles(event);   // ★ 不得省略：HitTest → Dispatch → Widget::OnDropFiles
+	}
+
 private:
 
 	ECDI::Demo::ModelProbePage* m_probePage = nullptr;   ///< main 设置——窗口生命周期内有效（main 未返回）
+
+	ECDI::Window* m_window = nullptr;   ///< Phase 14 A7：非拥有（Application 拥有——B 契约）；销毁时置空
+
+	bool m_hideOnClose = false;         ///< Phase 14 A7 模式 B：关闭按钮 → 隐藏到托盘
+
+	int m_trayEventSeq = 0;             ///< Phase 14 A3 观测：托盘事件序号（判定"一次双击来几个事件"）
 
 };
 
@@ -97,11 +205,19 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
 	// ── chrome 形态（默认自绘标题栏；配置期 API 只能在 Show 前生效——ChromeMode 一次确定，故经命令行选择）──
 	// 用法：modelprobe.exe [--native] [--borderless [caption inset]] [--layer bottom|desktop]
-	//   （无参数）             自绘标题栏（Borderless + CaptionBar；caption 32 / inset 8）
+	//                     [--no-tray] [--no-drop] [--stay] [--hide-on-close]
+	//   （无参数）             自绘标题栏（Borderless + CaptionBar）+ 托盘图标 + 文件拖入
 	//   --native               系统标题栏（Normal——零回归对照）
 	//   --borderless 40 12     自绘 + 自定义标题栏高度与缩放热区
 	//   --layer bottom         置底档；--layer desktop 桌面档（spike 未通过 → 降级 Bottom + Warning）
+	//   --no-tray / --no-drop  Phase 14 A7 对照：不注册托盘 / 不开启文件拖入
+	//   --stay                 Phase 14 A4 模式 A：真关窗后进程存活（SetQuitOnLastWindowClosed(false)）
+	//   --hide-on-close        Phase 14 A4 模式 B：关闭按钮 = 隐藏到托盘（托盘「显示窗口」恢复）
 	bool borderless = true;    // 默认自绘标题栏（--native 回退系统标题栏）
+	bool trayIcon = true;      // Phase 14 A7：托盘图标（--no-tray 关闭）
+	bool fileDrop = true;      // Phase 14 A7：文件拖入（--no-drop 关闭）
+	bool stayAlive = false;    // Phase 14 A4 模式 A：最后窗口关闭时不退出
+	bool hideOnClose = false;  // Phase 14 A4 模式 B：关闭 = 隐藏到托盘
 	int captionHeight = ECDI::CaptionBar::kDefaultHeight;   // D7：行为区与实体区建议同值
 	int resizeInset = 8;
 	ECDI::WindowLayer layer = ECDI::WindowLayer::Normal;
@@ -131,6 +247,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 				else if (v == L"desktop") layer = ECDI::WindowLayer::Desktop;   // spike 未通过 → 降级 Bottom + Warning
 			} else if (tok == L"--native"){
 				borderless = false;   // 系统标题栏（Normal——零回归对照）
+			} else if (tok == L"--no-tray"){
+				trayIcon = false;
+			} else if (tok == L"--no-drop"){
+				fileDrop = false;
+			} else if (tok == L"--stay"){
+				stayAlive = true;
+			} else if (tok == L"--hide-on-close"){
+				hideOnClose = true;
 			}
 		}
 	}
@@ -152,6 +276,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	page->SetStyle(ECDI::PanelStyleOverride{ .background = ECDI::Color::FromRGBA8(15, 17, 21, 255) });   // #0f1115 全窗底
 
 	application.SetProbePage(page.get());
+	application.SetWindow(&win);         // Phase 14 A7：托盘菜单的运行期窗口操作入口
+	application.SetHideOnClose(hideOnClose);
+	if (stayAlive){
+		application.SetQuitOnLastWindowClosed(false);   // Phase 14 A4 模式 A：最后窗口关闭不退出
+		ECDI::Logger::Log(ECDI::LogLevel::Info, L"Phase14: quit-on-last-window-closed disabled (--stay)");
+	}
 	page->SetWindow(&win);   // Phase 12 实测接缝——非拥有 Window*（B 契约正确用法）
 
 	root.AddChild(std::move(page));
@@ -165,7 +295,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 		ECDI::Logger::Log(ECDI::LogLevel::Info, L"WindowChrome: Borderless enabled");
 	}
 	win.SetWindowLayer(layer);
+
+	// ── Phase 14 A7：托盘图标（应用级能力——与窗口无关；图标资源 ID 默认 102 = ModelProbe.rc 的 IDI_APP）──
+	if (trayIcon){
+		application.SetTrayIcon(ECDI::TrayIconOptions{ .tooltip = kWindowTitle });
+		ECDI::Logger::Log(ECDI::LogLevel::Info, L"Phase14: tray icon registered (right-click for menu)");
+	}
+
 	win.Show();
+
+	// 拖入是**运行期 API**（Show 之后调用才生效——Show 前 = Warning + 忽略，见详设 §2.4 门控）
+	if (fileDrop){
+		win.SetFileDropEnabled(true);
+		ECDI::Logger::Log(ECDI::LogLevel::Info, L"Phase14: file drop enabled (drag files onto the page)");
+	}
 
 	return application.Run();
 }

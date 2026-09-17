@@ -3,6 +3,7 @@
 #include "ECDI/Platform/ChildProcess.h"
 #include "ECDI/Widget/Panel.h"
 
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +16,7 @@ class Label;
 class CheckBox;
 class Radio;
 class Window;   // 前置声明（Phase 12 实测接缝——非拥有指针）
+class DropFilesEvent;   // 前置声明（Phase 14：OnDropFiles override 形参——.cpp 侧含全头）
 
 namespace Demo{
 
@@ -73,6 +75,19 @@ public:
 	/// @brief 窗口状态事件显示（DemoApplication::OnWindowStateChanged 转发——winRow 右侧单行显示最近一条）
 	void AppendWindowState(const std::string& stateName);
 
+	/// @brief 运行期通知显示（Phase 14 A7 手测观测通道——托盘/拖入事件；与窗口状态共用 winRow 右侧标签）
+	void AppendNotice(const std::string& text);
+
+	/// @brief 只写事件日志、不动界面标签（Phase 14 A4/A5 观测补充）
+	/// @details 一次操作常产生多行细节（拖入的路径列表、与实时光标坐标的对照），而标签是 SetText
+	/// **替换**语义只能留一条 ⇒ 细节走日志、标签留给"最新一条事件"。
+	void LogEvent(const std::string& text);
+
+	/// @brief 文件拖入（Phase 14 R9——bubbling 落点观测）
+	/// @details 拖到**页面区域**才会到达这里；拖到标题栏条带时 `HitTest` 命中 `CaptionBar`
+	/// （root 的兄弟、非本页祖先），bubbling 不跨兄弟 ⇒ 本方法不被调用。默认空实现不感知。
+	void OnDropFiles(const DropFilesEvent& event) override;
+
 	// ── 测试/调用驱动 API（demo 控件公开接口——构造界面与测试共用）──
 
 	void SetBaseUrl(const std::string& url);        ///< 设置 base URL 输入框
@@ -93,6 +108,9 @@ private:
 	void GenerateJson();
 	void RebuildRows();
 	void UpdateStat();
+
+	/// @brief 事件日志写入（AppendNotice / LogEvent 共用——惰性打开 + 相对毫秒时间戳 + 立即 flush）
+	void WriteLog(const std::string& text);
 
 	/// @brief 状态消息统一出口（9.8）：SetText → AutoSize（宽度随内容）→ statRow Arrange（兄弟随动）→ Invalidate
 	void RefreshStatText(const std::string& message);
@@ -116,6 +134,13 @@ private:
 	Radio* m_fmtCfg = nullptr;
 	Window* m_window = nullptr;           ///< 非拥有——运行期 API 实测接缝（SetWindow 注入）
 	Label* m_windowEventLabel = nullptr;  ///< 最近一条窗口状态事件（winRow 右侧）
+
+	/// A3 手测：事件日志（exe 同目录 `modelprobe-events.log`——**追加**语义，带相对毫秒时间戳）
+	/// @details 为什么需要：标签是 SetText **替换**语义，只留最新一条，中间态与到达顺序全丢；
+	/// 而"一次操作到底来几个事件、什么顺序"恰恰是托盘判据（2026-09-17 实测反复受困的一点）。
+	/// 惰性打开（首次 AppendNotice），打不开则静默跳过——观测设施不阻塞主流程。
+	std::ofstream m_eventLog;
+	unsigned long long m_logStartTick = 0;   ///< 日志起点（相对时间戳用；不可用 Win32 类型——本头不引 Windows.h）
 
 	// ── 模型行池（复用——避免反复 AddChild 抖动树；idx 稳定 = model 序）──
 	struct RowWidgets{
