@@ -27,5 +27,7 @@ void RegisterImageDecodeTests();
 void RegisterAntiAliasingTests();   ///< Phase 8.6：圆角覆盖度抗锯齿（L1 掩码数学 + L2 GDI 集成）
 void RegisterWindowChromeTests();   ///< Phase 12：WindowChrome（chrome 形态 / 九宫格命中 / rcWork / 状态事件）
 void RegisterCaptionBarTests();   ///< Phase 13：CaptionBar（命中委托 / 按钮命令 / 状态查询 / 命令断言）
+void RegisterTrayTests();   ///< Phase 14：托盘（状态机 / Shell 序列 / 自愈 / 失败语义 / 析构防线）
+void RegisterDropFilesTests();   ///< Phase 14：拖入（HDROP 生命周期 / 事件内容 / 默认关闭）
 
 } // namespace ECDI::Test

@@ -13,6 +13,8 @@
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
+#include "ECDI/EventSystem/Window/DropFilesEvent.h"
+#include "ECDI/EventSystem/Application/TrayEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/Widget/Widget.h"
@@ -29,9 +31,21 @@ Application::Application()
 	// 7.1.5：延迟清理逻辑注册给平台循环（时机平台控制——每条消息后 PerformDeferredCleanup）
 	m_platformApplication->SetDeferredCleanup([this]{ ProcessDeferredDestroy(); });
 
+	// Phase 14 D3：托盘事件上行通道（O-1 契约 A——构造期注册，早于一切上行可能；
+	// sink 内只调 OnEvent——经既有 EventRouter 分派到 OnTrayEvent 虚方法）
+	m_platformApplication->SetTrayEventSink([this](const TrayEvent& event){
+		OnEvent(event);
+	});
+
 }
 
-Application::~Application() = default;   // 7.1.5：析构点在此（Win32PlatformApplication.h 已 include——PlatformApplication 完整）
+Application::~Application(){
+
+	// Phase 14 O-1：先断托盘事件上行，再让 m_platformApplication 析构——
+	// 防止宿主窗口销毁过程中的 Shell 回调访问已析构的 Application（谁注册谁清理）
+	m_platformApplication->SetTrayEventSink(nullptr);
+
+}
 
 int Application::Run() {
 
@@ -112,8 +126,8 @@ void Application::OnWindowDestroyed(
 	m_windows.erase(it);
 
 
-	// 所有窗口都关闭了，退出消息循环
-	if (m_windows.empty()){
+	// 所有窗口都关闭了，退出消息循环（Phase 14 R13：常驻应用可关闭隐式退出——默认 true = 零行为变更）
+	if (m_windows.empty() && m_quitOnLastWindowClosed){
 		Exit();
 	}
 }
@@ -343,6 +357,52 @@ void Application::OnKeyUp(const KeyUpEvent& event) {
 	}
 
 	target->OnKeyUp(event);
+
+}
+
+// ── Phase 14：托盘透传 + 拖入派发 ────────────────────────────────
+
+void Application::SetTrayIcon(const TrayIconOptions& options){
+	m_platformApplication->SetTrayIcon(options);
+}
+
+void Application::RemoveTrayIcon(){
+	m_platformApplication->RemoveTrayIcon();
+}
+
+int Application::ShowTrayMenu(const TrayMenu& menu){
+	return m_platformApplication->ShowTrayMenu(menu);
+}
+
+void Application::SetQuitOnLastWindowClosed(bool enabled){
+	m_quitOnLastWindowClosed = enabled;
+}
+
+// ── Phase 14 R11：拖入派发（HitTest → Dispatch → Bubbling——与鼠标同族）──
+void Application::OnDropFiles(const DropFilesEvent& event){
+
+	Window& window = *event.GetWindow();
+
+	// 1. HitTest（落点为客户区坐标——DragQueryPoint 既有语义，与鼠标同系）
+	Widget* target = FindTargetWidget(window, event.GetX(), event.GetY());
+
+	// 2. 无目标则忽略（与 OnMouseMove 同款语义）
+	if (target == nullptr){
+
+		return;
+
+	}
+
+	// 3. Bubbling：沿 Parent 链逐级调用（与 OnMouseMove 同款——不查 IsHandled）
+	Widget* current = target;
+
+	while (current != nullptr){
+
+		current->OnDropFiles(event);
+
+		current = current->GetParent();
+
+	}
 
 }
 

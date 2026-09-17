@@ -21,6 +21,7 @@ class MouseWheelEvent;
 class KeyDownEvent;
 class KeyUpEvent;
 class CharInputEvent;
+class DropFilesEvent;
 class Layout;
 
 /// @brief ECDI Framework 的 Widget 基类
@@ -154,6 +155,11 @@ public:
 	/// @brief 周期定时器触发（8.5.1；焦点控件可 override——TextBox 光标闪烁）
 	/// @details 空实现——无定时器需求的控件不感知；Event 原则"语义由消费者解释"
 	virtual void OnTimer(const TimerEvent& event);
+
+	/// @brief 文件拖入（Phase 14 R9——bubbling 调用点；默认不响应）
+	/// @details 与鼠标事件同族（Application::OnDropFiles 经 HitTest 找到目标后沿 Parent 链派发）；
+	/// 平台层已完成 DragFinish（R10）——事件携带的是已脱离系统资源的纯数据。
+	virtual void OnDropFiles(const DropFilesEvent& event){}
 
 	// ── Hover（9.5 R4：Hover 状态变化事实——9.6 动画前置）────────
 	// 职责：只产生"已发生的事实"（进入/离开），不负责视觉过渡/动画/Hover Style（语义推迟消费者）

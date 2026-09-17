@@ -14,6 +14,8 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
+#include "ECDI/EventSystem/Window/DropFilesEvent.h"
+#include "ECDI/EventSystem/Application/TrayEvent.h"
 
 namespace ECDI{
 
@@ -103,6 +105,19 @@ void EventRouter::OnEvent(const Event& event){
 	dispatcher.Dispatch<CharInputEvent>([this](const CharInputEvent& e){
 
 			OnCharInput(e);
+
+		});
+
+	// ── Phase 14：拖入 / 托盘 ────────────────────────
+	dispatcher.Dispatch<DropFilesEvent>([this](const DropFilesEvent& e){
+
+			OnDropFiles(e);
+
+		});
+
+	dispatcher.Dispatch<TrayEvent>([this](const TrayEvent& e){
+
+			OnTrayEvent(e);
 
 		});
 

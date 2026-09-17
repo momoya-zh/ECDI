@@ -4,10 +4,12 @@
 #include "ECDI/Core/Logger.h"          // Phase 12：chrome/层级/状态契约的 Warning 日志
 #include "ECDI/Core/String.h"
 #include "ECDI/EventSystem/Window/WindowStateChangedEvent.h"   // Phase 12 R7：WM_SIZE 状态事件
+#include "ECDI/EventSystem/Window/DropFilesEvent.h"            // Phase 14 R9：拖入事件
 
 #include <Windows.h>
 #include <dwmapi.h>                    // Phase 12 R6：DwmExtendFrameIntoClientArea / DwmSetWindowAttribute
 #include <imm.h>
+#include <shellapi.h>                  // Phase 14：DragAcceptFiles / DragQueryFileW / DragQueryPoint / DragFinish
 #include <windowsx.h>                  // Phase 12 R3：GET_X_LPARAM / GET_Y_LPARAM（NCHITTEST 屏幕坐标提取）
 
 #ifdef DrawText
@@ -17,6 +19,7 @@
 #include <cstring>
 #include <string>
 #include <system_error>
+#include <vector>
 
 // ── Phase 12 D-DWM-1（实现期修正）：Win11 圆角常量**无需兜底** ──────────
 // 实测取证：MinGW-w64 的 <dwmapi.h> 把 DWMWA_WINDOW_CORNER_PREFERENCE 定义为
@@ -106,6 +109,81 @@ void Win32PlatformWindow::Show() {
 
 }
 
+void Win32PlatformWindow::Hide() {
+
+	// Phase 14 R12：与 Show() 对称——但 m_shown 是「配置期/运行期」标记，不因隐藏回退
+	if (m_hwnd != nullptr) {
+
+		ShowWindow(m_hwnd, SW_HIDE);
+
+	}
+
+}
+
+void Win32PlatformWindow::SetFileDropEnabled(bool enabled) {
+
+	// Phase 14 R8：运行期契约（与 Minimize 同组——O-3 拍板）
+	if (!m_shown) {
+
+		Logger::Log(LogLevel::Warning,
+			L"FileDrop: SetFileDropEnabled ignored before Show() - runtime API");
+
+		return;
+
+	}
+
+	if (m_hwnd != nullptr) {
+
+		DragAcceptFiles(m_hwnd, enabled ? TRUE : FALSE);   // 幂等（shellapi）
+
+	}
+
+}
+
+void Win32PlatformWindow::DragFinishAdapter(HDROP hDrop) {
+
+	DragFinish(hDrop);
+
+}
+
+void Win32PlatformWindow::HandleDropFiles(HDROP hDrop) {
+
+	// ① 路径列表（UTF-8——边界转换在本层，R9）
+	const UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+
+	std::vector<std::string> paths;
+
+	paths.reserve(count);
+
+	for (UINT i = 0; i < count; ++i) {
+
+		const UINT len = DragQueryFileW(hDrop, i, nullptr, 0);   // 不含终止符
+
+		std::wstring buf(len + 1, L'\0');
+
+		DragQueryFileW(hDrop, i, buf.data(), static_cast<UINT>(buf.size()));
+
+		buf.resize(len);
+
+		paths.push_back(WideToUTF8(buf));
+
+	}
+
+	// ② 落点（客户区坐标——DragQueryPoint 既有语义，与鼠标事件同系）
+	POINT pt{};
+
+	DragQueryPoint(hDrop, &pt);
+
+	// ③ ★ DragFinish 先于事件抛出（R10）——经测试缝（v1.1 拍板：函数指针）
+	m_dragFinish(hDrop);
+
+	// ④ 抛 Framework Event（O-6：Window* 经既有 GetWindow——PlatformWindowHost.h:32-34）
+	DropFilesEvent event(m_host.GetWindow(), std::move(paths), pt.x, pt.y);
+
+	m_host.OnEvent(event);   // → Window::OnEvent → Application::OnEvent → HitTest → Bubbling
+
+}
+
 bool Win32PlatformWindow::Release() noexcept {
 
 	if (m_hwnd==nullptr) {
@@ -184,6 +262,13 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 
 	// ── 内部状态同步（在 Event 翻译前完成，经 Host 回调保证框架层看到最新状态）──
 	switch (msg){
+
+	// ── Phase 14 R9：文件拖入（窗口级——DragAcceptFiles 启用后才收得到）──
+	case WM_DROPFILES:
+
+		HandleDropFiles(reinterpret_cast<HDROP>(wParam));
+
+		return 0;
 
 	// ── Phase 12 R2：无边框客户区（必须先于其它 NC 相关处理）────────────
 	case WM_NCCALCSIZE:

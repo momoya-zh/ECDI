@@ -10,6 +10,22 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
 endif()
 
 # ═══════════════════════════════════════════════════════════════════════════
+# _DEBUG 语义对齐（Phase 14 A2 收口，2026-09-17）
+#   框架断言层以 _DEBUG 为唯一开关（Core/ECDIAssert.h:22——未定义时 FRAMEWORK_ASSERT
+#   整体展开为 ((void)0)，即断言层变死代码）。四工具链的 _DEBUG 来源实测：
+#     · MSVC (cl.exe)             → /MDd 隐含
+#     · clang-cl                  → /MDd 隐含
+#     · clang（MSVC ABI 目标）      → CMake 的 MSVC 模拟注入 -D_DEBUG -D_DLL -D_MT
+#     · MinGW (g++)               → **无**（GNU ABI，CMake 不做 MSVC 模拟）⇒ 断言被编译掉
+#   故只补「非 MSVC 模拟」的工具链，且仅 Debug 配置（Release 不需要断言）。
+#   判据：skill 条 35 / 条 50（断言启用三层取证——二进制层 7 条条件串命中率）。
+# ═══════════════════════════════════════════════════════════════════════════
+
+if(NOT MSVC AND NOT CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+    add_compile_definitions($<$<CONFIG:Debug>:_DEBUG>)
+endif()
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 2026-09-03 拆库（demo 独立 examples/ModelProbe/）/ 2026-09-05 库化实施（Phase 10 详设 v1.1）：
 #   ECDI        = 框架静态库（include/ECDI = 80 Public 头；9 个 Internal 实现头已下沉
 #                 ECDI/src 与同名 cpp 同目录——include/ 内零 Windows.h / 零下沉头引用）
@@ -54,6 +70,9 @@ if(WIN32)
     # Phase 12 WindowChrome dependencies（R6 DWM——静态库模型下 PUBLIC 传播；
     # 未来切换 SHARED 模型时重新评估传播属性）
     target_link_libraries(ECDI PUBLIC dwmapi)
+    # Phase 14 tray-and-drop dependencies（Shell_NotifyIconW / DragAcceptFiles 族——
+    # 唯一归属 shell32；PUBLIC 传播同上）
+    target_link_libraries(ECDI PUBLIC shell32)
 endif()
 
 # ── R5：version.h 生成（三宏——configure 注入 SemVer）──

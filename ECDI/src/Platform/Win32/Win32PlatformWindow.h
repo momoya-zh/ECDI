@@ -62,6 +62,22 @@ public:
 
 	WindowState GetWindowState() const noexcept override;
 
+	// ── Phase 14：窗口显示控制 / 文件拖入 ──────────────────────────
+
+	void Hide() override;
+	void SetFileDropEnabled(bool enabled) override;
+
+	/// @brief DragFinish 测试缝类型（v1.1 拍板：函数指针——不出实现层、保 final）
+	/// @details 声明必须位于首个使用点之前——GCC 对成员函数形参不做延迟名字查找
+	/// （放在 private 区会令 MinGW 报 "'DragFinishFn' has not been declared"）
+	using DragFinishFn = void (*)(HDROP hDrop);
+
+	// ── 测试注入/观测（仅内部头——不进 Public API；条 51：seam 不出实现层）──
+
+	HWND GetHwndForTests() const noexcept{ return m_hwnd; }
+
+	void SetDragFinishForTests(DragFinishFn fn){ m_dragFinish = fn; }
+
 	/// @brief 静态窗口过程（应用层注册 WindowClass 用；GWLP_USERDATA 绑定本实例）
 	static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -69,6 +85,13 @@ private:
 
 	/// @brief 实例级消息处理（WindowProc 路由到这里）
 	LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+	/// @brief WM_DROPFILES 处理（Phase 14——解析 HDROP → DragFinish → 抛事件，R9/R10/R11）
+	void HandleDropFiles(HDROP hDrop);
+
+	/// @brief DragFinish 测试缝实现（类型定义见上方 public 区——此处只留适配器与成员）
+	static void DragFinishAdapter(HDROP hDrop);
+	DragFinishFn m_dragFinish = &DragFinishAdapter;
 
 	/// @brief 最大化客户区校正（R4——rcWork 唯一基准，D-COMP-1：不引入补偿）
 	void AdjustMaximizedClientRect(HWND hwnd, RECT& rcClient);

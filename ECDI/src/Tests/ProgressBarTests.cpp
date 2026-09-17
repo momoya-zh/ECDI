@@ -71,6 +71,12 @@ public:
 
 	WindowState GetWindowState() const noexcept override{ return WindowState::restored; }	// Phase 13：stub
 
+	// ── Phase 14：新增 2 个纯虚（本替身不关心显示/拖入——空实现）──
+
+	void Hide() override{}
+
+	void SetFileDropEnabled(bool) override{}
+
 	PlatformRenderContext m_context;   ///< 空基类可实例化（无纯虚）——测试替身直接持有
 
 	int startCount = 0;

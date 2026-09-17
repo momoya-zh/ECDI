@@ -89,6 +89,28 @@ void Window::Show() {
 
 }
 
+void Window::Hide() {
+
+	// Phase 14 R12：Show 的对称——隐藏 ≠ 销毁（不触发 WindowDestroyedEvent，窗口仍在册）
+	if (m_platformWindow != nullptr) {
+
+		m_platformWindow->Hide();
+
+	}
+
+}
+
+void Window::SetFileDropEnabled(bool enabled) {
+
+	// Phase 14 R8：转发平台能力（默认关闭——零回归底线）
+	if (m_platformWindow != nullptr) {
+
+		m_platformWindow->SetFileDropEnabled(enabled);
+
+	}
+
+}
+
 Widget& Window::GetRootWidget() noexcept {
 
 	return *m_rootWidget;

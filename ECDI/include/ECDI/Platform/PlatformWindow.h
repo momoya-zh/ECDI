@@ -118,6 +118,19 @@ public:
 	/// @details 与 `WindowStateChangedEvent` 互补：事件回答「变成了什么」，本查询回答「现在是什么」。
 	/// 事实的唯一来源在平台层（`WM_SIZE` 时由 `IsIconic` / `IsZoomed` 判定并缓存）——**纯虚**。
 	virtual WindowState GetWindowState() const noexcept = 0;
+
+	// ── Phase 14：窗口显示控制 / 文件拖入（运行期——Show() 之后有效）────
+
+	/// @brief 隐藏窗口（R12——Show 的对称；**不销毁 HWND**）
+	/// @details 与 Release() 的语义边界：Hide = 资源存活仅不可见（可再 Show）；
+	/// Release = 销毁 HWND（不可逆）。**不改 m_shown**（运行期标记不因隐藏回退）。
+	/// @pre Show() 之前调用记 Warning 并忽略（与 Minimize 同组）
+	virtual void Hide() = 0;
+
+	/// @brief 启用 / 停用本窗口的文件拖入（R8；默认关闭）
+	/// @details 平台实现为 DragAcceptFiles 薄封装；幂等、可重复调用。
+	/// @pre Show() 之前调用记 Warning 并忽略（O-3 拍板：运行期分组——架构一致性选择）
+	virtual void SetFileDropEnabled(bool enabled) = 0;
 };
 
 }

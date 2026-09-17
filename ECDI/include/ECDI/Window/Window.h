@@ -56,6 +56,17 @@ class Window : public PlatformWindowHost {
 		/// @brief 显示窗口
 		void Show();
 
+		/// @brief 隐藏窗口（Phase 14 R12——Show 的对称；不销毁 HWND，可再次 Show）
+		/// @details 与 Release() 的区别：**隐藏 ≠ 销毁**。隐藏后窗口对象与 HWND 均存活，
+		/// 仅不可见（不进任务栏）。常驻应用「关闭主窗口但保留托盘」的实现路径 = Hide() 而非 Release()。
+		/// @pre Show() 之前调用记 Warning 并忽略（运行期 API——同 Minimize）
+		void Hide();
+
+		/// @brief 启用 / 停用本窗口的文件拖入（Phase 14 R8；默认关闭）
+		/// @details 启用后拖入文件到本窗口会派发 DropFilesEvent（走既有 HitTest + Bubbling）。
+		/// @pre Show() 之前调用记 Warning 并忽略
+		void SetFileDropEnabled(bool enabled);
+
 		/// @brief 获取 RootWidget（Widget 树的根节点，代表窗口客户区）
 		Widget& GetRootWidget() noexcept;
 

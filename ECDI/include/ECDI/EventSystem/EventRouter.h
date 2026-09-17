@@ -17,6 +17,8 @@ class MouseWheelEvent;
 class KeyDownEvent;
 class KeyUpEvent;
 class CharInputEvent;
+class DropFilesEvent;
+class TrayEvent;
 
 /// @brief 事件路由器基类
 /// @details
@@ -93,6 +95,19 @@ protected:
 
 	virtual void OnCharInput(
 		const CharInputEvent& event
+	){}
+
+	/// @brief 文件拖入（Phase 14 R9；窗口级事件——经既有 HitTest + Bubbling 派发）
+	/// @details 与鼠标事件同族（有落点坐标）；平台层已完成 DragFinish（R10）。
+	virtual void OnDropFiles(
+		const DropFilesEvent& event
+	){}
+
+	/// @brief 托盘交互（Phase 14 R4；**应用级事件——无 HitTest、无来源窗口**）
+	/// @details 与 TimerEvent 的差异：Timer 派发给焦点控件；托盘事件**没有窗口上下文**，
+	/// 直接到达 Application 子类（消费者在此决定弹菜单 / 恢复窗口等）。
+	virtual void OnTrayEvent(
+		const TrayEvent& event
 	){}
 
 };

@@ -15,6 +15,7 @@ enum class EventType{
 	WindowCloseRequested,	///< 用户请求关闭窗口（点击关闭按钮 / Alt+F4）
 	WindowResized,			///< 窗口大小变化
 	WindowStateChanged,		///< 窗口状态变化（Phase 12 R7——minimized/maximized/restored）
+	DropFiles,				///< 文件拖入（Phase 14 R9——窗口级，携带 UTF-8 路径列表 + 落点）
 	Timer,					///< 周期定时器触发（8.5.1；WM_TIMER 翻译，带 timerId）
 
 	// ── 鼠标事件 ────────────────────────────────────
@@ -26,7 +27,10 @@ enum class EventType{
 	// ── 键盘事件 ────────────────────────────────────
 	KeyDown,				///< 键盘按键按下
 	KeyUp,					///< 键盘按键释放
-	CharInput				///< 字符输入（由 WM_CHAR 翻译，一个 wchar_t = 一个事件）
+	CharInput,				///< 字符输入（由 WM_CHAR 翻译，一个 wchar_t = 一个事件）
+
+	// ── 应用事件（Phase 14：应用级——无来源窗口）────────
+	Tray					///< 托盘交互（Phase 14 R4——GetWindow() 恒 nullptr）
 };
 
 }
