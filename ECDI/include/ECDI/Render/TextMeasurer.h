@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "ECDI/Core/Size.h"
 #include "ECDI/Core/Font.h"
