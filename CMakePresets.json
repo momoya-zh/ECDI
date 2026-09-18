@@ -1,0 +1,32 @@
+﻿{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "vs2026",
+      "displayName": "Visual Studio 2026 (x64)",
+      "description": "Generates a native Visual Studio solution: one project per CMake target, wired by ProjectReference. This repository keeps no hand-written .vcxproj - CMake is the only source of truth for the build.",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/cmake-build-vs"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vs2026-debug",
+      "displayName": "Visual Studio 2026 - Debug",
+      "configurePreset": "vs2026",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2026-release",
+      "displayName": "Visual Studio 2026 - Release",
+      "configurePreset": "vs2026",
+      "configuration": "Release"
+    }
+  ]
+}

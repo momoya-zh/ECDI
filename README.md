@@ -56,12 +56,25 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
+For a native Visual Studio solution, use the `vs2026` preset:
+
+```bash
+cmake --preset vs2026            # → cmake-build-vs/ : one project per target
+cmake --build --preset vs2026-debug
+```
+
+There is no hand-written `.vcxproj` in this repository — CMake generates the
+solution, so each target becomes its own project wired with `ProjectReference`,
+and the file lists cannot drift out of sync.
+
 Targets:
 
 | Target | Type | Description |
 |---|---|---|
 | `ECDI` | static library | The framework (`include/ECDI/*.h` — 92 public headers; internal implementation lives in `src/`) |
+| `ecdi_tests` | executable | Self-hosted test suite — 210 cases, zero dependencies |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
+| `visualtest` | executable | Side-by-side visual check for image decoding (Phase 11) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
 
 ### Install & consume as a library
