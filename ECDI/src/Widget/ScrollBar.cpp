@@ -185,9 +185,17 @@ int ScrollBar::OffsetFromThumbStart(int thumbStart) const noexcept{
 
 }
 
-int ScrollBar::MainAxisPos(int mouseX, int mouseY) const noexcept{
+int ScrollBar::MainAxisPosFromClient(int clientX, int clientY) const noexcept{
 
-	return (m_orientation == Orientation::Vertical) ? mouseY : mouseX;
+	// ★ 坐标系换算（既有约定——TextBox.cpp:895）：事件坐标 = **窗口客户区绝对**，
+	//   本控件内部一律用自身局部坐标（ThumbStart/TrackLength 同系）⇒ 先减绝对位置。
+	//   GetAbsolutePosition 已是**视觉坐标**（Phase 15 含沿途内容偏移——详设 §3.2）。
+	const Point abs = GetAbsolutePosition();
+
+	const int localX = clientX - static_cast<int>(abs.x);
+	const int localY = clientY - static_cast<int>(abs.y);
+
+	return (m_orientation == Orientation::Vertical) ? localY : localX;
 
 }
 
@@ -232,7 +240,7 @@ void ScrollBar::OnPaint(PaintContext& ctx, int x, int y){
 
 void ScrollBar::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
-	const int pos   = MainAxisPos(event.GetMouseX(), event.GetMouseY());
+	const int pos   = MainAxisPosFromClient(event.GetMouseX(), event.GetMouseY());
 	const int start = ThumbStart();
 	const int len   = ThumbLength();
 
@@ -280,7 +288,7 @@ void ScrollBar::OnMouseButtonUp(const MouseButtonUpEvent&){
 
 void ScrollBar::OnMouseMove(const MouseMoveEvent& event){
 
-	const int pos   = MainAxisPos(event.GetMouseX(), event.GetMouseY());
+	const int pos   = MainAxisPosFromClient(event.GetMouseX(), event.GetMouseY());
 	const int start = ThumbStart();
 	const int len   = ThumbLength();
 

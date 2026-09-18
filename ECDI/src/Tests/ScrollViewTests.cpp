@@ -497,38 +497,52 @@ void TestScrollBarThumbGeometry(){
 
 void TestScrollBarDragInvertsOffset(){
 	TestableScrollBar bar(ScrollBar::Orientation::Vertical);
+	// ★ 关键：**非零绝对 Y**（40）。事件坐标 = 客户区绝对；垂直条取主轴 Y ⇒
+	//   若控件绝对 y == 0，"客户区 y" 恰好等于"局部 y"，漏掉换算也测不出来（曾经的漏测盲区）。
+	bar.SetPosition(188, 40);
 	bar.SetSize(12, 100);
 	bar.SetRange(400, 100);   // thumbLen 25、denom 75、maxOffset 300 ⇒ offset = 4 × thumbStart
+
+	const Point abs = bar.GetAbsolutePosition();   // (188, 40)
+	const int ax = static_cast<int>(abs.x);
+	const int ay = static_cast<int>(abs.y);
 
 	std::vector<int> notified;
 	bar.SetOnOffsetChanged([&notified](int value){ notified.push_back(value); });
 
-	// ① 按下滑块内（y=10 < 25）⇒ 进入拖拽，抓取偏移 = 10
-	bar.OnMouseButtonDown(MouseButtonDownEvent(nullptr, 6, 10, MouseButton::Left));
+	// ① 按下滑块内（**局部** y=10 < 25）⇒ 进入拖拽，抓取偏移 = 10
+	//    事件坐标 = 绝对(188,40) + 局部(6,10)
+	bar.OnMouseButtonDown(MouseButtonDownEvent(nullptr, ax + 6, ay + 10, MouseButton::Left));
 	EXPECT_EQ(notified.size(), size_t{ 0 });   // 命中滑块不通知（只改抓取状态）
+	// （若控件误把事件坐标当局部用：局部 y 会算成 50 ⇒ 落到轨道 → 走翻页分支 ⇒ 下面全部失败）
 
-	// 拖到 y=50 ⇒ 滑块起点 40 ⇒ offset = 40×300/75 = 160
-	bar.OnMouseMove(MouseMoveEvent(nullptr, 6, 50));
+	// 拖到局部 y=50 ⇒ 滑块起点 40 ⇒ offset = 40×300/75 = 160
+	bar.OnMouseMove(MouseMoveEvent(nullptr, ax + 6, ay + 50));
 	EXPECT_EQ(bar.GetOffset(), 160);
 	EXPECT_EQ(notified.size(), size_t{ 1 });
 	EXPECT_EQ(notified.back(), 160);
 
 	// 拖到底 ⇒ clamp 到 maxOffset
-	bar.OnMouseMove(MouseMoveEvent(nullptr, 6, 90));
+	bar.OnMouseMove(MouseMoveEvent(nullptr, ax + 6, ay + 90));
 	EXPECT_EQ(bar.GetOffset(), 300);
 
-	bar.OnMouseButtonUp(MouseButtonUpEvent(nullptr, 6, 90, MouseButton::Left));
+	bar.OnMouseButtonUp(MouseButtonUpEvent(nullptr, ax + 6, ay + 90, MouseButton::Left));
 
 	// ② 松开后再移动：不再拖拽（仅 hover 视觉，不动偏移）
-	bar.OnMouseMove(MouseMoveEvent(nullptr, 6, 10));
+	bar.OnMouseMove(MouseMoveEvent(nullptr, ax + 6, ay + 10));
 	EXPECT_EQ(bar.GetOffset(), 300);
 
 	// ③ denom <= 0 除零保护：内容 == 视口 ⇒ 滑块占满、反推恒 0
+	//    另取一处绝对位置，验证换算与具体坐标无关
 	TestableScrollBar full(ScrollBar::Orientation::Vertical);
+	full.SetPosition(40, 30);
 	full.SetSize(12, 100);
 	full.SetRange(100, 100);
-	full.OnMouseButtonDown(MouseButtonDownEvent(nullptr, 6, 50, MouseButton::Left));
-	full.OnMouseMove(MouseMoveEvent(nullptr, 6, 90));
+	const Point absFull = full.GetAbsolutePosition();   // (40, 30)
+	const int fx = static_cast<int>(absFull.x);
+	const int fy = static_cast<int>(absFull.y);
+	full.OnMouseButtonDown(MouseButtonDownEvent(nullptr, fx + 6, fy + 50, MouseButton::Left));
+	full.OnMouseMove(MouseMoveEvent(nullptr, fx + 6, fy + 90));
 	EXPECT_EQ(full.GetOffset(), 0);
 
 	// ④ SetOffset（外部驱动）**不**触发回调（防容器↔条递归——C6/D11）

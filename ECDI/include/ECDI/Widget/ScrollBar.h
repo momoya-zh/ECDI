@@ -101,8 +101,13 @@ private:
 	/// @brief 拖拽反推：滑块起点 → 新偏移（`denom <= 0` 时返回 0——除零保护）
 	[[nodiscard]] int OffsetFromThumbStart(int thumbStart) const noexcept;
 
-	/// @brief 鼠标主轴坐标（垂直取 Y / 水平取 X——相对本控件原点）
-	[[nodiscard]] int MainAxisPos(int mouseX, int mouseY) const noexcept;
+	/// @brief 鼠标主轴坐标（**先把事件坐标换算到自身局部**，再取主轴：垂直取 Y / 水平取 X）
+	/// @details ⚠️ **鼠标事件的 `GetMouseX/Y` 是「窗口客户区绝对坐标」，不是控件局部坐标**
+	/// （既有约定——`TextBox.cpp:895` 有坐标系记录；`Button`/`CaptionButton` 的 I6 判定与
+	/// `TextBox` 的点击定位/拖选**都先减 `GetAbsolutePosition()`**）。
+	/// 本控件内部一律用自身局部坐标（与 `ThumbStart`/`TrackLength` 同系）⇒ 换算**必须在此完成**。
+	/// 漏掉换算的症状：拖拽/翻页按客户区坐标计算，滑块位置与鼠标无关（点哪都跳到别处）。
+	[[nodiscard]] int MainAxisPosFromClient(int clientX, int clientY) const noexcept;
 
 	/// @brief 通知容器偏移变化（回调可空——条可独立使用，D9）
 	void NotifyOffset();
