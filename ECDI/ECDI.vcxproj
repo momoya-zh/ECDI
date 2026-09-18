@@ -222,6 +222,9 @@
     <ClCompile Include="src\Platform\Win32\Win32ChildProcess.cpp" />
     <ClCompile Include="src\Platform\Win32\WicImageDecoder.cpp" />
     <ClCompile Include="src\Platform\Win32\ExecutablePath.cpp" />
+    <ClCompile Include="src\Tests\TrayTests.cpp" />
+    <ClCompile Include="src\Tests\DropFilesTests.cpp" />
+    <ClCompile Include="src\Tests\test_main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\examples\ModelProbe\ModelProbe.rc" />
@@ -331,6 +334,11 @@
     <ClInclude Include="include\ECDI\EventSystem\Window\WindowStateChangedEvent.h" />
     <ClInclude Include="include\ECDI\Window\CaptionBar.h" />
     <ClInclude Include="src\Window\CaptionButton.h" />
+    <ClInclude Include="src\Tests\RunAllTests.h" />
+    <ClInclude Include="src\Tests\TestFramework.h" />
+    <ClInclude Include="include\ECDI\Application\TrayIcon.h" />
+    <ClInclude Include="include\ECDI\EventSystem\Application\TrayEvent.h" />
+    <ClInclude Include="include\ECDI\EventSystem\Window\DropFilesEvent.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ECDI开发规范.md" />
