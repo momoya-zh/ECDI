@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.20)
 project(VisualTest LANGUAGES CXX)
 
 # Phase 11 视觉验收 GUI（人工核）：

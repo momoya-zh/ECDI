@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.20)
 project(MinimalApp LANGUAGES CXX)
 
 # Phase 10 库化烟雾测试（外部消费者验收）：

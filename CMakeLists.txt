@@ -31,7 +31,7 @@ endif()
 #                 ECDI/src 与同名 cpp 同目录——include/ 内零 Windows.h / 零下沉头引用）
 #   modelprobe  = 应用（add_subdirectory(examples/ModelProbe)——链接 ECDI）
 #   ecdi_public_header_test = Public Header 自包含测试（每头一 TU，EXCLUDE_FROM_ALL——
-#                 --target ecdi_public_header_test 按需验证 80 头独立可编译）
+#                 --target ecdi_public_header_test 按需验证 92 头独立可编译）
 # 依赖方向单向律：src → include/ECDI 允许；include/ECDI → src / Windows.h 禁止
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -95,7 +95,9 @@ foreach(h ${PUBLIC_HEADERS})
     file(RELATIVE_PATH rel "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/include" "${h}")
     string(REPLACE "/" "_" tu "${rel}")
     set(tu "${CMAKE_CURRENT_BINARY_DIR}/selfcontain/${tu}.cpp")
-    file(GENERATE OUTPUT "${tu}" CONTENT "#include \"${rel}\"\r\nint avoid_empty_tu = 0;\r\n")
+    # ⚠️ 生成 TU 需要一个符号「避免空 TU」——**必须 static**（内部链接）：否则 92 个 TU
+    # 各定义一个同名**外部**符号 ⇒ 静态库内 92 份重复定义 ⇒ 每次构建刷 91 条 LNK4006（2026-09-18 修正）
+    file(GENERATE OUTPUT "${tu}" CONTENT "#include \"${rel}\"\r\nstatic int avoid_empty_tu = 0;\r\n")
     list(APPEND PUBLIC_HEADER_TEST_TUS "${tu}")
 endforeach()
 add_library(ecdi_public_header_test STATIC EXCLUDE_FROM_ALL ${PUBLIC_HEADER_TEST_TUS})
