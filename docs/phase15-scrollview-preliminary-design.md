@@ -1,6 +1,6 @@
 ﻿# Phase 15 滚动容器（ScrollView + 滚动条）初步设计
 
-> 状态：v1.1（2026-09-18）｜初步设计——🚧 待评审（**v1.0 外部评审「方向通过，但暂不建议直接进详设」→ 已按 A/B 两项修订**：A `ScrollBar` 偏移误伤（结构性）/ B 双轴两轮判定，详见 §9）
+> 状态：v1.2（2026-09-18）｜初步设计——✅ **已通过**（三轮外部评审「可以进入详细设计」，2026-09-18）；**上一轮两项处置已落地并复核**（§9）
 > 前序：需求确认 v1.1 ✅（2026-09-18 二轮外部评审通过，「可进初设」）
 > 上游：[phase15-scrollview-requirements.md](phase15-scrollview-requirements.md)（**§1.4 设计不变量为本稿的强约束**）
 > 相关：phase9.5-r1-clip-detailed-design.md（Clip 能力）/ phase9.6-panel-container-semantics-detailed-design.md（Panel 语义）/ phase13-captionbar-preliminary-design.md（`ConsumesMouseInput` 接缝先例）/ roadmap-deferred.md §7.5
@@ -801,7 +801,7 @@ UpdateContentExtent()
 
 ---
 
-## 9. 评审响应（v1.0）
+## 9. 评审响应（v1.0 → v1.2）
 
 外部评审结论：「**方向通过，但暂时不建议直接进入详细设计**」——需先修正一处结构性问题（`ContentOffset` 不能同时作用于 Content 与 ScrollBar），另建议修一处算法缺口（双轴 viewport 单轮判定）。**其余 9 项通过**（三处坐标变换 · `ClipsChildren()` · ScrollView 继承 `Widget` · extent 模型 · offset 单一真相源 · `UpdateContentExtent()` 原子链 · ScrollBar 数学模型 · ModelProbe 迁移 · ContentView 思路）。
 
@@ -814,10 +814,32 @@ UpdateContentExtent()
 
 **AI 对评审的一处修正**：B 项评审算法在「`needV` 因 `vH` 被扣小而由 false 升级为 true」时漏掉 `vW` 的扣减 ⇒ 最终 viewport 与 need 不自洽；修正版取并集后统一扣减。
 
+### 9.1 三轮评审（2026-09-18）——「可以进入详细设计」+ **一处判断澄清**
+
+**评审结论**：初设方向通过，同意进入详细设计（13 项 ✅：三处坐标变换 / `ClipsChildren()` / 不继承 `Panel` / Content 独立容器 / ScrollBar 不随内容滚动 / ScrollBar 命中坐标 / offset 单一真相源 / extent→clamp→条同步 / 数学模型 / `ConsumesMouseInput` / ModelProbe 迁移方向 / 双轴 reserve；余 4 项归详设）。
+
+**⚠️ 必须记录的「评审基线 vs 事实」差异**：本轮评审**抓取的是 v1.0 页面**（约 705 行 / §3.5 仍为单轮判定 / 成员为 `Widget* m_content`），**未包含 v1.1 的修订**（826 行 / §3.5 已两轮 / 成员为 `ScrollContent* m_content` / 新增 §3.1.1）——**v1.1 在评审时尚未推送**。
+
+**由此产生一处需要澄清的判断**：评审称「ScrollBar 跟着内容滚动的问题**已经不成立了**」，理由为「内容挂到 `content` 下即可」。**该判断不成立** —— `Paint` / `HitTest` 施加的偏移来自**父节点自身的 `GetContentOffset()`**；只要它 override 在 `ScrollView` 上，**`ScrollBar` 作为直接子仍被偏移**（与内容挂在谁下面**无关**）。**AI 数值复现**（`ScrollView` 几何 y=100 / `offsetY=50` / vBar 相对几何 y=0）：
+
+| 结构 | vBar 视觉 y（期望 100） | vBar 命中局部 y（期望 0） |
+|---|---|---|
+| **A** = v1.0（偏移 override 在 `ScrollView`） | **50**（偏差 −50）❌ | **50** ❌ |
+| **B** = v1.1（偏移 override 沉到 `ScrollContent`） | **100** ✓ | **0** ✓ |
+
+且结构 B 下**内容仍正常偏移**（`row3` geom y=84 ⇒ 视觉 `100 − 50 + 84 = 134` ✓）——即「修好条」未「修坏内容」。
+
+⇒ **v1.1 的「偏移消费者下沉」才是真修复**（方向与二轮评审的批评一致）。**本节保留此澄清**，以免详设误以为「content 容器」本身已解决该问题。**回归锚**：§7「偏移层隔离」用例。
+
+**另**：评审建议「双轴两轮判定留详设拍板」——**v1.1 已提前定案**并给出修正算法（评审原版实测 2/6 反例、修正版 0/6；§3.5）。
+
+**详设输入（评审列出的 4 项 ⏳）**：ScrollBar 参数 · content 节点具体类型 · ScrollBar 几何重排 · 测试探针。
+
 ---
 
 ## 10. 修订记录
 
+- v1.2（2026-09-18）**初步设计收口——✅ 已通过**：三轮外部评审「**可以进入详细设计**」（13 项 ✅，余 4 项归详设）。新增 **§9.1**：① 记录**评审基线差异**——本轮评审抓取的是 **v1.0 页面**（v1.1 未推送）；② **澄清一处不成立的判断**——评审认为「content 容器已解决 ScrollBar 误伤」，但偏移来自**父自身的 `GetContentOffset()`**，只要 override 在 `ScrollView` 上，滚动条作为直接子**仍被偏移**（AI 数值复现：结构 A 视觉偏差 −50 / 命中偏差 +50；结构 B 均为 0）；**v1.1 的偏移下沉才是真修复**。头部状态行 → 已通过。
 - v1.1（2026-09-18）**外部评审处置——一处结构性矛盾 + 一处算法不完整**（评审结论：「方向通过，但暂不建议直接进详设」；其余 9 项通过）：
   - **❗A（必须修）`ScrollBar` 被内容偏移误伤**——评审指出：v1.0 把 `GetContentOffsetX/Y()` override 在 **`ScrollView` 自身**，而接缝语义是「作用于全部直接子节点」，`ScrollBar` 作为直接子被一并偏移。**AI 独立数值复现确认成立**（`ScrollView` 几何 y=100 / `offsetY=100` / vBar 几何 (388,0)：条视觉 y 算得 **0**、期望 **100**（偏移 −100）；条的 HitTest 局部 y 算得 **100**、期望 **0**）⇒ **视觉 / 命中 / 绝对坐标三个坐标系同时错**，拖拽·hover·mouse-up 全受影响。**修法**：偏移的消费者**下沉到内容节点**——`ScrollView` 不 override 接缝（偏移恒 0，三个直接子都不受影响），新增**内部头** `src/Widget/ScrollContent.h` 作为**内容坐标空间的根**（唯一被偏移的子树）。**比评审建议的 `ContentSpace → Content` 两层少一层**（Content 自己即偏移消费者，中间转发节点无收益）。
   - **★ 命名避坑（AI 新增发现）**：`ScrollView` 的公共查询用 **`GetScrollOffsetX/Y()`**（`TextBox::GetScrollOffsetY()` 既有先例），**不可**与虚接缝名同名——同名非虚成员触发 **name hiding**（`Widget* p = &sv` 走基类返回 0，`sv.` 走派生返回真值）⇒ **一个查询两份语义**。
