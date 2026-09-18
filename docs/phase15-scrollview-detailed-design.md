@@ -1,6 +1,6 @@
 ﻿# Phase 15 滚动容器（ScrollView + 滚动条）详细设计
 
-> 状态：v1.1（2026-09-18）｜详细设计——🚧 待评审（**v1.0 外部评审「通过，可进入实现」**；**v1.1 补两条实现前修正**——顺序统一 + `ModelProbe.h` 补记，见 §9）
+> 状态：v1.2（2026-09-18）｜详细设计——✅ **已通过并实现完毕**（v1.0/v1.1 外部评审「**通过，可进入实现**」；实现 A/B/C 三批 + 验收实测，见 §9 v1.2 条目）
 > 前序：需求确认 ✅ v1.2（2026-09-18）｜初步设计 ✅ v1.2（三轮外部评审通过「可进详设」）
 > 上游：[phase15-scrollview-requirements.md](phase15-scrollview-requirements.md)（§1.4 四条不变量）· [phase15-scrollview-preliminary-design.md](phase15-scrollview-preliminary-design.md)（§9.1 评审基线澄清）
 > 相关：phase12-windowchrome-detailed-design.md（**逐文件最小 diff 规格**先例）· phase13-captionbar-detailed-design.md（`ConsumesMouseInput` 接缝）
@@ -27,8 +27,13 @@
 | 14 | `examples/ModelProbe/ModelProbe.h` | 修改 | **+1 成员** `ScrollView* m_scroll`（`m_list` 保持 `Panel*`） | §2.11 |
 | 15 | `ECDI/src/Tests/ScrollViewTests.cpp` | **新建** | T15-1..N | §5 |
 | — | `CMakeLists.txt` | **零改动** | — | `GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库（§2.12） |
+| 16 | `ECDI/src/Tests/RunAllTests.h` | 修改 | +1 声明 | §2.12（**v1.2 补记**——v1.0/v1.1 漏记） |
+| 17 | `ECDI/src/Tests/RunAllTests.cpp` | 修改 | +1 调用 | §2.12（**v1.2 补记**） |
+| 18 | `ECDI/ECDI.vcxproj` | 修改 | +3 `ClCompile` +4 `ClInclude` | §2.12（**v1.2 补记**——VS 项目**显式列举**，非 glob） |
 
 **Public 头**：89 → **92**（+`Widget/ScrollView.h` +`Widget/ScrollBar.h` +`Theme/ScrollBarStyle.h`；`ScrollContent.h` 为 `src/` 内部头**不计入**）。
+
+> **v1.2 实测**：实际改动 **18 个文件**（计划 **15** + **3 个补记**：`RunAllTests.h` / `RunAllTests.cpp` / `ECDI.vcxproj`）。**Public 头实测 92** ✓（`include/ECDI/**/*.h` 计数）。
 
 ---
 
@@ -234,6 +239,7 @@ int ScrollContent::GetContentOffsetY() const noexcept{
 | 新增私有 | `int ViewportWidth() const noexcept;` / `int ViewportHeight() const noexcept;`（**扣除已显示条**——§3.3） |
 | 新增私有 | `void SyncBars() noexcept;`（范围 + 几何 + 可见性一次同步——§3.4） |
 | 新增私有 | `void ApplyLayout();`（`ScrollContent` 尺寸 + 两条几何重排） |
+| `SetSize` 访问级别 | **`public`**（**v1.2 实测修正**）：草案列入 `protected`，但与 `TextBox`/`CollapsiblePanel`/`CaptionBar` **三个先例不一致**，且**本头自己的用法示例 `sv->SetSize(400, 300)` 编译不过** ⇒ 移到 `public`。`OnMouseWheel` **保持 `protected`**（事件回调不供外部直调，测试经派生类 `using` 暴露） |
 
 ### 2.6 新建 `ECDI/src/Widget/ScrollView.cpp`（核心实现）
 
@@ -362,6 +368,8 @@ void ScrollView::OnMouseWheel(const MouseWheelEvent& event){
 | `kPageClickRatio` | 翻页量 = `viewportExtent`（一屏）—— 不用比例 |
 | `m_dragGrabOffset` | 拖拽起点在滑块内的相对偏移（防跳） |
 | 未 override `ClipsChildren()` | 保持 false（条的子为空——无子树需约束） |
+| **`GetThickness()`** | **v1.2 补记**（v1.0 漏列）：`ScrollView` 算 viewport 必须读条厚度（§3.3 要扣它），而厚度归 Style（主题可改）⇒ 须**单点可查**，不能在两处各读一份常量。实现为 `public` 内联访问器（`{ return m_style.thickness.value; }`） |
+| `MainAxisPosFromClient` | **v1.2 补记**：私有助手，**先把事件坐标换算到自身局部**再取主轴——见 §2.8.1 坐标系纪律 |
 
 ### 2.8 新建 `ECDI/src/Widget/ScrollBar.cpp`（核心实现——范围模型 §3.4）
 
@@ -444,6 +452,26 @@ int ScrollBar::OffsetFromThumbStart(int thumbStart) const noexcept{
 }
 ```
 
+#### 2.8.1 事件坐标系纪律（**v1.2 补记——实现期真实缺陷**）
+
+⚠️ **鼠标事件的 `GetMouseX/Y` 是「窗口客户区绝对坐标」，不是控件局部坐标**。既有约定，源码原文见 `TextBox.cpp:895`；
+`Button.cpp:116`（I6 拖出释放判定）、`CaptionButton.cpp:56`、`TextBox.cpp:896/910/928`（点击定位/拖选）**全部先减 `GetAbsolutePosition()`**。
+
+```cpp
+// 事件坐标（客户区绝对） → 控件局部（既有坐标系约定——TextBox.cpp:895）
+const Point abs = GetAbsolutePosition();   // 已是视觉坐标（含沿途内容偏移——§3.2）
+local = client - abs;
+```
+
+**实现期缺陷**：`ScrollBar` 初版把事件坐标**直接当局部**用 ⇒ 拖拽 / 轨道翻页 / hover 全按客户区坐标计算（用户实测症状：滑块位置与鼠标无关）。
+**修法**：私有助手 **`MainAxisPosFromClient(clientX, clientY)`** 内完成换算后取主轴 ⇒ 三个调用点一处不改。
+
+**判据（可复用）**：全库 `GetMouseX` grep ⇒ **唯一没做换算的那个就是 bug**（本阶段即如此定位）。
+
+**测试盲区（两层）**：
+1. 直调 `protected` handler 的用例若**直接喂局部坐标**，等于「把事件坐标当局部用」的镜像错误 ⇒ **产品错、测试也错 ⇒ 全绿**。伪造事件**必须加回控件绝对位置**。
+2. **垂直条主轴取 Y**：若控件 `abs.y == 0`，则「客户区 y」恰好等于「局部 y」⇒ **漏换算也测不出**。故被测控件必须放在**绝对坐标非零**处（本阶段取 `SetPosition(188, 40)`）。**通式**：主轴分量对应的那个绝对坐标必须非零（垂直条看 Y，水平条看 X）。
+
 ### 2.9 新建 `ECDI/include/ECDI/Theme/ScrollBarStyle.h`（Public 头 91 → 92）
 
 **沿用初设 §2.4 草案**（6 字段：track/thumb/thumbHover/thumbPressed + cornerRadius + thickness）。**详设定默认值**（§3.5）。
@@ -496,16 +524,26 @@ ScrollBarStyle DefaultTheme::GetScrollBarStyle() const{
 | L371 | `auto list = std::make_unique<ModelListPanel>();` | `auto shell = std::make_unique<Panel>();`（带原 `PanelStyleOverride`）+ `auto sv = std::make_unique<ScrollView>();`；`shell->AddChild(std::move(sv))` |
 | L380 | `m_list = list.get();` | `m_list = shell.get();`（`Panel*` 不变）+ `m_scroll = sv.get();` |
 | L789 | `m_list->AddChild(std::unique_ptr<Widget>(row.panel));` | `m_scroll->GetContentView().AddChild(std::unique_ptr<Widget>(row.panel));` |
-| L798 | `static_cast<ModelListPanel*>(m_list)->SetRows(std::move(rows));` | **删除** `SetRows`（逐行 `AddChild` + `m_scroll->SetScrollStep(28)` + `UpdateContentExtent()`） |
+| L798 | `static_cast<ModelListPanel*>(m_list)->SetRows(std::move(rows));` | **删除** `SetRows`（逐行 `AddChild` + `m_scroll->SetScrollStep(28)` + **显式 `SetContentExtent`**——**v1.2 修正**，见下方偏差说明） |
 | （新增） | — | `m_scroll->SetScrollStep(28);`（**框架默认 32 不绑 Demo**——D5） |
 
 **验收判据**：滚轮一滚一行（28px）· 行高/视觉不变 · 圆角边框保持 · **净删 ~35 行手搓逻辑**。
 
-### 2.12 构建（零改动）
+> ⚠️ **v1.2 实测偏差（extent 的给出方式）**：迁移表原写 **`UpdateContentExtent()`**，实施改为**显式 `SetContentExtent(600, 行数 × kRowHeight)`**。
+> **根因**：行池复用时**被隐藏的旧行仍留在内容树下、且保留创建时的几何**（`SetVisible(false)` 不动 geometry）⇒ 按「子控件包围盒」推导会把它们算进 extent ⇒ **可滚出空白区**。
+> 显式式与原手搓版 `total = rows.size() × rowHeight` **逐位等价**。
+> **连带记账**：`UpdateContentExtent()` **未定义「不可见子控件是否参与包围盒」**——框架层语义缝隙；本阶段**不改框架**，仅 Demo 侧绕开（已入 §8 L8）。
+
+### 2.12 构建（CMake **零改动**——但 VS 项目文件需手工登记）
 
 `CMakeLists.txt` 用 `file(GLOB_RECURSE FRAMEWORK_SOURCES CONFIGURE_DEPENDS "ECDI/src/*.cpp")`
 ⇒ 新增 3 个 `.cpp`（`ScrollContent`/`ScrollView`/`ScrollBar`）**自动入库**；
-`ecdi_public_header_test`（每 Public 头一 TU）自动覆盖新增 3 个头。**无需改构建脚本**。
+`ecdi_public_header_test`（每 Public 头一 TU）自动覆盖新增 3 个头。**测试源文件同样自动入库**。
+
+> ⚠️ **v1.2 补记 ①：`ECDI/ECDI.vcxproj` 是「显式逐行列举」而非 glob** —— 新增的 3 个 `.cpp` 与 4 个头（含**内部头** `src/Widget/ScrollContent.h`）**必须手工补行**，否则在 VS 打开该项目时文件既不参与构建、也不出现在 Solution Explorer。本阶段已补 **+3 `ClCompile`（含 `src/Tests/ScrollViewTests.cpp`）+4 `ClInclude`**。
+> 顺带发现：该文件**早已滞后**（缺 Phase 14 的 `TrayTests.cpp` / `DropFilesTests.cpp` / `test_main.cpp` / `RunAllTests.h` / `TestFramework.h`），**未擅自补**、已单独报用户裁决；`.filters` 滞后更多（24/68 `ClCompile`）但**纯分组用途、不影响构建**。
+
+> ⚠️ **v1.2 补记 ②**：新增测试文件除入库外，还需在 `RunAllTests.h` **+1 声明**、`RunAllTests.cpp` **+1 调用**（§1 表行 16/17）——v1.0 只写了「构建零改动」，漏了这条手工接线。
 
 > ⚠️ **但 CLion 可能需手动 Reload CMake Project**（`CONFIGURE_DEPENDS` 在部分生成器下不即时生效）——交付时提示用户。
 
@@ -612,7 +650,7 @@ thumbStart = maxOffset == 0 ? 0 : (track - thumbLen) × offset / maxOffset
 | **T15-13** | `ScrollBar.DragInvertsOffset` | 拖拽反推；`denom<=0` 除零保护；`m_dragGrabOffset` 不跳动 |
 | **T15-14** | `ScrollBar.ThemeAndOverride` | `ApplyTheme` 注入 + `SetStyle` override 后 `ApplyTheme` **不覆盖**（D7 契约，同 `ProgressBarTests` 先例） |
 
-**用例数**：196（现状）→ **+14 = 210**（预计；实施后以实测为准）。
+**用例数**：196 → **+14 = 210**。**v1.2 实测：210 ✓**（四工具链实测；全库注册名唯一性扫描无重名）。
 
 ---
 
@@ -627,6 +665,21 @@ thumbStart = maxOffset == 0 ? 0 : (track - thumbLen) × offset / maxOffset
 | **A5** | `ModelProbe` 手测 | 滚轮一滚一行（28px）· 行高/圆角/边框不变 · 滚动条可拖拽/翻页 · 标题栏可拖窗（`--borderless`） |
 | **A6** | `ecdi_public_header_test` | 92 头各自独立可编译（含新增 3 头） |
 | **A7** | 交付提示 | CLion 需 Reload CMake Project（§2.12） |
+
+**v1.2 实测结果**：
+
+| # | 状态 | 证据 |
+|---|---|---|
+| **A1** | ✅ | 四工具链构建通过；`ecdi_tests` **210 全绿**（四个 `cmake-build-debug-*` 产物时间戳 2026-09-18 16:34–16:36） |
+| **A2** | ✅ | **二进制铁证 10/10**（特征串见下）。四链 Debug：clang `-D_DEBUG`×169 · clangcl `-MDd`×169 · **mingw `-D_DEBUG`×165** · visual-studio `-MDd`×169 ⇒ **全 10/10 ✅**；Release **0/10（符合预期——断言仅 Debug）**。★ **MinGW 由 Phase 14 的「0/9 死代码」升为「10/10 启用」**（`CMakeLists.txt` 的 `_DEBUG` 补丁生效） |
+| **A3** | ✅ | 既有 196 全保（含 `WidgetTests`/`CollapsiblePanelTests`/`ClipTests` 的 `HitTest` 直调） |
+| **A4** | ✅ | T15-5 `ScrollBar.NotAffectedByContentOffset` 通过（Paint 命令 / HitTest / `GetAbsolutePosition` 三通道逐位一致） |
+| **A5** | ✅ | 用户手测：滚动条**拖动跟手**、轨道翻页正常、行高/圆角/边框不变 |
+| **A6** | 🔶 待编译 | `ecdi_public_header_test` 的 Glob 已生成 **92 个 TU**（Debug 四链 `selfcontain/` 实测各 92）；该目标 `EXCLUDE_FROM_ALL` ⇒ 需显式 `--target ecdi_public_header_test` 实际编译 |
+| **A7** | ⏳ | 交付提示（§2.12） |
+
+**A2 特征串（10 条）**：`it != m_windows.end()` · `m_rootWidget != nullptr` · `current == &GetRootWidget()` · `child->m_parent == nullptr` · `index < m_children.size()` · `!child->Contains(this)` · `it != m_children.end()` · `spacing >= 0` · `stretch >= 0` · **`step >= 0`（Phase 15 新增）**。
+（**搜索纪律**：窄串 —— `HandleAssertFailure` 收 `std::string_view`；**不可**用源文件路径判据，会被调试信息污染；排除通用短串 `child` / `false` / `m_inFrame`。）
 
 ---
 
@@ -659,10 +712,20 @@ thumbStart = maxOffset == 0 ? 0 : (track - thumbLen) × offset / maxOffset
 | **L5** | 嵌套滚动**停递不做**（内外层同时滚） | 记账（D7 降级——条 35） |
 | **L6** | 内容负向坐标（<0）不支持（extent 钳 0） | 记账（条 37） |
 | **L7** | `CaptionBar` 窄窗（<138px）按钮越界仍可命中 | **既有缺陷**，本阶段不处理（条 30） |
+| **L8** | `UpdateContentExtent()` **未定义「不可见子控件是否参与包围盒」**（`SetVisible(false)` 不动 geometry）⇒ 复用型内容池会把它算进去 | 记账（框架层语义缝隙；Demo 侧改用显式 `SetContentExtent` 绕开——§2.11 偏差） |
 
 ---
 
 ## 9. 修订记录
+
+- v1.2（2026-09-18）**实现期回写**（A/B/C 三批实现 + 验收实测；**不改任何设计决策**，只补实测数据与三处实施期偏差）：
+  - **① §2.7 补 `ScrollBar::GetThickness()`**（v1.0 漏列）：厚度参与 viewport 计算 ⇒ 必须单点可查（不可两处各读常量）。
+  - **② §2.8.1 新增「事件坐标系纪律」**：`ScrollBar` 初版把**事件坐标当局部**用（**真缺陷**，用户实测发现）⇒ 引入 `MainAxisPosFromClient` 完成换算；并记录**两层测试盲区**（直调 handler 喂局部坐标 = 镜像同错；`abs.y == 0` 会掩盖垂直轴漏换算）。
+  - **③ §2.11 extent 给出方式偏差**：改用**显式 `SetContentExtent(600, 行数 × 行高)`**（根因：隐藏行池污染包围盒；与原式逐位等价）⇒ §8 新增 **L8** 记账。
+  - **④ §2.5 `SetSize` 访问级别修正**：`protected` → **`public`**（与 `TextBox`/`CollapsiblePanel`/`CaptionBar` 三个先例一致；修正后本头用法示例可编译）。
+  - **⑤ §2.12 构建补记**：`RunAllTests.h/.cpp` 手工接线 + **`ECDI.vcxproj` 显式列举需手工登记**（否则 VS 项目缺失文件）⇒ §1 总览由 **15 → 18 文件**。
+  - **⑥ §5/§6 补实测**：用例 **210 ✓**（= 预测）；**A2 二进制铁证四链 10/10 ✅**，其中 **MinGW 首次由死代码转为启用**。
+  - **实现提交**：`750f39e`（A 批——Widget 接缝）· `ba27e61`（B 批——ScrollView/ScrollBar/Theme）· `dc89301`（vcxproj 登记）· `7654b9f`（C 批——ModelProbe 迁移 + 测试）· `10f5561`（测试脚手架修正：`Panel` 恒不可命中 + 跨场景指针）· `4695e4e`（**事件坐标换算修正**）。
 
 - v1.1（2026-09-18）**实现前两条修正**（v1.0 外部评审「通过，可进入实现」，并提醒 `SetSize`/`SetContentExtent` 顺序为最易写错处）：
   - **① `SetSize` / `SetContentExtent` 顺序统一**（评审提醒 → AI 判定**必须改**）：v1.0 两条路径顺序不同——`SetSize` 是 `ApplyLayout → ClampOffset`，而 `SetContentExtent` 是 `ClampOffset → ApplyLayout`。**该不一致有真实风险**：`ApplyLayout` 决定滚动条**可见性** ⇒ 决定 `ViewportWidth/Height` ⇒ 决定 `maxOffset`；`ClampOffset` 若排在其前，用的是**旧 viewport** 的界限。**典型失效**：内容变短 + 横条消失 ⇒ viewport 变大 ⇒ `maxOffset` 变小 ⇒ offset 仍越界。⇒ **统一为 `ApplyLayout() → ClampOffset() → SyncBars()`**，并新增**顺序冻结**说明块（含理由与实现纪律）+ 同步 `UpdateContentExtent` 的注释链。

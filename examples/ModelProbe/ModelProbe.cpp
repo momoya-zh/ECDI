@@ -1,5 +1,6 @@
-﻿// Windows.h 前置 + 宏防护（P2 资源释放用 Win32——FindResource/WriteFile；DrawText 宏不污染 ECDI 头声明；
-// min/max 宏已由全文件 (std::min)/(std::max) 括号形式防护，同 main.cpp 先例）
+﻿// Windows.h 前置 + 宏防护（P2 资源释放用 Win32——FindResource/WriteFile；DrawText 宏不污染 ECDI 头声明）。
+// 注：原「min/max 宏用 (std::min)/(std::max) 括号形式防护」一句随 Phase 15 收回手搓 ModelListPanel 而失效——
+// 本文件已无 std::min/max/clamp 调用，故 <algorithm> 一并移除（唯一使用者 Animation.h 自含该依赖）。
 #include <Windows.h>
 #ifdef DrawText
 #undef DrawText
@@ -23,7 +24,6 @@
 #include "ECDI/Widget/TextBox.h"
 #include "ECDI/Window/Window.h"
 
-#include <algorithm>
 #include <cctype>
 #include <utility>
 

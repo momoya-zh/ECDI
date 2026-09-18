@@ -36,14 +36,13 @@ constexpr Color kRowColor() noexcept{ return Color::FromRGBA8(7, 8, 9, 255); }
 // ── 测试替身 ─────────────────────────────────────────────────
 
 /// @brief 暴露 `ScrollView` 的 protected 成员 + `OnPaint` 观测点
-/// @details `ScrollView` 把 `SetSize`/`OnMouseWheel` 的 override 声明在 protected
-/// （详设 §2.5 草案如此；与 `TextBox`/`CollapsiblePanel`/`CaptionBar` 三个先例不一致——已记账）。
-/// 测试经 using 暴露，与 `TestableTextBox` 的既有手法一致。
+/// @details `ScrollView` 把 `OnMouseWheel` 声明在 protected（事件回调不供外部直调），
+/// 测试经 `using` 暴露——同 `TestableTextBox` 的既有手法。
+/// （`SetSize` 已在详设 §2.5 v1.2 修正为 `public`，无需再暴露。）
 class TestableScrollView final: public ScrollView{
 
 public:
 
-	using ScrollView::SetSize;         ///< 尺寸（protected override——测试经 using 暴露）
 	using ScrollView::OnMouseWheel;    ///< 滚轮（protected override）
 
 	/// @brief 记录自身 `OnPaint` 收到的最终坐标（验「自身坐标不叠自身偏移」——C2）

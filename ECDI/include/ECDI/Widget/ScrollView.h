@@ -118,6 +118,14 @@ public:
 	[[nodiscard]] ScrollBar* GetVerticalScrollBar() noexcept;
 	[[nodiscard]] ScrollBar* GetHorizontalScrollBar() noexcept;
 
+	// ── 几何 ────────────────────────────────────────────────
+
+	/// @brief 尺寸变化 → 原子重算（顺序同 `SetContentExtent`：`ApplyLayout → ClampOffset → SyncBars`）
+	/// @details **`public`**：与 `TextBox` / `CollapsiblePanel` / `CaptionBar` 三个先例一致
+	/// （详设 §2.5 v1.2 修正——草案曾列 `protected`，结果本头自己的用法示例 `sv->SetSize(...)` 编译不过）。
+	/// 布局路径经 `Widget*` 调用同样虚分派到本 override。
+	void SetSize(int w, int h) override;
+
 	// ── 接缝 ────────────────────────────────────────────────
 
 	/// @brief 命中约束在视口内（D2 / R3）
@@ -125,9 +133,6 @@ public:
 	[[nodiscard]] bool ClipsChildren() const noexcept override { return true; }
 
 protected:
-
-	/// @brief 尺寸变化 → 原子重算（顺序同 `SetContentExtent`）
-	void SetSize(int w, int h) override;
 
 	/// @brief 滚轮滚动（`Application::OnMouseWheel` 已按 target→parent 冒泡，本类只滚自己）
 	void OnMouseWheel(const MouseWheelEvent& event) override;
