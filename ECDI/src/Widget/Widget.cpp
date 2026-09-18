@@ -97,7 +97,16 @@ std::unique_ptr<Widget>Widget::RemoveChild(Widget* child){
 
 bool Widget::ContainsPoint(int x, int y) const noexcept{
 
+	// 默认命中区域：矩形 [0, width) × [0, height)——判定表达式见 ContainsRect
+	// Phase 15：表达式抽到**非虚** ContainsRect——D2 门控与命中判定共用同一份判据
+	return ContainsRect(x, y);
+
+}
+
+bool Widget::ContainsRect(int x, int y) const noexcept{
+
 	// 默认命中区域：矩形 [0, width) × [0, height)
+	// ⚠️ 用 m_geometry.width（float）而非 GetWidth()（int 截断）——保持与既有判定逐位一致
 	return x >= 0 &&y >= 0 &&x < m_geometry.width &&y < m_geometry.height;
 
 }
@@ -118,14 +127,23 @@ Widget* Widget::HitTest(int x, int y) noexcept {
 
 	}
 
+	// Phase 15 D2：裁剪容器门控——**必须在递归子节点之前**（放后面等于没约束）
+	// 判据走非虚 ContainsRect（不可用 ContainsPoint：Panel 恒 false 会拦死自身整棵子树）
+	if (ClipsChildren() && !ContainsRect(x, y)){
+
+		return nullptr;
+
+	}
+
 	// 逆序遍历子节点（后添加的在上层，优先命中）
 	for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
 	{
 		Widget* child = it->get();
 
 		// 坐标转换：从当前 Widget 的局部坐标转到子 Widget 的局部坐标
-		const int localX = x - static_cast<int>(child->m_geometry.x);
-		const int localY = y - static_cast<int>(child->m_geometry.y);
+		// Phase 15：**加**回自身内容偏移（与 Paint 的"减"反向同源——详设 §3.2 符号冻结）
+		const int localX = x - static_cast<int>(child->m_geometry.x) + GetContentOffsetX();
+		const int localY = y - static_cast<int>(child->m_geometry.y) + GetContentOffsetY();
 
 		// 递归检测子节点
 		if (Widget* target = child->HitTest(localX, localY))
@@ -242,9 +260,14 @@ void Widget::Paint(PaintContext& ctx,int offsetX,int offsetY){
 
 	OnPaint(ctx,x,y);
 
+	// Phase 15：子控件的视觉原点 = 自身视觉位置 − 自身内容偏移
+	// 默认偏移 0 ⇒ childOriginX/Y 与 x/y 逐位相同（零回归的结构保证）
+	const int childOriginX = x - GetContentOffsetX();
+	const int childOriginY = y - GetContentOffsetY();
+
 	for(auto& child : m_children){
 
-		child->Paint(ctx,x,y);
+		child->Paint(ctx,childOriginX,childOriginY);
 
 	}
 
@@ -350,9 +373,10 @@ Point Widget::GetAbsolutePosition() const noexcept{
 
 	while (parent){
 
-		pos.x += static_cast<float>(parent->GetX());
+		// Phase 15：逐层**减去**父的内容偏移（返回视觉位置——详设 §3.2）
+		pos.x += static_cast<float>(parent->GetX() - parent->GetContentOffsetX());
 
-		pos.y += static_cast<float>(parent->GetY());
+		pos.y += static_cast<float>(parent->GetY() - parent->GetContentOffsetY());
 
 		parent = parent->GetParent();
 

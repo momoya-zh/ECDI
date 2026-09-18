@@ -110,6 +110,28 @@ public:
 	///       float → int 向零截断（v1 不引入 rounding policy）
 	bool AutoSize();
 
+	// ── 内容偏移接缝（Phase 15 D1-A：视口偏移——内容坐标 → 视口坐标的变换）──
+	// 语义：本控件「子内容」相对视口的位移（正 = 内容被向左 / 向上推出）。
+	// ⚠️ 不影响自身：自身 m_geometry 与 Paint 的 PushClip 一律用**视口矩形**，绝不叠加本偏移。
+	// ⚠️ 三处必须同变换：Paint（子偏移）/ HitTest（子局部）/ GetAbsolutePosition（父链累加）。
+	// 默认 0 ⇒ 非容器控件零回归（既有行为逐位不变）。
+
+	/// @brief 内容偏移 X（默认 0——仅滚动容器的内容节点 override 返回非 0）
+	/// @details **override 归属**：只有「内容坐标空间的根」（`ScrollContent`）才 override；
+	/// `ScrollView` 自身**不得** override——否则滚动条作为直接子也会被偏移（Phase 15 详设 §3.1.1）。
+	[[nodiscard]] virtual int GetContentOffsetX() const noexcept { return 0; }
+
+	/// @brief 内容偏移 Y（默认 0）
+	[[nodiscard]] virtual int GetContentOffsetY() const noexcept { return 0; }
+
+	/// @brief 是否把子节点的命中约束在本控件矩形内（Phase 15 D2——默认 false 零回归）
+	/// @details 语义：**命中点**须落在此容器矩形内，否则**不递归其子树**——不是「限制子控件几何」。
+	/// 检查发生在**递归子节点之前**；逐层检查自动等价于「所有祖先裁剪域的交集」
+	/// （与 Paint 的嵌套 PushClip 同构）。
+	/// ⚠️ **不得用 ContainsPoint 实现本门控**：`Panel::ContainsPoint` 恒 `false`，会拦死自身整棵子树。
+	/// 实际判据走**非虚** `ContainsRect`。
+	[[nodiscard]] virtual bool ClipsChildren() const noexcept { return false; }
+
 	int GetX() const noexcept { return static_cast<int>(m_geometry.x); }
 
 	int GetY() const noexcept { return static_cast<int>(m_geometry.y); }
@@ -219,7 +241,9 @@ public:
 	/// @brief 是否显示聚焦框（默认 true）
 	bool ShowFocusRect() const noexcept{ return m_showFocusRect; }
 
-	/// @brief 获取绝对坐标（父链累加；TextBox 光标/ScrollBar/Popup/Tooltip 未来用）
+	/// @brief 获取绝对坐标（父链累加，**含沿途内容偏移**——返回视觉位置）
+	/// @details Phase 15：逐层**减去**父的内容偏移。既有消费者全部需要视觉位置
+	/// （TextBox 光标 3 处 / Button·CaptionButton 的 I6 判定 2 处——详设 §5 K10）。
 	Point GetAbsolutePosition() const noexcept;
 
 	// ── HitTest ─────────────────────────────────────
@@ -254,6 +278,11 @@ private:
 
 	/// @brief 递归检测 widget 是否是 this 的后代（用于 AddChild 防环检测）
 	bool Contains(const Widget* widget) const noexcept;
+
+	/// @brief 矩形命中判定（**非虚**——供 ContainsPoint 默认实现与 ClipsChildren 门控共用）
+	/// @details 抽出的动机：D2 门控**不能**走 `ContainsPoint`（虚函数、被 `Panel` 覆盖为恒 false），
+	/// 但两者应共享**同一份**判定表达式（`[0, width) × [0, height)`）——否则门控与命中语义会漂移。
+	[[nodiscard]] bool ContainsRect(int x, int y) const noexcept;
 
 	Widget* m_parent = nullptr;		///< 父节点指针（RootWidget 为 nullptr）
 
