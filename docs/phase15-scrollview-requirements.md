@@ -1,6 +1,7 @@
 ﻿# Phase 15 滚动容器（ScrollView + 滚动条）需求确认
 
-> 状态：v1.1（2026-09-18）｜需求确认——🚧 待拍板（D1–D12 全部给倾向；**v1.0 外部评审「方向通过，可进初设」**，三项硬要求已核实并回写）
+> 状态：v1.2（2026-09-18）｜需求确认——✅ **已通过**（二轮外部评审「可进初设」，2026-09-18）；D1–D12 全部拍板，**§1.4 设计不变量为后续阶段的强约束**
+> 下游：[phase15-scrollview-preliminary-design.md](phase15-scrollview-preliminary-design.md)（初步设计 v1.0）
 > 前序：Phase 9.5 R1 ✅（Clip pipeline——`PushClip/PopClip` + `TextBox` 内部"偏移+裁切+换算"三件套）/ Phase 9.7 ✅（自适应布局——`SetStretch` + `Arrange`）/ Phase 9.8 ✅（`GetPreferredSize`）/ Phase 13 ✅（`CaptionBar`）/ Phase 14 ✅（托盘与拖入）
 > 相关：phase9.5-r1-clip-detailed-design.md（**L102 记账「不做水平滚动条（v1.0 记账）」——本阶段兑现**）/ phase9.6-panel-container-semantics-detailed-design.md（Panel 输入透传定案）/ roadmap-deferred.md（延期项总表）/ MEMORY.md（分层不变量）
 
@@ -252,6 +253,9 @@
 
 ## 6. 修订记录
 
+- v1.2（2026-09-18）**需求确认阶段收口——✅ 已通过**：二轮外部评审「**v1.1 已经达到需求层可以拍板 → 初步设计的状态**」，明确 **D1–D12 全部认可**（特别是 D7 降级与 §1.4 四条不变量），并给出**初设 7 个关注点**（坐标变换展开 / `ClipsChildren` 判定序 / ScrollView 与 ScrollBar 命中优先 / extent 与滚动条几何的数学关系 / 双轴 viewport 定义 / extent 更新时机 / `ConsumesMouseInput` 推演）。
+  - **AI 复核回复**：7 点全部接受，其中 2 点已就地取证——③ `HitTest` **逆序遍历**（`Widget.cpp:118`）⇒ ScrollBar 只需最后 `AddChild` 即天然优先命中，且 `Application::FindTargetWidget` 为**单一入口**（`Application.cpp:180-187`）⇒ 改一处 5 条路径全受益；⑦ `Window::IsClientInteractiveAt` = `HitTest(...) != nullptr && hit->ConsumesMouseInput()`（`Window.cpp:247-262`）⇒ 保持 `false` 零破坏，**且与 D2 耦合**（D2 落地后越界内容不再命中，该判定才自动正确）。
+  - **7 点全部落位初设**：见 [初步设计 v1.0](phase15-scrollview-preliminary-design.md) §3.1 / §3.2 / §2.3 / §3.4 / §3.5 / §3.6 / §4.3。**本稿仅改状态与修订记录，需求条目与决策倾向零变更**（评审明确「不需要继续往需求文档塞实现细节」）。
 - v1.1（2026-09-18）外部评审处置（评审结论：「**方向通过，待拍板后进初设**」；重点 D2/D3/D7）：
   - **核实三项硬要求（全部执行，结论回写）**：
     - **D3** 全库枚举 `GetAbsolutePosition` 消费者 —— **5 处全部需要视觉坐标**（且 3 处是换算链）⇒ 从"倾向认偏移"**升级为「必须认偏移」**；
