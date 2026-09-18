@@ -79,14 +79,18 @@
 
 | # | 延期项 | 来源 | 备注 |
 |---|---|---|---|
-| 28 | **`HitTest` 父边界约束的通用化**（K4：子节点越界仍可命中，波及 hover/按下/移动/滚轮/拖入 5 条路径） | Phase 15 需求稿 §1.2 K4/K5 | Phase 15 以 **`ClipsChildren()` 门控**（需裁剪的容器声明式开启）局部收口，**不**通改全部容器命中语义（零回归风险无法在无消费者场景验证）。重启：第二个非滚动消费者（ListBox / 裁剪面板）出现时，把默认值从 false 翻成 true |
-| 29 | **焦点滚入视口**（`PageUp/PageDown/Home/End` + Tab 聚焦时自动滚动） | Phase 15 需求稿 §4 | 与滚轮**驱动源不同**（焦点驱动 vs extent 驱动），未纳入 R1–R5。重启：ScrollView 内出现可聚焦控件集合时 |
-| 30 | **平滑 / 惯性 / 弹性滚动** | Phase 15 需求稿 §4 | Phase 9.6 动画系统可支撑（`AnimationManager` per-Window tick），属体验增强 |
-| 31 | **虚拟化（按需生成子控件）** | Phase 15 需求稿 §4 | 需内容模型抽象（数据源 → 可视行），YAGNI；大列表性能真实成为瓶颈时再评 |
-| 32 | **TextBox 横向滚动条** | Phase 9.5 R1 详设 L102（v1.0 记账） | Phase 15 的 R2 只做**容器级**滚动条；TextBox 滚动是 **caret 驱动**（与 extent 驱动不同源）——若要给 TextBox 加条，须让 TextBox 内部视图接入 `ScrollBar`，是独立议题（Phase 15 §4 已显式划出） |
+| 30 | **`HitTest` 父边界约束的通用化**（K4：子节点越界仍可命中，波及 hover/按下/移动/滚轮/拖入 5 条路径） | Phase 15 需求稿 §1.2 K4/K5 | Phase 15 以 **`ClipsChildren()` 门控**（需裁剪的容器声明式开启）局部收口，**不**通改全部容器命中语义（零回归风险无法在无消费者场景验证）。**已发现的真实实例（2026-09-18）**：`CaptionBar` 窗口宽 < 138px 时 `minButton.x < 0` 越界仍可命中（`CaptionBar.cpp:97`，全库无 `WM_GETMINMAXINFO`）——该缺陷**已经存在**，Phase 15 不处理。重启：第二个非滚动消费者（ListBox / 裁剪面板）出现时，把默认值从 false 翻成 true |
+| 31 | **焦点滚入视口**（`PageUp/PageDown/Home/End` + Tab 聚焦时自动滚动） | Phase 15 需求稿 §4 | 与滚轮**驱动源不同**（焦点驱动 vs extent 驱动），未纳入 R1–R5。重启：ScrollView 内出现可聚焦控件集合时 |
+| 32 | **平滑 / 惯性 / 弹性滚动** | Phase 15 需求稿 §4 | Phase 9.6 动画系统可支撑（`AnimationManager` per-Window tick），属体验增强 |
+| 33 | **虚拟化（按需生成子控件）** | Phase 15 需求稿 §4 | 需内容模型抽象（数据源 → 可视行），YAGNI；大列表性能真实成为瓶颈时再评 |
+| 34 | **TextBox 横向滚动条** | Phase 9.5 R1 详设 L102（v1.0 记账） | Phase 15 的 R2 只做**容器级**滚动条；TextBox 滚动是 **caret 驱动**（与 extent 驱动不同源）——若要给 TextBox 加条，须让 TextBox 内部视图接入 `ScrollBar`，是独立议题（Phase 15 §4 已显式划出） |
+| 35 | **嵌套滚动停递**（内层滚到边界才向父级冒泡） | Phase 15 需求稿 D7（v1.1 降级） | 嵌套消费者**实测 = 0**（全库 `ScrollView` / `ScrollBar` 零实现）⇒ YAGNI。三种机制各有代价——① 改虚函数签名触及 5 个实现者（`Widget` / `TextBox` / `ModelListPanel` / `EventRouter` / `Application`）② Event 带 consumed **污染 Event 原则** ③ Application 认识容器（耦合）；代价表见 Phase 15 需求稿 D7。重启：出现第二个真实嵌套消费者 |
+| 36 | **横向滚轮**（`WM_MOUSEHWHEEL`） | Phase 15 需求稿 K15/K16 · D8 | 平台层**未翻译** `WM_MOUSEHWHEEL`（`WindowMessageHandler.cpp:162` 只有 `WM_MOUSEWHEEL`）+ `MouseEvent` **无修饰键** ⇒ 横向只能靠滚动条拖动 + 显式 API。做须先扩平台翻译 + Event 维度（轴 / 修饰键） |
+| 37 | **负向内容**（子控件坐标 < 0 的包围盒） | Phase 15 需求稿 D6 | extent 定义钳 0（`max(0, max(x + width))`）——布局系统（`VerticalLayout`）从 0 起算，负坐标不是正常布局产物 |
 
 ## 8. 修订记录
 
+- v1.8（2026-09-18）Phase 15 需求稿 v1.1 回写同步：**修正 §7.5 编号撞号（v1.0 引入）**——原用 28–32，与 §1.2 的 `28`、§7 的 `29` 重复，统一顺延为 **30–34**；条 30 补 **`CaptionBar` 窄窗越界实例**（窗口宽 < 138px，既有缺陷）；新增条 35 嵌套滚动停递（D7 v1.1 降级）· 条 36 横向滚轮（K15/K16 实测：平台无翻译 + Event 无修饰键）· 条 37 负向内容（D6 extent 钳 0）。
 - v1.7（2026-09-17）新增 §7.5 Phase 15 延期项（①②③④⑤ 五条）：K4 命中约束通用化（以 `ClipsChildren()` 门控局部收口）· 焦点滚入 · 平滑/惯性 · 虚拟化 · TextBox 横向滚动条（Phase 9.5 R1 记账的边界澄清——仅指 TextBox，非容器级）。
 - v1.0（2026-08-15）总表定稿：全部延期项分组到阶段（7/7.5/8/8.5/9/9.5）；确认 SetFont 入 8.5、21-25 入 9.5。
 - v1.1（2026-08-15）**Phase 7 拆 7.1/7.2**（用户决策）：测试体系入 7.2（新增 #28——5.5.2 P8 承诺的 Selection 单元测试补测；Phase 10 转库前测试保障）。
