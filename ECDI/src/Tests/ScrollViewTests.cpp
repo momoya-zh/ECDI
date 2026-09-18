@@ -89,9 +89,11 @@ const DrawRectCommand* FindRectByColor(const CommandBuffer& commands, const Colo
 	return nullptr;
 }
 
-/// @brief 往内容节点加一行 Panel（绝对定位；返回非拥有指针）
+/// @brief 往内容节点加一行 Panel（**带背景**——供 Paint 坐标断言；返回非拥有指针）
 /// @param parent 内容节点（`ScrollView::GetContentView()` 返回 `Widget&`）
-Panel* AddRow(Widget& parent, int width, int height, int x, int y){
+/// @details ⚠️ `Panel::ContainsPoint()` **恒返回 false**（2026-08-30 定案：纯容器自身永不参与命中）
+/// ⇒ **本函数的返回值永远不可能成为 `HitTest` 的目标**。命中类用例请用 `AddHitRow`。
+Panel* AddPanelRow(Widget& parent, int width, int height, int x, int y){
 	auto row = std::make_unique<Panel>();
 	row->SetSize(width, height);
 	row->SetPosition(x, y);
@@ -99,6 +101,20 @@ Panel* AddRow(Widget& parent, int width, int height, int x, int y){
 	//（留边框会多画一圈描边环 + 背景四边内缩 ⇒ 断言偏移）
 	row->SetStyle(PanelStyleOverride{ .background = kRowColor(), .cornerRadius = 0.0f, .borderWidth = 0.0f });
 	Panel* raw = row.get();
+	parent.AddChild(std::move(row));
+	return raw;
+}
+
+/// @brief 往内容节点加一个**可命中**的叶子控件（裸 `Widget`——默认 `ContainsPoint` 为矩形判定）
+/// @details 为什么不用 `Panel`：见 `AddPanelRow` 的说明。裸 `Widget` 不产生任何绘制命令，
+/// 故同时适合需要"命令流只由被测控件产生"的用例。
+/// @note 递归**不**受 `ContainsPoint` 门控（`Widget::HitTest` 先递归子节点）⇒ `Panel` 内的
+/// 子控件依旧可命中（`ModelProbe` 行内 `CheckBox` 即依赖此点）；受影响的只是"`Panel` 自身当目标"。
+Widget* AddHitRow(Widget& parent, int width, int height, int x, int y){
+	auto row = std::make_unique<Widget>();
+	row->SetSize(width, height);
+	row->SetPosition(x, y);
+	Widget* raw = row.get();
 	parent.AddChild(std::move(row));
 	return raw;
 }
@@ -170,7 +186,7 @@ void TestScrollViewOffsetDoesNotAffectOwnClip(){
 void TestScrollViewContentIsOffset(){
 	TestableScrollView sv;
 	sv.SetSize(200, 100);
-	Panel* row = AddRow(sv.GetContentView(), 180, 20, 0, 40);
+	Panel* row = AddPanelRow(sv.GetContentView(), 180, 20, 0, 40);
 	sv.SetContentExtent(180, 400);
 	sv.SetContentOffset(0, 30);
 
@@ -198,12 +214,12 @@ void TestScrollBarNotAffectedByContentOffset(){
 	// 两套同构场景，唯一差别 = 内容偏移；条的三项观测必须逐位相同
 	TestableScrollView base;
 	base.SetSize(200, 100);
-	AddRow(base.GetContentView(), 180, 20, 0, 40);
+	AddPanelRow(base.GetContentView(), 180, 20, 0, 40);
 	base.SetContentExtent(180, 400);
 
 	TestableScrollView shifted;
 	shifted.SetSize(200, 100);
-	AddRow(shifted.GetContentView(), 180, 20, 0, 40);
+	AddPanelRow(shifted.GetContentView(), 180, 20, 0, 40);
 	shifted.SetContentExtent(180, 400);
 	shifted.SetContentOffset(0, 30);
 	EXPECT_EQ(shifted.GetScrollOffsetY(), 30);   // 前置：偏移确实非 0
@@ -240,16 +256,16 @@ void TestScrollBarNotAffectedByContentOffset(){
 	EXPECT_EQ(trackShifted.rect.width, trackBase.rect.width);
 	EXPECT_EQ(trackShifted.rect.height, trackBase.rect.height);
 
-	// ② HitTest：同一点命中的仍是条（条在偏移层之外）
-	ScrollBar* vBarBase = base.GetVerticalScrollBar();
-	Widget* hitBase    = base.HitTest(190, 50);
-	Widget* hitShifted = shifted.HitTest(190, 50);
-	EXPECT_TRUE(hitBase == vBarBase);
-	EXPECT_TRUE(hitShifted == vBarBase);
+	// ② HitTest：同一点命中的仍是**本场景自己的**条（条在偏移层之外）
+	//    ⚠️ 必须逐场景取自己的条——两个场景是各自独立的控件树，指针不可跨场景比
+	ScrollBar* vBarBase    = base.GetVerticalScrollBar();
+	ScrollBar* vBarShifted = shifted.GetVerticalScrollBar();
+	EXPECT_TRUE(base.HitTest(190, 50) == vBarBase);
+	EXPECT_TRUE(shifted.HitTest(190, 50) == vBarShifted);
 
 	// ③ GetAbsolutePosition：条自身视觉位置不含内容偏移
 	const Point absBase    = vBarBase->GetAbsolutePosition();
-	const Point absShifted = shifted.GetVerticalScrollBar()->GetAbsolutePosition();
+	const Point absShifted = vBarShifted->GetAbsolutePosition();
 	EXPECT_NEAR(absBase.x, 188.0f, kEps);
 	EXPECT_NEAR(absBase.y, 0.0f, kEps);
 	EXPECT_NEAR(absShifted.x, absBase.x, kEps);
@@ -262,7 +278,7 @@ void TestScrollViewHitTestWithOffset(){
 	TestableScrollView sv;
 	sv.SetPosition(0, 100);
 	sv.SetSize(200, 200);
-	Panel* row = AddRow(sv.GetContentView(), 180, 20, 0, 84);
+	Widget* row = AddHitRow(sv.GetContentView(), 180, 20, 0, 84);
 	sv.SetContentExtent(180, 400);
 	sv.SetContentOffset(0, 50);
 
@@ -283,7 +299,7 @@ void TestScrollViewHitTestWithOffset(){
 void TestScrollViewClipsChildrenRejectsOutside(){
 	TestableScrollView sv;
 	sv.SetSize(200, 200);
-	Panel* row = AddRow(sv.GetContentView(), 180, 20, 0, 300);   // 内容 y=300：视口只有 0..200
+	Widget* row = AddHitRow(sv.GetContentView(), 180, 20, 0, 300);   // 内容 y=300：视口只有 0..200
 	sv.SetContentExtent(180, 400);
 
 	// ① 命中点在容器矩形之外 ⇒ **整棵子树**不命中（内容坐标系里正对行也无效）
@@ -306,21 +322,23 @@ void TestScrollViewClipsChildrenRejectsOutside(){
 void TestPanelHitTestRegression(){
 	Panel panel;
 	panel.SetSize(100, 100);
-	EXPECT_FALSE(panel.ClipsChildren());
+	EXPECT_FALSE(panel.ClipsChildren());   // 门控关闭 ⇒ 旧语义（零回归）
 
-	Panel* child = nullptr;
+	// 子用**可命中的叶子**（裸 Widget）：`Panel` 自身 `ContainsPoint` 恒 false、永不可命中
+	// （见 `AddPanelRow` 说明）——若拿 Panel 当目标，本用例会因"目标类型选错"而失去判据
+	Widget* child = nullptr;
 	{
-		auto inner = std::make_unique<Panel>();
+		auto inner = std::make_unique<Widget>();
 		inner->SetSize(50, 50);
 		inner->SetPosition(200, 200);   // 子越界（旧语义下仍可命中——本阶段**不通改**）
 		child = inner.get();
 		panel.AddChild(std::move(inner));
 	}
 
-	// 命中点落在 panel 矩形之外：(210,210) → 子局部 (10,10) ⇒ 旧语义命中越界子
+	// ① 命中点落在 panel 矩形之外：(210,210) → 子局部 (10,10) ⇒ 旧语义命中越界子（K4 保持）
 	EXPECT_TRUE(panel.HitTest(210, 210) == child);
 
-	// Panel 自身永不参与命中（2026-08-30 定案：纯容器语义）
+	// ② Panel 自身永不参与命中（2026-08-30 定案：纯容器语义）——即便点在自身矩形内
 	EXPECT_TRUE(panel.HitTest(10, 10) == nullptr);
 }
 
@@ -385,8 +403,8 @@ void TestScrollViewContentShrinkClampsOffset(){
 void TestScrollViewExtentIsBoundingBox(){
 	TestableScrollView sv;
 	sv.SetSize(200, 100);
-	AddRow(sv.GetContentView(), 50, 20, 0, 0);
-	AddRow(sv.GetContentView(), 50, 20, 0, 30);
+	AddHitRow(sv.GetContentView(), 50, 20, 0, 0);
+	AddHitRow(sv.GetContentView(), 50, 20, 0, 30);
 
 	sv.UpdateContentExtent();
 	EXPECT_NEAR(sv.GetContentExtent().width, 50.0f, kEps);
@@ -402,7 +420,7 @@ void TestScrollViewExtentIsBoundingBox(){
 	// 负向内容钳 0（v1 不支持负向 extent——记账）
 	TestableScrollView negative;
 	negative.SetSize(200, 100);
-	AddRow(negative.GetContentView(), 50, 20, -100, -100);
+	AddHitRow(negative.GetContentView(), 50, 20, -100, -100);
 	negative.UpdateContentExtent();
 	EXPECT_NEAR(negative.GetContentExtent().width, 0.0f, kEps);
 	EXPECT_NEAR(negative.GetContentExtent().height, 0.0f, kEps);
