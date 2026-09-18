@@ -1,6 +1,6 @@
 ﻿# Phase 15 滚动容器（ScrollView + 滚动条）详细设计
 
-> 状态：v1.0（2026-09-18）｜详细设计——🚧 待评审
+> 状态：v1.1（2026-09-18）｜详细设计——🚧 待评审（**v1.0 外部评审「通过，可进入实现」**；**v1.1 补两条实现前修正**——顺序统一 + `ModelProbe.h` 补记，见 §9）
 > 前序：需求确认 ✅ v1.2（2026-09-18）｜初步设计 ✅ v1.2（三轮外部评审通过「可进详设」）
 > 上游：[phase15-scrollview-requirements.md](phase15-scrollview-requirements.md)（§1.4 四条不变量）· [phase15-scrollview-preliminary-design.md](phase15-scrollview-preliminary-design.md)（§9.1 评审基线澄清）
 > 相关：phase12-windowchrome-detailed-design.md（**逐文件最小 diff 规格**先例）· phase13-captionbar-detailed-design.md（`ConsumesMouseInput` 接缝）
@@ -23,8 +23,9 @@
 | 10 | `ECDI/include/ECDI/Theme/Theme.h` | 修改 | +1 include +1 纯虚 | §2.10 |
 | 11 | `ECDI/include/ECDI/Theme/DefaultTheme.h` | 修改 | +1 override 声明 | §2.10 |
 | 12 | `ECDI/src/Theme/DefaultTheme.cpp` | 修改 | +1 实现（~14 行） | §2.10 |
-| 13 | `examples/ModelProbe/ModelProbe.cpp`(+`.h`) | 修改 | 删 `ModelListPanel`（35 行）→ 接 `ScrollView` | §2.11 |
-| 14 | `ECDI/src/Tests/ScrollViewTests.cpp` | **新建** | T15-1..N | §5 |
+| 13 | `examples/ModelProbe/ModelProbe.cpp` | 修改 | 删 `ModelListPanel`（L51-85）→ 接 `ScrollView` | §2.11 |
+| 14 | `examples/ModelProbe/ModelProbe.h` | 修改 | **+1 成员** `ScrollView* m_scroll`（`m_list` 保持 `Panel*`） | §2.11 |
+| 15 | `ECDI/src/Tests/ScrollViewTests.cpp` | **新建** | T15-1..N | §5 |
 | — | `CMakeLists.txt` | **零改动** | — | `GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库（§2.12） |
 
 **Public 头**：89 → **92**（+`Widget/ScrollView.h` +`Widget/ScrollBar.h` +`Theme/ScrollBarStyle.h`；`ScrollContent.h` 为 `src/` 内部头**不计入**）。
@@ -266,10 +267,10 @@ ScrollView::~ScrollView() = default;   // 三个成员皆非拥有——生命�
 
 ```cpp
 void ScrollView::SetSize(int w, int h){
-	Widget::SetSize(w, h);          // 基类几何（必须显式调——隐藏基类会在 override 后失效）
-	ApplyLayout();                  // ① 条几何（厚度/可见性） ② ScrollContent 尺寸
-	ClampOffset();                  // ③ maxOffset 变了 ⇒ 立即 clamp（不变式）
-	SyncBars();                     // ④ 范围 + 可见性同步
+	Widget::SetSize(w, h);          // 基类几何（必须显式调——override 会隐藏基类重载）
+	ApplyLayout();                  // 条几何 + 可见性 + ScrollContent 尺寸 ⇒ 定下 viewport
+	ClampOffset();                  // ② 用**新** viewport 重算 maxOffset 并 clamp（不变式 C7）
+	SyncBars();                     // ③ 范围 + 可见性同步
 	// 不 Invalidate：SetSize 由布局调用，重绘由调用方/Arrange 路径负责（既有契约）
 }
 ```
@@ -286,7 +287,7 @@ void ScrollView::UpdateContentExtent(){
 		w = (std::max)(w, c->GetX() + c->GetWidth());
 		h = (std::max)(h, c->GetY() + c->GetHeight());
 	}
-	SetContentExtent(w, h);         // ② extent → ③ maxOffset → ④ clamp offset → ⑤ sync → ⑥ Invalidate
+	SetContentExtent(w, h);   // ② → ③ ApplyLayout → ④ ClampOffset → ⑤ SyncBars → ⑥ Invalidate（§2.6 顺序冻结）
 }
 ```
 
@@ -302,13 +303,23 @@ void ScrollView::SetContentExtent(int width, int height){
 	m_contentW = w;
 	m_contentH = h;
 
-	m_content->SetSize(m_contentW, m_contentH);   // 内容坐标空间根节点的尺寸 = 内容 extent
-	ClampOffset();                                 // ★ maxOffset 变了 ⇒ **立即** clamp（内容变短的悬空防护）
-	ApplyLayout();
-	SyncBars();
+	m_content->SetSize(m_contentW, m_contentH);  // 内容坐标空间的根尺寸 = 内容 extent
+	ApplyLayout();     // ① 条几何 + **可见性** ⇒ 定下 ViewportWidth/Height
+	ClampOffset();     // ② 用**新** viewport 重算 maxOffset 并 clamp（§2.6 顺序冻结）
+	SyncBars();        // ③ 范围 + 可见性同步
 	Invalidate();
 }
 ```
+
+> ★ **顺序冻结（v1.1 新增——外部评审提醒后确认）**：两条路径**统一**为
+> **`ApplyLayout() → ClampOffset() → SyncBars()`**，**不得调换**。
+>
+> **理由**：`ApplyLayout` 决定滚动条的**可见性** ⇒ 决定 `ViewportWidth/Height` ⇒ 决定 `maxOffset`。
+> `ClampOffset` 若排在其前，用的是**旧 viewport** 算出的界限——典型失效场景：
+> **内容变短 + 横条消失 ⇒ viewport 变大 ⇒ `maxOffset` 变小 ⇒ offset 仍越界**。
+> `ApplyLayout` **不读 offset**（只读 extent 与视口），故前置无副作用。
+>
+> **实现纪律**：不要"优化"成别的顺序（评审明确点出此处为最易写错处）。
 
 **`SetContentOffset`（唯一权威 + clamp）**
 
@@ -474,7 +485,19 @@ ScrollBarStyle DefaultTheme::GetScrollBarStyle() const{
 | `OnMouseWheel` 按行滚 / `ApplyLayout()` / `m_offset` | **全部删除**（由 `ScrollView` 接管） |
 | `SetScrollStep` | `sv->SetScrollStep(28)`（显式——框架默认 32 不绑 Demo） |
 | **背景/圆角/边框**（原继承 `Panel`） | ⚠️ `ScrollView` **无样式能力** ⇒ **外层 `Panel`** 包住（`PanelStyleOverride` 原样搬迁，§3.6） |
-| `m_list` 成员类型 | `ModelListPanel*` → `ScrollView*` |
+| **`m_list`**（`ModelProbe.h:131`，实测类型 **`Panel*`**） | **保持 `Panel*`**——指向**外层 `Panel`**（承接原 `PanelStyle` 背景/圆角/边框）。⚠️ **详设 v1.0 记为「`ModelListPanel*` → `ScrollView*`」有误**，实际它不是 `ModelListPanel*` |
+| **新增 `ScrollView* m_scroll`**（`ModelProbe.h`） | 指向 `ScrollView`；**内容子控件加到 `m_scroll->GetContentView()`**（不是 `m_list`） |
+
+**迁移点（实测行号，`ModelProbe.cpp` 共 854 行）**：
+
+| 行 | 现状 | 迁移后 |
+|---|---|---|
+| L51-85 | `class ModelListPanel : public Panel`（35 行） | **删除**（`Panel` 装饰 + `ScrollView` + `GetContentView()` 替代） |
+| L371 | `auto list = std::make_unique<ModelListPanel>();` | `auto shell = std::make_unique<Panel>();`（带原 `PanelStyleOverride`）+ `auto sv = std::make_unique<ScrollView>();`；`shell->AddChild(std::move(sv))` |
+| L380 | `m_list = list.get();` | `m_list = shell.get();`（`Panel*` 不变）+ `m_scroll = sv.get();` |
+| L789 | `m_list->AddChild(std::unique_ptr<Widget>(row.panel));` | `m_scroll->GetContentView().AddChild(std::unique_ptr<Widget>(row.panel));` |
+| L798 | `static_cast<ModelListPanel*>(m_list)->SetRows(std::move(rows));` | **删除** `SetRows`（逐行 `AddChild` + `m_scroll->SetScrollStep(28)` + `UpdateContentExtent()`） |
+| （新增） | — | `m_scroll->SetScrollStep(28);`（**框架默认 32 不绑 Demo**——D5） |
 
 **验收判据**：滚轮一滚一行（28px）· 行高/视觉不变 · 圆角边框保持 · **净删 ~35 行手搓逻辑**。
 
@@ -641,4 +664,7 @@ thumbStart = maxOffset == 0 ? 0 : (track - thumbLen) × offset / maxOffset
 
 ## 9. 修订记录
 
+- v1.1（2026-09-18）**实现前两条修正**（v1.0 外部评审「通过，可进入实现」，并提醒 `SetSize`/`SetContentExtent` 顺序为最易写错处）：
+  - **① `SetSize` / `SetContentExtent` 顺序统一**（评审提醒 → AI 判定**必须改**）：v1.0 两条路径顺序不同——`SetSize` 是 `ApplyLayout → ClampOffset`，而 `SetContentExtent` 是 `ClampOffset → ApplyLayout`。**该不一致有真实风险**：`ApplyLayout` 决定滚动条**可见性** ⇒ 决定 `ViewportWidth/Height` ⇒ 决定 `maxOffset`；`ClampOffset` 若排在其前，用的是**旧 viewport** 的界限。**典型失效**：内容变短 + 横条消失 ⇒ viewport 变大 ⇒ `maxOffset` 变小 ⇒ offset 仍越界。⇒ **统一为 `ApplyLayout() → ClampOffset() → SyncBars()`**，并新增**顺序冻结**说明块（含理由与实现纪律）+ 同步 `UpdateContentExtent` 的注释链。
+  - **② `examples/ModelProbe/ModelProbe.h` 补入改动清单**（v1.0 漏记）：v1.0 §2.11 记「`m_list` 类型 `ModelListPanel*` → `ScrollView*`」，但**实测 `m_list` 是 `Panel*`**（`ModelProbe.h:131`）。而 R4 结构为 `Panel（外层，承接样式）→ ScrollView → 内容` ⇒ **`m_list` 保持 `Panel*`**（指向外层），**另需新增 `ScrollView* m_scroll`**。⇒ §1 总览由 **14 → 15 文件**（`.cpp` / `.h` 拆为两行），§2.11 补**迁移点行号表**（L51-85 / L371 / L380 / L789 / L798 + 新增 `SetScrollStep(28)`）。
 - v1.0（2026-09-18）详细设计初稿：§1 实施总览（**14 文件**，Public 头 89→92）· §2 **逐文件最小 diff 规格**（`Widget.h` 落点 A/B/C · `Widget.cpp` **4 处最小 diff** · `ScrollContent` 内部头 · `ScrollView`/`ScrollBar` 新建实现 · `ScrollBarStyle` · `Theme`/`DefaultTheme` · R4 迁移 · 构建零改动）· §3 常量与算法冻结（含**详设补钉**：`ContainsPoint` 判定用 `m_geometry.width`（float）而非 `GetWidth()` ⇒ 抽出**非虚 `ContainsRect`** 供门控共用；`long long` 中间量防溢出）· §4 契约表 **C1–C14** · §5 测试规格 **T15-1..14** · §6 验收 **A1–A7** · §7 影响面与回归清单 · §8 已知局限 **L1–L7**。上游：需求 v1.2 ✅ + 初设 v1.2 ✅（三轮评审通过）。
