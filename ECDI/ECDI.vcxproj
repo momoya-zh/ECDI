@@ -183,6 +183,9 @@
     <ClCompile Include="src\Widget\TextWidget.cpp" />
     <ClCompile Include="src\Widget\TextBox.cpp" />
     <ClCompile Include="src\Widget\Widget.cpp" />
+    <ClCompile Include="src\Widget\ScrollView.cpp" />
+    <ClCompile Include="src\Widget\ScrollBar.cpp" />
+    <ClCompile Include="src\Widget\ScrollContent.cpp" />
     <ClCompile Include="src\Platform\Win32\WindowMessageHandler.cpp" />
     <ClCompile Include="src\Window\Window.cpp" />
     <ClCompile Include="src\Window\CaptionBar.cpp" />
@@ -296,6 +299,9 @@
     <ClInclude Include="Include\ECDI\Widget\TextBox.h" />
     <ClInclude Include="Include\ECDI\Widget\Widget.h" />
     <ClInclude Include="Include\ECDI\Widget\WidgetState.h" />
+    <ClInclude Include="Include\ECDI\Widget\ScrollView.h" />
+    <ClInclude Include="Include\ECDI\Widget\ScrollBar.h" />
+    <ClInclude Include="src\Widget\ScrollContent.h" />
     <ClInclude Include="src\Platform\Win32\WindowMessageHandler.h" />
     <ClInclude Include="Include\ECDI\Window\Window.h" />
     <ClInclude Include="Include\ECDI\EventSystem\Window\WindowEvent.h" />
@@ -307,6 +313,7 @@
     <ClInclude Include="Include\ECDI\Theme\CheckBoxStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\RadioStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\ProgressBarStyle.h" />
+    <ClInclude Include="Include\ECDI\Theme\ScrollBarStyle.h" />
     <ClInclude Include="Include\ECDI\Theme\Theme.h" />
     <ClInclude Include="Include\ECDI\Theme\DefaultTheme.h" />
     <ClInclude Include="include\ECDI\Animation\Easing.h" />
