@@ -1,6 +1,6 @@
 ﻿# Phase 15 滚动容器（ScrollView + 滚动条）初步设计
 
-> 状态：v1.0（2026-09-18）｜初步设计——🚧 待评审
+> 状态：v1.1（2026-09-18）｜初步设计——🚧 待评审（**v1.0 外部评审「方向通过，但暂不建议直接进详设」→ 已按 A/B 两项修订**：A `ScrollBar` 偏移误伤（结构性）/ B 双轴两轮判定，详见 §9）
 > 前序：需求确认 v1.1 ✅（2026-09-18 二轮外部评审通过，「可进初设」）
 > 上游：[phase15-scrollview-requirements.md](phase15-scrollview-requirements.md)（**§1.4 设计不变量为本稿的强约束**）
 > 相关：phase9.5-r1-clip-detailed-design.md（Clip 能力）/ phase9.6-panel-container-semantics-detailed-design.md（Panel 语义）/ phase13-captionbar-preliminary-design.md（`ConsumesMouseInput` 接缝先例）/ roadmap-deferred.md §7.5
@@ -53,7 +53,7 @@
 > **两处均为非纯虚**（带默认实现）⇒ **零破坏**：无需任何既有派生类同步（skill 条 33 的「实现者清单」问题不成立）。
 > **同时修正** `Widget.h:222` 的过期注释：`GetAbsolutePosition` 的用途已从「TextBox 光标 / ScrollBar / Popup / Tooltip **未来用**」改为**现状陈述**（TextBox 已在用 3 处，见 §5）。
 
-### 2.2 新建 `ECDI/include/ECDI/Widget/ScrollView.h`（Public 头 **89 → 90**）
+### 2.2 新建 `ECDI/include/ECDI/Widget/ScrollView.h`（Public 头 **89 → 90**）+ 内部 `ECDI/src/Widget/ScrollContent.h`（**不进 Public 头计数**）
 
 ```cpp
 #pragma once
@@ -77,13 +77,14 @@ class MouseWheelEvent;
 /// - **不提供**样式（背景/圆角/边框属 `Panel`；需要装饰时用一个外层 `Panel` 包住本控件）；
 /// - **不推导** 内容尺寸以外的语义（不做 ListBox/虚拟化/框选——见需求稿 §4）。
 ///
-/// 树结构（内容与装饰分离）：
+/// 树结构（**内容坐标空间与视口空间分离**——§3.3）：
 /// ```
-/// ScrollView（视口）
-/// ├── content 容器（尺寸 = 内容 extent；子控件加在它下面）   ← GetContentView()->AddChild(...)
-/// ├── 垂直 ScrollBar（靠右；条自身不参与 extent 推导）
-/// └── 水平 ScrollBar（靠底；v1 默认创建但仅在需要时显示——见 §3.4）
+/// ScrollView（**不 override 接缝** ⇒ 偏移恒 0）
+/// ├── ScrollContent（内容坐标空间的根——**唯一 override 偏移**的节点；AddChild 加在它下面）
+/// ├── 垂直 ScrollBar（固定在视口——**不受偏移**）
+/// └── 水平 ScrollBar（固定在视口——**不受偏移**）
 /// ```
+/// ⚠️ **判据**：*装饰与交互子节点必须待在偏移层之外*——否则滚动条会随内容一起滚（§3.1.1 反例）。
 ///
 /// 使用（最小）：
 /// ```cpp
@@ -105,8 +106,10 @@ public:
 
 	// ── 内容 ────────────────────────────────────────
 
-	/// @brief 内容容器（子控件加在此节点下；**非拥有**——树内节点）
-	/// @details 其尺寸 = 内容 extent（`SetContentExtent` 同步），故子控件按**内容坐标系**布局。
+	/// @brief 内容视图（内容子控件加在此节点下；**非拥有**——树内节点）
+	/// @details 实际类型为内部类 `ScrollContent`（内容坐标空间的根——§2.2 末 / §3.3）；
+	/// 公开面只暴露 `Widget&`（调用方只需 `AddChild`）⇒ 内部头不必进 Public 头计数。
+	/// 其尺寸 = 内容 extent（`SetContentExtent` 同步），故子控件按**内容坐标系**布局。
 	Widget& GetContentView() noexcept;
 	const Widget& GetContentView() const noexcept;
 
@@ -129,11 +132,18 @@ public:
 	/// @brief 设置内容偏移（内部 clamp 到 `[0, maxOffset]`——D11 单一真相源）
 	void SetContentOffset(int x, int y);
 
-	/// @brief 内容偏移 X（接缝实现——供 Paint/HitTest/GetAbsolutePosition 消费）
-	[[nodiscard]] int GetContentOffsetX() const noexcept override;
+	/// @brief 滚动偏移 X（**公共查询**——注意与虚接缝 `GetContentOffsetX` **不同名**）
+	/// @details ⚠️ **命名不可改回 `GetContentOffsetX`**：那是 `Widget` 的**虚接缝名**；若在此声明同名非虚成员，
+	/// 会触发 **name hiding**——`Widget* p = &sv; p->GetContentOffsetX()` 走基类（返回 0），
+	/// 而 `sv.GetContentOffsetX()` 走派生（返回真值）⇒ **同一个查询两份语义**。
+	/// 沿用 `TextBox::GetScrollOffsetY()` 的既有命名先例（类型 `int`——D1 定案整数像素）。
+	[[nodiscard]] int GetScrollOffsetX() const noexcept;
 
-	/// @brief 内容偏移 Y（接缝实现）
-	[[nodiscard]] int GetContentOffsetY() const noexcept override;
+	/// @brief 滚动偏移 Y（公共查询——同 `GetScrollOffsetX`）
+	[[nodiscard]] int GetScrollOffsetY() const noexcept;
+
+	// ⚠️ **本类不 override `GetContentOffsetX/Y()`**——接缝由内部节点 `ScrollContent` 实现（§3.1.1）；
+	//    若在此 override，滚动条作为直接子也会被偏移。
 
 	/// @brief 最大化偏移（`max(0, contentExtent - viewportExtent)`——与 K11 手搓版同式）
 	[[nodiscard]] int GetMaxOffsetX() const noexcept;
@@ -170,7 +180,7 @@ protected:
 
 private:
 
-	Widget* m_content = nullptr;		///< 内容容器（非拥有——子节点）
+	ScrollContent* m_content = nullptr;	///< 内容坐标空间的根（非拥有——子节点；内部类型）
 	ScrollBar* m_vBar = nullptr;		///< 垂直条（非拥有——子节点；父先于子析构）
 	ScrollBar* m_hBar = nullptr;		///< 水平条（非拥有）
 
@@ -185,6 +195,52 @@ private:
 
 }
 ```
+
+**内部头：内容坐标空间的根（`ECDI/src/Widget/ScrollContent.h`——不进 Public 头计数）**
+
+```cpp
+#pragma once
+
+#include "ECDI/Widget/Widget.h"
+
+namespace ECDI{
+
+class ScrollView;
+
+/// @brief 内容坐标空间的根（Phase 15——**唯一被内容偏移作用的子树**）
+/// @details 为什么需要本类：`Widget::GetContentOffsetX/Y()` 的语义是「作用于**全部直接子节点**」。
+/// 若把偏移 override 在 `ScrollView` 上，则**滚动条作为直接子也会被一起偏移**
+/// （视觉 / HitTest / `GetAbsolutePosition` 三个坐标系同时错——详见 §3.1.1 的反例）。
+/// 因此把偏移的消费者**下沉**到本节点：`ScrollView` 自身偏移恒 0（三个直接子都不受影响），
+/// 只有本节点的子树进入**内容坐标系**。
+///
+/// 依赖形态：持所属 `ScrollView&`（**非拥有**）——`CaptionButton` 持 `Window&` 的既有先例。
+/// 位置：`src/` 内部头（与 `src/Window/CaptionButton.h` 同款），**不进 Public 头计数**。
+class ScrollContent : public Widget{
+
+public:
+
+	/// @brief 构造
+	/// @param owner 所属滚动容器（**非拥有**——生命周期由 `ScrollView` 的子树拥有）
+	explicit ScrollContent(ScrollView& owner);
+
+	/// @brief 内容偏移 X（**接缝实现**——转发所属 `ScrollView` 的权威偏移）
+	[[nodiscard]] int GetContentOffsetX() const noexcept override;
+
+	/// @brief 内容偏移 Y（转发）
+	[[nodiscard]] int GetContentOffsetY() const noexcept override;
+
+private:
+
+	ScrollView& m_owner;	///< 非拥有（树内节点——父先于子析构）
+
+};
+
+}
+```
+
+> ⚠️ **两个易错点**：① 偏移的 override **归属 = 本节点**而非 `ScrollView`（否则滚动条被误伤——§3.1.1）；
+> ② `ScrollView` 的公共查询命名见 §2.2 的 `GetScrollOffsetX/Y()`（**不可**与虚接缝同名——name hiding）。
 
 ### 2.3 新建 `ECDI/include/ECDI/Widget/ScrollBar.h`（Public 头 **90 → 91**）
 
@@ -455,6 +511,23 @@ content.HitTest(84)     →  row3  局部 = 84 − 84 + 0 = 0  ∈ [0, h) ✓ �
 **结论（本节的实质产出）**：`Paint` 用**减**（传给子的原点左移）、`HitTest` 用**加**（收到的局部坐标先加回偏移），
 两者方向相反但同源。**这是最容易写错符号的地方**——详设须为每一处给出正负号，并用上表这样的数值实例回归。
 
+#### 3.1.1 ★ 偏移的 **override 归属**——一个结构陷阱（v1.1 新增，评审 A 项）
+
+**上面的变换式对所有 Widget 生效**，因此**谁 override `GetContentOffsetX/Y()` 决定了哪棵子树进入内容坐标系**。
+若 override 在 `ScrollView` 自身（v1.0 的错误写法），则**滚动条作为直接子也会被偏移**：
+
+**反例（AI 数值复现）**：`ScrollView` 几何 y=100、`offsetY=100`、vBar 几何 (388, 0)：
+
+| 量 | 按本节变换式算 | 期望 | 结果 |
+|---|---|---|---|
+| ScrollBar 视觉 y | `(100 − 100) + 0 = 0` | 100 | **偏移 −100** ❌ |
+| ScrollBar 的 HitTest 局部 y（点在条顶） | `0 − 0 + 100 = 100` | 0 | **错位 100** ❌ |
+
+⇒ **视觉 / 命中 / 绝对坐标三个坐标系同时错**，拖拽、hover、mouse-up 全受影响。
+
+**正确归属**：偏移 override 在 **`ScrollContent`**（内容坐标空间的根），而 `ScrollView` 自身偏移恒 0
+（§2.2 已按此修正、§3.3 给出树结构）。**判据一句话**：*装饰与交互子节点必须待在偏移层之外*。
+
 ### 3.2 `ClipsChildren()` 判定序（D2——**必须在递归之前**）
 
 ```
@@ -473,22 +546,30 @@ HitTest(x, y)
 
 ### 3.3 `ScrollView` 结构（含内容容器决策）
 
-**内容容器**（§8 O1 的倾向方案）：`ScrollView` 的树为
-`[content, 垂直条, 水平条]`，**内容子控件挂在 `content` 下**而非直接挂 `ScrollView` 下。
+**★ v1.1 结构校正（评审 A 项）**：`Widget::GetContentOffsetX/Y()` 作用于**全部直接子节点**。若把偏移
+override 在 `ScrollView` 上，则**滚动条作为直接子也会被一起偏移**——视觉 / HitTest / `GetAbsolutePosition`
+三处同错（反例见 §3.1.1）。⇒ **偏移的消费者必须下沉到内容节点**：
 
-| 方案 | 形态 | 取舍 |
-|---|---|---|
-| X 直接子 | 内容与两条同为 `ScrollView` 的 children | `UpdateContentExtent` 须**排除滚动条**（特判）；`Arrange` 若设在 ScrollView 上会排到滚动条 |
-| **Y 内容容器（倾向）** | 内容挂 `content` 子节点 | 内容/装饰天然分离；`Layout` 挂在 `content` 上（ScrollView 自身不参与布局——符合 §1.4(4)）；`extent` 推导无特判。代价 = 多一层 Widget 树 |
+```
+ScrollView（**不 override 接缝** ⇒ 偏移恒 0 ⇒ 三个直接子都不受影响）
+├── ScrollContent（内部类，**内容坐标空间的根**——唯一 override 偏移的节点）
+│     └── 内容子控件（受偏移）
+├── VScrollBar（固定在视口——**不受偏移** ✓）
+└── HScrollBar（固定在视口——**不受偏移** ✓）
+```
 
-**`content` 容器的尺寸 = 内容 extent**（不是视口尺寸）⇒ 其子控件按**内容坐标系**正常布局。
-⚠️ 这会让 `content` 的 `PushClip`（自身边界）是**内容矩形**而非视口——**不构成问题**：
-`ScrollView` 已 `PushClip` 视口，嵌套交集 = 视口 ∩ 内容矩形 = 视口 ✓（K2 的既有语义）。
+**为什么不需要中间转发层**：评审建议 `ContentSpace → Content` 两层，但 `ScrollContent` 自己即可作为偏移消费者
+（**只有它的子**受影响）⇒ 中间层无收益。正确性推演：`ScrollView`（偏移 0）给 `ScrollContent` 传 `childOrigin = x`；
+`ScrollContent` 的 `contentX = x + geometry(0)`，再算 `childOrigin = contentX − 自己的偏移(= ScrollView 的)`
+⇒ 内容子控件拿到 `x − offset` ✓ 与 §3.1 的数值自检完全一致。
+
+**`ScrollContent` 的尺寸 = 内容 extent**（不是视口尺寸）⇒ 其子控件按**内容坐标系**正常布局。
+⚠️ 这会让 `ScrollContent` 的 `PushClip`（自身边界）是**内容矩形**而非视口——**不构成问题**：
+`ScrollView` 已 `PushClip` 视口，嵌套交集 = 视口 ∩ 内容矩形 = 视口 ✓（K2 既有语义）。
+**`ScrollContent` 的 `ClipsChildren()` 保持默认 `false`**——视口约束由 `ScrollView` 一层负责即够（§3.2 纪律 3）。
 
 **`SetSize` override 的副作用**（视口变化时的原子序列）：
-`基类 SetSize` → 重算 `maxOffset`（视口变了）→ `clamp` 偏移 → 重排 `content`/两条的几何 → 同步 `ScrollBar::SetRange`。
-
-**`OnMouseWheel`**：`offset -= delta / 120.0f * step`（与 `TextBox.cpp:452` 同式）→ `clamp` → 同步条 → `Invalidate`。
+`基类 SetSize` → 重算 `maxOffset`（视口变了）→ `clamp` 偏移 → 重排 `ScrollContent`/两条的几何 → 同步 `ScrollBar::SetRange`。
 
 ### 3.4 `ScrollBar` 版式与拖拽（范围模型）
 
@@ -521,17 +602,38 @@ thumbStart  = trackLen == thumbLen ? 0
 
 **必须钉死**：`viewportExtent` 是"含条"还是"不含条"。定错 ⇒ **滚到底部时最后一行被水平条遮住**。
 
-**v1 定案（倾向）**：
+**v1.1 定案**：
 
 1. **条占位（reserve），不 overlay**——确定、可预测（overlay 属体验增强，记账）；
-2. **「是否需要某条」的判据用未扣除的视口**：`contentExtent > GetHeight()/GetWidth()`（**单轮判定**，不做两轮收敛）；
-3. **供 `maxOffset` / 滑块用的 `viewportExtent` = 扣除已显示条后的长度**：
-   `viewportH = GetHeight() - (hBar 显示 ? 垂直条厚度 : 0)`；
-4. **双轴交叉区不做缩角**（已记账）：水平条轨道宽 = 视口宽 − 垂直条厚。
+2. **两轮判定**（**v1.1 由单轮改**——评审指出：既然条占位，占空间就是**布局事实**，明知 viewport 可能算错仍接受属**设计缺口**而非 YAGNI）；
+3. **交叉区不做缩角**（已记账）：水平条轨道宽 = 视口宽 − 垂直条厚。
 
-⚠️ **已知误差（如实记账）**：单轮判定在**边界情形**会偏一位——内容宽度恰好在 `视口宽` 与 `视口宽 − 条厚` 之间时，
-理论上需要水平条但单轮判据认为不需要（因判据用的是未扣除宽度）。**v1 接受**（记账），
-若实测暴露可见缺陷，再引入"两轮判定"（第二轮用扣除后宽度复核）——属详设/实施期的收敛项。
+```
+// 两轮判定（修正版——单调性：viewport 只会变小 ⇒ need 只会 false→true ⇒ 并集即不动点，最多 2 轮）
+nV1 = contentH > viewportH0 ;  nH1 = contentW > viewportW0
+tW  = viewportW0 - (nV1 ? barThickness : 0)      // 第一轮结论下的可用宽
+tH  = viewportH0 - (nH1 ? barThickness : 0)      // 第一轮结论下的可用高
+nV  = nV1 || (contentH > tH)                     // ★ 单调升级：vH 变小时 V 条可能「补出现」
+nH  = nH1 || (contentW > tW)                     // ★ 同理
+viewportW = viewportW0 - (nV ? barThickness : 0) // 并集对应的最终视口
+viewportH = viewportH0 - (nH ? barThickness : 0)
+```
+
+⚠️ **为什么评审原算法不够（AI 修正，实测 2/6 反例）**：评审版第二轮只**重算 need** 却**不再扣减**——
+当 `needV` 因 `vH` 被扣小而**由 false 升级为 true** 时，`vW` 已错过扣减 ⇒ **最终 viewport 与 need 不自洽**。
+
+**严格判据（不动点四条）**：① `needV == (contentH > viewportH_final)` ② `needH == (contentW > viewportW_final)`
+③ `viewportW_final == viewportW0 − (needV ? T : 0)` ④ `viewportH_final == viewportH0 − (needH ? T : 0)`
+
+| 用例（`c=W×H v=W×H`，T=12） | 评审版 | 修正版 |
+|---|---|---|
+| `c=301×500 v=300×500` | needV=1 但 vW=300 **未扣** ❌ | need(V=1,H=1) vp=**288×488** ✓ |
+| `c=300×501 v=300×500` | needH=1 但 vH=500 **未扣** ❌ | need(V=1,H=1) vp=**288×488** ✓ |
+| `c=301×501 v=300×500` | vp=288×488 ✓ | vp=288×488 ✓ |
+| `c=300×500 v=300×500`（恰好相等） | 都不需要 ✓ | 都不需要 ✓ |
+| `c=200×300 v=300×500`（都不需要） | ✓ | ✓ |
+| `c=288×488 v=300×500`（恰好装下） | ✓ | ✓ |
+| **合计违反严格判据** | **2/6** | **0/6** |
 
 ### 3.6 `extent` 更新时机（GPT 关注点 6）
 
@@ -595,6 +697,7 @@ UpdateContentExtent()
 | 时机 | **递归子节点之前** |
 | 实现约束 | **不得**用 `ContainsPoint`（`Panel` 恒 false 会拦死子树） |
 | 默认 | `false` ⇒ 既有控件树命中语义**零变化** |
+| **偏移 override 归属** | 偏移的消费者 = **内容节点**（`ScrollContent`）；**装饰与交互子节点**（`ScrollBar`）必须待在偏移层之外——否则视觉/命中/绝对坐标三处同错（§3.1.1 反例） |
 | 与 NCHITTEST 的耦合 | `Window::IsClientInteractiveAt` 亦走 `HitTest` ⇒ 本契约生效后，**越界内容不再让 caption 区失去拖拽**（D4 连带收益） |
 
 ### 4.4 失败模式与安全
@@ -634,7 +737,7 @@ UpdateContentExtent()
 |---|---|---|
 | T1 | **`ScrollBar` 三态色的具体色值** | `DefaultTheme::GetScrollBarStyle()` 的常数值（参照 `ModelProbe` 暗色配色或中性灰） |
 | T2 | **`kMinThumb` / 默认 `step` / 默认 `thickness` 的取值** | 常量表 + 依据（默认 step 不得绑 Demo——D5） |
-| T3 | **`ScrollView` 的 `content` 节点类** | 复用 `Panel`（含样式）还是裸 `Widget`？（倾向裸 `Widget`——样式归外层 Panel，O6） |
+| T3 | **`content` 节点类** | ✅ **已定（v1.1）**：内部类 `ScrollContent`（`src/Widget/ScrollContent.h`，内容坐标空间的根、唯一 override 偏移）——公开面只暴露 `Widget&`（§2.2 / §3.3） |
 | T4 | **`ScrollBar` 的 `ContainsPoint`** | 默认矩形是否够（轨道整条可点 ⇒ 够）；hover 命中是否需区分滑块/轨道 |
 | T5 | **两条的几何重排规则** | 垂直条 `x = 视口宽 − 厚度`；水平条 `y = 视口高 − 厚度`；`SetScrollBarVisible(false)` 时如何回收空间 |
 | T6 | **测试替身/探针** | `RecordingBackend` 命令断言如何验"内容被偏移"（命令坐标 vs 期望） |
@@ -649,6 +752,7 @@ UpdateContentExtent()
 | **坐标变换** | 默认偏移 0 ⇒ `Paint`/`HitTest`/`GetAbsolutePosition` 与现状逐位一致（**零回归锚**）；单层偏移下三处一致性；**多层嵌套**（ScrollView→content→row）的符号/累加 |
 | **命中约束** | 点在该容器内 + 子越界 ⇒ 不命中越界子；点在容器外 ⇒ 整棵子树不命中（含深层）；**`Panel` 不受影响**（`ClipsChildren()==false` 回归） |
 | **偏移与 clamp** | 滚轮步长换算（`delta=±120/±30/±240`）；到边界不再滚；`maxOffset` 变小后 offset 立即 clamp（§3.6 缺口用例） |
+| **偏移层隔离** | ★ `ScrollView` 自身的偏移恒 0；滚动条的**视觉位置 / `HitTest` / `GetAbsolutePosition` 均不受内容偏移影响**（§3.1.1 反例回归锚——防"偏移 override 被搬回 ScrollView"） |
 | **extent** | `max(y+h)` 而非 `Σ`（间隔场景 → 50 not 40）；负向钳 0；空内容 = 0 |
 | **ScrollBar 版式** | 滑块长度/位置的比例；`maxOffset==0` 占满；拖拽反推；轨道点击翻页；拖拽中 Capture 跟手 |
 | **主题** | `ApplyTheme` 注入 + `SetStyle` override 后 `ApplyTheme` 不覆盖（D7 契约，同 `ProgressBarTests` 先例） |
@@ -659,17 +763,20 @@ UpdateContentExtent()
 ## 8. 开放决策点（含初设新发现）
 
 ### O1 内容与装饰的树结构：直接子（X）vs 内容容器（Y）
-**倾向 Y**（§3.3）。理由：extent 推导无特判、`Layout` 挂 content 更自然、符合职责四层。**代价** = 多一层节点。
-**待拍板**：是否接受多一层（影响 R4 迁移写法与 `GetContentView()` API）。
+**倾向 Y**（§3.3）——且经评审后**升级语义**：内容节点不只是「容器」，而是**内容坐标空间的根**
+（`ScrollContent`，**唯一 override 内容偏移**的节点）。理由：extent 推导无特判、`Layout` 挂 content 更自然、
+符合职责四层；**更关键的是**：只有让偏移的消费者下沉到内容节点，`ScrollBar` 才能待在偏移层之外（§3.1.1 反例）。
+**代价** = 多一层节点（**已确认接受**）。
 
 ### O2 内容容器的尺寸语义
 **倾向**：`content` 尺寸 = **内容 extent**（子控件按内容坐标系布局）。
 **备选**：`content` 尺寸 = 视口尺寸（则子控件需自行按内容坐标布置，但 `PushClip` 语义更直白）。
 ⚠️ 取决于 O1 的结论——若选 X 则本项消失。
 
-### O3 条占位 vs overlay，以及单轮/两轮判定
-**倾向**：占位 + 单轮（§3.5），边界误差**记账**。
-**待拍板**：是否接受单轮的边界误差（可能表现为"该出横条却没出"）。
+### O3 条占位 vs overlay，以及判定轮数
+**倾向**：**占位（reserve）+ 两轮判定**（§3.5）——评审指出：既然条是占位（占空间是**布局事实**），
+明知 viewport 可能算错仍接受属**设计缺口**而非 YAGNI ⇒ **v1.1 已改两轮**（修正算法，最多 2 轮收敛）。
+**overlay** 仍不做（体验增强，记账）。
 
 ### O4 `ScrollBar` 的通知形态
 **倾向**：`std::function<void(int)>`——**已有既先例**（`CaptionButton` 构造收 `std::function` 回调）。
@@ -696,10 +803,23 @@ UpdateContentExtent()
 
 ## 9. 评审响应（v1.0）
 
-> 本稿为初稿；外部评审意见待回填。
+外部评审结论：「**方向通过，但暂时不建议直接进入详细设计**」——需先修正一处结构性问题（`ContentOffset` 不能同时作用于 Content 与 ScrollBar），另建议修一处算法缺口（双轴 viewport 单轮判定）。**其余 9 项通过**（三处坐标变换 · `ClipsChildren()` · ScrollView 继承 `Widget` · extent 模型 · offset 单一真相源 · `UpdateContentExtent()` 原子链 · ScrollBar 数学模型 · ModelProbe 迁移 · ContentView 思路）。
+
+| # | 评审意见 | 处置 | 依据 |
+|---|---|---|---|
+| **A** | **`ScrollBar` 会随内容偏移一起滚动**（视觉 / HitTest / `GetAbsolutePosition` 三处同错） | ✅ **采纳**（**AI 独立数值复现确认成立**） | §3.1.1 误伤反例；修法 = 偏移消费者下沉到 `ScrollContent`（§2.2 + §3.3） |
+| A-1 | 建议结构 `ContentSpace → Content`（两层） | ⚠️ **部分采纳**：**采纳「内容坐标空间分离」**，但**合并为一层** `ScrollContent` | Content 自己即偏移消费者，中间转发层无收益（§3.3） |
+| **B** | 双轴 viewport 单轮 → **两轮**（不该为 YAGNI 留已知错误） | ✅ **采纳方向**；**但评审算法不完整，AI 给出修正版** | 严格不动点判据实测：**评审版 2/6 违反、修正版 0/6**（§3.5） |
+| — | 其余 9 项（见上） | ✅ 通过，不改 | — |
+
+**AI 对评审的一处修正**：B 项评审算法在「`needV` 因 `vH` 被扣小而由 false 升级为 true」时漏掉 `vW` 的扣减 ⇒ 最终 viewport 与 need 不自洽；修正版取并集后统一扣减。
 
 ---
 
 ## 10. 修订记录
 
-- v1.0（2026-09-18）初步设计初稿：§1 范围映射（R1–R5 → 设计域）· **§2 头全文草案 7 处**（`Widget.h` 两接缝增量 · 新建 `ScrollView.h` / `ScrollBar.h` / `ScrollBarStyle.h` / `Theme.h` 增量 / `DefaultTheme` 增量 / 构建零改动说明）· §3 实现分解（**坐标变换三处完全展开 + 数值自检** · `ClipsChildren` 判定序 · `ScrollView` 结构与内容容器 · `ScrollBar` 范围模型与拖拽 · **双轴 viewport 定义** · extent 更新时机 · R4 迁移映射）· §4 契约四组 · **§5 影响面 10 项 grep 实证** · §6 待定项 7 项 · §7 测试方向 7 组 · **§8 开放决策点 O1–O8**。落实需求稿 §1.4 四条不变量为强约束；**响应外部评审的 7 个关注点**（§3.1 变换展开 / §3.2 判定序 / §2.3 事件与命中优先（`HitTest` 逆序 ⇒ 条天然优先）· §3.4 范围模型 / §3.5 双轴定义 / §3.6 更新时机 / §2.3 + §4.3 `ConsumesMouseInput` 推演）。
+- v1.1（2026-09-18）**外部评审处置——一处结构性矛盾 + 一处算法不完整**（评审结论：「方向通过，但暂不建议直接进详设」；其余 9 项通过）：
+  - **❗A（必须修）`ScrollBar` 被内容偏移误伤**——评审指出：v1.0 把 `GetContentOffsetX/Y()` override 在 **`ScrollView` 自身**，而接缝语义是「作用于全部直接子节点」，`ScrollBar` 作为直接子被一并偏移。**AI 独立数值复现确认成立**（`ScrollView` 几何 y=100 / `offsetY=100` / vBar 几何 (388,0)：条视觉 y 算得 **0**、期望 **100**（偏移 −100）；条的 HitTest 局部 y 算得 **100**、期望 **0**）⇒ **视觉 / 命中 / 绝对坐标三个坐标系同时错**，拖拽·hover·mouse-up 全受影响。**修法**：偏移的消费者**下沉到内容节点**——`ScrollView` 不 override 接缝（偏移恒 0，三个直接子都不受影响），新增**内部头** `src/Widget/ScrollContent.h` 作为**内容坐标空间的根**（唯一被偏移的子树）。**比评审建议的 `ContentSpace → Content` 两层少一层**（Content 自己即偏移消费者，中间转发节点无收益）。
+  - **★ 命名避坑（AI 新增发现）**：`ScrollView` 的公共查询用 **`GetScrollOffsetX/Y()`**（`TextBox::GetScrollOffsetY()` 既有先例），**不可**与虚接缝名同名——同名非虚成员触发 **name hiding**（`Widget* p = &sv` 走基类返回 0，`sv.` 走派生返回真值）⇒ **一个查询两份语义**。
+  - **⚠️B（算法不完整）双轴 viewport 两轮判定**——评审建议单轮改两轮（理由：既然条 **reserve** 占位，占空间就是**布局事实**，明知可能算错仍接受属**设计缺口**而非 YAGNI ⇒ **AI 采纳该方向**）。但**评审算法不完整**：`needV` 第二轮可能由 false **升级为 true**（因 `vH` 被 `needH` 扣小），此时 `vW` 已错过扣减。**严格不动点判据实测：评审版 2/6 例违反、修正版 0/6 例**。修正版利用单调性取并集（最多 2 轮收敛）。
+  - **逐节改动**：§2.2 标题扩为「`ScrollView.h` + 内部 `ScrollContent.h`」· 树结构注释重写 · **删**两个 `GetContentOffset*` override、改 `GetScrollOffsetX/Y()` · `m_content` 类型 → `ScrollContent*` · **新增 `ScrollContent.h` 草案**（不进 Public 头计数）· §3.1 **新增 §3.1.1 偏移 override 归属 + 误伤反例** · §3.3 树结构改为「内容坐标空间与视口空间分离」 · §3.5 单轮 → **两轮（修正算法）+ 6 例验证表** · §8 O1 升级为「内容坐标空间的根」、O3 改「两轮修正」 · §9 评审响应表。
