@@ -1,6 +1,6 @@
 ﻿# Phase 15 滚动容器（ScrollView + 滚动条）详细设计
 
-> 状态：v1.2（2026-09-18）｜详细设计——✅ **已通过并实现完毕**（v1.0/v1.1 外部评审「**通过，可进入实现**」；实现 A/B/C 三批 + 验收实测，见 §9 v1.2 条目）
+> 状态：v1.2（2026-09-18）｜详细设计——✅ **已验收闭合**（v1.0/v1.1 外部评审「**通过，可进入实现**」；实现 A/B/C 三批 + **A1–A7 验收全过**，见 §9 v1.2/v1.3 条目）
 > 前序：需求确认 ✅ v1.2（2026-09-18）｜初步设计 ✅ v1.2（三轮外部评审通过「可进详设」）
 > 上游：[phase15-scrollview-requirements.md](phase15-scrollview-requirements.md)（§1.4 四条不变量）· [phase15-scrollview-preliminary-design.md](phase15-scrollview-preliminary-design.md)（§9.1 评审基线澄清）
 > 相关：phase12-windowchrome-detailed-design.md（**逐文件最小 diff 规格**先例）· phase13-captionbar-detailed-design.md（`ConsumesMouseInput` 接缝）
@@ -659,7 +659,7 @@ thumbStart = maxOffset == 0 ? 0 : (track - thumbLen) × offset / maxOffset
 | # | 项 | 判据 |
 |---|---|---|
 | **A1** | 四工具链构建 + 测试 | MSVC / ClangCL / Clang / MinGW 全绿；用例 196 → **210** |
-| **A2** | **断言启用核验** | 按 skill 条 50 取二进制证据（7 条条件串）——`CMakeLists.txt` 已为非 MSVC 模拟链补 `_DEBUG` |
+| **A2** | **断言启用核验** | 按 skill 条 50 取二进制证据（**10 条条件串**——实施期由 7 扩充）——`CMakeLists.txt` 已为非 MSVC 模拟链补 `_DEBUG` |
 | **A3** | **零回归** | 既有 196 用例**全部保持通过**（尤其 `WidgetTests` / `CollapsiblePanelTests` / `ClipTests` 的 `HitTest` 直调用例） |
 | **A4** | **偏移层隔离**（T15-5） | ★ 本条是本阶段特有的结构性验收——防「偏移 override 被搬回 `ScrollView`」 |
 | **A5** | `ModelProbe` 手测 | 滚轮一滚一行（28px）· 行高/圆角/边框不变 · 滚动条可拖拽/翻页 · 标题栏可拖窗（`--borderless`） |
@@ -675,8 +675,8 @@ thumbStart = maxOffset == 0 ? 0 : (track - thumbLen) × offset / maxOffset
 | **A3** | ✅ | 既有 196 全保（含 `WidgetTests`/`CollapsiblePanelTests`/`ClipTests` 的 `HitTest` 直调） |
 | **A4** | ✅ | T15-5 `ScrollBar.NotAffectedByContentOffset` 通过（Paint 命令 / HitTest / `GetAbsolutePosition` 三通道逐位一致） |
 | **A5** | ✅ | 用户手测：滚动条**拖动跟手**、轨道翻页正常、行高/圆角/边框不变 |
-| **A6** | 🔶 待编译 | `ecdi_public_header_test` 的 Glob 已生成 **92 个 TU**（Debug 四链 `selfcontain/` 实测各 92）；该目标 `EXCLUDE_FROM_ALL` ⇒ 需显式 `--target ecdi_public_header_test` 实际编译 |
-| **A7** | ⏳ | 交付提示（§2.12） |
+| **A6** | ✅ | `ecdi_public_header_test` **92 头全部独立编译成功**：`[115/116] Linking CXX static library ecdi_public_header_test.lib`（**EXIT 0**）。★ 该目标同时是**编码探针**——`Font.h` 的 `C4819` 在补 BOM 后**消失**（本轮 0 条）。附带揪出生成 TU 的 `avoid_empty_tu` 缺 `static` ⇒ 91 条 `LNK4006`（已修，见 §9 v1.3） |
+| **A7** | ✅ | 用户 2026-09-18 已在 CLion **Reload CMake Project**（新增 3 个 `.cpp` 入库生效） |
 
 **A2 特征串（10 条）**：`it != m_windows.end()` · `m_rootWidget != nullptr` · `current == &GetRootWidget()` · `child->m_parent == nullptr` · `index < m_children.size()` · `!child->Contains(this)` · `it != m_children.end()` · `spacing >= 0` · `stretch >= 0` · **`step >= 0`（Phase 15 新增）**。
 （**搜索纪律**：窄串 —— `HandleAssertFailure` 收 `std::string_view`；**不可**用源文件路径判据，会被调试信息污染；排除通用短串 `child` / `false` / `m_inFrame`。）
@@ -718,6 +718,11 @@ thumbStart = maxOffset == 0 ? 0 : (track - thumbLen) × offset / maxOffset
 
 ## 9. 修订记录
 
+- v1.3（2026-09-18）**验收闭合**（无任何设计改动，只记验收结果与两项构建级既有缺陷的处置）：
+  - **① A6 通过**：`ecdi_public_header_test` 显式构建 ⇒ **92 个公有头各自独立编译成功**（`Linking CXX static library`，EXIT 0）。★ 该目标兼具**编码探针**作用：`Core/Font.h` 的 `C4819`（MSVC 按 CP936 误读 UTF-8）在补 BOM 后**消失**（本轮 0 条）。
+  - **② A7 完成**：用户已在 CLion **Reload CMake Project**，新增 3 个 `.cpp` 入库生效。
+  - **③ 顺带修两项构建级既有缺陷**（均为历史遗留，**非 Phase 15 引入**）：生成 TU 的 `avoid_empty_tu` 补 `static`（内部链接）⇒ 消除静态库内 92 份同名外部符号，**91 条 `LNK4006` 归零**；`CMakeLists.txt` 同区块注释「80 头」→ **92 头**。另补 4 个构建/配置文件的 BOM（`ECDI.slnx` · `cmake/ECDIConfig.cmake.in` · `examples/MinimalApp` 与 `examples/VisualTest` 的 `CMakeLists.txt`）⇒ **被跟踪文本文件 BOM 覆盖 100%**。
+  - **验收提交**：`80068fe`（收尾批——详设 v1.2 + 两份 README + `SetSize` 权限 + include 清理）· `c01d6c3`（5 个源码补 BOM）· `c8ad2ab`（`static` 修正 + 4 个配置补 BOM）。
 - v1.2（2026-09-18）**实现期回写**（A/B/C 三批实现 + 验收实测；**不改任何设计决策**，只补实测数据与三处实施期偏差）：
   - **① §2.7 补 `ScrollBar::GetThickness()`**（v1.0 漏列）：厚度参与 viewport 计算 ⇒ 必须单点可查（不可两处各读常量）。
   - **② §2.8.1 新增「事件坐标系纪律」**：`ScrollBar` 初版把**事件坐标当局部**用（**真缺陷**，用户实测发现）⇒ 引入 `MainAxisPosFromClient` 完成换算；并记录**两层测试盲区**（直调 handler 喂局部坐标 = 镜像同错；`abs.y == 0` 会掩盖垂直轴漏换算）。

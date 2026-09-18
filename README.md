@@ -137,6 +137,7 @@ docs/       design documents (119 files; requirements → preliminary → detail
 | 12 | Window chrome (borderless mode, `WM_NCCALCSIZE` / `NCHITTEST` interception, maximize work-area correction, DWM integration) | ✅ |
 | 13 | Caption bar (self-drawn title bar, `NCHITTEST` → widget-tree delegation, window-state query API) | ✅ |
 | **14** | **Tray icon + file drop**: application-level platform seam (`PlatformApplication` + internal hidden top-level host window), `NOTIFYICON_VERSION_4` callback translation, self-healing after explorer restart, window-level `WM_DROPFILES` | ✅ |
+| **15** | **Scroll container (`ScrollView` + scrollbar)**: content-offset seam (`GetContentOffsetX/Y`, consumed by paint / hit test / absolute position), `ClipsChildren` hit-test gate, two-pass dual-axis viewport, single-source offset with self-drawn scrollbars, internal `ScrollContent` as the root of the content coordinate space, ModelProbe list migrated off its hand-rolled container | ✅ |
 
 ## License
 
