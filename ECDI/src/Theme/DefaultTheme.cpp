@@ -89,6 +89,21 @@ ProgressBarStyle DefaultTheme::GetProgressBarStyle() const{
 	return s;
 }
 
+ScrollBarStyle DefaultTheme::GetScrollBarStyle() const{
+
+	// Phase 15 默认视觉：中性灰轨道 + 稍亮滑块（三态）
+	// ⚠️ thickness 不是纯视觉量——它参与 viewport 计算（详设 §3.3 双轴判定要扣它）
+	ScrollBarStyle s;
+	s.trackColor.value        = Color::FromRGBA8(240, 240, 245);
+	s.thumbColor.value        = Color::FromRGBA8(190, 190, 200);
+	s.thumbHoverColor.value   = Color::FromRGBA8(160, 160, 175);
+	s.thumbPressedColor.value = Color::FromRGBA8(130, 130, 145);
+	s.cornerRadius.value      = 3.0f;
+	s.thickness.value         = 12;
+	return s;
+
+}
+
 const DefaultTheme& GetDefaultTheme(){
 	static DefaultTheme instance;   // static local = 首次调用构造，非程序启动
 	return instance;
