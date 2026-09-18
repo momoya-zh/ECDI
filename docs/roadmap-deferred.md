@@ -75,8 +75,19 @@
 |---|---|---|---|
 | 29 | 抗锯齿升级（圆角/圆弧覆盖度） | `phase9.5-alpha-primitive-detailed-design.md` §4「明确不做（YAGNI）」 | ✅ **已实现（2026-09-11）**——三件套齐备（`docs/phase8.6-render-antialiasing-{requirements,preliminary-design,detailed-design}.md`，详设 v1.4），`ecdi_tests` **174/174 通过**（158 既有零回归 + 15 AA 新增 + 1 ModelProbe 回归）；**正式修订 9.5「约束 2（圆角无抗锯齿）」**——改为「alpha 合成与几何抗锯齿正交」；两层拆分（覆盖度生成 ⇄ 形状装配）+ 掩码按 radius 缓存 + `PatchSurface` 复用；公共 API 与全部控件零改动（消费方 Button/CheckBox/Panel/ProgressBar/Radio/TextBox/焦点框自动获益）。斜线（`DrawLine` AA）**另起**——`DrawLine` 连 alpha 路径都没有 |
 
+## 7.5 Phase 15 滚动容器（新立——2026-09-17）
+
+| # | 延期项 | 来源 | 备注 |
+|---|---|---|---|
+| 28 | **`HitTest` 父边界约束的通用化**（K4：子节点越界仍可命中，波及 hover/按下/移动/滚轮/拖入 5 条路径） | Phase 15 需求稿 §1.2 K4/K5 | Phase 15 以 **`ClipsChildren()` 门控**（需裁剪的容器声明式开启）局部收口，**不**通改全部容器命中语义（零回归风险无法在无消费者场景验证）。重启：第二个非滚动消费者（ListBox / 裁剪面板）出现时，把默认值从 false 翻成 true |
+| 29 | **焦点滚入视口**（`PageUp/PageDown/Home/End` + Tab 聚焦时自动滚动） | Phase 15 需求稿 §4 | 与滚轮**驱动源不同**（焦点驱动 vs extent 驱动），未纳入 R1–R5。重启：ScrollView 内出现可聚焦控件集合时 |
+| 30 | **平滑 / 惯性 / 弹性滚动** | Phase 15 需求稿 §4 | Phase 9.6 动画系统可支撑（`AnimationManager` per-Window tick），属体验增强 |
+| 31 | **虚拟化（按需生成子控件）** | Phase 15 需求稿 §4 | 需内容模型抽象（数据源 → 可视行），YAGNI；大列表性能真实成为瓶颈时再评 |
+| 32 | **TextBox 横向滚动条** | Phase 9.5 R1 详设 L102（v1.0 记账） | Phase 15 的 R2 只做**容器级**滚动条；TextBox 滚动是 **caret 驱动**（与 extent 驱动不同源）——若要给 TextBox 加条，须让 TextBox 内部视图接入 `ScrollBar`，是独立议题（Phase 15 §4 已显式划出） |
+
 ## 8. 修订记录
 
+- v1.7（2026-09-17）新增 §7.5 Phase 15 延期项（①②③④⑤ 五条）：K4 命中约束通用化（以 `ClipsChildren()` 门控局部收口）· 焦点滚入 · 平滑/惯性 · 虚拟化 · TextBox 横向滚动条（Phase 9.5 R1 记账的边界澄清——仅指 TextBox，非容器级）。
 - v1.0（2026-08-15）总表定稿：全部延期项分组到阶段（7/7.5/8/8.5/9/9.5）；确认 SetFont 入 8.5、21-25 入 9.5。
 - v1.1（2026-08-15）**Phase 7 拆 7.1/7.2**（用户决策）：测试体系入 7.2（新增 #28——5.5.2 P8 承诺的 Selection 单元测试补测；Phase 10 转库前测试保障）。
 - v1.2（2026-09-11）新增 **§7 Phase 8.6 渲染抗锯齿**（条目 #29）——把 `phase9.5-alpha-primitive-detailed-design.md` §4 的「抗锯齿升级」正式纳入总表并立项（该延期项此前只存在于 9.5 详设清单，总表零记录，属登记遗漏）。本次**仅补登记 AA 一项**；9.6 / 9.7 / 9.8 / 10 / 11 / 12 的延期项批量回填仍待单独授权（见头部已知缺口声明）。
