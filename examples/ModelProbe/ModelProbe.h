@@ -15,6 +15,7 @@ class Button;
 class Label;
 class CheckBox;
 class Radio;
+class ScrollView;   // 前置声明（Phase 15：模型列表滚动容器——非拥有指针）
 class Window;   // 前置声明（Phase 12 实测接缝——非拥有指针）
 class DropFilesEvent;   // 前置声明（Phase 14：OnDropFiles override 形参——.cpp 侧含全头）
 
@@ -129,6 +130,10 @@ private:
 	Label* m_statLabel = nullptr;
 	Panel* m_statRow = nullptr;   ///< 状态行容器（9.8 RefreshStatText Arrange 用）
 	Panel* m_list = nullptr;
+	/// 模型列表滚动容器（Phase 15 R4——非拥有；内容子控件加到 GetContentView()，不是加到 m_list）
+	/// @details `m_list` 仍是**外层 `Panel`**（承接背景/圆角/边框——`ScrollView` 无样式能力，详设 §3.6）；
+	/// 两者是父子：`Panel(装饰) → ScrollView(视口/偏移/范围) → ScrollContent(内容坐标系) → 行`。
+	ScrollView* m_scroll = nullptr;
 	Radio* m_fmtIds = nullptr;
 	Radio* m_fmtFull = nullptr;
 	Radio* m_fmtCfg = nullptr;

@@ -27,6 +27,7 @@ int ECDI::Test::RunAllTests()
     RegisterCaptionBarTests();   // Phase 13：CaptionBar
     RegisterTrayTests();   // Phase 14：托盘
     RegisterDropFilesTests();   // Phase 14：拖入
+    RegisterScrollViewTests();   // Phase 15：滚动容器
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

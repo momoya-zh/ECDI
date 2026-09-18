@@ -218,6 +218,7 @@
     <ClCompile Include="src\Tests\AntiAliasingTests.cpp" />
     <ClCompile Include="src\Tests\WindowChromeTests.cpp" />
     <ClCompile Include="src\Tests\CaptionBarTests.cpp" />
+    <ClCompile Include="src\Tests\ScrollViewTests.cpp" />
     <ClCompile Include="src\Platform\Win32\Win32ChildProcess.cpp" />
     <ClCompile Include="src\Platform\Win32\WicImageDecoder.cpp" />
     <ClCompile Include="src\Platform\Win32\ExecutablePath.cpp" />

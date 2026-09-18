@@ -10,7 +10,6 @@
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Font.h"
 #include "ECDI/Core/String.h"
-#include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
 #include "ECDI/EventSystem/Window/DropFilesEvent.h"   // Phase 14 A7：OnDropFiles override（Widget 级观测）
 #include "ECDI/Layout/HorizontalLayout.h"
 #include "ECDI/Layout/VerticalLayout.h"
@@ -20,6 +19,7 @@
 #include "ECDI/Widget/CheckBox.h"
 #include "ECDI/Widget/Label.h"
 #include "ECDI/Widget/Radio.h"
+#include "ECDI/Widget/ScrollView.h"   // Phase 15 R4：模型列表滚动容器（收回手搓 ModelListPanel）
 #include "ECDI/Widget/TextBox.h"
 #include "ECDI/Window/Window.h"
 
@@ -47,42 +47,11 @@ constexpr Color kSecondaryHover() noexcept{ return Color::FromRGBA8(44, 52, 68, 
 constexpr float kRadius = 6.0f;    ///< 常规圆角（QSS 6px）
 constexpr float kRowHeight = 28.0f;   ///< 模型行高
 
-/// @brief 模型列表滚动容器（Panel 子类——裁切 + 滚轮改行 Y 偏移；行位置 = i*rowH - offset）
-class ModelListPanel : public Panel{
-public:
-	void SetRows(std::vector<Widget*> rows){
-		m_rows = std::move(rows);
-		ApplyLayout();
-	}
-
-	void SetRowHeight(float h){
-		m_rowHeight = h;
-		ApplyLayout();
-	}
-
-protected:
-	void OnMouseWheel(const MouseWheelEvent& event) override{
-		// delta > 0 = 上滚（远离用户）→ 内容上移（offset 减）；一滚一行
-		const float step = event.GetDelta() > 0 ? -m_rowHeight : m_rowHeight;
-		m_offset += step;
-		const float total = static_cast<float>(m_rows.size()) * m_rowHeight;
-		const float maxOffset = (std::max)(0.0f, total - static_cast<float>(GetHeight()));
-		m_offset = (std::clamp)(m_offset, 0.0f, maxOffset);
-		ApplyLayout();
-		Invalidate();
-	}
-
-private:
-	void ApplyLayout(){
-		for (size_t i = 0; i < m_rows.size(); ++i){
-			m_rows[i]->SetPosition(0, static_cast<int>(static_cast<float>(i) * m_rowHeight - m_offset));
-		}
-	}
-
-	std::vector<Widget*> m_rows;
-	float m_rowHeight = kRowHeight;
-	float m_offset = 0.0f;
-};
+// Phase 15 R4：**原 `ModelListPanel`（35 行手搓滚动容器）已删除**——被框架 `ScrollView` 收回：
+// ① 裁切 → `ScrollView` 自身 clip（`Widget::Paint` 的 PushClip + 后端交集语义）；
+// ② 滚轮按行滚 + `m_offset` → `ScrollView::OnMouseWheel` + 内容偏移（接缝统一）；
+// ③ 行位置 `i*rowH − offset` → 行只放**布局位置** `i*rowH`（视觉位移由接缝减 offset——C1）。
+// 装饰（背景/圆角/边框）不再靠继承 `Panel` → **外层 `Panel`** 包住 `ScrollView`（详设 §3.6）。
 
 }   // namespace
 
@@ -367,18 +336,28 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	statRow->AddChild(std::move(noneBtn));
 	AddChild(std::move(statRow));
 
-	// ── 模型列表（滚动容器——裁切 + 滚轮）──
-	auto list = std::make_unique<ModelListPanel>();
-	list->SetSize(600, 200);
-	list->SetStretch(1);   // 9.7：模型列表垂直拉伸，吃剩余空间
-	list->SetStyle(PanelStyleOverride{
+	// ── 模型列表（Phase 15：外层 Panel 承接装饰 + ScrollView 管视口/偏移/范围）──
+	// 装饰与滚动分离（详设 §3.6）：ScrollView **无样式能力**，背景/圆角/边框由外层 Panel 提供
+	// （原 ModelListPanel 的 PanelStyle 原样搬迁）；滚动条由 ScrollView 自带（R2）。
+	auto shell = std::make_unique<Panel>();
+	shell->SetSize(600, 200);
+	shell->SetStretch(1);   // 9.7：模型列表垂直拉伸，吃剩余空间
+	shell->SetLayout(std::make_unique<VerticalLayout>(0, true));   // 唯一子（ScrollView）铺满
+	shell->SetStyle(PanelStyleOverride{
 		.background = kListBg(),
 		.cornerRadius = 8.0f,
 		.borderWidth = 1.0f,
 		.borderColor = kInputBorder(),
 	});
-	m_list = list.get();
-	AddChild(std::move(list));
+
+	auto list = std::make_unique<ScrollView>();
+	list->SetScrollStep(static_cast<int>(kRowHeight));   // 28 = 原行高（D5：框架默认 32 不绑 Demo）
+	list->SetStretch(1);                                 // 吃满 shell
+	m_scroll = list.get();
+
+	shell->AddChild(std::move(list));
+	m_list = shell.get();
+	AddChild(std::move(shell));
 
 	// ── 导出格式 ──
 	auto fmtRow = std::make_unique<Panel>();
@@ -753,8 +732,6 @@ void ModelProbePage::RebuildRows(){
 	for (auto& row : m_rows){
 		row.panel->SetVisible(false);
 	}
-	std::vector<Widget*> rows;
-	rows.reserve(m_models.size());
 	for (size_t i = 0; i < m_models.size(); ++i){
 		RowWidgets row;
 		if (i < m_rows.size()){
@@ -768,6 +745,9 @@ void ModelProbePage::RebuildRows(){
 			// 新建行：cb + idLabel + metaLabel（绝对定位；行高固定）
 			row.panel = new Panel();
 			row.panel->SetSize(600, static_cast<int>(kRowHeight));
+			// Phase 15：行只放**布局位置**（i × 行高，恒定）——视觉位移由 ScrollView 的内容偏移
+			// 统一提供（原手搓版在此处减 offset；现由接缝处理 ⇒ 布局位置永不随滚动变化——C1）
+			row.panel->SetPosition(0, static_cast<int>(static_cast<float>(i) * kRowHeight));
 			auto cb = std::make_unique<CheckBox>();
 			cb->SetSize(28, static_cast<int>(kRowHeight));
 			cb->SetTextColor(kText());
@@ -786,16 +766,18 @@ void ModelProbePage::RebuildRows(){
 			row.panel->AddChild(std::move(cb));
 			row.panel->AddChild(std::move(idLabel));
 			row.panel->AddChild(std::move(metaLabel));
-			m_list->AddChild(std::unique_ptr<Widget>(row.panel));   // 所有权入树（unique_ptr<Panel> → Widget 移动）
+			m_scroll->GetContentView().AddChild(std::unique_ptr<Widget>(row.panel));   // 所有权入树（内容坐标系——**不是** m_list）
 			m_rows.push_back(row);
 		}
 		// 新查询 → 全不选；回调绑定（idx 稳定 = model 序）
 		row.cb->SetChecked(false);
 		const size_t idx = i;
 		row.cb->SetOnCheckedChanged([this, idx](bool){ UpdateStat(); });
-		rows.push_back(row.panel);
 	}
-	static_cast<ModelListPanel*>(m_list)->SetRows(std::move(rows));
+	// Phase 15 R4：extent **显式**给出（= 行数 × 行高），不走 UpdateContentExtent()——
+	// 行池里被隐藏的旧行仍留在内容树下且保留创建时的几何，按"子控件包围盒"推导会把它们算进范围
+	// （表现为能滚出空白区）。本式与原手搓版 total = rows.size() × rowHeight 逐位等价。
+	m_scroll->SetContentExtent(600, static_cast<int>(static_cast<float>(m_models.size()) * kRowHeight));
 }
 
 void ModelProbePage::UpdateStat(){
