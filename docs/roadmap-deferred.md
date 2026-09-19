@@ -1,6 +1,6 @@
 ﻿# ECDI 延期事项排期总表（roadmap-deferred）
 
-> 状态：v1.2（2026-09-11）｜确认排期
+> 状态：v1.9（2026-09-19）｜确认排期
 > 作用：汇总全部"记账/延期/TODO/推迟"决策 → 对应实现阶段。README 技术债表的完整展开。
 > ⚠️ **已知缺口（2026-09-11 声明）**：本表内容主体停留在 v1.1（2026-08-15），**9.6 / 9.7 / 9.8 / 10 / 11 / 12 的延期项尚未批量补记**（含 9.6 的 Fade→PushOpacity / DrawArc / PushTransform / DoubleClick / Dirty Region 等记账项）。v1.2 仅补登记抗锯齿一项（#29）——**不要把本表当作完整清单**。
 
@@ -88,8 +88,15 @@
 | 36 | **横向滚轮**（`WM_MOUSEHWHEEL`） | Phase 15 需求稿 K15/K16 · D8 | 平台层**未翻译** `WM_MOUSEHWHEEL`（`WindowMessageHandler.cpp:162` 只有 `WM_MOUSEWHEEL`）+ `MouseEvent` **无修饰键** ⇒ 横向只能靠滚动条拖动 + 显式 API。做须先扩平台翻译 + Event 维度（轴 / 修饰键） |
 | 37 | **负向内容**（子控件坐标 < 0 的包围盒） | Phase 15 需求稿 D6 | extent 定义钳 0（`max(0, max(x + width))`）——布局系统（`VerticalLayout`）从 0 起算，负坐标不是正常布局产物 |
 
+## 7.6 布局内边距（Layout padding）（新立——2026-09-19；阶段号待定，候选 Phase 17）
+
+| # | 延期项 | 来源 | 备注 |
+|---|---|---|---|
+| 38 | **容器级内边距**（`LinearLayout` padding——一次性解决「窗口四周留白」） | 用户 2026-09-19 观察（ModelProbe 内容四边贴死客户区，鼠标拖选极易越出 GUI 边界） | **现状（已核实：零边距是结构性的，不是配置疏漏）**：`Window` 把 root 设为**客户区全尺寸**（`Window.cpp:444-445`）；`VerticalLayout::Arrange` 从 `y=0` 起算、**跨轴坐标恒 0**（`VerticalLayout.cpp:59`，注释「契约 4，现状不变」）、`fillCrossAxis` 时子宽 = **父宽**（`:53`/`:56`）、`remaining` 只减 `spacing` 不减任何 inset（`:37-38`）⇒ ModelProbe 的 13 个子控件各 680 宽、贴死左右与底边。**框架当前无任何容器级 padding/margin**（全库唯一 `padding` 是 `TextBoxStyle::padding`——控件内文字内边距，与容器无关；`Layout.h` 只有 `Arrange(Widget&)`）。**Phase 9.8 曾明确拒绝过**（需求 §4 非目标 + 初设 §3.2 冻结「不要为 AutoSize 顺手搞一套完整 Padding/Style 系统」）——但那是「**不要顺手搞**」，理由是**需求未出现**；**现在需求已出现**。**倾向方案 B（框架侧）**：`VerticalLayout` / `HorizontalLayout` 各加 `int padding = 0` 形参，`Arrange` 改 **4 处**（起点 `y = padding` · `remaining − 2·padding` · 跨轴宽 `− 2·padding` · `SetPosition(padding, y)`）——**root 一处即全局留白**（root 自身也是 `VerticalLayout`），ModelProbe 只需改两处构造参数（`main.cpp:262` + `ModelProbe.cpp:155`），**无需 demo 侧包裹容器**。**备选方案 A（仅 demo 侧）**：`ModelProbePage` 加内层容器 + override `SetSize` 同步几何（`SetSize` 是虚、`TextBox` 有 override 先例，`Widget.h:88`）——代价是绕开框架缺能力，此后每个想留白的 demo 都要重复这套同步。**⛔ 不得并入 Phase 16**（Phase 16 的定性就是「纯实现层 · 公共 API 净增 0」）。**触角提醒**：只要动 root 一级就会碰到 `main.cpp`（**须单独授权**——skill 条 2）。重启：本项立项（需走五阶段） |
+
 ## 8. 修订记录
 
+- v1.9（2026-09-19）新增 **§7.6 布局内边距**（条目 **#38**）——用户观察 ModelProbe 内容贴边触发；已核实「零边距是结构性的」（`VerticalLayout::Arrange` 跨轴恒 0 + `remaining` 无 inset）；倾向 **方案 B**（`LinearLayout` 加 `padding` 形参，`Arrange` 改 4 处，root 一处即全局生效）；备选 A（demo 侧包裹 + `SetSize` 同步）一并记录。**并修正头部状态行**——原写 v1.2（2026-09-11）而 §8 已记到 v1.8，属状态漂移（skill 条 30 同族），已同步为 v1.9。
 - v1.8（2026-09-18）Phase 15 需求稿 v1.1 回写同步：**修正 §7.5 编号撞号（v1.0 引入）**——原用 28–32，与 §1.2 的 `28`、§7 的 `29` 重复，统一顺延为 **30–34**；条 30 补 **`CaptionBar` 窄窗越界实例**（窗口宽 < 138px，既有缺陷）；新增条 35 嵌套滚动停递（D7 v1.1 降级）· 条 36 横向滚轮（K15/K16 实测：平台无翻译 + Event 无修饰键）· 条 37 负向内容（D6 extent 钳 0）。
 - v1.7（2026-09-17）新增 §7.5 Phase 15 延期项（①②③④⑤ 五条）：K4 命中约束通用化（以 `ClipsChildren()` 门控局部收口）· 焦点滚入 · 平滑/惯性 · 虚拟化 · TextBox 横向滚动条（Phase 9.5 R1 记账的边界澄清——仅指 TextBox，非容器级）。
 - v1.0（2026-08-15）总表定稿：全部延期项分组到阶段（7/7.5/8/8.5/9/9.5）；确认 SetFont 入 8.5、21-25 入 9.5。

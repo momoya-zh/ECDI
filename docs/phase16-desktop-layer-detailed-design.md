@@ -2,7 +2,7 @@
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-19
-> 状态：**待评审**——初设 v1.3 已「评审通过 · O1 已实测关闭」（`SWP_FRAMECHANGED` **不需要**，§6.1 三组 × 3 轮 + v5a 三点量具）⇒ 本稿给出**逐文件最小 diff 规格 + 测试规格 + 验收**。
+> 状态：**✅ 评审通过 · 可进实现**（2026-09-19 外部详细设计评审：「**设计上通过，可以进入实现**」「没有发现需要推翻架构或重新做初设级别修改的问题」）——评审另给 **7 条实现级检查项**（非阻塞），已落成 **§9.1 盯防清单**。初设 v1.3 已「评审通过 · O1 已实测关闭」（`SWP_FRAMECHANGED` **不需要**，§6.1 三组 × 3 轮 + v5a 三点量具）。
 > 上游：[phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) **v1.4**（D0–D11 已定 · §8.1 两条新约束 · §8.2 八问）· [phase16-desktop-layer-preliminary-design.md](phase16-desktop-layer-preliminary-design.md) **v1.3**（B1–B11 基线 · C1–C12 契约 · O1–O5）
 > 相关：phase12-windowchrome-detailed-design.md（**逐文件最小 diff 规格**先例）· phase15-scrollview-detailed-design.md（§1 实施总览 / §5 测试规格 / §6 验收的排版先例）· window-ownership-detailed-design.md（访问权限与生命周期）
 > 一句话：**公共 API 头数 92 → 92（净增 0）**，全部改动收敛在 `Win32PlatformWindow` 内部 + 1 个新测试文件。本阶段是项目**首个纯实现层 Phase**。
@@ -900,7 +900,7 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 
 | # | 项 | 判据 |
 |---|---|---|
-| **A1** | 四工具链构建 + 测试 | MSVC / ClangCL / Clang / MinGW 全绿；`ecdi_tests` 210 → **217** |
+| **A1** | 四工具链构建 + 测试 | MSVC / ClangCL / Clang / MinGW 全绿；`ecdi_tests` 210 → **217**。★ 其中 **MinGW / Clang 侧须确认本阶段唯一新增的平台回调**（`CALLBACK` 签名 + `HWINEVENTHOOK` 类型 + 链接）**实际过一遍**——同型先例（`&Win32PlatformWindow::WindowProc`）**不可外推**，`WINEVENTPROC` 是另一个函数指针类型（§9.1 #7） |
 | **A2** | **断言启用核验** | 按 skill 条 50 取二进制证据：**10 条条件串**（★ **本阶段零新增断言** ⇒ 特征集**不变**）——`grep -c` 判据同 Phase 15（clang `-D_DEBUG` / clangcl `-MDd` / mingw `-D_DEBUG` / visual-studio `-MDd`） |
 | **A3** | **零回归** | 既有 210 用例**全部保持通过**——尤其 `WindowChromeTests` 9 条（`RuntimeApiRejectedBeforeShow` / `ChromeModeDecidedOnce` / `MaximizedClientWithinWorkArea`）与 `AnimationTests` / `ProgressBarTests` 的 `TestPlatformWindow`（3 个实现者，本阶段**无新增 pure virtual**） |
 | **A4** | ★ **C2 不容降级**（**本阶段特有的结构性验收**） | ① T16-7 五条全过；② **`HWND_BOTTOM` 出现点审查**：`grep -n 'HWND_BOTTOM' ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` ⇒ 只允许出现在「`ResolveTarget` 的 Bottom 分支」与注释中，**不得**出现在 `WM_WINDOWPOSCHANGING` 或任何 Desktop 分支 |
@@ -979,8 +979,28 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 2. `Bottom` 档**逐位等价**的证据：`ecdi_tests` 的 `WindowChromeTests` 9 条 + T16-1（批 C 后）；
 3. `grep -n 'HWND_BOTTOM'` —— A4 判据。
 
+### 9.1 实现期盯防清单（外部评审给定 7 条——**非设计阻塞项，而是照文档落地时不许走样的点**）
+
+> 评审结论：**设计上通过，可以进入实现**；「没有发现需要推翻架构或重新做初设级别修改的问题」。下列 7 条是评审给出的
+> **实现级检查项**——**照本稿落地即可，不得在实现期「顺手优化」其中任何一条**。
+
+| # | 盯防点 | 为什么 | 本稿落点 |
+|---|---|---|---|
+| 1 | `SyncDesktopHookOff()` 的**注销顺序**不可变（先 `erase`、后 `UnhookWinEvent`） | 反序会让「回调已取出 owner、而对象正在析构」成为可能 ⇒ UAF。评审原话：「别为了看起来更符合 Unhook 再清理的直觉把它反过来」 | §2.4.6 · §3.3 · **C6** |
+| 2 | `WM_WINDOWPOSCHANGING` **不得**重新出现 Desktop → `HWND_BOTTOM` 的隐式 fallback | 这是本阶段唯一会**静默降级**的错误。评审称 A4 的 `grep` 判据「**比普通单元测试更强**」——它检查的是「实现结构有没有重新偷偷造出第二条路径」 | §2.4.4 · **A4** |
+| 3 | `IsDirectlyAboveDesktop()` 的「**不可判定 = `true`**」语义不得被简化 | 评审原话：「这两个函数组合起来的三态语义**很容易在实现时被『优化』坏**」。⚠️ 附加禁令：**不得**把 `ReinsertAboveDesktop()` 里的 `!IsDesktopLayer() \|\| m_hwnd == nullptr \|\| !IsWindow(m_hwnd)` 三重守卫「合并」进 `IsDirectlyAboveDesktop()`——两者**前提不同**（前者问「我该不该管」、后者问「我在不在位」） | §2.4.6 · **C11** |
+| 4 | `WS_MINIMIZEBOX` 的改写**不得**顺手补 `SWP_FRAMECHANGED` | O1 已实测关闭（该位**几何中性**）；补上即与 §3.2 的调用序列不符，且多一次非客户区重算 | §3.2 · §2.4.6 · **O1** |
+| 5 | `Bottom` 路径**不得**意外增加 Desktop 专属开销（`GetShellWindow` / 钩子） | 既有档位的零回归是**两个维度**：行为**与成本**。评审原话：「Bottom 路径不要意外增加 `GetShellWindow()` / Hook 等 Desktop 专属开销」 | §3.4 · §2.4.6 |
+| 6 | T16-7 的 **dead HWND 创建顺序**（② 必须在 ⑤ 之前） | 句柄值可能被系统回收 ⇒ 顺序反了会让「失效句柄」这个前提**不成立**（假阴性），测试变成「通过但没有意义」 | §2.5.6 |
+| 7 | 四工具链——**尤其 MinGW / Clang**——的 `CALLBACK` / `HWINEVENTHOOK` 声明与链接**实际过一遍** | 本阶段唯一新增的平台回调。既有同型先例 `&Win32PlatformWindow::WindowProc`（`Win32WindowClass.cpp:28`）虽已四链实证，但 `WINEVENTPROC` 是**另一个**函数指针类型 | §2.3 落点③ · **O5** · **A1** |
+
+> 📌 评审另有一条**不计入实现检查项**的裁定（已采纳为本稿纪律）：**§8 L1 保持不变**——**不得**把验收措辞包装成「绝对无闪烁」。
+> 那是「框架响应时序 vs Windows Shell 自身动作」的边界，写成「无闪烁」等于给自己立一个**无法兑现的契约**。
+
+
 ---
 
 ## 10. 修订记录
 
+- v1.1（2026-09-19）**外部详细设计评审处置——「设计上通过，可以进入实现」（无阻塞项）**：① **状态行**由「待评审」改为「**评审通过 · 可进实现**」（评审原话：「**设计上通过，可以进入实现**」「没有发现需要推翻架构或重新做初设级别修改的问题」「已经具备**直接交给实现阶段**的条件」，并肯定本稿「更强调危险路径的结构性约束」的取向）；② **新增 §9.1 实现期盯防清单**——把评审给出的 **7 条实现级检查项**落成表（注销顺序不可变 / 不得重现 Desktop→`HWND_BOTTOM` 隐式 fallback / 三态语义不得简化 **且三重守卫不得合并** / 不得补 `SWP_FRAMECHANGED` / `Bottom` 路径零新增开销 / T16-7 的 dead HWND 顺序 / 四工具链回调类型实测过一遍），逐条绑定本稿落点；③ **A1 补强**——显式要求 MinGW / Clang 侧确认 `CALLBACK` 与 `HWINEVENTHOOK` 的声明与链接，并写明「同型先例不可外推」；④ 评审对 §8 L1（瞬时遮挡不得包装成「无闪烁」）的裁定**照原样保留**。评审未提出任何需要返回初设的问题 ⇒ 本稿 v1.1 即**实现依据**。
 - v1.0（2026-09-19）**详细设计初稿**（初设 v1.3「评审通过 · O1 已关闭」后启动）。① **§1 实施总览**——**7 个文件**（4 改 + 1 新建 + 2 接线），Public 头 **92 → 92**、用例 **210 → 217**、断言特征串 **10 → 10**；② **§1.3 本稿对初设的五处修正**——**D-1** `PlatformWindow.h` 的 `@details`（原文「Bottom/Desktop 档持续维护普通窗口层底部位置」对 Desktop 已失实）⇒ Public 头改动由 1 处变 **2 处（仍均仅注释）**；**D-2** T16-5 的方法由「伪造 `WINDOWPOS` 直发」改为「真实 `SetWindowPos` + z 序邻居观察」（不把契约建立在未证实的 `DefWindowProc` 行为上）；**D-3** 测试落点定为**新建 `DesktopLayerTests.cpp`**（样本取「直接构造 `Win32PlatformWindow`」——`DropFilesTests.cpp:133` 先例，免去三层 `static_cast`）；**D-4** 新成员落点改为 **private 成员区末尾新增 Phase 16 分组**（不在 `m_windowLayer` 之后割裂 Phase 12 分组）；**D-5** **零新增 `FRAMEWORK_ASSERT`**（每个前置条件均由显式守卫闭合，断言只会成死代码）⇒ A2 特征集不变；③ **§2 逐文件最小 diff**——含 `WM_WINDOWPOSCHANGING` 的**等价性核对表**（`Normal` / `Bottom` **逐位等价**）、`SetWindowLayer` 的**三处差异表**、九个新方法体全文；④ **§3 关键行为冻结**——`ResolveTarget` 真值表 · Borderless+Desktop 调用序列 · 生命周期时序（含**注销顺序不可交换**的理由）· `Bottom` 档成本表 · Desktop 档运行期开销；⑤ **§4 契约表**——C1–C12 逐条给出实现落点与验证方式；⑥ **§5 测试规格**——T16-1..T16-7（含 T16-4 的**两窗口分工**与 T16-7 的**顺序纪律**）+ **§5.1 否定型断言必须配正对照**的新纪律；⑦ **§6 验收 A1–A8**——**A4「C2 不容降级」**给出 `HWND_BOTTOM` 出现点的可机检判据；⑧ **§7 影响面**——`PlatformWindow` 3 个实现者**零同步**、`WM_WINDOWPOSCHANGING` 处理点唯一、`WM_DESTROY` **刻意不改**（避免双路径脱钩）；⑨ **§8 已知局限 L1–L9**（含 L1 的**判据措辞纪律**：不得写「无闪烁」）；⑩ **§9 三批实施顺序**（A 纯新增 / B 行为切换 / C 测试）。待评审。
