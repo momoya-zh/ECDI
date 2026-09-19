@@ -330,16 +330,20 @@ void TestConfigTimeContract(){
 
 	const HWND hwnd = window.GetHwndForTests();
 
-	// 两个**独立**观测代理：样式位 + 钩子计数（任一路径被误开都会露出来）
+	window.Show();
+
+	PumpMessages(32);
+
+	// 两个**独立**观测代理：样式位 + 钩子计数（任一路径被误开都会露出来）。
+	// ⚠️ 基线必须在 **Show 之后**记录——`GWL_STYLE` 的整值含**系统动态位**
+	//（`WS_VISIBLE` 由 `ShowWindow` 写入）：Show 前取的基线与 Show 后必然差一个位，
+	// 整值比较会**假失败**（首轮实测即如此：仅样式断言失败、钩子计数两条全过，
+	// 恰证明 `SetWindowLayer` 主体确实被拒——变的只有系统动态位）。
 	const LONG_PTR styled = GetWindowLongPtrW(hwnd, GWL_STYLE);
 
 	const int onBefore = g_hookOn;
 
 	const int offBefore = g_hookOff;
-
-	window.Show();
-
-	PumpMessages(32);
 
 	// 运行期切层 ⇒ Warning + 忽略（契约 C10）
 	window.SetWindowLayer(WindowLayer::Normal);
@@ -348,7 +352,12 @@ void TestConfigTimeContract(){
 
 	PumpMessages(16);
 
-	EXPECT_TRUE(GetWindowLongPtrW(hwnd, GWL_STYLE) == styled);
+	// ★ 比较屏蔽系统自管位（`WS_VISIBLE` / `WS_MINIMIZE` / `WS_MAXIMIZE`——它们不归
+	// 本契约管）：若被拒路径错跑了 `ApplyDesktopStyle(false)`，`WS_MINIMIZEBOX` 会被
+	// 补回 ⇒ 掩码比较照样抓得到。
+	const LONG_PTR kDynamic = static_cast<LONG_PTR>(WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE);
+
+	EXPECT_TRUE((GetWindowLongPtrW(hwnd, GWL_STYLE) & ~kDynamic) == (styled & ~kDynamic));
 
 	EXPECT_TRUE(g_hookOn == onBefore);
 

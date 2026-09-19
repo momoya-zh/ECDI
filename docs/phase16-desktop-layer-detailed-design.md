@@ -1,4 +1,4 @@
-﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）详细设计（v1.4）
+﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）详细设计（v1.5）
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-19
@@ -740,7 +740,7 @@ void CountingHookObserver(bool installed){ installed ? ++g_hookOn : ++g_hookOff;
 | **T16-3** | `DesktopLayer.StyleRoundTripAndIdempotent` | `original = style`；`Desktop` ⇒ 位清零；`Normal` ⇒ **`style == original`（逐位复原）**；连续两次 `Desktop` ⇒ 两次读值相等（幂等）；再 `Normal` ⇒ `style == original` |
 | **T16-4** | `DesktopLayer.HookLifecycle` | **两窗口**（见下 §2.5.5 的 A / B 分工）；逐次断言 `g_hookOn` / `g_hookOff` **精确计数**（不是"至少一次"） |
 | **T16-5** | `DesktopLayer.NormalLayerNotMaintained` | 三窗口 `ref` / `normal` / `bottom`；`ref.Show()` → **正对照** `bottom.SetWindowLayer(Bottom); bottom.Show()` ⇒ `IsAboveInZOrder(ref, bottom)` 为真（**证明维护机制在工作**）→ 被测 `normal.Show()` ⇒ `IsAboveInZOrder(normal, ref)` 为真（**Normal 不受维护、后显示者在上**，契约 C3） |
-| **T16-6** | `DesktopLayer.ConfigTimeContract` | `Set(Desktop)` → 记 `styled = style`；`Show()` + 泵消息；记 `onBefore` / `offBefore`；运行期 `Set(Normal)` + `Set(Bottom)`；断言 **两个独立观测代理**均未变：`style == styled` ∧ `g_hookOn == onBefore` ∧ `g_hookOff == offBefore`（契约 C10） |
+| **T16-6** | `DesktopLayer.ConfigTimeContract` | `Set(Desktop)` → **`Show()` + 泵消息** → **然后**记 `styled` / `onBefore` / `offBefore`（★ 基线在 Show **之后**——`GWL_STYLE` 整值含**系统动态位** `WS_VISIBLE`，由 `ShowWindow` 写入；Show 前取基线 + 整值比较 = **假失败**，v1.5 实测）→ 运行期 `Set(Normal)` + `Set(Bottom)`；断言两个独立观测代理均未变：**`(style & ~kDynamic) == (styled & ~kDynamic)`**（`kDynamic = WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE`——系统自管位，不归本契约；若被拒路径错跑 `ApplyDesktopStyle(false)`，`WS_MINIMIZEBOX` 被补回 ⇒ 掩码比较照样抓到）∧ `g_hookOn == onBefore` ∧ `g_hookOff == offBefore`（契约 C10） |
 | **T16-7** | `DesktopLayer.ResolveTargetTruthTable` | 五条纯逻辑断言（见下 §2.5.6）——**不需要 explorer、不需要 Show** |
 
 #### 2.5.5 T16-4 的两窗口分工（**必须拆**，否则测不到）
@@ -1026,6 +1026,8 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 ---
 
 ## 10. 修订记录
+
+- v1.5（2026-09-19）**T16-6 假失败修复（用户首轮验证唯一失败项，216/217）**。**根因不在框架，在判据**：基线 `styled` 记录于 `Show()` **之前**，而 `ShowWindow` 会把 **`WS_VISIBLE` 写进 `GWL_STYLE`** ⇒ 整值比较必然差一个位。**失败模式自证了责任方**：两个钩子计数断言全过 ⇒ `SetWindowLayer` 主体确实被拒（若误执行，`ApplyDesktopStyle(false)` 会补回 `WS_MINIMIZEBOX` 且 `SyncDesktopHook` 会卸钩）——被改的只有系统动态位。**修复**：① 基线移到 `Show() + PumpMessages` 之后；② 断言改掩码版（屏蔽 `WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE`——系统自管位，若被拒路径错跑掩码照样能抓到）。§2.5.4 T16-6 规格同步；教训沉淀 skill 条 83（整值断言跨系统状态变更点必须先枚举动态位）。
 
 - v1.4（2026-09-19）**批 B / 批 C 实施后回写（三批全部落盘，待验收 A1–A8）**。① **§2.5.4 伪代码更正**：T16-1 规格里的 `ref.Handle` / `bot.Handle` **不存在**——实际 API 是 `GetHwndForTests()`（`DropFilesTests.cpp:205` 先例）；测试按真实 API 落地，规格已同步。② **§2.5 规模实测**：新测试文件 **435 行 / 47 条 `EXPECT_*`**（估算偏低 +74%）；`ecdi_tests` 用例 **210 → 217**（22 个含用例文件 / 217 注册名 / **零重复** / `DesktopLayer.` 前缀全库唯一——脚本扫描确认）。③ **批 B 落点**（`829bb6d`，+49/−24）：三处既有代码改造（`Release` 脱钩前置 / `WM_WINDOWPOSCHANGING` 按档位分流 / `SetWindowLayer` 样式+钩子+分流派发）+ 两处公共头注释——`git diff -U0` 删除 24 行全部为预期旧块；**A4 判据首次生效**：`HWND_BOTTOM` 代码行仅剩 `ResolveTarget` 分支 1 处（另 4 处为注释）。④ **批 C 落点**：新建 `DesktopLayerTests.cpp`（T16-1..T16-7；T16-4 两窗口**连续计数**口径同 §2.5.5；T16-6 用 `onBefore`/`offBefore` 快照）+ `RunAllTests.h`/`.cpp` 各 +1 行接线；新文件行尾**显式转 CRLF**（Write 默认 LF，26/27 既有文件为 CRLF——条 8⑤）。⑤ **双工具链静态自查**：批 B `.cpp` 与批 C 测试文件各自 g++ / clang++ `-fsyntax-only -D_DEBUG` 均 **0 error / 0 warning**；四工具链构建与测试运行由用户执行（A1/A3）。
 
