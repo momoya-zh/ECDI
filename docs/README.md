@@ -211,6 +211,16 @@
 | [phase12-windowchrome-detailed-design.md](phase12-windowchrome-detailed-design.md) | 详细设计（**9 开放决策点全收** + 平台实现全文 6 case + **10 方法**（7 override + 3 私有辅助）；`TestWindow::Handle()` 三跳取 HWND；dwmapi 双构建系统；测试 **9** 自动用例含 spike 全文） | ✅ **v1.5 已实施（2026-09-12）**：v1.1 外部评审 → v1.2 内部复核 → v1.3 AI 核验补正 → v1.4 **实施期回写 4 处缺口**（D-DWM-1 零兜底 / `NCCALCSIZE_PARAMS` / 2 个测试替身补 override / Handle() include）→ **v1.5 实施后缺陷修复**（`TestWindow` 改持非拥有 `Window*` + `Create()`——原直构窗口未登记，销毁时触发 `Application.cpp:92` 断言；**仅 MSVC 构建暴露**，因 `FRAMEWORK_ASSERT` 只在 `_DEBUG` 下存在）；`ecdi_tests` **183/183**（MinGW，含带 `-D_DEBUG` 的一次；MSVC/Clang/ClangCL 待用户确认） |
 | [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase、**残差登记 G-1~G-4**） | ✅ **v1.7 已回写**（框架侧 2 Phase 全部落地 · R-1/R-6/R10 已出清 · 判据①–⑥全通过 · **残差 G-1~G-4 已登记**——G-1 `Desktop` 档未实现为唯一阻断项；应用侧待需求确认） |
 
+## Phase16 桌面驻留层（`WindowLayer::Desktop`）（🚧 需求确认 v1.0 待评审）
+
+`desktopnest-roadmap.md` v1.7 §5 登记的 **G-1**——**全项目唯一「已取证但未落地」的能力**。Phase 12 立 `WindowLayer::Desktop` 时只定了语义（`D-DESK-1`：语义状态 ≠ 实现路径），实现按 `Bottom` 降级执行；2026-09-15 spike 已把路线实测清楚（**E 路线：紧贴桌面窗口正上方 + 前台钩子重插**，六条判据 ①–⑥ 全过，A/C/D 三条判死）。本阶段把该路线**真正实现进 `Win32PlatformWindow`**。
+
+⚠️ **公共 API 净增 0**（`WindowLayer` 枚举与 `SetWindowLayer` 已于 Phase 12 就位）——与 Phase 12/14/15 均不同，**本阶段是纯实现层工作**。头号议题是**窗口样式取舍**：spike 用 `WS_POPUP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`，而框架窗口是 `WS_OVERLAPPEDWINDOW` + 零扩展样式——且 `WS_EX_NOACTIVATE` 在 spike 里只是**探针便利**（探针不需交互），**不是路线的必要条件**（DesktopNest 的框需要点击）。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) | 需求确认（**K1–K14 现状勘察（全部带行号）**：`Desktop` 降级执行 `Bottom` + Warning 文案过期 / `WM_WINDOWPOSCHANGING` 是全档位共用维护点（`Desktop` 与 `Bottom` 目标 z 序**不同**）/ 窗口样式 `WS_OVERLAPPEDWINDOW` + 零扩展样式 / `SetWindowLayer` 配置期契约与 `CreateWindowExW` 构造期**时序紧张** / spike 双层维护（钩子 + 轮询）而框架 `Run()` **无心跳** / `Progman` 会被 explorer **销毁重建**（句柄失效时重插会落到 `HWND_BOTTOM`——比不重插更糟）/ `WS_EX_NOACTIVATE` 全库零使用。**三条会改形态的事实**：**F-1 窗口样式三处差异**（含一条常识性澄清）+ **F-2 样式决定时机错位** + **F-3 维护缺心跳**。**R1–R12 四组**：实现主体（含 `Bottom` 零回归 · 句柄失效自适应 · 销毁脱钩 · 文案同步）· 交互与样式（**交互能力不得降级**）· 覆盖范围（`ChromeMode` 正交 · 多窗口 · `Hide`/`Release` 关系）· 测试验收。**D0–D10 全部给倾向待拍板**（真正取舍点 = D1 主样式 / D2 `WS_EX_NOACTIVATE`）；非目标 8 项；**§8 待勘察项 6 条**） | 🚧 **v1.0 待评审** |
+
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
 > **独立契约文档**——不属任何 Phase，故不用 `phaseN-*` 命名（阶段由文档头部 / §8 跟踪）。
