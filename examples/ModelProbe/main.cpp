@@ -209,7 +209,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	//   （无参数）             自绘标题栏（Borderless + CaptionBar）+ 托盘图标 + 文件拖入
 	//   --native               系统标题栏（Normal——零回归对照）
 	//   --borderless 40 12     自绘 + 自定义标题栏高度与缩放热区
-	//   --layer bottom         置底档；--layer desktop 桌面档（spike 未通过 → 降级 Bottom + Warning）
+	//   --layer bottom         置底档；--layer desktop 桌面档（已落地——紧贴桌面窗口正上方，Win+D 后仍可见）
 	//   --no-tray / --no-drop  Phase 14 A7 对照：不注册托盘 / 不开启文件拖入
 	//   --stay                 Phase 14 A4 模式 A：真关窗后进程存活（SetQuitOnLastWindowClosed(false)）
 	//   --hide-on-close        Phase 14 A4 模式 B：关闭按钮 = 隐藏到托盘（托盘「显示窗口」恢复）
@@ -244,7 +244,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 			} else if (tok == L"--layer"){
 				const std::wstring v = nextToken();
 				if (v == L"bottom")       layer = ECDI::WindowLayer::Bottom;
-				else if (v == L"desktop") layer = ECDI::WindowLayer::Desktop;   // spike 未通过 → 降级 Bottom + Warning
+				else if (v == L"desktop") layer = ECDI::WindowLayer::Desktop;   // Desktop 档已落地（Phase 16）：紧贴桌面窗口正上方，Win+D 后仍可见
 			} else if (tok == L"--native"){
 				borderless = false;   // 系统标题栏（Normal——零回归对照）
 			} else if (tok == L"--no-tray"){
