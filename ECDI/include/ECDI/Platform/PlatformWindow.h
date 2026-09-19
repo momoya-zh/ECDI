@@ -90,8 +90,9 @@ public:
 
 	/// @brief 设置窗口层级档位（R10）
 	/// @param layer 目标档位
-	/// @details Bottom/Desktop 档持续维护普通窗口层底部位置（Win32 实现经
-	/// WM_WINDOWPOSCHANGING）；切回 Normal 时停止维护（不主动改变当前 z 序——
+	/// @details **Bottom** 档持续维护普通窗口层底部位置；**Desktop** 档持续维护
+	/// 「紧贴桌面窗口正上方」（Win+D 后仍可见）——两者均由 Win32 实现经
+	/// `WM_WINDOWPOSCHANGING` 维护。切回 Normal 时停止维护（不主动改变当前 z 序——
 	/// 交系统自然演化）。
 	virtual void SetWindowLayer(WindowLayer layer) = 0;
 

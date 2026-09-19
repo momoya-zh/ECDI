@@ -22,13 +22,13 @@ enum class WindowLayer{
 	Bottom,
 
 	/// @brief 桌面驻留层：被应用窗口覆盖，且 **Win+D 后仍保持可见**
-	/// @details ⚠️ 实现路线待 spike 验证；spike 未通过前此档位不承诺可用——
-	/// 调用后退化为 Bottom 语义并记 Warning 日志。
-	/// **API 承诺与当前平台能力刻意解耦**：枚举值保留，未来 Windows 版本可行时
-	/// 只需替换实现，公共 API 零变更。
-	/// ★ 语义状态 ≠ 实现路径（详设 D-DESK-1）：降级的是「实现如何执行」（当前按
-	/// Bottom 路径执行），**不是「状态是什么」**——本档位的请求语义恒为 Desktop，
-	/// 未来若新增查询 API（如 GetWindowLayer），spike 未通过时必须仍返回 Desktop。
+	/// @details **实现已落地**（Phase 16，2026-09-19）——Win32 实现 = 窗口以
+	/// `GetWindow(桌面窗口, GW_HWNDPREV)` 为目标位置持续维护「紧贴桌面窗口正上方」，
+	/// 并移除 `WS_MINIMIZEBOX`（「显示桌面」只最小化**可最小化**窗口）。
+	/// **API 承诺与平台能力解耦**：本枚举只描述层级语义，与之无关的平台手段
+	/// （`WS_POPUP` / `WorkerW` 挂载 / `SetParent`）一律不进入公共契约。
+	/// ★ 语义状态 ≠ 实现路径（详设 D-DESK-1）：平台实现无论经哪条路径执行，
+	/// 本档位的请求语义恒为 Desktop（未来若新增查询 API，必须如实返回 Desktop）。
 	Desktop
 };
 

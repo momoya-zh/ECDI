@@ -219,6 +219,12 @@ void Win32PlatformWindow::HandleDropFiles(HDROP hDrop) {
 
 bool Win32PlatformWindow::Release() noexcept {
 
+	// ★ Phase 16（契约 C12）：**脱钩必须在 hwnd 判空之前** —— 旧实现
+	//   `if (m_hwnd==nullptr) return true;` 会让「hwnd 已空、钩子仍在」的路径
+	//   **跳过全部清理** ⇒ 回调打到已析构对象（UB）。**钩子与 hwnd 是相互独立的资源**，
+	//   不可用同一个判空条件代表两者（与 Phase B 的 Window 所有权教训同族）。
+	SyncDesktopHookOff();
+
 	if (m_hwnd==nullptr) {
 
 		return true;
@@ -434,19 +440,26 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 
 	}
 
-	// ── Phase 12 R10：持续维护普通窗口层底部位置（Bottom / Desktop 档）────
+	// ── Phase 12 R10 / Phase 16 D8：持续维护层级档位对应的 z 序位置 ─────────
 	case WM_WINDOWPOSCHANGING: {
 
 		// ⚠️ 必须是「持续维护」而非一次性 SetWindowPos（其他程序会把我们顶下来）；
 		// ⚠️ 只改 hwndInsertAfter，不碰 x/y/cx/cy/flags（否则会干扰最大化/还原几何）；
 		// ⚠️ 契约边界：不承诺阻止第三方 SetWindowPos 造成的瞬时 z 序变化（Windows z 序是动态的）
-		if (m_windowLayer != WindowLayer::Normal){
+		// ★ Phase 16（D8）：判据由「!= Normal ⇒ 一律 HWND_BOTTOM」改为**按档位分流**——
+		//   Normal 不修改 / Bottom 保持既有语义（逐位等价）/ Desktop 贴桌面窗口正上方。
+		auto* wp = reinterpret_cast<WINDOWPOS*>(lParam);
 
-			auto* wp = reinterpret_cast<WINDOWPOS*>(lParam);
+		if ((wp->flags & SWP_NOZORDER) == 0){
 
-			if ((wp->flags & SWP_NOZORDER) == 0){
+			const HWND target = TargetInsertAfter();
 
-				wp->hwndInsertAfter = HWND_BOTTOM;
+			// ★ K8 / C2：target == nullptr 表示**本次不修改**（Normal 档 / 桌面句柄无效 /
+			//   桌面已处 z 序最顶）——**绝不可**把它交给 SetWindowPos（那会落到
+			//   HWND_BOTTOM，把 Desktop 档意外降级成 Bottom）。保持原值是唯一安全选择。
+			if (target != nullptr){
+
+				wp->hwndInsertAfter = target;
 
 			}
 
@@ -893,12 +906,21 @@ void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
 
 	m_windowLayer = layer;   // 语义状态恒记录用户请求（D-DESK-1：不随实现路径降级）
 
-	if (layer == WindowLayer::Desktop){
+	// ── Phase 16 D1(A′) / D3：Desktop 档移除 WS_MINIMIZEBOX ────────────────
+	// 真因（需求稿 §8 P0 实测）：「显示桌面」只最小化**可最小化**窗口 ⇒ 差异是**一位**，
+	// 不是整个窗口形态 ⇒ 保留 WS_OVERLAPPEDWINDOW 的其余系统红利（Alt+Space /
+	// Aero Snap / 最大化动画），仅让 Desktop 档放弃「可最小化」这一条。
+	ApplyDesktopStyle(IsDesktopLayer());
 
-		// ⚠️ spike 未通过前：Desktop 不承诺可用——状态不降级，仅当前 Win32 实现
-		// 按 Bottom 语义执行（D-DESK-1：降级的是「实现如何执行」，不是「状态是什么」）。
-		Logger::Log(LogLevel::Warning,
-			L"WindowChrome: WindowLayer::Desktop not yet validated (spike pending) - executed as Bottom");
+	// ── Phase 16 D11：钩子生命周期（Set ⇒ 装 / 离档 ⇒ 卸；Hide / Show **不参与**）──
+	SyncDesktopHook();
+
+	if (IsDesktopLayer()){
+
+		// K2 修正：原文案写 "spike pending"（该 spike 已于 2026-09-15 结项）——
+		// 本阶段即为落地，不再降级执行。
+		Logger::Log(LogLevel::Info,
+			L"WindowChrome: WindowLayer::Desktop enabled - window is wedged above the desktop window");
 
 	}
 
@@ -908,12 +930,14 @@ void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
 
 	}
 
-	// 切到 Bottom/Desktop：立即派发一次（后续由 WM_WINDOWPOSCHANGING 持续维护）
-	// 切回 Normal：不主动改变当前 z 序（交系统自然演化——避免「突然跳到最前」的反直觉效果）
-	if (m_windowLayer != WindowLayer::Normal){
+	// 切到 Bottom/Desktop：立即派发一次（后续由 WM_WINDOWPOSCHANGING 持续维护）；
+	// 切回 Normal：target == nullptr ⇒ **不主动改变当前 z 序**（交系统自然演化——
+	// 避免「突然跳到最前」的反直觉效果）。
+	const HWND target = TargetInsertAfter();
 
-		SetWindowPos(m_hwnd, HWND_BOTTOM, 0, 0, 0, 0,
-			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	if (target != nullptr){
+
+		SetWindowPos(m_hwnd, target, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
 	}
 
