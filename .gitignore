@@ -12,6 +12,8 @@ Release/
 build/
 build-*/
 out/
+# CMake 构建目录（CLion 自带目录内 .gitignore，命令行 cmake --preset 不会生成，故在此兜底）
+cmake-build-*/
 
 # ===== ECDI/ 下的 VS 输出（显式列出，便于阅读）=====
 ECDI/Debug/
@@ -86,3 +88,6 @@ Thumbs.db
 Desktop.ini
 ecdi_test_log.txt
 model-probe-gui
+
+# ===== 学习讲义（私有，不入库）=====
+learning/
