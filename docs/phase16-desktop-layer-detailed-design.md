@@ -2,7 +2,7 @@
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-19
-> 状态：**✅ 评审通过 · 可进实现**（2026-09-19 外部详细设计评审：「**设计上通过，可以进入实现**」「没有发现需要推翻架构或重新做初设级别修改的问题」）——评审另给 **7 条实现级检查项**（非阻塞），已落成 **§9.1 盯防清单**。初设 v1.3 已「评审通过 · O1 已实测关闭」（`SWP_FRAMECHANGED` **不需要**，§6.1 三组 × 3 轮 + v5a 三点量具）。
+> 状态：**✅ 评审通过 · 可进实现**（2026-09-19 外部详细设计评审：「**设计上通过，可以进入实现**」「没有发现需要推翻架构或重新做初设级别修改的问题」）——评审另给 **7 条实现级检查项**（非阻塞），已落成 **§9.1 盯防清单**。初设 v1.3 已「评审通过 · O1 已实测关闭」（`SWP_FRAMECHANGED` **不需要**，§6.1 三组 × 3 轮 + v5a 三点量具）。 ★ **v1.2：实施前核对补正 D-6**——`wcscmp` 的包含来源（显式补入 `<cwchar>`；详见 §1.3 D-6 与 §2.4.1）。
 > 上游：[phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) **v1.4**（D0–D11 已定 · §8.1 两条新约束 · §8.2 八问）· [phase16-desktop-layer-preliminary-design.md](phase16-desktop-layer-preliminary-design.md) **v1.3**（B1–B11 基线 · C1–C12 契约 · O1–O5）
 > 相关：phase12-windowchrome-detailed-design.md（**逐文件最小 diff 规格**先例）· phase15-scrollview-detailed-design.md（§1 实施总览 / §5 测试规格 / §6 验收的排版先例）· window-ownership-detailed-design.md（访问权限与生命周期）
 > 一句话：**公共 API 头数 92 → 92（净增 0）**，全部改动收敛在 `Win32PlatformWindow` 内部 + 1 个新测试文件。本阶段是项目**首个纯实现层 Phase**。
@@ -18,7 +18,7 @@
 | 1 | `ECDI/include/ECDI/Window/WindowLayer.h` | 修改 | **仅注释**（`Desktop` 档 8 行） | §2.1 —— 原「spike 未通过 ⇒ 退化为 Bottom」已失实 |
 | 2 | `ECDI/include/ECDI/Platform/PlatformWindow.h` | 修改 | **仅注释**（`SetWindowLayer` 的 `@details` 3 行） | §2.2 —— ★ **初设漏项**，见 §1.3 D-1 |
 | 3 | `ECDI/src/Platform/Win32/Win32PlatformWindow.h` | 修改 | +2 成员 +9 方法 +1 `using` +1 缝 setter | §2.3 |
-| 4 | `ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` | 修改 | +1 标准库 include · +2 匿名 namespace 实体 · **3 处既有代码改造** · +9 新方法体 | §2.4 |
+| 4 | `ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` | 修改 | **+2** 标准库 include（`<cwchar>` + `<unordered_map>`） · +2 匿名 namespace 实体 · **3 处既有代码改造** · +9 新方法体 | §2.4 |
 | 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-7（约 250 行） | §2.5 |
 | 6 | `ECDI/src/Tests/RunAllTests.h` | 修改 | +1 声明 | §2.6 |
 | 7 | `ECDI/src/Tests/RunAllTests.cpp` | 修改 | +1 调用 | §2.6 |
@@ -33,7 +33,7 @@
 | **测试用例** | 210 | **217** | +7（T16-1..T16-7）；`ecdi_tests` 注册总数（实测基线 210，21 个文件） |
 | **断言特征串** | 10 | **10** | ★ **零新增断言**——见 §1.3 D-5 |
 
-### 1.3 本稿对初设的五处修正（逐条给理由）
+### 1.3 本稿对初设的**六**处修正（逐条给理由）
 
 | # | 初设 | 本稿 | 理由 |
 |---|---|---|---|
@@ -42,6 +42,7 @@
 | **D-3** | §7：「是否新建文件**归详设**」 | **新建 `DesktopLayerTests.cpp`** | 本阶段测试的最佳样本是**直接构造 `Win32PlatformWindow`**（先例 `DropFilesTests.cpp:133` `Win32PlatformWindow window(host, "DropTest", 200, 200);`）——可**直接**调用 `GetHwndForTests()` / `SetDesktopHookObserverForTests()`，无需经 `Window`→`PlatformWindow&`→`static_cast` 三跳；也避免把 Phase 12 的 `WindowChromeTests.cpp` 变成跨阶段杂糅文件（与 Phase 14/15「每阶段一测试文件」一致） |
 | **D-4** | §2.2：「成员（private 区，**`m_windowLayer` 之后**）」 | **private 成员区末尾新增 Phase 16 分组** | `m_windowLayer` 之后是 Phase 12 的 `bool m_shown` / `m_chromeConfigured` / `m_lastWindowState` 三件套，插在其中会割裂既有分组。本项目排版惯例是**每阶段一组**（`Phase 12：…` / `Phase 13：…`）⇒ 追加到成员区末尾 |
 | **D-5** | （未提及） | **零新增 `FRAMEWORK_ASSERT`**，并**显式声明** | 本阶段无「可断言且真会触发」的不变量：`ResolveTarget` 是纯分支；`ApplyDesktopStyle` / `ReinsertAboveDesktop` / `SyncDesktopHook` 的每个前置条件都由**显式守卫**返回（守卫即契约，断言只会成为死代码）。⇒ A2 特征串**保持 10 条**（与 Phase 15 同集），不新增登记（skill 条 50⑧④） |
+| **D-6** | （未提及；原写「真正的新增只有标准库**一行**」） | **两行**：`<cwchar>` + `<unordered_map>`；调用写**裸** `wcscmp` | 原规格的 `wcscmp` **依赖 `<Windows.h>` 的传递包含**，而全库既无 `wcscmp` 先例、也无任何 `.cpp` include `<cwchar>`。**实测**：MinGW g++（`-c`，exit 0 零警告）与 clang++（`-fsyntax-only`，0 error 0 warning）**不加它都能编过**——机制上可用；但「靠展开链」与**本文件自己的既有认知**相悖（`:15-17` 的 `DrawText` 防护注释正是因为「`dwmapi.h / windowsx.h` 展开链会带进 `Windows.h`」而存在），且该块的 4 个既有标准库 include **逐一核对均被使用**（口径 = 「**列你所用的**」）⇒ **显式补入**：成本 1 行，收益是 TU 自洽。⚠️ 同时修正 §2.4.6 的一处笔误（原称「`wcscmp` 需要 `<cstring>`」——**不成立**） |
 
 ---
 
@@ -184,21 +185,43 @@
 
 ### 2.4 `ECDI/src/Platform/Win32/Win32PlatformWindow.cpp`
 
-#### 2.4.1 include：+1 行（**插在 `:4` `Logger.h` 之前**）
+#### 2.4.1 include：**+2 行**（**标准库段** —— 项目头段零新增）
+
+**❌ 不加这一行**（考虑过并否决——D-5 已定**零新增断言**，故 `ECDIAssert.h` 不需要；此处显式记录，以免实施者以为漏了）：
 
 ```cpp
-#include "ECDI/Core/ECDIAssert.h"      // （本阶段**不用**——见下）
+#include "ECDI/Core/ECDIAssert.h"
 ```
 
-> ❌ **不新增此行**。本稿 D-5 已定**零新增断言**，故 `ECDIAssert.h` **不需要** include。此处显式记录「考虑过并否决」，以免实施者以为漏了。
-
-**真正的新增只有标准库一行**（插在 `:21` `system_error` 之后、`:22` `vector` 之前）：
+**✅ 真正新增的标准库两行**（字典序插入既有 4 行之间）：
 
 ```cpp
-#include <unordered_map>               // Phase 16：hook → 实例 反查表（仅 .cpp——不进任何头）
+#include <cstring>                     // 既有（:19）
+#include <cwchar>                      // ★ Phase 16 新增：IsDesktopClassWindow 的裸 wcscmp（D-6 · §2.4.2）
+#include <string>                      // 既有（:20）
+#include <system_error>                // 既有（:21）
+#include <unordered_map>               // ★ Phase 16 新增：hook → 实例 反查表（仅 .cpp——不进任何头）
+#include <vector>                      // 既有（:22）
 ```
 
-> ⚠️ **顺序纪律**：`<cstring>` `<string>` `<system_error>` **`<unordered_map>`** `<vector>` —— 字典序。Windows 平台头（`<Windows.h>` 等，`:9-13`）在**标准库之前**、在**项目头之后**（本文件既有顺序，不动）。
+> ⚠️ **顺序纪律**：`<cstring>` **`<cwchar>`** `<string>` `<system_error>` **`<unordered_map>`** `<vector>` —— 字典序
+> （`cstring < cwchar`：第 2 字符 `s` < `w`）。Windows 平台头（`<Windows.h>` 等，`:9-13`）在**标准库之前**、**项目头之后**（本文件既有顺序，不动）。
+
+> ⚠️ **为什么 `<cwchar>` 必须显式加（D-6——**实测结论**，不是保守估计）**：`wcscmp` 归 `<cwchar>`，**不属于** `<cstring>`。
+> 实测两个工具链在不加它时**都能编过**（`<Windows.h>` 的展开链把它带了进来）：
+>
+> | 工具链 | 命令 | 结果 |
+> |---|---|---|
+> | **MinGW g++** | `-std=c++20 -Wall -Wextra -c` | **exit 0，零警告** |
+> | **clang++** | `-std=c++20 -Wall -Wextra -fsyntax-only` | **0 error / 0 warning** |
+>
+> 仍然显式加，理由两条：① 该块既有的 4 个标准库 include **逐一核对均被使用**（`memcpy`×1 / `std::string`×11 /
+> `std::system_error`×1 / `std::vector`×1）⇒ 这个块的口径是「**列你所用的**」；② **本文件自己就记着「头展开链不稳定」**——
+> `:15-17` 的 `DrawText` 防护注释明写 `dwmapi.h / windowsx.h` 的展开链也可能带进 `Windows.h` ⇒ 依赖展开链与这条既有认知相悖。
+>
+> **调用写法**：**裸 `wcscmp`**（不带 `std::`）——全库 c-函数一律裸调用（`memcpy` 2 处 · `wcslen` 2 处），只有 `std::abs` 带前缀（那是 `<cmath>` 重载解析的需要）。
+> **为什么不用 `lstrcmpW`**：它是 locale 敏感的 `CompareString` 语义；类名比较要的是**序数**比较。
+
 
 #### 2.4.2 匿名 namespace：+2 实体（**插在 `ClipboardGuard`（`:38-47`）之后、闭括号 `}`（`:49`）之前**）
 
@@ -228,6 +251,8 @@ bool IsDesktopClassWindow(HWND hwnd){
 
 	if (GetClassNameW(hwnd, buf, 32) == 0){ return false; }
 
+	// 序数比较（`<cwchar>` 已在 include 段显式补入——D-6 / §2.4.1）。
+	// ⚠️ 不用 lstrcmpW：那是 locale 敏感的 CompareString 语义，类名比较要的是序数。
 	return wcscmp(buf, L"Progman") == 0 || wcscmp(buf, L"WorkerW") == 0;
 
 }
@@ -595,7 +620,7 @@ void Win32PlatformWindow::SyncDesktopHookOff(){
 ```
 
 > 📌 **两处实现注意**：
-> ① `wcscmp` 需要 `<cstring>`/`<string.h>`——本文件已有 `<cstring>`（`:19`）✅。
+> ① `wcscmp` 归 **`<cwchar>`**（**不是** `<cstring>`——这是 v1.0 的笔误，v1.2 已正）⇒ 已在 §2.4.1 **显式补入** `#include <cwchar>`（D-6）。
 > ② `EVENT_SYSTEM_FOREGROUND` / `OBJID_WINDOW` / `WINEVENT_OUTOFCONTEXT` / `GetShellWindow` / `UnhookWinEvent` / `HWINEVENTHOOK` 全部来自 `<Windows.h>`（本文件 `:9` 已含，且 `:15-17` 有 `DrawText` 防护）✅。
 
 ### 2.5 新建 `ECDI/src/Tests/DesktopLayerTests.cpp`
@@ -1001,6 +1026,8 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 ---
 
 ## 10. 修订记录
+
+- v1.2（2026-09-19）**实施前核对补正（D-6）：`wcscmp` 的包含来源**。① **§1.3 新增 D-6**（本稿对初设的**第六**处修正）——原 §2.4.1 写「真正的新增只有标准库**一行**」，但 `wcscmp` 归 `<cwchar>`、**不属于** `<cstring>`，原稿**未列它**，等于把 TU 的自洽性押在 `<Windows.h>` 的传递包含上。② **实测两工具链**（MinGW g++ `-c` exit 0 零警告 · clang++ `-fsyntax-only` 0 error 0 warning）确认**机制上可用**，但**仍显式补入 `#include <cwchar>`**——理由：该块 4 个既有标准库 include **逐一核对均被使用**（口径 = 「列你所用的」），且本文件 `:15-17` 的 `DrawText` 防护注释**本身就记着「头展开链不稳定」**。③ **§2.4.1 整节改写**（既有 4 行的上下文对照 + 两行新增标记 + 字典序说明 + 为什么必须显式加的证据表 + 裸调用与「不用 `lstrcmpW`」的理由）。④ **§2.4.2 的 `IsDesktopClassWindow`** 补两条内联注释（序数比较 + 不用 `lstrcmpW`）。⑤ **修正 §2.4.6 注意① 的一处笔误**——原文「`wcscmp` 需要 `<cstring>`/`<string.h>`……本文件已有 `<cstring>` ✅」**不成立**。⑥ **§1.1 改动清单**第 4 行「+1 标准库 include」→「**+2**」。**规模锚点不变**（92 → 92 · 210 → 217 · 10 → 10）；八条实现级检查项（§9.1）与契约 C1–C12 均不受影响。
 
 - v1.1（2026-09-19）**外部详细设计评审处置——「设计上通过，可以进入实现」（无阻塞项）**：① **状态行**由「待评审」改为「**评审通过 · 可进实现**」（评审原话：「**设计上通过，可以进入实现**」「没有发现需要推翻架构或重新做初设级别修改的问题」「已经具备**直接交给实现阶段**的条件」，并肯定本稿「更强调危险路径的结构性约束」的取向）；② **新增 §9.1 实现期盯防清单**——把评审给出的 **7 条实现级检查项**落成表（注销顺序不可变 / 不得重现 Desktop→`HWND_BOTTOM` 隐式 fallback / 三态语义不得简化 **且三重守卫不得合并** / 不得补 `SWP_FRAMECHANGED` / `Bottom` 路径零新增开销 / T16-7 的 dead HWND 顺序 / 四工具链回调类型实测过一遍），逐条绑定本稿落点；③ **A1 补强**——显式要求 MinGW / Clang 侧确认 `CALLBACK` 与 `HWINEVENTHOOK` 的声明与链接，并写明「同型先例不可外推」；④ 评审对 §8 L1（瞬时遮挡不得包装成「无闪烁」）的裁定**照原样保留**。评审未提出任何需要返回初设的问题 ⇒ 本稿 v1.1 即**实现依据**。
 - v1.0（2026-09-19）**详细设计初稿**（初设 v1.3「评审通过 · O1 已关闭」后启动）。① **§1 实施总览**——**7 个文件**（4 改 + 1 新建 + 2 接线），Public 头 **92 → 92**、用例 **210 → 217**、断言特征串 **10 → 10**；② **§1.3 本稿对初设的五处修正**——**D-1** `PlatformWindow.h` 的 `@details`（原文「Bottom/Desktop 档持续维护普通窗口层底部位置」对 Desktop 已失实）⇒ Public 头改动由 1 处变 **2 处（仍均仅注释）**；**D-2** T16-5 的方法由「伪造 `WINDOWPOS` 直发」改为「真实 `SetWindowPos` + z 序邻居观察」（不把契约建立在未证实的 `DefWindowProc` 行为上）；**D-3** 测试落点定为**新建 `DesktopLayerTests.cpp`**（样本取「直接构造 `Win32PlatformWindow`」——`DropFilesTests.cpp:133` 先例，免去三层 `static_cast`）；**D-4** 新成员落点改为 **private 成员区末尾新增 Phase 16 分组**（不在 `m_windowLayer` 之后割裂 Phase 12 分组）；**D-5** **零新增 `FRAMEWORK_ASSERT`**（每个前置条件均由显式守卫闭合，断言只会成死代码）⇒ A2 特征集不变；③ **§2 逐文件最小 diff**——含 `WM_WINDOWPOSCHANGING` 的**等价性核对表**（`Normal` / `Bottom` **逐位等价**）、`SetWindowLayer` 的**三处差异表**、九个新方法体全文；④ **§3 关键行为冻结**——`ResolveTarget` 真值表 · Borderless+Desktop 调用序列 · 生命周期时序（含**注销顺序不可交换**的理由）· `Bottom` 档成本表 · Desktop 档运行期开销；⑤ **§4 契约表**——C1–C12 逐条给出实现落点与验证方式；⑥ **§5 测试规格**——T16-1..T16-7（含 T16-4 的**两窗口分工**与 T16-7 的**顺序纪律**）+ **§5.1 否定型断言必须配正对照**的新纪律；⑦ **§6 验收 A1–A8**——**A4「C2 不容降级」**给出 `HWND_BOTTOM` 出现点的可机检判据；⑧ **§7 影响面**——`PlatformWindow` 3 个实现者**零同步**、`WM_WINDOWPOSCHANGING` 处理点唯一、`WM_DESTROY` **刻意不改**（避免双路径脱钩）；⑨ **§8 已知局限 L1–L9**（含 L1 的**判据措辞纪律**：不得写「无闪烁」）；⑩ **§9 三批实施顺序**（A 纯新增 / B 行为切换 / C 测试）。待评审。
