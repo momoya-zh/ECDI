@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | 1 | `ECDI/include/ECDI/Window/WindowLayer.h` | 修改 | **仅注释**（`Desktop` 档 8 行） | §2.1 —— 原「spike 未通过 ⇒ 退化为 Bottom」已失实 |
 | 2 | `ECDI/include/ECDI/Platform/PlatformWindow.h` | 修改 | **仅注释**（`SetWindowLayer` 的 `@details` 3 行） | §2.2 —— ★ **初设漏项**，见 §1.3 D-1 |
-| 3 | `ECDI/src/Platform/Win32/Win32PlatformWindow.h` | 修改 | +2 成员 +9 方法 +1 `using` +1 缝 setter | §2.3 |
+| 3 | `ECDI/src/Platform/Win32/Win32PlatformWindow.h` | 修改 | +2 成员 · **+12 方法**（**10** 个类外定义：`ResolveTarget` / `TargetInsertAfter` / `FindDesktopWindow` / `IsDirectlyAboveDesktop` / `ReinsertAboveDesktop` / `ApplyDesktopStyle` / `SyncDesktopHook` / `SyncDesktopHookOff` / `OnForegroundChanged` / `DesktopForegroundProc`；**2** 个内联：观测缝 setter `SetDesktopHookObserverForTests` / 判据 `IsDesktopLayer`）· +1 `using` | §2.3（**v1.3 更正**：原「+9 方法 +1 缝 setter」把内联判据漏计、又把 setter 重复计数） |
 | 4 | `ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` | 修改 | **+2** 标准库 include（`<cwchar>` + `<unordered_map>`） · +2 匿名 namespace 实体 · **3 处既有代码改造** · +9 新方法体 | §2.4 |
 | 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-7（约 250 行） | §2.5 |
 | 6 | `ECDI/src/Tests/RunAllTests.h` | 修改 | +1 声明 | §2.6 |
@@ -1026,6 +1026,8 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 ---
 
 ## 10. 修订记录
+
+- v1.3（2026-09-19）**批 A 实施后回写：修正 §1.1 的方法计数（+9 → +12）**，并记录批 A 的两条实证。① **计数更正**——批 A 落盘后按「实测对账」逐个数（不凭记忆）：新方法共 **12**（类外定义 **10**：`ResolveTarget` / `TargetInsertAfter` / `FindDesktopWindow` / `IsDirectlyAboveDesktop` / `ReinsertAboveDesktop` / `ApplyDesktopStyle` / `SyncDesktopHook` / `SyncDesktopHookOff` / `OnForegroundChanged` / `DesktopForegroundProc`；**内联 2**：观测缝 setter `SetDesktopHookObserverForTests` / 判据 `IsDesktopLayer`）+ 类型别名 1（`HookObserverFn`）+ 成员 2（`m_desktopHook` / `m_hookObserver`）。原写法「+9 方法 +1 缝 setter」同时犯了两个方向的错：**漏计**内联判据、**重复计** setter。⚠️ 与初设 v1.1 的「+10 → +12」是**同一处易错点**（这已是第二次）——计数类断言必须落盘后实测，不能推算。② **批 A 严格纯新增已实证**：`git diff -U0` 对被改文件统计 **删除行数 = 0**（这正是批 A 的存在意义：「新增不接线」的零风险验证）。③ **两条工具链静态自查通过**：对改动后的 `Win32PlatformWindow.cpp` 跑 `-std=c++20 -Wall -Wextra -fsyntax-only -DUNICODE -D_UNICODE -D_DEBUG -I ECDI/include -I ECDI/src` ⇒ **MinGW g++ 0 error / 0 warning** · **clang++ 0 error / 0 warning**（`-D_DEBUG` 使断言路径同时参与类型检查）。（四工具链正式构建仍归用户 A1。）
 
 - v1.2（2026-09-19）**实施前核对补正（D-6）：`wcscmp` 的包含来源**。① **§1.3 新增 D-6**（本稿对初设的**第六**处修正）——原 §2.4.1 写「真正的新增只有标准库**一行**」，但 `wcscmp` 归 `<cwchar>`、**不属于** `<cstring>`，原稿**未列它**，等于把 TU 的自洽性押在 `<Windows.h>` 的传递包含上。② **实测两工具链**（MinGW g++ `-c` exit 0 零警告 · clang++ `-fsyntax-only` 0 error 0 warning）确认**机制上可用**，但**仍显式补入 `#include <cwchar>`**——理由：该块 4 个既有标准库 include **逐一核对均被使用**（口径 = 「列你所用的」），且本文件 `:15-17` 的 `DrawText` 防护注释**本身就记着「头展开链不稳定」**。③ **§2.4.1 整节改写**（既有 4 行的上下文对照 + 两行新增标记 + 字典序说明 + 为什么必须显式加的证据表 + 裸调用与「不用 `lstrcmpW`」的理由）。④ **§2.4.2 的 `IsDesktopClassWindow`** 补两条内联注释（序数比较 + 不用 `lstrcmpW`）。⑤ **修正 §2.4.6 注意① 的一处笔误**——原文「`wcscmp` 需要 `<cstring>`/`<string.h>`……本文件已有 `<cstring>` ✅」**不成立**。⑥ **§1.1 改动清单**第 4 行「+1 标准库 include」→「**+2**」。**规模锚点不变**（92 → 92 · 210 → 217 · 10 → 10）；八条实现级检查项（§9.1）与契约 C1–C12 均不受影响。
 

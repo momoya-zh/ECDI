@@ -17,8 +17,10 @@
 #endif
 
 #include <cstring>
+#include <cwchar>                      // Phase 16：IsDesktopClassWindow 的 wcscmp（D-6——显式列全，不依赖 <Windows.h> 的展开链）
 #include <string>
 #include <system_error>
+#include <unordered_map>               // Phase 16：hook → 实例 反查表（仅 .cpp——不进任何头）
 #include <vector>
 
 // ── Phase 12 D-DWM-1（实现期修正）：Win11 圆角常量**无需兜底** ──────────
@@ -45,6 +47,37 @@ public:
 private:
 	bool m_opened;
 };
+
+/// @brief hook → 实例 映射（Phase 16 D5：每窗口一个钩子 ⇒ 回调必须能反查 owner）
+/// @details `SetWinEventHook` 的回调签名固定且**无 user-data 参数**，而框架须支持多窗口
+/// ⇒ 以**回调首参（hook 自身）**为键反查实例。**替代方案（进程级窗口列表 + 广播）已否决**：
+/// 那要求回调遍历所有窗口并各自判断「是否该动」，把「谁的维护」变成全局语义。
+/// ⚠️ **线程安全**：`WINEVENT_OUTOFCONTEXT` 的回调在**注册钩子的那个线程**的消息循环中执行
+/// ⇒ 与 Install / Uninstall 天然同线程 ⇒ **无需加锁**（契约 C8）。
+/// ⚠️ 函数局部 `static` 的析构发生在进程退出——此时任何仍存活的窗口自身即属泄漏，无实际风险。
+std::unordered_map<HWINEVENTHOOK, Win32PlatformWindow*>& HookOwners(){
+
+	static std::unordered_map<HWINEVENTHOOK, Win32PlatformWindow*> owners;
+
+	return owners;
+
+}
+
+/// @brief 桌面类窗口判定（钩子过滤与 z 序判据共用同一份类名集合）
+/// @details `Progman` = 桌面本体；`WorkerW` = 壁纸 / `SHELLDLL_DefView` 宿主（部分 Windows
+/// 版本「显示桌面」抬升的是它而非 `Progman`）⇒ 两者都算「桌面层被抬升」。
+/// ⚠️ 类名缓冲 32 宽字符足够（两名称最长 7），`GetClassNameW` 返回值 0 视为不匹配。
+bool IsDesktopClassWindow(HWND hwnd){
+
+	wchar_t buf[32]{};
+
+	if (GetClassNameW(hwnd, buf, 32) == 0){ return false; }
+
+	// 序数比较（`<cwchar>` 已在 include 段显式补入——D-6 / 详设 §2.4.1）。
+	// ⚠️ 不用 lstrcmpW：那是 locale 敏感的 CompareString 语义，类名比较要的是序数。
+	return wcscmp(buf, L"Progman") == 0 || wcscmp(buf, L"WorkerW") == 0;
+
+}
 
 }
 
@@ -883,6 +916,219 @@ void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
 			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
 	}
+
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Phase 16：桌面驻留层（R1–R4）
+// ══════════════════════════════════════════════════════════════════════════
+
+HWND Win32PlatformWindow::ResolveTarget(WindowLayer layer, HWND desktop){
+
+	// ── Normal 档：不参与 z 序维护 ⇒ 返回「跳过」哨兵 ──
+	if (layer == WindowLayer::Normal){
+
+		return nullptr;
+
+	}
+
+	// ── Bottom 档：既有语义（Phase 12 已实现）——逐位不变 ──
+	if (layer == WindowLayer::Bottom){
+
+		return HWND_BOTTOM;
+
+	}
+
+	// ── Desktop 档：紧贴桌面窗口正上方 ──
+	if (desktop == nullptr || !IsWindow(desktop)){
+
+		// ★ K8 / C2：桌面窗口不可用（explorer 重建窗口期 / 非交互式会话）⇒ **跳过本次修改**。
+		//   绝不可 fallback 到 HWND_BOTTOM —— 那会把 Desktop 档意外降级成 Bottom，
+		//   是「比不重插更糟」的位置（desktop_spike.cpp:592-594 已显式防御同一陷阱）。
+		return nullptr;
+
+	}
+
+	// 桌面窗口的上一位 =「紧贴着它的那个位置」。
+	// ⚠️ 返回 nullptr（桌面已在 z 序最顶）同样是**跳过** —— 此时「紧贴其上」不可能，
+	//    而任何替代位置（HWND_BOTTOM / HWND_TOP）都违反契约。
+	return GetWindow(desktop, GW_HWNDPREV);
+
+}
+
+HWND Win32PlatformWindow::TargetInsertAfter() const{
+
+	// ⚠️ **只让 Desktop 档去查桌面句柄**——Normal / Bottom 不看它。
+	//    这让 WM_WINDOWPOSCHANGING 在 **Bottom 档下不产生任何 GetShellWindow() 调用**
+	//    （零新增成本：Bottom 是既有档位，不应因本阶段变慢 —— 契约 §3.4）。
+	const HWND desktop = IsDesktopLayer() ? FindDesktopWindow() : nullptr;
+
+	return ResolveTarget(m_windowLayer, desktop);
+
+}
+
+HWND Win32PlatformWindow::FindDesktopWindow(){
+
+	// D7：实测 `GetShellWindow()` ≡ `FindWindowW(L"Progman")`（四组独立运行一致）⇒ 取
+	// **官方 API**：语义直述（「shell 的桌面窗口」）、无按类名枚举的成本。
+	// ⚠️ 返回值仍须 `IsWindow` 校验——explorer 重建窗口期可能短暂失效（K8）；
+	//    调用方（ResolveTarget / IsDirectlyAboveDesktop）一律按「不可用 ⇒ 跳过」处理。
+	// ★ D6：**不缓存** ⇒ 不需要「缓存 + 有效性检测 + 重定位」状态机——explorer 重建
+	//   `Progman` 之后，下一次查询**天然**拿到新句柄。代价实测 0.8 次/秒（可忽略）。
+	return GetShellWindow();
+
+}
+
+bool Win32PlatformWindow::IsDirectlyAboveDesktop() const{
+
+	// ★ 契约 C11（三态）：true = 已在位 / false = 未在位 / **true = 不可判定**。
+	//   不可判时返回 true 的含义是「**禁止无依据的 z-order 操作**」，
+	//   **不是**「z 序已满足 C1」。
+	if (m_hwnd == nullptr || !IsWindow(m_hwnd)){ return true; }   // 不可判 ⇒ 抑制动作
+
+	const HWND desktop = FindDesktopWindow();
+
+	if (desktop == nullptr || !IsWindow(desktop)){ return false; }   // 桌面不可用 ⇒ 未在位
+
+	return GetWindow(desktop, GW_HWNDPREV) == m_hwnd;
+
+}
+
+void Win32PlatformWindow::ReinsertAboveDesktop(){
+
+	if (!IsDesktopLayer() || m_hwnd == nullptr || !IsWindow(m_hwnd)){
+
+		return;
+
+	}
+
+	// ★ 需求稿 §8.1②（本阶段**正式设计输入**）：先判在位，已在位则什么都不做。
+	//   路线 E 的原始实现是**无条件重插**——实测那是 Win+D 瞬间「闪烁一下」的来源之一
+	//   （用户目视确认）。在位检查把抖动降到最小，且零额外成本。
+	if (IsDirectlyAboveDesktop()){
+
+		return;
+
+	}
+
+	const HWND target = TargetInsertAfter();
+
+	if (target != nullptr){
+
+		SetWindowPos(m_hwnd, target, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	}
+
+}
+
+void Win32PlatformWindow::ApplyDesktopStyle(bool desktop){
+
+	if (m_hwnd == nullptr){
+
+		return;   // 无窗口无从改样式（构造期已创建 HWND，此处仅防御）
+
+	}
+
+	const LONG_PTR current = GetWindowLongPtrW(m_hwnd, GWL_STYLE);
+
+	const LONG_PTR wanted = desktop
+		? (current & ~static_cast<LONG_PTR>(WS_MINIMIZEBOX))
+		: (current |  static_cast<LONG_PTR>(WS_MINIMIZEBOX));
+
+	if (wanted == current){
+
+		return;   // 幂等：已是目标值则不动手（避免多余的 WM_STYLECHANGING/CHANGED 往返）
+
+	}
+
+	// ⚠️ **不需要 SWP_FRAMECHANGED**（O1 已实测关闭，初设 §6.1）：只改样式位，
+	//    非客户区几何逐位不变（v5a 三点量具 A = B = C = 0 × 0）。
+	//    Borderless 档的 SetChromeMode 已在配置期派发过一次，那次重算发生在本调用
+	//    **之前**，且不因改这一位失效 ⇒ 既不必要、也不应重复派发。
+	SetWindowLongPtrW(m_hwnd, GWL_STYLE, wanted);
+
+}
+
+void Win32PlatformWindow::SyncDesktopHook(){
+
+	const bool want = (IsDesktopLayer() && m_hwnd != nullptr);
+
+	if (want && m_desktopHook == nullptr){
+
+		// hInstance 可传 nullptr（D5 / K9）：WINEVENT_OUTOFCONTEXT 的回调在**本进程内**
+		// 由系统在注册线程的消息循环中调用，不要求回调位于 DLL ⇒ 无需模块句柄。
+		m_desktopHook = SetWinEventHook(
+			EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+			nullptr, &Win32PlatformWindow::DesktopForegroundProc,
+			0, 0, WINEVENT_OUTOFCONTEXT);
+
+		if (m_desktopHook != nullptr){
+
+			HookOwners()[m_desktopHook] = this;
+
+			if (m_hookObserver != nullptr){ m_hookObserver(true); }
+
+		}
+
+	}
+	else if (!want && m_desktopHook != nullptr){
+
+		SyncDesktopHookOff();
+
+	}
+
+}
+
+void Win32PlatformWindow::SyncDesktopHookOff(){
+
+	if (m_desktopHook == nullptr){ return; }   // 幂等（Release 与析构会各调一次）
+
+	// ★ 注销顺序（契约 C6 / C12）：**先从映射表移除，再 UnhookWinEvent** ——
+	//   反序会让「回调已取出 owner、而对象正在析构」成为可能（UAF）。
+	//   移除后即使回调窗口期内仍被触发，`HookOwners().find()` 也会返回 end() ⇒ 安全返回。
+	HookOwners().erase(m_desktopHook);
+
+	UnhookWinEvent(m_desktopHook);
+
+	m_desktopHook = nullptr;
+
+	if (m_hookObserver != nullptr){ m_hookObserver(false); }
+
+}
+
+void Win32PlatformWindow::OnForegroundChanged(HWND foreground){
+
+	// 只有「桌面层被抬升」才需要跟随（Win+D / Show Desktop 的机制即此——spike §7.1）。
+	if (!IsDesktopClassWindow(foreground)){
+
+		return;
+
+	}
+
+	ReinsertAboveDesktop();
+
+}
+
+void CALLBACK Win32PlatformWindow::DesktopForegroundProc(HWINEVENTHOOK hook, DWORD event,
+	HWND hwnd, LONG idObject, LONG /*idChild*/, DWORD /*thread*/, DWORD /*time*/){
+
+	// 三重过滤：事件类型 / 窗口句柄 / 对象粒度（只关心窗口级前台变更）
+	if (event != EVENT_SYSTEM_FOREGROUND || hwnd == nullptr || idObject != OBJID_WINDOW){
+
+		return;
+
+	}
+
+	const auto it = HookOwners().find(hook);
+
+	if (it == HookOwners().end()){
+
+		// 已卸除（回调与 UnhookWinEvent 之间的窗口期——见 SyncDesktopHookOff 的注销顺序）
+		return;
+
+	}
+
+	it->second->OnForegroundChanged(hwnd);
 
 }
 

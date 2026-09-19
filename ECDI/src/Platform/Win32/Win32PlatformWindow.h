@@ -78,6 +78,32 @@ public:
 
 	void SetDragFinishForTests(DragFinishFn fn){ m_dragFinish = fn; }
 
+	// ── Phase 16：桌面驻留层（D9 观测缝 + O3 纯函数）──────────────────────
+
+	/// @brief 桌面钩子安装/卸除的观测缝（Phase 16 D9——**函数指针**形态，复刻 `DragFinishFn` 先例）
+	/// @details `SetWinEventHook` 依赖**真实桌面环境**，自动化只能断言「装 / 卸被调用了」，
+	/// 故以观测缝计数，不去 mock 系统 API（条 51：seam 不出实现层、保 `final`）。
+	/// ⚠️ 声明必须位于其首个使用点（`SetDesktopHookObserverForTests` 的**形参类型**）之前——
+	/// 与 `DragFinishFn` 同一教训：GCC 对成员函数形参不做延迟名字查找
+	/// （若放在 private 区，MinGW 会报 has not been declared）。
+	using HookObserverFn = void (*)(bool installed);
+
+	/// @param fn 观测回调（`true` = 已装 / `false` = 已卸）；`nullptr` = 取消观测
+	void SetDesktopHookObserverForTests(HookObserverFn fn){ m_hookObserver = fn; }
+
+	/// @brief 把「档位 + 桌面句柄」映射为目标 z 序位置（**纯函数**——O3 定为 C 的落点）
+	/// @param layer   当前档位
+	/// @param desktop 桌面窗口句柄（仅 `Desktop` 档需要；其余档位忽略）
+	/// @return `HWND_BOTTOM` = Bottom 档 ·「桌面窗口的上一位」= Desktop 档 ·
+	///         **`nullptr` = 本次不修改**（Normal 档 / 桌面句柄无效 / 桌面已处 z 序最顶）
+	/// @details ⚠️ **`nullptr` 是「跳过」哨兵，不是「插到最底」**——调用方必须显式判空，
+	/// 绝不可把它直接交给 `SetWindowPos`（那会落到 `HWND_BOTTOM`，把 `Desktop` 档
+	/// **意外降级**成 `Bottom`——K8 / 契约 C2 的核心）。
+	/// @note **public static 的唯一目的是可被自动化测试直接覆盖**（C2 是本阶段最危险的路径）。
+	/// 测试已 include 本内部头（`DropFilesTests.cpp:13` 先例）⇒ 零新文件、零测试缝；
+	/// 且它不读实例状态 ⇒ 无副作用、可纯逻辑断言（T16-7）。
+	static HWND ResolveTarget(WindowLayer layer, HWND desktop);
+
 	/// @brief 静态窗口过程（应用层注册 WindowClass 用；GWLP_USERDATA 绑定本实例）
 	static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -102,6 +128,56 @@ private:
 	/// @brief DWM 增强（R6——系统阴影 + Win11 圆角；失败容忍，仅日志不中断）
 	void ApplyDwmEnhancements(HWND hwnd);
 
+	// ── Phase 16：桌面驻留层（R1–R4）────────────────────────────────────
+
+	/// @brief 目标 z 序位置（D8——按档位分流的**唯一**入口）
+	/// @details 只做两件事：**判断是否要查桌面句柄**（仅 Desktop 档）+ 交给 `ResolveTarget`。
+	/// 语义与返回值同 `ResolveTarget`（`nullptr` = 本次不修改）。
+	HWND TargetInsertAfter() const;
+
+	/// @brief 定位桌面窗口（D6 / D7——**不缓存**，每次即时重查）
+	/// @return 桌面窗口句柄；`nullptr` = 不可用（explorer 重建窗口期 / 非交互式会话）
+	static HWND FindDesktopWindow();
+
+	/// @brief 本窗口是否已「紧贴桌面窗口正上方」（D8 判据——需求稿 §8.1② 的前置检查）
+	/// @details ⚠️ **三态**（契约 C11）：`true` = 已在位 / `false` = 未在位 /
+	/// **`true` = 不可判定**——不可判时返回 `true` 的语义是「**禁止无依据的 z-order 操作**」，
+	/// **不是**「z 序已满足 C1」。名称保留（改成 `…OrCannotDetermine` 只会让调用点更难读）。
+	bool IsDirectlyAboveDesktop() const;
+
+	/// @brief 把窗口重新插到桌面窗口正上方（内部**先判在位**，已在位则什么都不做）
+	void ReinsertAboveDesktop();
+
+	/// @brief 应用 / 撤销 Desktop 档所需的样式位（D1 A′ / D3）
+	/// @param desktop `true` = 移除 `WS_MINIMIZEBOX`；`false` = 补回
+	/// @details **幂等**（目标值与现值相同则不动手——避免多余的 `WM_STYLECHANGING/CHANGED`
+	/// 往返）且**可逆**（配置期内允许 `Desktop → Normal` 转移）。
+	/// ⚠️ **不需要 `SWP_FRAMECHANGED`**（O1 已实测关闭，初设 §6.1）：`WS_MINIMIZEBOX`
+	/// 不参与非客户区几何计算 ⇒ 改这一位没有需要系统重算的对象。
+	void ApplyDesktopStyle(bool desktop);
+
+	/// @brief 同步钩子与当前档位（D11 四态表的**唯一**执行点）
+	/// @details 幂等：Desktop 档且未装 ⇒ 装；非 Desktop 档且已装 ⇒ 卸；其余不动。
+	void SyncDesktopHook();
+
+	/// @brief 强制卸除钩子（`Release()` / 析构路径专用——**只减不增**，不读档位）
+	void SyncDesktopHookOff();
+
+	/// @brief 前台事件回调的转发落点（在**注册线程**上执行——契约 C8）
+	/// @param foreground 成为前台的窗口（可能不是本窗口）
+	void OnForegroundChanged(HWND foreground);
+
+	/// @brief 静态窗口过程式回调（`SetWinEventHook` **无 user-data 参数** ⇒ 经 hook 反查实例）
+	/// @details 签名与 `WINEVENTPROC` 一致。**既有先例**：`&Win32PlatformWindow::WindowProc`
+	/// 以同款「`static … CALLBACK` 成员 → Win32 回调指针」形态传进 `WNDCLASSW.lpfnWndProc`
+	/// （`Win32WindowClass.cpp:28`）——但 `WINEVENTPROC` 是**另一个**函数指针类型，
+	/// 四工具链仍须实际编译确认（O5）。
+	static void CALLBACK DesktopForegroundProc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
+		LONG idObject, LONG idChild, DWORD thread, DWORD time);
+
+	/// @brief 当前是否处于 Desktop 档（判据集中——避免各处重复比较枚举）
+	bool IsDesktopLayer() const noexcept{ return m_windowLayer == WindowLayer::Desktop; }
+
 	PlatformWindowHost& m_host;	///< Host 回调（非拥有——Window 实现）
 	WindowMessageHandler m_messageHandler;	///< 翻译器（7.1.2：构造传 m_host——不再认识应用层）
 	HWND m_hwnd = nullptr;	///< 窗口句柄（原 Window::m_handle）
@@ -121,6 +197,11 @@ private:
 
 	int m_imeResultPendingChars = 0;	///< 待吞掉的 IME 结果 WM_CHAR 数（8.5.1：GCS_RESULTSTR 已提交框架——
 	///< 系统随后仍发结果 WM_CHAR（DefWindowProc 通道），吞掉防双写；UTF-16 码元计数 = WM_CHAR 消息数）
+
+	// ── Phase 16：桌面驻留层状态 ────────────────────────────────────────
+
+	HWINEVENTHOOK m_desktopHook = nullptr;	///< 桌面驻留维护钩子（D11——**仅 Desktop 档持有**，其余档恒 `nullptr`）
+	HookObserverFn m_hookObserver = nullptr;	///< 钩子观测缝（测试用——生产恒 `nullptr`，见 public 区的 setter）
 
 };
 
