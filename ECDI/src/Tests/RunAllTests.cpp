@@ -28,6 +28,7 @@ int ECDI::Test::RunAllTests()
     RegisterTrayTests();   // Phase 14：托盘
     RegisterDropFilesTests();   // Phase 14：拖入
     RegisterScrollViewTests();   // Phase 15：滚动容器
+    RegisterDesktopLayerTests();   // Phase 16：桌面驻留层
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

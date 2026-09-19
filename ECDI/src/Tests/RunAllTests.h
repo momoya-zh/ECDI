@@ -30,5 +30,6 @@ void RegisterCaptionBarTests();   ///< Phase 13：CaptionBar（命中委托 / �
 void RegisterTrayTests();   ///< Phase 14：托盘（状态机 / Shell 序列 / 自愈 / 失败语义 / 析构防线）
 void RegisterDropFilesTests();   ///< Phase 14：拖入（HDROP 生命周期 / 事件内容 / 默认关闭）
 void RegisterScrollViewTests();   ///< Phase 15：滚动容器（坐标接缝 / 裁剪命中 / 偏移层隔离 / 范围模型）
+void RegisterDesktopLayerTests();   ///< Phase 16：桌面驻留层（档位分流 / 样式位 / 钩子生命周期 / ResolveTarget 真值表）
 
 } // namespace ECDI::Test

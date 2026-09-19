@@ -1,8 +1,8 @@
-﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）详细设计（v1.0）
+﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）详细设计（v1.4）
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-19
-> 状态：**✅ 评审通过 · 可进实现**（2026-09-19 外部详细设计评审：「**设计上通过，可以进入实现**」「没有发现需要推翻架构或重新做初设级别修改的问题」）——评审另给 **7 条实现级检查项**（非阻塞），已落成 **§9.1 盯防清单**。初设 v1.3 已「评审通过 · O1 已实测关闭」（`SWP_FRAMECHANGED` **不需要**，§6.1 三组 × 3 轮 + v5a 三点量具）。 ★ **v1.2：实施前核对补正 D-6**——`wcscmp` 的包含来源（显式补入 `<cwchar>`；详见 §1.3 D-6 与 §2.4.1）。
+> 状态：**✅ 评审通过 · 可进实现**（2026-09-19 外部详细设计评审：「**设计上通过，可以进入实现**」「没有发现需要推翻架构或重新做初设级别修改的问题」）——评审另给 **7 条实现级检查项**（非阻塞），已落成 **§9.1 盯防清单**。初设 v1.3 已「评审通过 · O1 已实测关闭」（`SWP_FRAMECHANGED` **不需要**，§6.1 三组 × 3 轮 + v5a 三点量具）。 ★ **v1.2：实施前核对补正 D-6**——`wcscmp` 的包含来源（显式补入 `<cwchar>`；详见 §1.3 D-6 与 §2.4.1）。 ★ **v1.4：三批已实施**（批 A `02f0e34` 纯新增 / 批 B `829bb6d` 行为切换 / 批 C 测试）——**待验收 A1–A8**（四工具链构建与测试运行由用户执行）。
 > 上游：[phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) **v1.4**（D0–D11 已定 · §8.1 两条新约束 · §8.2 八问）· [phase16-desktop-layer-preliminary-design.md](phase16-desktop-layer-preliminary-design.md) **v1.3**（B1–B11 基线 · C1–C12 契约 · O1–O5）
 > 相关：phase12-windowchrome-detailed-design.md（**逐文件最小 diff 规格**先例）· phase15-scrollview-detailed-design.md（§1 实施总览 / §5 测试规格 / §6 验收的排版先例）· window-ownership-detailed-design.md（访问权限与生命周期）
 > 一句话：**公共 API 头数 92 → 92（净增 0）**，全部改动收敛在 `Win32PlatformWindow` 内部 + 1 个新测试文件。本阶段是项目**首个纯实现层 Phase**。
@@ -19,7 +19,7 @@
 | 2 | `ECDI/include/ECDI/Platform/PlatformWindow.h` | 修改 | **仅注释**（`SetWindowLayer` 的 `@details` 3 行） | §2.2 —— ★ **初设漏项**，见 §1.3 D-1 |
 | 3 | `ECDI/src/Platform/Win32/Win32PlatformWindow.h` | 修改 | +2 成员 · **+12 方法**（**10** 个类外定义：`ResolveTarget` / `TargetInsertAfter` / `FindDesktopWindow` / `IsDirectlyAboveDesktop` / `ReinsertAboveDesktop` / `ApplyDesktopStyle` / `SyncDesktopHook` / `SyncDesktopHookOff` / `OnForegroundChanged` / `DesktopForegroundProc`；**2** 个内联：观测缝 setter `SetDesktopHookObserverForTests` / 判据 `IsDesktopLayer`）· +1 `using` | §2.3（**v1.3 更正**：原「+9 方法 +1 缝 setter」把内联判据漏计、又把 setter 重复计数） |
 | 4 | `ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` | 修改 | **+2** 标准库 include（`<cwchar>` + `<unordered_map>`） · +2 匿名 namespace 实体 · **3 处既有代码改造** · +9 新方法体 | §2.4 |
-| 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-7（约 250 行） | §2.5 |
+| 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-7（**实测 435 行 / 47 条 `EXPECT_*`**——v1.4 回写，估算偏低见 §2.5） | §2.5 |
 | 6 | `ECDI/src/Tests/RunAllTests.h` | 修改 | +1 声明 | §2.6 |
 | 7 | `ECDI/src/Tests/RunAllTests.cpp` | 修改 | +1 调用 | §2.6 |
 | — | `CMakeLists.txt` | **零改动** | — | `GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库（新 `.cpp` 无需登记） |
@@ -625,7 +625,7 @@ void Win32PlatformWindow::SyncDesktopHookOff(){
 
 ### 2.5 新建 `ECDI/src/Tests/DesktopLayerTests.cpp`
 
-**结构（约 250 行）**：include 段 → `LayerHost` → 3 个 helper → 7 个用例 → `RegisterDesktopLayerTests()`。
+**结构（实测 **435 行 / 47 条 `EXPECT_*`**——立项估「约 250 行」未计项目「每语句间空行」排版惯例，偏差 +74%）：include 段 → `LayerHost` → 3 个 helper → 7 个用例 → `RegisterDesktopLayerTests()`。
 
 #### 2.5.1 include 段（照抄 `DropFilesTests.cpp` 的骨架）
 
@@ -735,7 +735,7 @@ void CountingHookObserver(bool installed){ installed ? ++g_hookOn : ++g_hookOff;
 
 | # | 用例名 | 关键代码 / 断言 |
 |---|---|---|
-| **T16-1** | `DesktopLayer.BottomLayerRegression` | 建 `ref`（Normal）+ `bot`（Bottom）：`ref.Show()` → `bot.SetWindowLayer(Bottom)` → `bot.Show()` → `PumpMessages(64)`；**正对照** `EXPECT_TRUE(IsWindowVisible(ref…))` + `IsWindowVisible(bot…)`；**断言** `EXPECT_TRUE(IsAboveInZOrder(ref.Handle, bot.Handle))`（★ `bot` 后显示却被压到 `ref` 之下 ⇒ 维护生效） |
+| **T16-1** | `DesktopLayer.BottomLayerRegression` | 建 `ref`（Normal）+ `bot`（Bottom）：`ref.Show()` → `bot.SetWindowLayer(Bottom)` → `bot.Show()` → `PumpMessages(64)`；**正对照** `EXPECT_TRUE(IsWindowVisible(ref…))` + `IsWindowVisible(bot…)`；**断言** `EXPECT_TRUE(IsAboveInZOrder(ref.GetHwndForTests(), bot.GetHwndForTests()))`（★ `bot` 后显示却被压到 `ref` 之下 ⇒ 维护生效） |
 | **T16-2** | `DesktopLayer.StyleStripsMinimizeBox` | `before = GetWindowLongPtrW(hwnd, GWL_STYLE)`；**前提** `EXPECT_TRUE((before & WS_MINIMIZEBOX) != 0)`；`SetWindowLayer(Desktop)` 后：`(after & WS_MINIMIZEBOX) == 0` 且 `(after & ~WS_MINIMIZEBOX) == (before & ~WS_MINIMIZEBOX)`（其余位逐位保持）+ 逐条 `WS_CAPTION` / `WS_THICKFRAME` / `WS_SYSMENU` / `WS_MAXIMIZEBOX` 均非 0 |
 | **T16-3** | `DesktopLayer.StyleRoundTripAndIdempotent` | `original = style`；`Desktop` ⇒ 位清零；`Normal` ⇒ **`style == original`（逐位复原）**；连续两次 `Desktop` ⇒ 两次读值相等（幂等）；再 `Normal` ⇒ `style == original` |
 | **T16-4** | `DesktopLayer.HookLifecycle` | **两窗口**（见下 §2.5.5 的 A / B 分工）；逐次断言 `g_hookOn` / `g_hookOff` **精确计数**（不是"至少一次"） |
@@ -1026,6 +1026,8 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 ---
 
 ## 10. 修订记录
+
+- v1.4（2026-09-19）**批 B / 批 C 实施后回写（三批全部落盘，待验收 A1–A8）**。① **§2.5.4 伪代码更正**：T16-1 规格里的 `ref.Handle` / `bot.Handle` **不存在**——实际 API 是 `GetHwndForTests()`（`DropFilesTests.cpp:205` 先例）；测试按真实 API 落地，规格已同步。② **§2.5 规模实测**：新测试文件 **435 行 / 47 条 `EXPECT_*`**（估算偏低 +74%）；`ecdi_tests` 用例 **210 → 217**（22 个含用例文件 / 217 注册名 / **零重复** / `DesktopLayer.` 前缀全库唯一——脚本扫描确认）。③ **批 B 落点**（`829bb6d`，+49/−24）：三处既有代码改造（`Release` 脱钩前置 / `WM_WINDOWPOSCHANGING` 按档位分流 / `SetWindowLayer` 样式+钩子+分流派发）+ 两处公共头注释——`git diff -U0` 删除 24 行全部为预期旧块；**A4 判据首次生效**：`HWND_BOTTOM` 代码行仅剩 `ResolveTarget` 分支 1 处（另 4 处为注释）。④ **批 C 落点**：新建 `DesktopLayerTests.cpp`（T16-1..T16-7；T16-4 两窗口**连续计数**口径同 §2.5.5；T16-6 用 `onBefore`/`offBefore` 快照）+ `RunAllTests.h`/`.cpp` 各 +1 行接线；新文件行尾**显式转 CRLF**（Write 默认 LF，26/27 既有文件为 CRLF——条 8⑤）。⑤ **双工具链静态自查**：批 B `.cpp` 与批 C 测试文件各自 g++ / clang++ `-fsyntax-only -D_DEBUG` 均 **0 error / 0 warning**；四工具链构建与测试运行由用户执行（A1/A3）。
 
 - v1.3（2026-09-19）**批 A 实施后回写：修正 §1.1 的方法计数（+9 → +12）**，并记录批 A 的两条实证。① **计数更正**——批 A 落盘后按「实测对账」逐个数（不凭记忆）：新方法共 **12**（类外定义 **10**：`ResolveTarget` / `TargetInsertAfter` / `FindDesktopWindow` / `IsDirectlyAboveDesktop` / `ReinsertAboveDesktop` / `ApplyDesktopStyle` / `SyncDesktopHook` / `SyncDesktopHookOff` / `OnForegroundChanged` / `DesktopForegroundProc`；**内联 2**：观测缝 setter `SetDesktopHookObserverForTests` / 判据 `IsDesktopLayer`）+ 类型别名 1（`HookObserverFn`）+ 成员 2（`m_desktopHook` / `m_hookObserver`）。原写法「+9 方法 +1 缝 setter」同时犯了两个方向的错：**漏计**内联判据、**重复计** setter。⚠️ 与初设 v1.1 的「+10 → +12」是**同一处易错点**（这已是第二次）——计数类断言必须落盘后实测，不能推算。② **批 A 严格纯新增已实证**：`git diff -U0` 对被改文件统计 **删除行数 = 0**（这正是批 A 的存在意义：「新增不接线」的零风险验证）。③ **两条工具链静态自查通过**：对改动后的 `Win32PlatformWindow.cpp` 跑 `-std=c++20 -Wall -Wextra -fsyntax-only -DUNICODE -D_UNICODE -D_DEBUG -I ECDI/include -I ECDI/src` ⇒ **MinGW g++ 0 error / 0 warning** · **clang++ 0 error / 0 warning**（`-D_DEBUG` 使断言路径同时参与类型检查）。（四工具链正式构建仍归用户 A1。）
 
