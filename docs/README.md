@@ -211,7 +211,7 @@
 | [phase12-windowchrome-detailed-design.md](phase12-windowchrome-detailed-design.md) | 详细设计（**9 开放决策点全收** + 平台实现全文 6 case + **10 方法**（7 override + 3 私有辅助）；`TestWindow::Handle()` 三跳取 HWND；dwmapi 双构建系统；测试 **9** 自动用例含 spike 全文） | ✅ **v1.5 已实施（2026-09-12）**：v1.1 外部评审 → v1.2 内部复核 → v1.3 AI 核验补正 → v1.4 **实施期回写 4 处缺口**（D-DWM-1 零兜底 / `NCCALCSIZE_PARAMS` / 2 个测试替身补 override / Handle() include）→ **v1.5 实施后缺陷修复**（`TestWindow` 改持非拥有 `Window*` + `Create()`——原直构窗口未登记，销毁时触发 `Application.cpp:92` 断言；**仅 MSVC 构建暴露**，因 `FRAMEWORK_ASSERT` 只在 `_DEBUG` 下存在）；`ecdi_tests` **183/183**（MinGW，含带 `-D_DEBUG` 的一次；MSVC/Clang/ClangCL 待用户确认） |
 | [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase、**残差登记 G-1~G-4**） | ✅ **v1.7 已回写**（框架侧 2 Phase 全部落地 · R-1/R-6/R10 已出清 · 判据①–⑥全通过 · **残差 G-1~G-4 已登记**——G-1 `Desktop` 档未实现为唯一阻断项；应用侧待需求确认） |
 
-## Phase16 桌面驻留层（`WindowLayer::Desktop`）（🚧 需求确认 v1.0 待评审）
+## Phase16 桌面驻留层（`WindowLayer::Desktop`）（🚧 需求确认 v1.1 待事实勘察）
 
 `desktopnest-roadmap.md` v1.7 §5 登记的 **G-1**——**全项目唯一「已取证但未落地」的能力**。Phase 12 立 `WindowLayer::Desktop` 时只定了语义（`D-DESK-1`：语义状态 ≠ 实现路径），实现按 `Bottom` 降级执行；2026-09-15 spike 已把路线实测清楚（**E 路线：紧贴桌面窗口正上方 + 前台钩子重插**，六条判据 ①–⑥ 全过，A/C/D 三条判死）。本阶段把该路线**真正实现进 `Win32PlatformWindow`**。
 
@@ -219,7 +219,7 @@
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) | 需求确认（**K1–K14 现状勘察（全部带行号）**：`Desktop` 降级执行 `Bottom` + Warning 文案过期 / `WM_WINDOWPOSCHANGING` 是全档位共用维护点（`Desktop` 与 `Bottom` 目标 z 序**不同**）/ 窗口样式 `WS_OVERLAPPEDWINDOW` + 零扩展样式 / `SetWindowLayer` 配置期契约与 `CreateWindowExW` 构造期**时序紧张** / spike 双层维护（钩子 + 轮询）而框架 `Run()` **无心跳** / `Progman` 会被 explorer **销毁重建**（句柄失效时重插会落到 `HWND_BOTTOM`——比不重插更糟）/ `WS_EX_NOACTIVATE` 全库零使用。**三条会改形态的事实**：**F-1 窗口样式三处差异**（含一条常识性澄清）+ **F-2 样式决定时机错位** + **F-3 维护缺心跳**。**R1–R12 四组**：实现主体（含 `Bottom` 零回归 · 句柄失效自适应 · 销毁脱钩 · 文案同步）· 交互与样式（**交互能力不得降级**）· 覆盖范围（`ChromeMode` 正交 · 多窗口 · `Hide`/`Release` 关系）· 测试验收。**D0–D10 全部给倾向待拍板**（真正取舍点 = D1 主样式 / D2 `WS_EX_NOACTIVATE`）；非目标 8 项；**§8 待勘察项 6 条**） | 🚧 **v1.0 待评审** |
+| [phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) | 需求确认（**K1–K14 现状勘察（全部带行号）**：`Desktop` 降级执行 `Bottom` + Warning 文案过期 / `WM_WINDOWPOSCHANGING` 是全档位共用维护点（`Desktop` 与 `Bottom` 目标 z 序**不同**）/ 窗口样式 `WS_OVERLAPPEDWINDOW` + 零扩展样式 / `SetWindowLayer` 配置期契约与 `CreateWindowExW` 构造期**时序紧张** / spike 双层维护（钩子 + 轮询）而框架 `Run()` **无心跳** / `Progman` 会被 explorer **销毁重建**（句柄失效时重插会落到 `HWND_BOTTOM`——比不重插更糟）/ `WS_EX_NOACTIVATE` 全库零使用。**三条会改形态的事实**：**F-1 窗口样式三处差异**（含一条常识性澄清）+ **F-2 样式决定时机错位** + **F-3 维护缺心跳**。**R1–R12 四组**：实现主体（含 `Bottom` 零回归 · 句柄失效自适应 · **R10 钩子生命周期四态边界**）· 交互与样式（**交互能力不得降级**）· 覆盖范围（`ChromeMode` 正交 · 多窗口 · `Hide`/`Release` 关系）· 测试验收。**D0–D11 全部给倾向待拍板**（真正取舍点 = **D1 主样式** / **D2 `WS_EX_NOACTIVATE`**）；非目标 8 项；**§8 事实勘察 9 项（P0–P3 已排序——本节是进初设的闸门）**） | 🚧 **v1.1 待事实勘察**（外部评审「方向与边界认可，但**尚不能拍板进初设**」——8 项处置全部采纳，无否决：状态转「待事实勘察」· §1.1 补设计方针「**先证明现有窗口形态能承载 Desktop 层，证明不了才改形态**」· **D1 顺序修正**（原「倾向 C」→「**A 为首选假设**」，补「**标题栏存在 ≠ 用户看得到**」须实测）· D2/D5 补强 · **R10 细化为四态边界表** · **新增 D11**（钩子生命周期·评审最重要补项）· §8 扩为 9 项带优先级） |
 
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
