@@ -1031,6 +1031,8 @@ void Win32PlatformWindow::ReinsertAboveDesktop(){
 	//   （用户目视确认）。在位检查把抖动降到最小，且零额外成本。
 	if (IsDirectlyAboveDesktop()){
 
+		// ★ 诊断（Phase 16 A5 排查）：在位跳过也要留痕——否则「没重插」与「重插了但没用」不可分。
+		Logger::Log(LogLevel::Debug, L"DesktopLayer: reinsert skipped (already directly above desktop)");
 		return;
 
 	}
@@ -1039,7 +1041,20 @@ void Win32PlatformWindow::ReinsertAboveDesktop(){
 
 	if (target != nullptr){
 
+		// ★ 诊断（同上）：重插目标是谁（Win11 下可能是 WinUIDesktopWin32WindowClass）。
+		{
+			wchar_t targetCls[32]{};
+			GetClassNameW(target, targetCls, 32);
+			Logger::Log(LogLevel::Info, std::wstring(L"DesktopLayer: reinsert -> target cls=") + targetCls);
+		}
+
 		SetWindowPos(m_hwnd, target, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	}
+	else{
+
+		// ★ 诊断（同上）：target == nullptr = 跳过哨兵（Normal 档 / 桌面句柄无效 / 桌面已在 z 序最顶）。
+		Logger::Log(LogLevel::Debug, L"DesktopLayer: reinsert skipped (target == nullptr)");
 
 	}
 
@@ -1092,6 +1107,17 @@ void Win32PlatformWindow::SyncDesktopHook(){
 
 			if (m_hookObserver != nullptr){ m_hookObserver(true); }
 
+			// ★ 诊断（Phase 16 A5 排查）：钩子安装结果原本**静默**——失败时 Desktop 档
+			//   「装不上钩子却毫无提示」。定位后连同本组诊断日志一并移除。
+			Logger::Log(LogLevel::Info, L"DesktopHook: SetWinEventHook OK");
+
+		}
+		else{
+
+			// ★ 诊断（同上）：失败必须可见（含 GetLastError）。
+			Logger::Log(LogLevel::Warning,
+				std::wstring(L"DesktopHook: SetWinEventHook FAILED err=") + std::to_wstring(GetLastError()));
+
 		}
 
 	}
@@ -1118,6 +1144,9 @@ void Win32PlatformWindow::SyncDesktopHookOff(){
 
 	if (m_hookObserver != nullptr){ m_hookObserver(false); }
 
+	// ★ 诊断（Phase 16 A5 排查）：脱钩同样留痕。定位后连同本组诊断日志一并移除。
+	Logger::Log(LogLevel::Info, L"DesktopHook: UnhookWinEvent done");
+
 }
 
 void Win32PlatformWindow::OnForegroundChanged(HWND foreground){
@@ -1125,9 +1154,13 @@ void Win32PlatformWindow::OnForegroundChanged(HWND foreground){
 	// 只有「桌面层被抬升」才需要跟随（Win+D / Show Desktop 的机制即此——spike §7.1）。
 	if (!IsDesktopClassWindow(foreground)){
 
+		// ★ 诊断（Phase 16 A5 排查）：前台变了但不是桌面类 ⇒ 不动作（正常路径，留痕以区分）。
 		return;
 
 	}
+
+	// ★ 诊断（同上）：**桌面被抬升**被识别到（Win+D 跟随的关键判据）。
+	Logger::Log(LogLevel::Info, L"DesktopLayer: desktop raised -> follow");
 
 	ReinsertAboveDesktop();
 
@@ -1135,6 +1168,18 @@ void Win32PlatformWindow::OnForegroundChanged(HWND foreground){
 
 void CALLBACK Win32PlatformWindow::DesktopForegroundProc(HWINEVENTHOOK hook, DWORD event,
 	HWND hwnd, LONG idObject, LONG /*idChild*/, DWORD /*thread*/, DWORD /*time*/){
+
+	// ★ 诊断（Phase 16 A5 排查）：**每个进入回调的事件都记一条**——用于区分
+	//   「回调根本没被调用」与「被三重过滤挡掉」。定位后连同本组诊断日志一并移除。
+	{
+		wchar_t cbCls[32]{};
+		if (hwnd != nullptr){ GetClassNameW(hwnd, cbCls, 32); }
+		Logger::Log(LogLevel::Debug,
+			std::wstring(L"DesktopHook: cb ev=") + std::to_wstring(event)
+			+ L" cls=" + cbCls
+			+ L" idObject=" + std::to_wstring(idObject)
+			+ L" owner=" + (HookOwners().find(hook) != HookOwners().end() ? L"yes" : L"NO"));
+	}
 
 	// 三重过滤：事件类型 / 窗口句柄 / 对象粒度（只关心窗口级前台变更）
 	if (event != EVENT_SYSTEM_FOREGROUND || hwnd == nullptr || idObject != OBJID_WINDOW){
