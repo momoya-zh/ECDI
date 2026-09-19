@@ -63,6 +63,24 @@ std::unordered_map<HWINEVENTHOOK, Win32PlatformWindow*>& HookOwners(){
 
 }
 
+/// @brief Phase 16 A5 修复：桌面跟随的**延后一拍**消息（仅本 TU 使用——不进公共头）
+/// @details 前台事件到达时 z 序尚未 settle ⇒ 当场判 `IsDirectlyAboveDesktop()` 会误读
+/// 「已在位」而跳过重插（A5 实测）。改为投递到自身消息队列，
+/// 下一轮消息循环再执行，判据即读到稳定态。
+/// ⚠️ 取 `WM_APP + 2`——`WM_APP + 1` 已被 Win32PlatformApplication.cpp 的托盘回调
+/// `kTrayCallbackMessage` 占用（虽属不同窗口，仍避开以免同号两义）。
+constexpr UINT kDesktopFollowMsg = WM_APP + 2;
+
+/// @brief Phase 16 A5 修复：桌面跟随的**重试定时器**（TimerId 保留段，登记见
+/// `include/ECDI/Animation/AnimationManager.h` 的登记表与详设 §9.6 §7）
+/// @details 桌面跟随必须等到**外壳真的抬起桌面之后**才有效——而那个时刻晚于本窗口的下一轮
+/// 消息循环（A5 实测：一拍时 `GetWindow(Progman, GW_HWNDPREV)` 仍是 `IME`，说明桌面尚未抬升）。
+/// ⇒ 用短延时定时器**固定多拍重插**：外壳动作的落点不可预知（本机实测第 2 拍即命中），
+/// 固定次数给出确定性覆盖——最后一拍必然落在外壳抬桌面之后。
+constexpr UINT_PTR kDesktopFollowTimerId = 3;   // 保留段：TextBox=1 / Animation=2 / Desktop=3
+constexpr UINT kDesktopFollowRetryMs = 16;      // 与动画 tick 同量级（约一个 UI 帧）
+constexpr int  kDesktopFollowMaxSteps = 4;      // 额外拍数上限（4×16ms ≈ 64ms；本机第 2 拍命中，留 2× 余量）
+
 /// @brief 桌面类窗口判定（钩子过滤与 z 序判据共用同一份类名集合）
 /// @details `Progman` = 桌面本体；`WorkerW` = 壁纸 / `SHELLDLL_DefView` 宿主（部分 Windows
 /// 版本「显示桌面」抬升的是它而非 `Progman`）⇒ 两者都算「桌面层被抬升」。
@@ -468,6 +486,26 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		break;   // 走 DefWindowProc（几何变更仍由系统处理）
 
 	}
+
+	// ── Phase 16 A5：桌面跟随（**延后一拍 + 有界重试**——见 OnForegroundChanged）──
+	case kDesktopFollowMsg:
+
+		FollowDesktopStep(hwnd);
+
+		return 0;
+
+	// ── Phase 16 A5：桌面跟随**重试定时器**（只认自己的 id；其余 id 走翻译器，既有行为不变）──
+	case WM_TIMER:
+
+		if (wParam == kDesktopFollowTimerId){
+
+			FollowDesktopStep(hwnd);
+
+			return 0;
+
+		}
+
+		break;   // 其它定时器（动画 tick / 光标闪烁）→ 翻译器 → TimerEvent（零回归）
 
 	case WM_PAINT:
 		// 决策 39：绘制不走翻译器（不是 Event），经 Host 回调编排整帧
@@ -1029,10 +1067,10 @@ void Win32PlatformWindow::ReinsertAboveDesktop(){
 	// ★ 需求稿 §8.1②（本阶段**正式设计输入**）：先判在位，已在位则什么都不做。
 	//   路线 E 的原始实现是**无条件重插**——实测那是 Win+D 瞬间「闪烁一下」的来源之一
 	//   （用户目视确认）。在位检查把抖动降到最小，且零额外成本。
+	// ⚠️ Phase 16 A5：本判据在**外壳抬桌面之前**也为真（实测）⇒ 它只表示「当前 z 序无需
+	//   调整」，**不代表「已跟随完成」**（外壳随后才抬桌面；见 FollowDesktopStep）。
 	if (IsDirectlyAboveDesktop()){
 
-		// ★ 诊断（Phase 16 A5 排查）：在位跳过也要留痕——否则「没重插」与「重插了但没用」不可分。
-		Logger::Log(LogLevel::Debug, L"DesktopLayer: reinsert skipped (already directly above desktop)");
 		return;
 
 	}
@@ -1041,20 +1079,41 @@ void Win32PlatformWindow::ReinsertAboveDesktop(){
 
 	if (target != nullptr){
 
-		// ★ 诊断（同上）：重插目标是谁（Win11 下可能是 WinUIDesktopWin32WindowClass）。
-		{
-			wchar_t targetCls[32]{};
-			GetClassNameW(target, targetCls, 32);
-			Logger::Log(LogLevel::Info, std::wstring(L"DesktopLayer: reinsert -> target cls=") + targetCls);
-		}
-
 		SetWindowPos(m_hwnd, target, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
 	}
-	else{
 
-		// ★ 诊断（同上）：target == nullptr = 跳过哨兵（Normal 档 / 桌面句柄无效 / 桌面已在 z 序最顶）。
-		Logger::Log(LogLevel::Debug, L"DesktopLayer: reinsert skipped (target == nullptr)");
+}
+
+void Win32PlatformWindow::FollowDesktopStep(HWND hwnd){
+
+	// **每一拍都无条件重插，并再排下一拍**，直到用满 kDesktopFollowMaxSteps。
+	// ⚠️ 为什么不能用「插上就停」：重插成功只证明「插了」，**不证明「插在外壳抬桌面之后」**——
+	//   A5 实测：第一拍常在外壳动作**之前**就成功（目标为 `IME` / `Windows.UI.Core.CoreWindow`），
+	//   随后外壳才把桌面抬到我们上面 ⇒ 被盖住；只有目标变成 `WinUIDesktopWin32WindowClass`
+	//   的那一拍才真正落在外壳动作之后（本机为第 2 拍）。
+	// ⚠️ 也不能用 `IsDirectlyAboveDesktop()` 当停止条件：外壳抬桌面**之前**它同样为真。
+	ReinsertAboveDesktop();
+
+	++m_desktopFollowRetries;
+
+	if (m_desktopFollowRetries <= kDesktopFollowMaxSteps){
+
+		SetTimer(hwnd, kDesktopFollowTimerId, kDesktopFollowRetryMs, nullptr);
+
+		return;
+
+	}
+
+	// 用满即停（每轮 Win+D 都会从 0 重新计数——见 OnForegroundChanged）。
+	m_desktopFollowRetries = 0;
+
+	KillTimer(hwnd, kDesktopFollowTimerId);
+
+	// 收尾仍未在位 ⇒ 拍数上限不够（正常不应出现；kDesktopFollowMaxSteps 需加大）。
+	if (!IsDirectlyAboveDesktop()){
+
+		Logger::Log(LogLevel::Warning, L"DesktopLayer: follow ended but NOT above desktop (raise max steps)");
 
 	}
 
@@ -1107,17 +1166,6 @@ void Win32PlatformWindow::SyncDesktopHook(){
 
 			if (m_hookObserver != nullptr){ m_hookObserver(true); }
 
-			// ★ 诊断（Phase 16 A5 排查）：钩子安装结果原本**静默**——失败时 Desktop 档
-			//   「装不上钩子却毫无提示」。定位后连同本组诊断日志一并移除。
-			Logger::Log(LogLevel::Info, L"DesktopHook: SetWinEventHook OK");
-
-		}
-		else{
-
-			// ★ 诊断（同上）：失败必须可见（含 GetLastError）。
-			Logger::Log(LogLevel::Warning,
-				std::wstring(L"DesktopHook: SetWinEventHook FAILED err=") + std::to_wstring(GetLastError()));
-
 		}
 
 	}
@@ -1144,9 +1192,6 @@ void Win32PlatformWindow::SyncDesktopHookOff(){
 
 	if (m_hookObserver != nullptr){ m_hookObserver(false); }
 
-	// ★ 诊断（Phase 16 A5 排查）：脱钩同样留痕。定位后连同本组诊断日志一并移除。
-	Logger::Log(LogLevel::Info, L"DesktopHook: UnhookWinEvent done");
-
 }
 
 void Win32PlatformWindow::OnForegroundChanged(HWND foreground){
@@ -1154,32 +1199,23 @@ void Win32PlatformWindow::OnForegroundChanged(HWND foreground){
 	// 只有「桌面层被抬升」才需要跟随（Win+D / Show Desktop 的机制即此——spike §7.1）。
 	if (!IsDesktopClassWindow(foreground)){
 
-		// ★ 诊断（Phase 16 A5 排查）：前台变了但不是桌面类 ⇒ 不动作（正常路径，留痕以区分）。
 		return;
 
 	}
 
-	// ★ 诊断（同上）：**桌面被抬升**被识别到（Win+D 跟随的关键判据）。
-	Logger::Log(LogLevel::Info, L"DesktopLayer: desktop raised -> follow");
-
-	ReinsertAboveDesktop();
+	// ★ Phase 16 A5 修复：**延后一拍 + 固定 N 拍无条件重插**。
+	//   为什么一拍不够：前台事件到达时 z 序尚未 settle，**且外壳抬桌面发生在其后**
+	//   （A5 实测：一拍时目标仍是 `IME` / `Windows.UI.Core.CoreWindow`，说明桌面尚未抬升）
+	//   ⇒ 单拍会插在「外壳动作之前」而落空。而「插上就停」同样不行——第一拍**可能真的插上**，
+	//   只是插在外壳动作之前。⇒ 改为**固定 N 拍无条件重插**（见 FollowDesktopStep），
+	//   最后一拍必然落在外壳抬桌面之后。
+	m_desktopFollowRetries = 0;
+	if (m_hwnd != nullptr){ PostMessageW(m_hwnd, kDesktopFollowMsg, 0, 0); }
 
 }
 
 void CALLBACK Win32PlatformWindow::DesktopForegroundProc(HWINEVENTHOOK hook, DWORD event,
 	HWND hwnd, LONG idObject, LONG /*idChild*/, DWORD /*thread*/, DWORD /*time*/){
-
-	// ★ 诊断（Phase 16 A5 排查）：**每个进入回调的事件都记一条**——用于区分
-	//   「回调根本没被调用」与「被三重过滤挡掉」。定位后连同本组诊断日志一并移除。
-	{
-		wchar_t cbCls[32]{};
-		if (hwnd != nullptr){ GetClassNameW(hwnd, cbCls, 32); }
-		Logger::Log(LogLevel::Debug,
-			std::wstring(L"DesktopHook: cb ev=") + std::to_wstring(event)
-			+ L" cls=" + cbCls
-			+ L" idObject=" + std::to_wstring(idObject)
-			+ L" owner=" + (HookOwners().find(hook) != HookOwners().end() ? L"yes" : L"NO"));
-	}
 
 	// 三重过滤：事件类型 / 窗口句柄 / 对象粒度（只关心窗口级前台变更）
 	if (event != EVENT_SYSTEM_FOREGROUND || hwnd == nullptr || idObject != OBJID_WINDOW){

@@ -146,7 +146,17 @@ private:
 	bool IsDirectlyAboveDesktop() const;
 
 	/// @brief 把窗口重新插到桌面窗口正上方（内部**先判在位**，已在位则什么都不做）
+	/// @details Phase 16 A5：本判据在**外壳抬桌面之前**也为真（实测）⇒ 「已在位」可能是
+	/// **过期判断**，故**不得**把它当作「已跟随完成」的依据（详见 `FollowDesktopStep`）。
 	void ReinsertAboveDesktop();
+
+	/// @brief Phase 16 A5：桌面跟随的**一步**（重插；并再排下一拍，直到用满 kDesktopFollowMaxSteps）
+	/// @details 由 `kDesktopFollowMsg`（延后一拍）与 `kDesktopFollowTimerId`（短延时）共用。
+	/// **每一拍都无条件重插、无条件再排下一拍**——不能用「插上就停」：重插成功只证明
+	/// 「插了」，**不证明「插在外壳抬桌面之后」**（A5 实测：第一拍常在外壳动作前成功，
+	/// 随后被盖住）。也不能用 `IsDirectlyAboveDesktop()` 当停止条件：外壳抬桌面**之前**
+	/// 它同样为真。
+	void FollowDesktopStep(HWND hwnd);
 
 	/// @brief 应用 / 撤销 Desktop 档所需的样式位（D1 A′ / D3）
 	/// @param desktop `true` = 移除 `WS_MINIMIZEBOX`；`false` = 补回
@@ -202,6 +212,7 @@ private:
 
 	HWINEVENTHOOK m_desktopHook = nullptr;	///< 桌面驻留维护钩子（D11——**仅 Desktop 档持有**，其余档恒 `nullptr`）
 	HookObserverFn m_hookObserver = nullptr;	///< 钩子观测缝（测试用——生产恒 `nullptr`，见 public 区的 setter）
+	int m_desktopFollowRetries = 0;	///< Phase 16 A5：桌面跟随**步数计数**（每轮 Win+D 由 OnForegroundChanged 清零；上限 kDesktopFollowMaxSteps）
 
 };
 
