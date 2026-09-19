@@ -1,9 +1,9 @@
-﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）初步设计（v1.1）
+﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）初步设计（v1.2）
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-09-19
-> 状态：**评审通过（带 3 项收敛）**——v1.1 已按评审处置（详见 §6 / §8）：**O3 定为 C**（纯函数 `ResolveTarget`，使最危险的 C2 分支可自动化）· **O2 倾向反转为「不加」**（`WS_EX_TOOLWINDOW` 不属本阶段需求）· **「不可判 ⇒ 无动作」与「钩子独立于 HWND」升格为契约 C11 / C12**
-> ★ **进详设的闸门 = O1 实测**（`SWP_FRAMECHANGED` 是否需要）——**探针 v4 已就绪**（§6.1）：`--strip-after` 复刻框架次序（**创建后** `SetWindowLongPtrW` 改样式），与既有 4 组的**创建期**设定**不等价**
+> 状态：**评审通过 · O1 已实测关闭 ⇒ 可进详细设计**——v1.1 按评审处置（**O3 定为 C** · **O2 反转为「不加」** · 新增契约 **C11 / C12**）；**v1.2 实测定案：`ApplyDesktopStyle` 不需要 `SWP_FRAMECHANGED`**（§6.1：三组 × 3 轮 Win+D + 框架既有先例），并如实记录探针 v1–v5 的一处**保真度缺陷**（漏了框架 `SetChromeMode` 的那次 `SWP_FRAMECHANGED`，**已修于 v5a**）
+> 实测来源：`.workbuddy/spike/desktop_layer_probe.cpp` **v5a**（**四点**对齐框架：窗口样式 · 三处 NC 拦截 · **配置期 `SWP_FRAMECHANGED`** · DPI 感知）
 > 前置：`phase16-desktop-layer-requirements.md` **v1.3**（D0–D11 已定 · §8.1 两条新约束 · §8.2 留给初设的 8 项）· `.workbuddy/spike/desktop_layer_probe.cpp`（4 形态 × 3 轮实测源码）· `desktop_spike.cpp`（路线 E 原始提交，`--auto` 可复现）
 > 一句话：把「**紧贴桌面窗口正上方 + 前台钩子维持**」这条已取证路线实现进 `Win32PlatformWindow`——**公共 API 净增 0**，全部改动收敛在**平台实现层内部**（本项目首个纯实现层 Phase）。
 
@@ -26,7 +26,7 @@
 | **D11** | 钩子生命周期四态：Set ⇒ 装 · Hide ⇒ **不卸** · Show ⇒ **不重装** · Release ⇒ **必卸** | 需求稿 §3.3 R10 |
 | **§8.1②** | **重插前先判在位**（已由「备注」升格为**正式设计输入**） | 需求稿 §8.1 |
 
-### 1.2 代码基线勘察（B1–B9，2026-09-19 复核）
+### 1.2 代码基线勘察（B1–B11，2026-09-19 复核）
 
 | # | 事实 | 出处 |
 |---|---|---|
@@ -40,6 +40,7 @@
 | **B8** | 测试基线：`WindowChromeTests.cpp` 9 用例（`ChromeModeDecidedOnce` / `BorderlessClientEqualsWindow` / `NCHitTestNineGrid` / `NCHitTestModeIsolation` / `MaximizedClientWithinWorkArea` / `CaptionHeightUnit` / `ZeroBoundaryClamp` / `StateEventFromApi` / `RuntimeApiRejectedBeforeShow`）；测试设施：`TestWindow`（非拥有 `Window*` + `Handle()` 三跳取 HWND）+ `PumpMessages(n)` | `src/Tests/WindowChromeTests.cpp:1-135` |
 | **B9** | 全局测试基线 **210 用例**（Phase 15 收口）；`PlatformWindow` 有 **3 个实现者**（`Win32PlatformWindow` + `AnimationTests` / `ProgressBarTests` 的 `TestPlatformWindow`） | MEMORY / skill 条 33 先例 |
 | **B10** | **测试可直接 include 内部头**：`DropFilesTests.cpp:13` 即有 `#include "Platform/Win32/Win32PlatformWindow.h"` ⇒ 拆出的**纯函数无需新文件 / 无需测试缝**即可被自动化覆盖（O3 取 C 的前提） | `src/Tests/DropFilesTests.cpp:13` |
+| **B11** | **框架已有「配置期通知系统重算非客户区」的先例**：`SetChromeMode(Borderless)` 自己派发 `SetWindowPos(…, SWP_FRAMECHANGED)`，注释原文「通知系统重算非客户区……**必须在窗口显示前派发——否则闪一次边框**」 | `Win32PlatformWindow.cpp:800-804` |
 
 ### 1.3 ★ 需求稿勘误（K13 与实况不符——本稿发现）
 
@@ -364,7 +365,7 @@ void Win32PlatformWindow::ApplyDesktopStyle(bool desktop){
 }
 ```
 
-⚠️ **是否需 `SWP_FRAMECHANGED`**：`WS_MINIMIZEBOX` **不参与非客户区几何计算**（只控制系统菜单项与按钮可用性）⇒ 预计**不需要**。但此为**待实测项**——列为 **O1**。若实测发现系统标题栏的最小化按钮仍可点，才补 `SetWindowPos(…, SWP_FRAMECHANGED)`。
+✅ **不需要 `SWP_FRAMECHANGED`（O1 已于 2026-09-19 实测关闭——§6.1）**：`WS_MINIMIZEBOX` **不参与非客户区几何计算**（只控制系统菜单项与按钮可用性）⇒ 改这一位**没有**任何需要系统重算的东西——实测改前 / 改后非客户区尺寸**逐位不变**（`16 × 39 → 16 × 39`）。另：Borderless 档的 `SetChromeMode` 本就会在配置期派发一次 `SWP_FRAMECHANGED`（`Win32PlatformWindow.cpp:800-804`），那次重算在 `SetWindowLayer` **之前**发生，且不会因为改这一位而失效 ⇒ 此处**既不必要、也不应**重复派发。
 
 ### 3.3 维护钩子：`hook → 实例` 反查（本稿的核心设计点）
 
@@ -588,7 +589,7 @@ bool Win32PlatformWindow::Release() noexcept{
 | `WindowLayer.h:24-31` | 「⚠️ 实现路线待 spike 验证；spike 未通过前此档位不承诺可用——调用后退化为 Bottom 语义并记 Warning 日志。」 | 改为「实现已落地」的事实陈述（**注释级改动**——§2.1「净增 0」仍成立） |
 | `examples/ModelProbe/main.cpp:247` | `// spike 未通过 → 降级 Bottom + Warning` | ⚠️ **AI 不得改 `main.cpp`**——须用户显式授权（需求稿 R4 已登记） |
 
-### 3.7 测试缝（D9 / §8.2-8）
+### 3.7 测试缝与纯函数（D9 / §8.2-8——v1.1：C2 由纯函数覆盖，缝只用于钩子计数）
 
 **`HookObserverFn`**（§2.2 已给）：`SetWinEventHook` 依赖真实桌面环境，**自动化只能断言「装/卸被调用了」**，不能 mock 系统 API ⇒ 用观测缝计数。复刻 `DragFinishFn` 先例（B6）的**函数指针**形态——**不出实现层、保 `final`**。
 
@@ -630,40 +631,68 @@ bool Win32PlatformWindow::Release() noexcept{
 | 测试 | `src/Tests/WindowChromeTests.cpp` 追加 **T16-1..T16-6**（+ **T16-7** 覆盖 `ResolveTarget` 真值表——**不需要窗口**，见 §7；是否新建文件**归详设**）；若新建文件则 `RunAllTests.h` / `RunAllTests.cpp` 手工接线 |
 | ⚠️ **测试替身** | **零同步**——本阶段**不新增任何 pure virtual**（B9 的 3 个实现者不受影响） |
 | 构建 | **零改动**（无新文件；`GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库） |
+| **工具（不进仓库）** | `.workbuddy/spike/desktop_layer_probe.cpp` **v5a**——O1 实测与后续**验收手测**复用；**四点**对齐框架（窗口样式 · 三处 NC 拦截 · **配置期 `SWP_FRAMECHANGED`** · DPI 感知）；`--auto` 自动注入 Win+D 多轮并自裁定（`VERDICT:` 行） |
 | Demo | `examples/ModelProbe/main.cpp:247` 的过期注释——**须用户授权**（AI 不得改 `main.cpp`） |
 | 文档 | 本稿 + 详设；**两处 README 索引都要改**（skill 条 77）· **需求稿 K13 勘误回写**（§1.3）· `desktopnest-roadmap.md` §5 G-1 可标 ✅（实现并验收后） |
 | 明确不动 | §2.3 已列 |
 
 ---
 
-## 6. 开放决策点（O1–O5——待详设 / 实测收敛）
+## 6. 开放决策点（O1–O5——**O1 已实测关闭**，其余待详设 / 验收收敛）
 
 | # | 决策 | 选项 / 倾向 | 依据与理由 |
 |---|---|---|---|
-| **O1** ★ | `ApplyDesktopStyle` 是否需要 `SWP_FRAMECHANGED` | **详设前置实验**（v1.1——不再保留「倾向不需要」的未验态度） | **关键澄清（v1.1 新增，本稿此前的推理有缺口）**：既有 4 组的 `overlapped-nominbox` 是**创建期**就写进 `CreateWindowExW` 的样式，而框架的 `ApplyDesktopStyle` 是**创建后**用 `SetWindowLongPtrW` 改——**两者不等价**（前者系统在创建时即按最终样式初始化；后者可能要 `SWP_FRAMECHANGED` 才让系统重算 frame）。**实验设计见 §6.1**（探针 v4 `--strip-after`） |
+| **O1** | `ApplyDesktopStyle` 是否需要 `SWP_FRAMECHANGED` | ✅ **已关闭：不需要**（2026-09-19 实测 + 框架先例） | **证据链三条**：① `WS_MINIMIZEBOX` **不参与非客户区几何**——实测改这一位前后 `non-client` **逐位不变**（`16 × 39 → 16 × 39`）⇒ 没有需要系统重算的对象；② **加与不加行为完全一致**——三组各 3 轮 Win+D **全 PASS**（`iconic` 恒 0 · `rect` 不变）；③ **框架已有先例**：`SetChromeMode(Borderless)` 在配置期就靠 `SWP_FRAMECHANGED` 通知系统重算 NC（`Win32PlatformWindow.cpp:800-804`）——那次重算发生在改样式**之前**，且不因改这一位失效。详见 §6.1（含一处**探针保真度缺陷**的如实记录） |
 | **O2** | `WS_EX_TOOLWINDOW` 是否加 | **倾向不加**（v1.1 **由「倾向加」反转**） | `TOOLWINDOW` 改变的是**任务栏 / Alt+Tab / 激活 / 系统菜单**这一组窗口语义，**不属本阶段需求**（需求稿里 Desktop 档的需求只有四条：z 序 / Win+D 可见 / explorer 重建 / 交互不降级）。「桌面常驻物不该占任务栏位」这个判断**本身成立**，但它是一条**尚未立项的需求** ⇒ 按 YAGNI 等**真实消费者**驱动（DesktopNest 明确要求「不出现在任务栏」时再开）。**本阶段的原则是「已经实测的最小改动」，不是「顺手把桌面常驻行为做完整」** |
 | **O3** | `TargetInsertAfter` 的 C2 分支（句柄无效 ⇒ 跳过）如何自动化 | **定为 C**（v1.1 收敛——A / B 不再保留）：拆出**纯函数** `static HWND ResolveTarget(WindowLayer layer, HWND desktop)` | C2 是**本阶段最危险的路径**（写错即静默降级成 Bottom）⇒ 必须自动化。**落点零新文件**：作为 `Win32PlatformWindow` 的 **public static**（声明在既有内部头，定义在既有 `.cpp`）。**测试可达性已有先例**：`DropFilesTests.cpp:13` 即 include 内部头（B10）⇒ 无需新头、无需测试缝、无需 mock 系统 API。详见 §3.1 ① 与 T16-7 |
 | **O4** | `HookOwners()` 的容器形态 | **A** `std::unordered_map<HWINEVENTHOOK, Win32PlatformWindow*>`（本稿）· **B** 静态单链表 / 小数组 | 倾向 **A**（O(1)、语义直白）；窗口数少（YAGNI：无大规模多窗口消费者），B 的省内存无意义。**v1.1 采评审意见：保持 A**；须详设确认：`<unordered_map>` 只在 `.cpp`（**不入公共头** ⇒ 零传播） |
 | **O5** | `GetShellWindow()` 的四工具链一致性 | 待验证 | 需求稿 §8-8（K9）的顺延项。`GetShellWindow` 是 Win2000+ 的 winuser API（四工具链均应有声明）；**须四工具链各构建一次确认**（归验收） |
 
-### 6.1 O1 实测方案（探针 v4——进详设的闸门）
+### 6.1 O1 实测结果（2026-09-19 已跑——**已关闭**）
 
-`.workbuddy/spike/desktop_layer_probe.cpp` 新增两个开关（**不进仓库**）：
+**结论**：`ApplyDesktopStyle` **不需要** `SWP_FRAMECHANGED`——只改样式位即可。详设据此定稿。
 
-| 开关 | 作用 |
+**三组实测**（`desktop_layer_probe.exe --auto --secondary`，各 3 轮 Win+D，判据 =「Win+D 生效中仍可见」）：
+
+| 组 | 窗口形态 | Win+D 判决 | `iconic` | `rect` | 样式回读 |
+|---|---|---|---|---|---|
+| 1 | `--strip-after`（**创建后**改样式，逐位复刻框架次序） | **3/3 PASS** | 恒 0 | 不变 | `0x04CF0000 → 0x04CD0000`（`WS_MINIMIZEBOX` 1 → 0） |
+| 2 | `--strip-after --framechanged`（对照：补 `SWP_FRAMECHANGED`） | **3/3 PASS** | 恒 0 | 不变 | 同上 |
+| 3 | `--style overlapped-nominbox`（**创建期**烘焙，既有参考组） | **3/3 PASS** | 恒 0 | 不变 | `0x14CD0000`（创建即无该位） |
+
+⇒ **加与不加 `SWP_FRAMECHANGED` 行为完全一致**，且组 1 与组 3（创建期烘焙）也一致。
+
+**决定性读数**：组 1 里「改样式前后**非客户区尺寸逐位不变**」（`16 × 39 → 16 × 39`，delta = 0）⇒ 改这一位
+**没有引起任何几何变化**，因此不存在「需要通知系统重算」的对象。这与 `WS_MINIMIZEBOX` 的语义一致
+（它只控制系统菜单项与按钮可用性，不参与 NC 计算）。
+
+**框架先例（补强）**：`SetChromeMode(Borderless)` 已在配置期派发 `SWP_FRAMECHANGED`（`Win32PlatformWindow.cpp:800-804`）。
+⇒ Borderless + Desktop 的真实调用序列是：
+
+```
+CreateWindowExW(WS_OVERLAPPEDWINDOW)
+    → SetChromeMode(Borderless)      【派发 SWP_FRAMECHANGED ⇒ NC 归零】
+    → SetWindowLayer(Desktop)        【改一位（NC 中性）+ 装钩子】
+    → Show()
+```
+
+⇒ `Desktop` 档**既不需要、也不应**重复派发。
+
+**⚠️ 一处必须如实记录的探针保真度缺陷（自审发现）**
+
+探针 v1–v5 声称「三处 NC 拦截**逐字照抄** `Win32PlatformWindow.cpp:274-402`」，但**漏了框架的第四步**——
+`SetChromeMode` 的那一次 `SWP_FRAMECHANGED`。后果：**探针的 Borderless ≠ 框架的 Borderless**（框架在配置期
+就把 NC 归零了，探针没有）⇒ v4/v5 打印的 `non-client = 16 × 39`（A / B 点）**在框架里根本不会出现**。
+
+| 项 | 说明 |
 |---|---|
-| `--strip-after` | 在 `CreateWindowExW` **之后**、`ShowWindow` **之前**用 `SetWindowLongPtrW` 移除 `WS_MINIMIZEBOX`——**逐位复刻框架次序**（`CreateWindowExW` → 配置期 `SetWindowLayer` → `Show`） |
-| `--framechanged` | strip 之后追加 `SetWindowPos(…, SWP_FRAMECHANGED \| SWP_NOMOVE \| SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE)`（对照 B） |
+| **对结论的影响** | **无**。P0（Win+D 可见性）看 `iconic` / `rect` / 像素；O1 看「改样式前后是否变化」这个**相对量**——两者都不依赖该绝对值 |
+| **已修** | 探针 **v5a** 补上该派发（位置与框架一致：创建后、Show 前），新增 `--no-chrome-framechanged` 可复现旧行为；并新增三点量具 **A（创建后）/ B（改样式后）/ C（Show 后）** |
+| **教训** | 宣称「逐字照抄」时必须比对**完整调用序列**，而不是只比对那几个消息处理函数——本轮漏的是**框架自己的一步**（skill 条 76 的又一实例） |
 
-**同时打印**：① 样式回读（`WS_MINIMIZEBOX` 位改前 / 改后）；② **非客户区尺寸**（`GetWindowRect − GetClientRect`）改前 / 改后——`SWP_FRAMECHANGED` 的作用正是让系统重算 frame ⇒ **尺寸若发生变化即说明系统确实重算了**；③ 窗口 rect 前后（诊断）。
-
-**判读**：
-
-| 观察 | 结论 |
-|---|---|
-| 回读 `WS_MINIMIZEBOX == 0` **且** Win+D 后仍可见 **且** 非客户区尺寸不变 | **不需要 `SWP_FRAMECHANGED`** ⇒ 详设按「只改样式位」定稿 |
-| 仍可见，但**非客户区尺寸发生了变化** | 系统在样式变更后自己重算了 ⇒ 仍不需显式 `SWP_FRAMECHANGED`，但须把该副作用记进详设 |
-| Win+D 后**被最小化**（`iconic=1` / `rect=(-32000,…)`） | **创建后改样式与创建期设定不等价** ⇒ 必须补 `SWP_FRAMECHANGED`，并进一步查「是否要改为先 `Show` 再改样式」 |
+**判据修正（v1.1 的写法有误）**：v1.1 把「`non-client` delta ≠ 0」读作「系统自己重算了 ⇒ 仍不需要」——**机制上说反了**：
+delta ≠ 0 只出现在**我们显式派发 `SWP_FRAMECHANGED`** 的那一组（组 2，`16×39 → 0×0`），它是**派发的效果**，
+不是系统自发行为。正确判据是：**「改样式本身是否引起几何变化」（组 1 的 delta = 0 ⇒ 否）** + **「加与不加是否行为一致」（是）**。
 
 ---
 
@@ -697,3 +726,5 @@ bool Win32PlatformWindow::Release() noexcept{
 - v1.0（2026-09-19）初步设计初稿：① **§1.1** 需求阶段已定决策汇总（D1/D2/D3/D4/D5/D6/D7/D8/D11 + §8.1②）；② **§1.2 代码基线 B1–B9**（全部带行号）；③ **§1.3 ★ 需求稿勘误**——K13 声称「`Bottom` 档已有跨工具链验证的 z 序用例」**实核不成立**（`WindowChromeTests.cpp` 9 用例零 `WindowLayer` 覆盖）⇒ R2 零回归缺测试保护，本稿 **T16-1 补**；④ **§1.4 §8.2 八问的答案索引**；⑤ **§2 头文件改动**——**公共头净增 0**（逐头确认 + **不新增 pure virtual ⇒ 3 个替身零同步**）+ `Win32PlatformWindow.h` 内部头增量；⑥ **§3 实现分解**——`TargetInsertAfter` 按档位分流（含 **`nullptr` 前置检查哨兵的语义澄清**：**不是**「插到最底」）+ 等价性核对表（`Normal` / `Bottom` **逐位等价**）+ `ApplyDesktopStyle` 幂等可逆 + **`hook → 实例` 反查**（本稿核心设计，**否**进程级广播方案）+ 重插前判在位（§8.1② 落实）+ `Release` 顶部脱钩（**修 B4 的 `hwnd` 空判陷阱**）+ 四态语义**「零代码」**对照 + K2 文案修正；⑦ **§4 契约 C1–C10**；⑧ **§5 影响面**（含「修改 Public 头 1 处但仅注释」与两处索引同改的提醒）；⑨ **§6 开放决策点 O1–O5**；⑩ **§7 测试 T16-1..6**（含 ★ T16-1 补 Phase 12 的空缺）。待评审。
 
 - v1.1（2026-09-19）**外部评审处置（「基本通过，带 3 项收敛进入详细设计」——14 条中 12 条采纳 / 1 条已完成 / 1 条转为实验）**：① **状态行**改为「评审通过（带 3 项收敛）」+ 标注 **O1 为进详设的闸门**（skill 条 74：状态由评审结论决定）；② **★ O3 定为 C**——拆出**纯函数** `ResolveTarget(layer, desktop)`（§2.2 public static 声明 + §3.1 ① 定义），**C2 由「需 O3 / 代码审查」升级为 T16-7 全自动**；§3.7 的「需注入状态 ⇒ O3」同步作废；③ **★ O2 倾向由「加」反转为「不加」**——`TOOLWINDOW` 改的是任务栏 / Alt+Tab / 激活 / 系统菜单语义，**不属本阶段需求**；「桌面常驻物不该占任务栏」成立但属**未立项需求**，等真实消费者驱动；④ **新增契约 C11 / C12**——C11 钉死 `IsDirectlyAboveDesktop()` **不可判定**返回值（`true`）的语义是「禁止无依据的 z-order 操作」而非「已满足 C1」（三态，§3.3 已内联注释）；C12 钉死「**钩子独立于 `HWND`**」（`Release()` 判空不得覆盖脱钩——B4 的根因，与 Phase B 所有权教训同族）；⑤ **修 §5 方法计数**（原「+10」把 `FindDesktopWindow` / `DesktopForegroundProc` 两个静态记成了一个 ⇒ **+12**）；⑥ **修 §7 自洽**（原「唯一不可自动 = C1」与 §3.7 矛盾 ⇒ 改为契约级自动化对照表，并新增 **T16-7**）；⑦ **补 §1.2 B10**——`DropFilesTests.cpp:13` 已 include 内部头，作为 O3 取 C 的前提证据；⑧ **★ O1 由「倾向不需要」升级为「详设前置实验」**——并指出本稿此前推理的**缺口**：既有 4 组是**创建期**设样式，框架是**创建后** `SetWindowLongPtrW`，**两者不等价** ⇒ 新增 **§6.1 实验方案**（探针 v4 `--strip-after` / `--framechanged`，打印样式回读 + 非客户区尺寸前后对比）。
+
+- v1.2（2026-09-19）**O1 实测关闭（进详设的闸门已解除）**：① **§6.1 整节改写**为「实测结果」——三组 × 3 轮 Win+D 全 PASS、加与不加 `SWP_FRAMECHANGED` 行为一致、组 1 的「改样式前后 NC 逐位不变」为决定性读数 ⇒ **`ApplyDesktopStyle` 不需要 `SWP_FRAMECHANGED`**；② **§3.2 的 ⚠️ 待验段改为定案**（含「Borderless 的 `SetChromeMode` 已在配置期派发过一次，且不因改这一位失效」的理由）；③ **§6 O1 行改为「已关闭」**并附证据链；④ **新增 B11**（框架既有先例 `Win32PlatformWindow.cpp:800-804`）；⑤ **§5 新增「工具」行**（探针 v5a 四点对齐框架，后续验收复用）；⑥ **如实记录一处探针保真度缺陷**——v1–v5 漏了框架 `SetChromeMode` 的 `SWP_FRAMECHANGED`，故其 `non-client = 16×39` 读数在框架里不会出现（**对 P0/O1 结论均无影响**，已修于 v5a）；⑦ **修正 v1.1 的判据表述**——把「delta ≠ 0 = 系统自发重算」更正为「delta ≠ 0 是**我们派发**的效果，正确判据是『改样式本身有无几何变化』+『加与不加行为是否一致』」。
