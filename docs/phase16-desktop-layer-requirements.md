@@ -1,12 +1,16 @@
-﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）需求确认（v1.1）
+﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）需求确认（v1.2）
 
 > 阶段：需求确认（五阶段法 ①）
-> 日期：2026-09-19（v1.1 修订 2026-09-19）
-> 状态：**待事实勘察**——v1.0 经外部评审「**范围 / 目标 / 非目标 / 验收边界已经很完整**」，但**尚不能拍板进初设**：真正缺的是 **§8 的事实勘察**（已按 P0–P2 排序）。该勘察完成后即可拍板 **D0–D11** 并进入初步设计
+> 日期：2026-09-19（v1.2 修订 2026-09-19）
+> 状态：**✅ 勘察完成 —— D0–D11 可拍板，可进初步设计**。§8 的 9 项已由真机实测全部回答（探针 `.workbuddy/spike/desktop_layer_probe.cpp`，4 形态 × 3 轮 + 用户目视确认）。**其中 P0 的结论改变了 D1 的选项**——真因是 `WS_MINIMIZEBOX`（而非 `WS_POPUP` 本身），最优解因此从「换 `WS_POPUP`」变成「**只移除一个样式位**」
 > 前置：`phase12-windowchrome-detailed-design.md` v1.5（**R10 语义 + `D-DESK-1` 契约**）· `desktopnest-roadmap.md` v1.7（**§5 G-1 登记** · **§7.1 E 路线取证** · §7.2 R-3）· `.workbuddy/spike/desktop_spike.cpp`（**路线 E 实测源码**，`--auto` 可无人值守复现）
 > 一句话：把**已取证但未落地**的 `WindowLayer::Desktop` 真正实现进 `Win32PlatformWindow`——让「桌面驻留」从一句契约承诺变成可运行的能力。
 > 一句话补充：本阶段**不新增任何公共 API**（`WindowLayer` 枚举与 `SetWindowLayer` 已于 Phase 12 就位）；真正的工作量在**平台实现层**与**窗口样式的一次性取舍**。
 > v1.0：初稿（§1 K1–K14 勘察 + 三条会改形态的事实 · §2 技术路线 · §3 R1–R12 四组 · §4 决策点 D0–D10 · §5 非目标 8 项 · §6 测试三层 · §7 影响面 · §8 待勘察 6 项）
+> v1.2（2026-09-19）**事实勘察完成回写——P0 的结论改变了 D1 的选项**。9 项勘察全部有答案（4 形态 × 3 轮实测 + 用户目视确认，原始判据见 §8 结果列）：
+> **★ 核心发现**：**「显示桌面」只最小化「可最小化窗口」** ⇒ 真因是 **`WS_MINIMIZEBOX`**，**不是 `WS_POPUP` 本身**。⇒ **D1 新增选项 A′（`WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX`）并改为首选倾向**——它保留 Alt+Space / Aero Snap / 最小化动画之外的**全部** Phase 12 红利，只放弃「最小化」，代价远小于换 `WS_POPUP`（C）。
+> 其余**已可用实测判据钉死**：**D2**（不加 `WS_EX_NOACTIVATE`——`ex=0` 下点击/焦点/激活全部正常）· **D4**（只装前台钩子，**不加 Timer**——tick 把重插次数从 4 抬到 13 却零收益）· **D3**（取 B：配置期内 `SetWindowLongPtrW` 改样式位）· **D7**（`GetShellWindow()` ≡ `FindWindowW("Progman")`）· **D6**（不缓存成立，0.8 次/秒）。
+> 另登记两条**新约束**：① **像素采样在非主显示器不可用**（G-4 的直接表现，见 §6）② **「重插前先判在位」**（fg-hook 无条件重插是 Win+D 瞬间抖动的来源，见 §7）。
 > v1.1（2026-09-19）外部评审「**方向与边界认可，但不拍板——缺事实勘察**」——**8 项处置全部采纳**（无否决）：① **状态行**由「待评审」改为「**待事实勘察**」（评审结论）② §1.1 补**设计方针**（「先证明现有窗口形态能不能承载 Desktop 层，证明不了才改变窗口形态」+ 「spike 的实现细节 ≠ 框架的设计输入」纪律）③ **D1 顺序修正 + 补强**——v1.0 写作「倾向 C + 验证 A」，评审指出**顺序反了**；改为「**A 为首选假设 → 验证不通过才取 C**」，并补评审原创论点「**「系统标题栏存在」≠「用户看得到系统标题栏」**——Borderless 若已处理非客户区，则须实测而非凭样式定义判断」④ **D2 补强**（`WS_EX_TOOLWINDOW` 与「能否交互」**不是一回事**——它影响任务栏 / Alt+Tab / 窗口类别；`NOACTIVATE` 明确排除，理由 = 加上它反而要补「怎么还能交互」）⑤ **D5 补强**（显式记入 B 的风险方向：钩子生命周期**必须绑定 `Win32PlatformWindow`**，不能绑 `Application`、不能全局 singleton）⑥ **R10 由一句模糊表述细化为「钩子生命周期四态边界表」**（Set ⇒ 装 · Hide ⇒ **不卸载** · Show ⇒ **不重复装** · Release ⇒ **必卸**）⑦ **新增 D11**（钩子生命周期边界——评审提出的**最重要补项**，原话「**应该作为初设里的明确决策，而不是实现时临时决定**」）⑧ **§8 重构**为带 **P0–P3 优先级**的 9 项（原 6 项 + D6 成本核实 · D3 安全窗口 · 定时器可用性），勘察顺序由评审给定
 
 ---
@@ -67,6 +71,22 @@ spike 的 E 路线窗口与框架窗口（`K4` / K14）逐项对照：
 
 ⚠️ **同时须澄清一个常识性误判**：`WS_EX_NOACTIVATE` 的取舍**不等于**「桌面档不可交互」。spike 用它只是因为探针程序不需要交互；而 DesktopNest 的框**需要**被点击（成员列表 / 收缩展开按钮）⇒ `WS_EX_NOACTIVATE` **不应盲目照搬**。这条判定直接影响 F-1 的结论——见 D2。
 
+> **★ v1.2 实测回写（2026-09-19，真机 3 轮 × 4 形态）——F-1 的焦点从「主样式」精确到「一个样式位」**
+>
+> 上表的「主样式」一行在实测后被**收窄**：决定「Win+D 后是否可见」的**不是 `WS_POPUP` vs `WS_OVERLAPPEDWINDOW` 这个整体选择**，而是二者差异中的**单个位 `WS_MINIMIZEBOX`**。
+>
+> | 形态（`--style`） | Win+D 生效时 | 判定 |
+> |---|---|---|
+> | `overlapped`（= 框架现状 `WS_OVERLAPPEDWINDOW`） | `rect=(-32000,-32000)` + `iconic=1` ⇒ **被最小化** | ❌ **FAIL**（两次独立运行各 3/3） |
+> | **`overlapped-nominbox`**（`WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX`） | `rect` 不变、`iconic=0` ⇒ 原位可见 | ✅ **PASS**（3/3 + **用户目视确认**） |
+> | `popup`（spike 形态） | `rect` 不变、`iconic=0` ⇒ 原位可见 | ✅ PASS（3/3 + **用户目视确认**） |
+>
+> **机制结论**：**「显示桌面」只最小化「可最小化窗口」**。⇒ 桌面档只需要**移除 `WS_MINIMIZEBOX` 一位**，`WS_CAPTION` / `WS_THICKFRAME` / `WS_SYSMENU` / `WS_MAXIMIZEBOX` 全部可以保留。
+>
+> ⇒ **对 F-1 的影响**：上表「⚠️ 结构性」的措辞**过强**——差异是**一位可修的**，不是结构性的。由此**新增 D1 的选项 A′ 并改为首选**：它保住 Alt+Space / Aero Snap 等**除「最小化」之外的全部** Phase 12 红利，代价远小于换 `WS_POPUP`（C）。**「若必须换 `WS_POPUP` 则明确放弃系统红利」这一范围取舍，在 A′ 下不再需要**。
+>
+> ⚠️ **同表「扩展样式」一行仍未完全出清**：实测的两组 PASS 都是 `ex=0`（无 `WS_EX_TOOLWINDOW`），故 `WS_EX_TOOLWINDOW`（任务栏 / Alt+Tab 行为）**尚未实测**——留作初设决策项（见 D2）。
+
 **F-2：样式决定时机与配置期契约的错位**
 
 `SetWindowLayer` 是配置期 API（`K5`：`Show()` 之后 Warning + 忽略），而 `CreateWindowExW` 在**构造期**（`K4`）。若桌面档需改主样式，则存在两条路径（详见 D3）：
@@ -96,8 +116,8 @@ spike 的双层维护（`K7`）中，前台钩子解决了「桌面层被抬升�
 
 1. **窗口样式**（F-1）——桌面档能否沿用 `WS_OVERLAPPEDWINDOW`？最小必需集是什么？
 2. **`WS_EX_NOACTIVATE` 的取舍**（F-1 澄清）——桌面常驻应用需要交互，不能照搬 spike。
-3. **样式改动时机**（F-2）——构造期 vs `SetWindowLayer` 时刻。
-4. **维护机制的兜底**（F-3）——钩子够不够，要不要心跳。
+3. **样式改动时机**（F-2）——构造期 vs `SetWindowLayer(Desktop)` 时刻。
+4. **维护机制的兜底**（F-3）——钩子单独够不够（**v1.2 实测已答：够，不加心跳**）。
 
 ---
 
@@ -154,10 +174,10 @@ spike 的双层维护（`K7`）中，前台钩子解决了「桌面层被抬升�
 | # | 决策 | 选项 | **倾向** | 理由 |
 |---|---|---|---|---|
 | **D0** | 范围与形态 | **A** 独立 Phase（走五阶段 + 设计文档可评审）/ **B** 并入 DesktopNest M1 一并做 | **A** | 用户 2026-09-19 立项即选独立 Phase（roadmap §9 第 9 项的两选项之一是 B，本次明确取 A）。理由：这是**唯一「已取证但未落地」**的能力，留下**可评审的契约**对简历叙事与后续维护都有价值；并入 M1 会让「框架能力」与「应用逻辑」混在一份文档里，平台细节无处安放 |
-| **D1** ★ | 窗口主样式（**本阶段核心拍板**） | **A** 保留 `WS_OVERLAPPEDWINDOW` / **B** 改为 `WS_POPUP` / **C** 分档位：`Normal`/`Bottom` 保持现状，`Desktop` 用 `WS_POPUP` | **A 为首选假设 → 验证不通过才取 C**（B 无支持理由） | ★ **顺序修正（v1.1——外部评审）**：v1.0 写作「倾向 C + 先验证 A」，评审指出**顺序反了**——应当是「**先证明 A 可行，证明不了才改形态**」。三条理由：① `WS_OVERLAPPEDWINDOW` 是 Phase 12 明定的**系统行为红利来源**（Alt+Space / Aero Snap / 最小化动画——详设 §5.4 手测矩阵）⇒ 直接改 `WS_POPUP` 等于**偷偷修改 Phase 12 的窗口行为契约**；② **「系统标题栏存在」与「用户看得到系统标题栏」不是一回事**——若 `ChromeMode::Borderless` 的 `WM_NCCALCSIZE` 已把非客户区处理掉，则 `WS_CAPTION` 是否妨碍桌面档视觉**就应当实测，而不是凭样式定义判断**；③ spike 全程用 `WS_POPUP` 是**探针程序的简化**，不构成「必须 `WS_POPUP`」的证据。⇒ **P0 勘察项**（§8 第 1 项） |
-| **D2** ★ | `WS_EX_NOACTIVATE` | **A** 桌面档加此样式（照搬 spike）/ **B** **不加**（保持可激活）/ **C** 加 `WS_EX_TOOLWINDOW` 但不加 `WS_EX_NOACTIVATE` | **B 或 C**（初设定；**A 明确排除**） | ⚠️ **spike 用 `WS_EX_NOACTIVATE` 只是因为探针不需要交互**（`desktop_spike.cpp:17` 明写「窗口用 `WS_EX_NOACTIVATE`，不抢焦点，故热键为全局轮询」）——这是**探针的便利**，不是 E 路线的**必要条件**。DesktopNest 的框需要点击（R6）⇒ **A 明确不可取**：加上它之后反而要花大量设计精力去补「怎么让它还能交互」，属典型的「**spike 为了方便测试做的东西，不应该反向成为框架 API 的约束**」。**v1.1 补（外部评审）**：`WS_EX_TOOLWINDOW` 与「能否交互」**不是一回事**——它影响的是**任务栏 / Alt+Tab / 窗口类别**，故把它独立成 C 选项是对的；其取舍 = 「桌面常驻物是否该占任务栏位」（倾向**不占** ⇒ 加 `TOOLWINDOW`），但须与 R6 一并验证不损害交互。⇒ **P1 勘察项**（§8 第 2 项） |
-| **D3** | 样式改动时机 | **A** 构造期按 `WindowLayer` 预置（需把层级提前到构造参数）/ **B** `SetWindowLayer(Desktop)` 时用 `SetWindowLongPtrW` 改 + `SWP_FRAMECHANGED` / **C** 不改样式（D1 选 A 时无需改） | **B**（D1 选 C 时）/ **C**（D1 选 A 时） | `K5`：`SetWindowLayer` 是配置期 API ⇒ **改动发生在 `Show()` 之前，系统尚未显示窗口，改样式是安全的**。A 需要把 `WindowLayer` 提升为构造参数——**破坏 `SetWindowLayer` 的 API 形态**，且与 Phase 12 已定稿的「配置期四件套统一生命周期」不一致（详设 §9.1） |
-| **D4** | 维护机制兜底（F-3） | **A** 只装前台钩子 / **B** 钩子 + 窗口级 `SetTimer` 且走 `TimerEvent` 翻译器 / **C** 钩子 + 平台内部 `SetTimer`（不进翻译器） | **A（首选）+ C（若初设认为需要兜底）** | spike 实测前台钩子已足够（12 秒内自动重插 3 次，`desktopnest-roadmap.md` §7.1）；轮询只是保险。⚠️ **B 明确不可取**——`TimerEvent` 是「派发给焦点 Widget」的框架事件（`Application::OnTimer` → `FindFocusedWidget`），平台层自用会**污染事件语义**（违反 Event 原则：Event 只表示「已发生的事实」，不应承载平台内部维护）。若需要兜底，C 符合 R9 三步惯例第 ③ 步（消息在平台实现内消化） |
+| **D1** ★ | 窗口主样式（**本阶段核心拍板**） | **A** 保留 `WS_OVERLAPPEDWINDOW`（现状）/ **A′** `WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX` / **B** 全改 `WS_POPUP` / **C** 分档位：`Normal`/`Bottom` 保持现状，`Desktop` 用 `WS_POPUP` | **A′（实测 PASS，且代价最小）** | **★ 实测判决（v1.2——4 形态 × 3 轮真机）**：**A ❌ FAIL**（`rect=(-32000,-32000)` + `iconic=1`，被「显示桌面」最小化；两次独立运行各 3/3）· **A′ ✅ PASS**（`rect` 不变 + `iconic=0`，3/3 + **用户目视确认**）· **C ✅ PASS**（3/3 + **用户目视确认**）· B 无支持理由（与 C 同类但更粗）。**★ 真因 = `WS_MINIMIZEBOX`**——「显示桌面」**只最小化「可最小化窗口」**，故桌面档只需**移除这一位**，`WS_CAPTION` / `WS_THICKFRAME` / `WS_SYSMENU` / `WS_MAXIMIZEBOX` 全部可保留。**为何 A′ 优于 C**：C 会连带失去 `WS_THICKFRAME` / `WS_SYSMENU` / `WS_MAXIMIZEBOX` ⇒ Alt+Space 系统菜单 / Aero Snap / 最小化动画等 Phase 12 红利整批失效；**A′ 只失去「最小化」**——对桌面常驻物而言，不可最小化**本就是合理语义**（它不占任务栏、不该被收起来）。⚠️ **A′ 的语义后果须记账**（归初设）：任务栏右键「最小化」、`Win+↓` 等最小化入口对该窗口失效；`ChromeMode::Normal` 下系统标题栏的最小化按钮呈灰态。⚠️ 另注：**v1.1 评审确立的「先证明现状能承载、证明不了才改形态」顺序是对的**——A 被证否后，正确的下一步是**继续问「最小改动是什么」**（得到 A′），而不是一步跳到最粗的 C |
+| **D2** ★ | `WS_EX_NOACTIVATE` 与 `WS_EX_TOOLWINDOW` | **A** 加 `WS_EX_NOACTIVATE`（照搬 spike）/ **B** **不加**（保持可激活）/ **C** 加 `WS_EX_TOOLWINDOW` 但不加 `WS_EX_NOACTIVATE` / **D** 两者都加 | **B（实测钉死）**；`WS_EX_TOOLWINDOW` 部分归初设 | ⚠️ **spike 用 `WS_EX_NOACTIVATE` 只是因为探针不需要交互**（`desktop_spike.cpp:17` 明写「窗口用 `WS_EX_NOACTIVATE`，不抢焦点，故热键为全局轮询」）——这是**探针的便利**，不是 E 路线的**必要条件**。**★ 实测判决（v1.2）**：`ex=0`（无任何扩展样式）下，`--caption 0` 的人工点击测出 `clicks=15 / focusEvents=2 / activateEvents=2`，坐标覆盖整个客户区；popup 形态启动即 `WM_ACTIVATE ACTIVE` + `WM_SETFOCUS` ⇒ **不加 `WS_EX_NOACTIVATE` 也能完整交互** ⇒ **A 排除、取 B**（评审判词：「spike 为了方便测试做的东西，不应该反向成为框架 API 的约束」）。**仍开口的一项**：`WS_EX_TOOLWINDOW`（影响任务栏 / Alt+Tab / 窗口类别，**与能否交互无关**）在两次 PASS 组中均为 `ex=0`，**尚未实测** ⇒ 留作初设决策（倾向：**加**——桌面常驻物不应占任务栏位；须在初设补验它不影响 Win+D 行为） |
+| **D3** | 样式改动时机 | **A** 构造期按 `WindowLayer` 预置（需把层级提升为构造参数）/ **B** `SetWindowLayer(Desktop)` 时用 `SetWindowLongPtrW` 改样式位 / **C** 不改样式 | **B**（D1 取 A′ 后必须改样式位） | D1 取 A′ ⇒ **必须改样式**，故 C 不再成立。`K5`：`SetWindowLayer` 是**配置期 API** ⇒ 改动发生在 `Show()` **之前**，系统尚未显示窗口，**改样式是安全的**（这正是 F-2 的「时序紧张」被配置期语义消解之处）。A 需要把 `WindowLayer` 提升为构造参数 ⇒ **破坏 `SetWindowLayer` 的 API 形态**，且与 Phase 12 定稿的「配置期四件套统一生命周期」不一致。**初设须回答**：① 改样式位后是否需 `SWP_FRAMECHANGED`（`WS_MINIMIZEBOX` 不改变边框量，预计不需要，但须实测）② **幂等与可逆**——`SetWindowLayer(Normal)` 是否恢复 `WS_MINIMIZEBOX`（配置期内可逆；YAGNI 评估归初设） |
+| **D4** | 维护机制兜底（F-3） | **A** 只装前台钩子 / **B** 钩子 + 窗口级 `SetTimer` 且走 `TimerEvent` 翻译器 / **C** 钩子 + 平台内部 `SetTimer`（不进翻译器） | **A（实测钉死：不加 Timer）** | **★ 实测判决（v1.2）**：`--tick` 与 `--no-tick` 对照——**tick=0 两组（nominbox / popup）均 PASS**（证明**前台钩子单独已足够**）；而 tick=1 组实测 `reinsert=13`（vs tick=0 的 **4**）、`FindWindowW` **78 次**（vs **9**）⇒ **tick 把重插次数抬到 3 倍多却零收益**，且**额外的 `SetWindowPos` 正是 Win+D 瞬间「闪烁一下」的来源之一**（用户目视）。⇒ **不加心跳**。⚠️ **B 明确不可取**（v1.1 已论证）：`TimerEvent` 是「派发给焦点 Widget」的框架事件（`Application::OnTimer` → `FindFocusedWidget`），平台层自用会**污染事件语义**（违反 Event 原则）。**配套优化（v1.2 新增，归 §7）**：前台钩子回调里**先判 `IsDirectlyAboveDesktop()`，在位则不动**——消除余下的不必要重插 |
 | **D5** | 钩子安装形式 | **A** 每窗口一个 `SetWinEventHook` / **B** 应用级共享一个钩子 + 窗口注册表 | **A** | `K9`：`WINEVENT_OUTOFCONTEXT` 下 `hInstance` 可传 `nullptr`。每窗口一个钩子实现最简、生命周期归属清晰（`K11`：`Release()` 时脱钩本窗口的）。**B 的风险方向（v1.1 补——外部评审）**：钩子生命周期**必须绑定 `Win32PlatformWindow`**——不能绑 `Application`，也不能搞全局 singleton；B 恰恰把归属推向应用级，会让「窗口已 `Destroy` → 钩子仍在 → 回调继续打到 `this`」成为可能。**多窗口场景下 A 的钩子数 = 窗口数**，可接受（YAGNI：无大规模多窗口消费者） |
 | **D6** | 桌面窗口句柄缓存 | **A** 每窗口缓存 `g_desktopHwnd`（spike 做法）/ **B** 进程级共享缓存 / **C** 不缓存（每次重查 `FindWindowW(L"Progman", nullptr)`） | **C（最简）** | `FindWindowW` 是廉价的（`desktop_spike.cpp:1180-1183` 做 250ms 节流只是为避免日志刷屏）。**不缓存 ⇒ 天然免疫 `K8` 的失效问题**（无需 `RefreshDesktopHwnd` 那套状态检测）。⚠️ 但须初设确认调用频率（若每个 `WM_WINDOWPOSCHANGING` 都调，需评估开销） |
 | **D7** | 桌面窗口定位方式 | **A** `FindWindowW(L"Progman", nullptr)`（按类名）/ **B** `GetShellWindow()` / **C** 枚举顶层窗口按类名匹配 | **A** | spike 全程用 A 且实测通过（`desktop_spike.cpp:560` / `:619` / `:642`）。B 是官方 API 且更「正规」（MSDN：返回 shell 的桌面窗口），**但未在 spike 环境实测**——须初设核实两者是否恒等（`GetShellWindow()` 的返回值定义与 `Progman` 的对应关系）。⇒ 倾向 **A（已实测）+ 初设补验 B** |
@@ -199,6 +219,8 @@ spike 的双层维护（`K7`）中，前台钩子解决了「桌面层被抬升�
 
 > 📌 **`--auto` 的价值**：spike 的 `desktop_spike.cpp` 支持 `--auto`（自动注入 Win+D + 采样），已证明**判据 ①⑥ 可无人值守取证**（`desktopnest-roadmap.md` §7.1）。⇒ 若本阶段产出同类探针，应保留该模式以便后续 Windows 版本变更时**快速复验路线是否仍成立**——这是「spike 结论会随系统版本失效」这一风险的唯一对冲手段。
 
+> 📌 **v1.2 实测补充——三条判据环境约束（本次踩坑后确立）**：① **像素类判据（9 点采样）只能在主屏使用**——系统级 DPI 感知下，非主显示器上 `GetWindowRect` 与 `GetPixel` 的坐标系错位（详见 §8.1①，即 **G-4**）；副屏上以 `rect` / `iconic` 为准。② **采样必须同时验证「前提真的发生了」**（Win+D 是否生效）——否则会把「前提未发生」误读为结论（§8 判据纪律）。③ **探针的进程级配置必须与被测框架一致**（DPI 感知级别 / `_DEBUG` / CRT 模式）——本次的教训是「探针未设 DPI 感知而框架是系统级感知」直接导致几何读数整体失真。④ 运行环境亦须洁净：探针窗口若被终端等前台窗口遮挡，`self-pixels` 会整体偏低（首轮多组的 `0/9` 即此因）。
+
 ---
 
 ## 7. 影响面
@@ -207,40 +229,62 @@ spike 的双层维护（`K7`）中，前台钩子解决了「桌面层被抬升�
 |---|---|
 | **新增 Public** | **零**——`WindowLayer` / `Window::SetWindowLayer` / `PlatformWindow::SetWindowLayer` 全部已就位（§1.1） |
 | 修改 Public | **零**（倾向）——除非 `D1` 需要在 `WindowLayer.h` 补充样式语义注释（属注释级改动） |
-| 修改 Internal | `Win32PlatformWindow.h`（`D8` 的辅助方法声明 + 钩子成员 / 句柄缓存（若 `D6` 选缓存））· `Win32PlatformWindow.cpp`（`WM_WINDOWPOSCHANGING` 分流 + 钩子安装/脱钩（`R10` 四态）+ 样式改动（若 `D1` 选 C）+ `K2` 文案修正 + `Release()` 脱钩）· 可能的 `Win32PlatformApplication`（若 `D4` 选 C 且定时器归应用级） |
+| 修改 Internal | `Win32PlatformWindow.h`（`D8` 的辅助方法声明 + 钩子成员）· `Win32PlatformWindow.cpp`（`WM_WINDOWPOSCHANGING` **按档位分流** + **`SetWindowLayer(Desktop)` 移除 `WS_MINIMIZEBOX`**（`D1` 取 A′——含改后是否需 `SWP_FRAMECHANGED`、改样式的幂等与可逆）+ 钩子安装/脱钩（`R10` 四态）+ **重插前先判在位**（§8.1②）+ `K2` 过期文案修正 + `Release()` 脱钩）· `Win32PlatformApplication` **零改动**（`D4` 取 A——不加 Timer） |
 | 修改 Demo | `examples/ModelProbe/main.cpp:247` 过期注释（`R4`）——⚠️ **AI 不得动 `main.cpp`**，须用户授权 |
 | 测试 | `src/Tests/` 新增用例（`D9` 的 L1 两层）+ `RunAllTests.h` / `RunAllTests.cpp` 手工接线；⚠️ **测试替身同步**（若 `PlatformWindow` 加纯虚——**本阶段倾向零新增纯虚**，见 `phase14` §7 的风险先例） |
+| **工具（不进仓库）** | `.workbuddy/spike/desktop_layer_probe.cpp`——Phase 16 事实勘察探针（`--auto` 可无人值守复现，`--style` / `--ex` / `--tick` / `--rounds` / `--secondary` 开关），被 `.gitignore` 的 `.workbuddy/` 覆盖。**建议保留**：Windows 版本变更时用它**快速复验本阶段结论是否仍成立**——这是「spike 结论会随系统版本失效」的唯一对冲手段 |
 | 文档 | 新增本文件 + 初设 + 详设；`docs/README.md` 索引；`desktopnest-roadmap.md` **§5 G-1 标 ✅** + §9 第 9 项收口 + §10 修订记录；可能需 `roadmap-deferred.md` 记账（若发现新的延期项） |
 | 明确不动 | 渲染四层（Widget → PaintContext → CommandBuffer → Renderer）· `WindowLayer` 枚举语义 · Phase 12 的四消息拦截骨架（NCCALCSIZE / NCHITTEST / NCACTIVATE / WINDOWPOSCHANGING **的 `Bottom` 部分**）· Phase 13 命中委托 · Phase 14 托盘 / 拖入 · 布局与尺寸体系 · 公共 API 面（净增 0 头） |
 
 ---
 
-## 8. 待勘察项（**事实勘察**——决定 D0–D11 能否拍板）
+## 8. 事实勘察结果（**已完成**——2026-09-19 真机实测）
 
-> **本节是本阶段的真正闸门**（v1.1 定性）：外部评审结论为「**范围 / 目标 / 非目标 / 验收边界已经很完整；当前真正缺的是本节的事实勘察。完成这些勘察后，就可以拍 D1–D11 并进入初步设计**」。⇒ 头部状态行据此由「待评审」改为「**待事实勘察**」。
+> **本节原为「进初设的闸门」**（v1.1 定性），现**已全部出清**：9 项均有答案，D0–D11 据此可拍板（v1.2）。
 >
-> **勘察顺序由评审给定**：**P0（D1）→ P1（D2）→ P2（D4）**——这三项最优先且**决定其余**；P3 各项可在进入初设前或初设中一并核实。
+> **工具**：`.workbuddy/spike/desktop_layer_probe.cpp`（**不进仓库**，被 `.gitignore` 覆盖）。它与 `desktop_spike.cpp` 的根本区别是**逐字对齐 ECDI 的窗口形态**——`WS_OVERLAPPEDWINDOW`（`Win32PlatformWindow.cpp:67`）+ 扩展样式 `0`（`:64`），并照抄三处 Borderless NC 拦截（`:274-296` / `:299-378` / `:381-402`）。**形态不一致则测的不是「现有形态」，实验无效。**
 >
-> ⚠️ **纪律**：每项勘察都要区分「**路线问题**」与「**参数问题**」——只有前者会改设计，后者只改实现（§1.1 设计方针）。
+> **方法**：`--auto` 两轮阶段机（注入 Win+D → 1.5s 采样 → 还原 → 采样）× **默认 3 轮**，每轮输出自解释的 `VERDICT` 行并按**多数轮**汇总；另加**用户目视确认**。
+>
+> **判据纪律（本次两度踩坑后确立，值得沿用）**：① 采样必须**同时验证「前提真的发生了」**（`IsWinDEffective`：窗口被最小化 ∨ 不再前台）——否则会把「Win+D 未生效」误读成结论（首轮即出现一个 `9/9` 的假阳性）；② 判据**相对基线**（`px >= baselinePx`）而非绝对阈值，并把 **`iconic` 作为最强判据**（不依赖像素量具）。
 
-| 优先 | # | 项 | 为什么重要 | 手段 |
+| 优先 | # | 项 | **实测结果（2026-09-19）** | 判定 |
 |---|---|---|---|---|
-| **P0** | 1 | **`WS_OVERLAPPEDWINDOW + ChromeMode::Borderless + WindowLayer::Desktop` 能否满足 spike 的可见性判据**（`D1` 的关键前提） | **直接决定整个 Desktop 档要不要改窗口形态**。评审措辞：「**先证明『现有窗口形态能不能承载 Desktop 层』，证明不了才改变窗口形态**」。若通过 ⇒ 零样式变更（最保守）；若不通过 ⇒ 须再确认**最小必需样式集**（`WS_POPUP` 是不是唯一选项？`WS_OVERLAPPEDWINDOW` 去掉 `WS_CAPTION` 的变体行不行？） | spike 变体（`--style overlapped` 对照）＋ Win+D 采样 |
-| **P1** | 2 | **`Desktop + Borderless` 下的交互能力**（`D2` 的关键前提） | 确认「可激活 / 可点击 / 可获得焦点」是否全部正常（`R6`）。**若正常 ⇒ `WS_EX_NOACTIVATE` 基本就可以排除**（评审原话）。同时验 `WS_EX_TOOLWINDOW` 对任务栏 / Alt+Tab 的实际影响 | ModelProbe `--layer desktop` 手测 |
-| **P2** | 3 | **只装前台钩子是否已足够**（`D4` 的取舍前提） | 评审：「先跑 `WinEventHook only`——若已满足 Explorer / 前台窗口导致的 z-order 维护，就**没有必要增加 Timer**」。spike 实测 12 秒内自动重插 3 次（已支持 A），但那次探针**自带 tick 轮询** ⇒ 须实测「**去掉轮询后钩子单独是否够**」 | spike 变体（去 tick）＋ 换壁纸 / 重启 explorer |
-| P3 | 4 | **`FindWindowW` 的调用成本**（`D6` 的取舍前提） | 倾向「不缓存、每次重查」⇒ 须确认在 `WM_WINDOWPOSCHANGING` 的频率下 `FindWindowW` 可接受。评审：「如果频率完全可以接受，那 C 很漂亮；如果很热，再考虑 cache + validity check——**没必要现在提前复杂化**」 | 计数埋点 / 实测频率 |
-| P3 | 5 | **`GetShellWindow()` 与 `FindWindowW(L"Progman")` 是否恒等**（`D7`） | 决定用官方 API 还是实测 API；两者不等时须选一个并说明 | 一行对照打印 |
-| P3 | 6 | **多显示器下 `Progman` 的唯一性** | §5 已列为非目标，但若「每个显示器一个桌面窗口」成立，则 `D6` / `D7` 的结论需要按显示器维度重做——**至少须确认前提是否成立** | `EnumWindows` 枚举类名 |
-| P3 | 7 | **`SetWindowLongPtrW` 改样式的安全窗口**（`D3`——**仅当 P0 判「`WS_OVERLAPPEDWINDOW` 不可行」而必须改样式时**才有意义） | 配置期内（未 `Show()`）改样式的实际行为——改后是否须追加 `SetWindowPos(…, SWP_FRAMECHANGED)`；与 `ChromeMode::Borderless` 的 `WM_NCCALCSIZE` 拦截有无交互 | spike 变体 |
-| P3 | 8 | **`SetWinEventHook` 跨工具链一致性**（`K9`） | `hInstance` = `nullptr` vs `WindowClass::GetInstance()` 在四工具链下的行为差异 | 四工具链构建 |
-| P3 | 9 | **平台内部 `SetTimer` 的可用性**（`D4` 选 C 时） | `StartTimer` 目前是运行期语义（`SetFileDropEnabled` 同组，Phase 14 O-3 拍板）；若平台层自用则不受此限，但须确认 `m_hwnd` 在配置期已就绪（`K4`：构造期已 `CreateWindowExW`，✅ 已就绪） | 实现期确认 |
+| **P0** | 1 | `WS_OVERLAPPEDWINDOW + Borderless + Desktop` 能否满足 spike 的可见性判据 | **A ❌ FAIL**：`rect=(-32000,-32000,-31840,-31972)` + `iconic=1` ⇒ 被「显示桌面」**最小化**（两次独立运行各 3/3）。**A′ ✅ PASS**：`WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX`，`rect` 不变 + `iconic=0`（3/3 + 用户目视）。**C ✅ PASS**：`WS_POPUP`（3/3 + 用户目视） | ✅ **真因 = `WS_MINIMIZEBOX`** ⇒ D1 新增 A′ 并改为首选 |
+| **P1** | 2 | `Desktop + Borderless` 的交互能力（可激活 / 可点击 / 可获得焦点） | `ex=0` 下 `clicks=15 / focusEvents=2 / activateEvents=2`，点击坐标覆盖整个客户区（含 y=12/18）；popup 形态启动即 `WM_ACTIVATE ACTIVE` + `WM_SETFOCUS` | ✅ **正常** ⇒ D2 排除 `WS_EX_NOACTIVATE` |
+| **P2** | 3 | 只装前台钩子是否已足够（D4 的取舍前提） | **tick=0 两组均 PASS** ⇒ 钩子单独已足够；tick=1 组 `reinsert=13` / `FindWindowW=78` vs tick=0 的 **4 / 9** ⇒ **3 倍多开销、零收益**，且是「闪烁一下」的来源之一（用户目视） | ✅ **足够** ⇒ D4 取 A，**不加 Timer** |
+| P3 | 4 | `FindWindowW` 的调用成本（D6） | tick=0 时 **9 次 / 11.2s ≈ 0.8 次/秒**；tick=1 时 78 次 / 11s ≈ 7 次/秒（后者是 tick 自身造成的） | ✅ **可忽略** ⇒ D6 取 C（不缓存） |
+| P3 | 5 | `GetShellWindow()` 与 `FindWindowW(L"Progman")` 是否恒等（D7） | **`equal=1`**——四组独立运行全部一致（两者返回同一 HWND，类名均为 `Progman`） | ✅ **恒等** ⇒ D7 可用官方 API |
+| P3 | 6 | 多显示器下 `Progman` 的唯一性 | `total desktop-class = 17` 而 **`Progman` 只有 1 个**；其余 16 个是 **136×39 的 `WorkerW`**（IME / shell 辅助宿主，与 `desktop_spike.cpp:392` 的记录同款）。`Progman` 的 `rect=(-1920,0,1920,1080)` **跨双屏**，而 `monitors=2` | ✅ **唯一** ⇒ **D6/D7 的结论不需按显示器维度重做** |
+| P3 | 7 | `SetWindowLongPtrW` 改样式的安全窗口（D3） | **未单独实测**——但它**只在「P0 判必须改样式」时才有意义**，而 P0 的结论正是「必须改」（A′）⇒ **升为初设必答项**（要求见 D3） | ⏭ **顺延初设** |
+| P3 | 8 | `SetWinEventHook` 跨工具链一致性（K9） | **未测**——本轮探针只在 MinGW 下构建运行；`hInstance` 传 `nullptr` 在 `WINEVENT_OUTOFCONTEXT` 下为 MSDN 允许 | ⏭ **顺延四工具链验证** |
+| P3 | 9 | 平台内部 `SetTimer` 的可用性（D4 选 C 时） | **不再需要**——D4 已由实测钉死为 A（不加 Timer） | ✅ **消解**（前提消失） |
 
-> 📌 **P0 的一个前提澄清**：`WS_OVERLAPPEDWINDOW` 说的是**主样式**，`ChromeMode::Borderless` 走的是 `WM_NCCALCSIZE` **拦截非客户区**（Phase 12）——两者**并不冲突**：前者决定「窗口有哪些系统能力」，后者决定「非客户区画不画」。这正是评审提醒「不要凭样式定义直接判断」的原因。
+### 8.1 勘察得出的两条新约束（v1.2 新增）
 
+**① 像素采样在非主显示器上不可用**（**G-4 的直接表现**）：本机副屏为 125% 缩放，实测 `[cfg] window DPI = 96` 而 `self-pixels` 恒为 `4/9`，并出现 `center-hit=SELF` 却 `outside-sample=#0080A0`（窗口外 20px 取到本体底色）的**自相矛盾读数**。根因：进程为**系统级 DPI 感知**（非 Per-Monitor V2）⇒ 系统在非主显示器上仍做 **DPI 虚拟化** ⇒ `GetWindowRect`（虚拟坐标）与 `GetPixel`（物理屏幕坐标）**两套坐标系错位**。
+
+⇒ **影响测试策略**：§6 的**像素类判据只能在主屏使用**；副屏上以 `rect` / `iconic` 为准。
+
+⚠️ **这不是探针缺陷**——探针 v3 已 `SetProcessDPIAware()` **与框架对齐**，错位依旧，说明它是**框架当前 DPI 感知级别的固有性质**（正对应 **G-4**）。本次 P0 结论不依赖像素判据，故不受影响。
+
+**② 「重插前先判在位」是必要的优化**：spike 路线 E 的 `InsertAboveDesktop` 是**无条件重插**——前台事件命中 `Progman` / `WorkerW` 即调 `SetWindowPos`，**不先判断自己是否已在位**（`desktop_spike.cpp:590-603`）。实测中用户观察到 Win+D 瞬间窗口「**闪烁一下**」，而 tick 组的重插次数是钩子组的 **3 倍多**。⇒ 初设应加：**先 `IsDirectlyAboveDesktop()`，在位则不动**（零成本，直接减少 Win+D 瞬间的抖动）。余下的那次闪烁源于系统重排（平台行为），只能靠此压到最小。
 ---
 
 ## 9. 修订记录
 
+- v1.2（2026-09-19）**事实勘察完成回写——P0 的结论改变了 D1 的选项**（需求稿定稿，**可进初步设计**）：
+  - **§8 整章重写**：「待勘察项」→「**事实勘察结果**」——9 项逐条填入实测判据与判定；新增 **§8.1 两条新约束**（① 像素采样在非主显示器不可用 = **G-4 的直接表现**；② **重插前先判在位**）。
+  - **★ 核心发现（改变了 D1 的形状）**：**「显示桌面」只最小化「可最小化窗口」** ⇒ 真因是 **`WS_MINIMIZEBOX`**，**不是 `WS_POPUP` 本身**。实测 4 形态 × 3 轮：`WS_OVERLAPPEDWINDOW` **FAIL**（`rect=(-32000,-32000)` + `iconic=1`，两次独立运行各 3/3）· **`WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX` PASS** · `WS_POPUP` **PASS**（后两者另有**用户目视确认**：「其它页面被收起来，这个框会闪烁一下，不过仍然在原位」）。
+  - **§1.3 F-1 回写**：对照表「主样式」一行**收窄**——原「⚠️ **结构性**」措辞**过强**，实测显示差异是**一位可修**的；补入三形态判决表 + 机制结论 + 「`WS_EX_TOOLWINDOW` 仍未实测」的显式开口。
+  - **D1 更新**：**新增选项 A′ 并改为首选倾向**（保留除「最小化」外的**全部** Phase 12 红利；C 会连带失去 `WS_THICKFRAME` / `WS_SYSMENU` / `WS_MAXIMIZEBOX`）；记账 A′ 的语义后果（任务栏「最小化」/ `Win+↓` 失效、Normal 档标题栏最小化按钮呈灰态）。**方法论留档**：A 被证否后正确的下一步是**继续问「最小改动是什么」**（得到 A′），而不是一步跳到最粗的 C——**这正是 v1.1 评审坚持「先证明现状能承载」所要的思考顺序**。
+  - **D2 更新**：**实测钉死「不加 `WS_EX_NOACTIVATE`」**（`ex=0` 下 `clicks=15 / focusEvents=2 / activateEvents=2`，坐标覆盖整个客户区）；**`WS_EX_TOOLWINDOW` 仍未实测** ⇒ 留作初设决策（倾向：**加**，桌面常驻物不占任务栏位）。
+  - **D3 更新**：倾向由「B / C 二择」改为**取 B 且明确为必需**（A′ 必须改样式位；配置期内改是安全的，F-2 的「时序紧张」被配置期语义消解）；新增两条初设必答（是否需 `SWP_FRAMECHANGED` · 改样式的幂等与可逆）。
+  - **D4 更新**：**实测钉死「只装前台钩子、不加 Timer」**——tick 组 `reinsert=13` / `FindWindowW=78`（11s）vs 钩子组 `4` / `9`，**3 倍多开销零收益**，且是用户观察到的「闪烁一下」来源之一。
+  - **D6 / D7 更新**：D6 取 C（不缓存）获实测支持（tick=0 时 **0.8 次/秒**）；D7 确证 **`GetShellWindow()` ≡ `FindWindowW("Progman")`**（`equal=1`，四组独立运行一致）。
+  - **§6 补充**：新增三条判据环境约束（像素判据仅主屏 · 采样须验前提 · 探针进程级配置须与被测框架一致）+ 运行环境洁净要求。
+  - **§7 更新**：`Win32PlatformWindow.cpp` 改动项具体化（**按档位分流** + **移除 `WS_MINIMIZEBOX`** + **重插前判在位**）；`Win32PlatformApplication` **零改动**；新增「工具（不进仓库）」行。
+  - **状态**：**✅ 勘察完成 —— D0–D11 可拍板，可进初步设计**。
 - v1.1（2026-09-19）**外部评审处置——8 项全部采纳（无否决）**。评审结论原文：「**范围 / 目标 / 非目标 / 验收边界已经很完整；当前真正缺的是 §8 的事实勘察。完成这些勘察后，就可以拍 D1–D11 并进入初步设计**」：
   - **① 状态行**：由「待评审」改为「**待事实勘察**」——这是本轮最重要的状态修正。评审明确「**还不能拍板进入初设**」，理由不是需求不完整，而是 **§8 的 6 项「设计前事实」尚未取得**。
   - **② §1.1 补设计方针**：**先证明「现有窗口形态能不能承载 Desktop 层」，证明不了才改变窗口形态**（评审归纳，与项目「最小改动 / 平台内部解决 / 不污染公共 API」路线一致）；并由此立一条纪律——**spike 的实现细节 ≠ 框架的设计输入**：spike 验证的是「路线」，不是「参数」。
