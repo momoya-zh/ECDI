@@ -1,8 +1,9 @@
-﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）初步设计（v1.0）
+﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）初步设计（v1.1）
 
 > 阶段：初步设计（五阶段法 ②）
 > 日期：2026-09-19
-> 状态：**待评审**
+> 状态：**评审通过（带 3 项收敛）**——v1.1 已按评审处置（详见 §6 / §8）：**O3 定为 C**（纯函数 `ResolveTarget`，使最危险的 C2 分支可自动化）· **O2 倾向反转为「不加」**（`WS_EX_TOOLWINDOW` 不属本阶段需求）· **「不可判 ⇒ 无动作」与「钩子独立于 HWND」升格为契约 C11 / C12**
+> ★ **进详设的闸门 = O1 实测**（`SWP_FRAMECHANGED` 是否需要）——**探针 v4 已就绪**（§6.1）：`--strip-after` 复刻框架次序（**创建后** `SetWindowLongPtrW` 改样式），与既有 4 组的**创建期**设定**不等价**
 > 前置：`phase16-desktop-layer-requirements.md` **v1.3**（D0–D11 已定 · §8.1 两条新约束 · §8.2 留给初设的 8 项）· `.workbuddy/spike/desktop_layer_probe.cpp`（4 形态 × 3 轮实测源码）· `desktop_spike.cpp`（路线 E 原始提交，`--auto` 可复现）
 > 一句话：把「**紧贴桌面窗口正上方 + 前台钩子维持**」这条已取证路线实现进 `Win32PlatformWindow`——**公共 API 净增 0**，全部改动收敛在**平台实现层内部**（本项目首个纯实现层 Phase）。
 
@@ -15,7 +16,7 @@
 | 决策 | 结论 | 来源 |
 |---|---|---|
 | **D1** ★ | **A′：`WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX`**（真因 = `WS_MINIMIZEBOX`；「显示桌面」只最小化可最小化窗口） | 需求稿 §8 P0（4 形态 × 3 轮 + 目视） |
-| **D2** | **不加 `WS_EX_NOACTIVATE`**（`ex=0` 下交互完整）；`WS_EX_TOOLWINDOW` **留本稿 O2** | 需求稿 §8 P1 |
+| **D2** | **不加 `WS_EX_NOACTIVATE`**（`ex=0` 下交互完整）；`WS_EX_TOOLWINDOW` **留本稿 O2（v1.1 倾向：不加）** | 需求稿 §8 P1 |
 | **D3** | **配置期内 `SetWindowLongPtrW` 改样式位**（改动安全性的细节归本稿 §3.2 / O1） | 需求稿 §4 |
 | **D4** | **只装前台钩子，不加 Timer**（实测 tick 三倍开销零收益） | 需求稿 §8 P2 |
 | **D5** | **每窗口一个钩子**；生命周期必须绑 `Win32PlatformWindow` | 需求稿 §4 |
@@ -38,6 +39,7 @@
 | **B7** | 平台层**零**「hook → 实例」反查设施；全库 `SetWinEventHook` 只在 spike 中出现（用全局变量——单窗口探针的便利） | 全库 grep |
 | **B8** | 测试基线：`WindowChromeTests.cpp` 9 用例（`ChromeModeDecidedOnce` / `BorderlessClientEqualsWindow` / `NCHitTestNineGrid` / `NCHitTestModeIsolation` / `MaximizedClientWithinWorkArea` / `CaptionHeightUnit` / `ZeroBoundaryClamp` / `StateEventFromApi` / `RuntimeApiRejectedBeforeShow`）；测试设施：`TestWindow`（非拥有 `Window*` + `Handle()` 三跳取 HWND）+ `PumpMessages(n)` | `src/Tests/WindowChromeTests.cpp:1-135` |
 | **B9** | 全局测试基线 **210 用例**（Phase 15 收口）；`PlatformWindow` 有 **3 个实现者**（`Win32PlatformWindow` + `AnimationTests` / `ProgressBarTests` 的 `TestPlatformWindow`） | MEMORY / skill 条 33 先例 |
+| **B10** | **测试可直接 include 内部头**：`DropFilesTests.cpp:13` 即有 `#include "Platform/Win32/Win32PlatformWindow.h"` ⇒ 拆出的**纯函数无需新文件 / 无需测试缝**即可被自动化覆盖（O3 取 C 的前提） | `src/Tests/DropFilesTests.cpp:13` |
 
 ### 1.3 ★ 需求稿勘误（K13 与实况不符——本稿发现）
 
@@ -140,6 +142,20 @@
 	bool IsDesktopLayer() const noexcept{ return m_windowLayer == WindowLayer::Desktop; }
 ```
 
+**纯函数（public 区——O3 定为 C 的落点、零新文件）**：
+
+```cpp
+	/// @brief 把「档位 + 桌面句柄」映射为目标 z 序位置（**纯函数**——不读实例状态，O3 定为 C）
+	/// @return `HWND_BOTTOM` = Bottom 档 ·「桌面窗口的上一位」= Desktop 档 ·
+	///         **`nullptr` = 本次不修改**（Normal 档 / 桌面句柄无效 / 桌面已处最顶）
+	/// @details ⚠️ `nullptr` 是「跳过」哨兵，**不是**「插到最底」——调用方必须显式判空。
+	/// @note **public static 的目的只是可被自动化测试直接覆盖**（C2 是本阶段最危险的路径）。
+	///       测试已 include 本内部头（B10）⇒ 零成本；不读实例状态 ⇒ 无副作用、可纯逻辑断言。
+	static HWND ResolveTarget(WindowLayer layer, HWND desktop);
+```
+
+> ⚠️ **为什么放 public（本类其余新增方法一律 private）**：C2「桌面不可用 ⇒ 不修改（**绝不**降级 `HWND_BOTTOM`）」是本阶段**最危险的路径**（写错即静默降级）；而它**不需要任何窗口、不需要 explorer** 就能验证——这正是 v1.1 把 O3 由「倾向 C」**定为 C** 的理由（A 的注入式测试缝要「假装系统 API」，C 只验证自己的判据）。
+
 **测试缝（public 区，紧随 `DragFinishFn` 先例 B6）**：
 
 ```cpp
@@ -170,26 +186,26 @@
 
 ### 3.1 `TargetInsertAfter`：按档位分流（D8——本阶段的核心 diff）
 
+**① 纯函数 `ResolveTarget`（v1.1：O3 **定为 C**——把最危险的 C2 路径变成可直接断言的真值表）**：
+
 ```cpp
-HWND Win32PlatformWindow::TargetInsertAfter() const{
+HWND Win32PlatformWindow::ResolveTarget(WindowLayer layer, HWND desktop){
 
 	// ── Normal 档：不参与 z 序维护 ⇒ 返回「跳过」哨兵 ──
-	if (m_windowLayer == WindowLayer::Normal){
+	if (layer == WindowLayer::Normal){
 
 		return nullptr;
 
 	}
 
 	// ── Bottom 档：既有语义（Phase 12 已实现）——逐位不变 ──
-	if (m_windowLayer == WindowLayer::Bottom){
+	if (layer == WindowLayer::Bottom){
 
 		return HWND_BOTTOM;
 
 	}
 
 	// ── Desktop 档：紧贴桌面窗口正上方 ──
-	const HWND desktop = FindDesktopWindow();
-
 	if (desktop == nullptr || !IsWindow(desktop)){
 
 		// ★ K8 / C2：桌面窗口不可用（explorer 重建窗口期）⇒ **跳过本次修改**。
@@ -203,6 +219,23 @@ HWND Win32PlatformWindow::TargetInsertAfter() const{
 	// ⚠️ 返回 nullptr（桌面已在 z 序最顶）同样是**跳过** —— 此时「紧贴其上」不可能，
 	//    而任何替代位置（HWND_BOTTOM / HWND_TOP）都违反契约。
 	return GetWindow(desktop, GW_HWNDPREV);
+
+}
+```
+
+> 📌 **可测化兑现**：五条判据（`Normal ⇒ nullptr` · `Bottom ⇒ HWND_BOTTOM` · `Desktop + nullptr ⇒ nullptr` · `Desktop + 非窗口 ⇒ nullptr` · `Desktop + 有效 ⇒ GetWindow(desktop, GW_HWNDPREV)`）**不需要窗口、不需要 explorer** ⇒ **T16-7** 按此行全覆盖（§7）。**这是 O3 取 C 而非 A 的全部理由**：A 的注入式测试缝要「假装系统 API」，C 只验证自己的判据。
+
+**② 薄包装 `TargetInsertAfter`（实例方法——只做「取句柄」与「交给纯函数」两件事）**：
+
+```cpp
+HWND Win32PlatformWindow::TargetInsertAfter() const{
+
+	// ⚠️ **只让 Desktop 档去查桌面句柄**——Normal / Bottom 不看它。
+	//    这让 `WM_WINDOWPOSCHANGING` 在 **Bottom 档下不产生任何 `GetShellWindow()` 调用**
+	//    （零新增成本：Bottom 是既有档位，不应因本阶段变慢）。
+	const HWND desktop = IsDesktopLayer() ? FindDesktopWindow() : nullptr;
+
+	return ResolveTarget(m_windowLayer, desktop);
 
 }
 ```
@@ -432,7 +465,10 @@ void Win32PlatformWindow::ReinsertAboveDesktop(){
 
 bool Win32PlatformWindow::IsDirectlyAboveDesktop() const{
 
-	if (m_hwnd == nullptr || !IsWindow(m_hwnd)){ return true; }   // 不可判 ⇒ 视作「无需动作」
+	// ★ C11（v1.1 语义澄清）：本函数**有三态** —— true = 已在位 / false = 未在位 / true = **不可判定**。
+	//   不可判时返回 true 的含义是「**禁止无依据的 z-order 操作**」，**不是**「z 序已满足 C1」。
+	//   名称保留（改成 IsDirectlyAboveDesktopOrCannotDetermine 只会让调用点更难读），语义由 C11 承担。
+	if (m_hwnd == nullptr || !IsWindow(m_hwnd)){ return true; }   // 不可判 ⇒ 抑制动作（C11）
 
 	const HWND desktop = FindDesktopWindow();
 
@@ -560,24 +596,26 @@ bool Win32PlatformWindow::Release() noexcept{
 
 - `Normal` ⇒ `nullptr`（不修改）✅ 可自动
 - `Bottom` ⇒ `HWND_BOTTOM` ✅ 可自动
-- `Desktop` + **无效句柄** ⇒ `nullptr`（**C2 的关键分支**）——需注入「桌面不可用」状态 ⇒ **O3**（是否为此增测试缝，或把判据拆为纯函数）
+- `Desktop` + **无效句柄** ⇒ `nullptr`（**C2 的关键分支**）——**v1.1 已解**：O3 定为 C ⇒ 拆出纯函数 `ResolveTarget(layer, desktop)`，把「桌面句柄」当**入参**直接注入 `nullptr` / 无效值，**无需任何测试缝**（§3.1 ①、T16-7）
 
 ---
 
-## 4. 契约（C1–C10）
+## 4. 契约（C1–C12）
 
 | # | 契约 | 验证方式 |
 |---|---|---|
 | **C1** | `Desktop` 档的目标 z 序位置 = `GetWindow(桌面窗口, GW_HWNDPREV)`（「紧贴桌面窗口正上方」的精确表述） | T16-1 / 手测 |
-| **C2** | ★ 桌面窗口**不可用**（`nullptr` / `!IsWindow`）或**已处 z 序最顶** ⇒ **不修改** `hwndInsertAfter`；**任何路径下都不得退化为 `HWND_BOTTOM`** | T16-x（需 O3）/ 代码审查 |
+| **C2** | ★ 桌面窗口**不可用**（`nullptr` / `!IsWindow`）或**已处 z 序最顶** ⇒ **不修改** `hwndInsertAfter`；**任何路径下都不得退化为 `HWND_BOTTOM`** | **T16-7**（`ResolveTarget` 纯逻辑断言）/ 代码审查 |
 | **C3** | `Normal` 档**不修改** z 序（`TargetInsertAfter` 返回 `nullptr`） | T16-5 |
 | **C4** | `Bottom` 档语义**逐位不变**（`HWND_BOTTOM`）——`Bottom` 与 `Normal` 的行为在本阶段零回归 | **T16-1（★ 补 Phase 12 的空缺）** |
 | **C5** | `Desktop` 档移除 `WS_MINIMIZEBOX`；离开 Desktop 档**补回**（幂等 + 可逆） | T16-2 / T16-3 |
 | **C6** | 钩子生命周期：Set ⇒ 装 · 离档 ⇒ 卸 · `Hide` ⇒ **不卸** · `Show` ⇒ **不重装** · `Release`/析构 ⇒ **必卸**；且**注销顺序 = 先摘映射、后 `UnhookWinEvent`** | T16-4（经 `HookObserverFn` 计数） |
-| **C7** | 桌面窗口句柄**不缓存**——每次查询即时重定位（⇒ explorer 重建**无需**状态机） | 代码审查 + T16-x |
+| **C7** | 桌面窗口句柄**不缓存**——每次查询即时重定位（⇒ explorer 重建**无需**状态机） | 代码审查 + 代码审查（`FindDesktopWindow` 无成员缓存字段） |
 | **C8** | 钩子回调在**注册线程**执行（`WINEVENT_OUTOFCONTEXT`）⇒ 与安装/卸除同线程 ⇒ **进程内无锁** | 代码审查（MSDN 语义） |
 | **C9** | `m_windowLayer` 语义状态**不随实现路径降级**（Phase 12 `D-DESK-1` 延续） | 现有 + 代码审查 |
 | **C10** | `SetWindowLayer` 仍为**配置期 API**（`Show()` 后 Warning + 忽略）——本阶段**不松开** | 补配置期反例用例（T16-6） |
+| **C11** | ★ `IsDirectlyAboveDesktop()` 的**不可判定**返回值（`true`）语义 = **「禁止无依据的 z-order 操作」**，**不是**「z 序已满足 C1」（三态：已在位 / 未在位 / 不可判 ⇒ 抑制） | 代码审查 |
+| **C12** | ★ **钩子是与 `HWND` 相互独立的资源**——`Release()` 的判空**不得**覆盖钩子脱除；任何「一个判空条件同时代表两种资源」的写法一律禁止（**B4 的坑即此**，与 Phase B 的 Window 所有权教训同族） | T16-4 / 代码审查 |
 
 ---
 
@@ -587,9 +625,9 @@ bool Win32PlatformWindow::Release() noexcept{
 |---|---|
 | **新增 Public 头** | **0** |
 | 修改 Public 头 | **1**（**仅注释**）：`WindowLayer.h:24-31` 的「spike 未验证 / 退化为 Bottom」表述 → 实现已落地的事实陈述 |
-| 修改 Internal 头 | `src/Platform/Win32/Win32PlatformWindow.h`：+2 成员（`m_desktopHook` / `m_hookObserver`）· +10 方法（6 功能 + 1 静态 + 1 强制卸 + 1 内联判据 + 1 测试缝 setter） |
+| 修改 Internal 头 | `src/Platform/Win32/Win32PlatformWindow.h`：+2 成员（`m_desktopHook` / `m_hookObserver`）· +12 方法（6 功能 + **2** 静态 + **1 纯函数 `ResolveTarget`（public static）** + 1 强制卸 + 1 内联判据 + 1 测试缝 setter）——v1.1 更正：原「+10」把两个静态方法（`FindDesktopWindow` / `DesktopForegroundProc`）记成了一个 |
 | 修改实现 | `src/Platform/Win32/Win32PlatformWindow.cpp`：`WM_WINDOWPOSCHANGING` 分支重构 · `SetWindowLayer` 重构 · `Release` 顶部插入脱钩 · +新方法体 · 匿名 namespace +2（`HookOwners()` / `IsDesktopClassWindow`）· +`<unordered_map>` |
-| 测试 | `src/Tests/WindowChromeTests.cpp` 追加 **T16-1..T16-6**（或新建 `DesktopLayerTests.cpp`——**归详设**）；若新建文件则 `RunAllTests.h` / `RunAllTests.cpp` 手工接线 |
+| 测试 | `src/Tests/WindowChromeTests.cpp` 追加 **T16-1..T16-6**（+ **T16-7** 覆盖 `ResolveTarget` 真值表——**不需要窗口**，见 §7；是否新建文件**归详设**）；若新建文件则 `RunAllTests.h` / `RunAllTests.cpp` 手工接线 |
 | ⚠️ **测试替身** | **零同步**——本阶段**不新增任何 pure virtual**（B9 的 3 个实现者不受影响） |
 | 构建 | **零改动**（无新文件；`GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库） |
 | Demo | `examples/ModelProbe/main.cpp:247` 的过期注释——**须用户授权**（AI 不得改 `main.cpp`） |
@@ -602,15 +640,34 @@ bool Win32PlatformWindow::Release() noexcept{
 
 | # | 决策 | 选项 / 倾向 | 依据与理由 |
 |---|---|---|---|
-| **O1** | `ApplyDesktopStyle` 是否需要 `SWP_FRAMECHANGED` | **倾向不需要**（待实测） | `WS_MINIMIZEBOX` 不参与非客户区几何计算 ⇒ 样式位变更不需要系统重算 frame。**验证方式**：改样式前后比较 `GetWindowRect`（边框量应不变）+ 观察系统标题栏最小化按钮是否呈灰态。若实测需要才补——**不为「保险」预先加**（多一次 `SetWindowPos` 就多一次可能的闪烁） |
-| **O2** | `WS_EX_TOOLWINDOW` 是否加 | **倾向加**（桌面常驻物不应占任务栏位），但**须补验不影响 Win+D 行为** | 需求稿 §8-2 留的开口项：两次 PASS 组均为 `ex=0`，TOOLWINDOW 的影响**未实测**。**补验方式**：探针已支持该组合——`desktop_layer_probe.exe --auto --secondary --style overlapped-nominbox --ex toolwindow`；若同样 PASS 则加，否则不加 |
-| **O3** | `TargetInsertAfter` 的 C2 分支（句柄无效 ⇒ 跳过）如何自动化 | **A** 增测试缝（`SetDesktopHandleProviderForTests(fn)`，可注入 `nullptr`）· **B** 只做代码审查 · **C** 拆出纯函数（把「句柄是否有效」当入参） | **倾向 C**——C2 是**本阶段最危险的路径**（写错就退化成 Bottom），值得自动化；C 的代价最小：判据写成 `static HWND ResolveTarget(WindowLayer, HWND desktop)`，三种入参（`nullptr` / 非窗口 / 有效）可直接断言。⚠️ C 会让「有效性检查」与「取值」分离，须保证调用方不做二次判断 |
-| **O4** | `HookOwners()` 的容器形态 | **A** `std::unordered_map<HWINEVENTHOOK, Win32PlatformWindow*>`（本稿）· **B** 静态单链表 / 小数组 | 倾向 **A**（O(1)、语义直白）；窗口数少（YAGNI：无大规模多窗口消费者），B 的省内存无意义。**须详设确认**：`<unordered_map>` 只在 `.cpp`（**不入公共头** ⇒ 零传播） |
+| **O1** ★ | `ApplyDesktopStyle` 是否需要 `SWP_FRAMECHANGED` | **详设前置实验**（v1.1——不再保留「倾向不需要」的未验态度） | **关键澄清（v1.1 新增，本稿此前的推理有缺口）**：既有 4 组的 `overlapped-nominbox` 是**创建期**就写进 `CreateWindowExW` 的样式，而框架的 `ApplyDesktopStyle` 是**创建后**用 `SetWindowLongPtrW` 改——**两者不等价**（前者系统在创建时即按最终样式初始化；后者可能要 `SWP_FRAMECHANGED` 才让系统重算 frame）。**实验设计见 §6.1**（探针 v4 `--strip-after`） |
+| **O2** | `WS_EX_TOOLWINDOW` 是否加 | **倾向不加**（v1.1 **由「倾向加」反转**） | `TOOLWINDOW` 改变的是**任务栏 / Alt+Tab / 激活 / 系统菜单**这一组窗口语义，**不属本阶段需求**（需求稿里 Desktop 档的需求只有四条：z 序 / Win+D 可见 / explorer 重建 / 交互不降级）。「桌面常驻物不该占任务栏位」这个判断**本身成立**，但它是一条**尚未立项的需求** ⇒ 按 YAGNI 等**真实消费者**驱动（DesktopNest 明确要求「不出现在任务栏」时再开）。**本阶段的原则是「已经实测的最小改动」，不是「顺手把桌面常驻行为做完整」** |
+| **O3** | `TargetInsertAfter` 的 C2 分支（句柄无效 ⇒ 跳过）如何自动化 | **定为 C**（v1.1 收敛——A / B 不再保留）：拆出**纯函数** `static HWND ResolveTarget(WindowLayer layer, HWND desktop)` | C2 是**本阶段最危险的路径**（写错即静默降级成 Bottom）⇒ 必须自动化。**落点零新文件**：作为 `Win32PlatformWindow` 的 **public static**（声明在既有内部头，定义在既有 `.cpp`）。**测试可达性已有先例**：`DropFilesTests.cpp:13` 即 include 内部头（B10）⇒ 无需新头、无需测试缝、无需 mock 系统 API。详见 §3.1 ① 与 T16-7 |
+| **O4** | `HookOwners()` 的容器形态 | **A** `std::unordered_map<HWINEVENTHOOK, Win32PlatformWindow*>`（本稿）· **B** 静态单链表 / 小数组 | 倾向 **A**（O(1)、语义直白）；窗口数少（YAGNI：无大规模多窗口消费者），B 的省内存无意义。**v1.1 采评审意见：保持 A**；须详设确认：`<unordered_map>` 只在 `.cpp`（**不入公共头** ⇒ 零传播） |
 | **O5** | `GetShellWindow()` 的四工具链一致性 | 待验证 | 需求稿 §8-8（K9）的顺延项。`GetShellWindow` 是 Win2000+ 的 winuser API（四工具链均应有声明）；**须四工具链各构建一次确认**（归验收） |
+
+### 6.1 O1 实测方案（探针 v4——进详设的闸门）
+
+`.workbuddy/spike/desktop_layer_probe.cpp` 新增两个开关（**不进仓库**）：
+
+| 开关 | 作用 |
+|---|---|
+| `--strip-after` | 在 `CreateWindowExW` **之后**、`ShowWindow` **之前**用 `SetWindowLongPtrW` 移除 `WS_MINIMIZEBOX`——**逐位复刻框架次序**（`CreateWindowExW` → 配置期 `SetWindowLayer` → `Show`） |
+| `--framechanged` | strip 之后追加 `SetWindowPos(…, SWP_FRAMECHANGED \| SWP_NOMOVE \| SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE)`（对照 B） |
+
+**同时打印**：① 样式回读（`WS_MINIMIZEBOX` 位改前 / 改后）；② **非客户区尺寸**（`GetWindowRect − GetClientRect`）改前 / 改后——`SWP_FRAMECHANGED` 的作用正是让系统重算 frame ⇒ **尺寸若发生变化即说明系统确实重算了**；③ 窗口 rect 前后（诊断）。
+
+**判读**：
+
+| 观察 | 结论 |
+|---|---|
+| 回读 `WS_MINIMIZEBOX == 0` **且** Win+D 后仍可见 **且** 非客户区尺寸不变 | **不需要 `SWP_FRAMECHANGED`** ⇒ 详设按「只改样式位」定稿 |
+| 仍可见，但**非客户区尺寸发生了变化** | 系统在样式变更后自己重算了 ⇒ 仍不需显式 `SWP_FRAMECHANGED`，但须把该副作用记进详设 |
+| Win+D 后**被最小化**（`iconic=1` / `rect=(-32000,…)`） | **创建后改样式与创建期设定不等价** ⇒ 必须补 `SWP_FRAMECHANGED`，并进一步查「是否要改为先 `Show` 再改样式」 |
 
 ---
 
-## 7. 测试方向（T16-1..T16-6——用例数 210 → 210+N，N 归详设）
+## 7. 测试方向（T16-1..T16-7——用例数 210 → 210+N，N 归详设）
 
 | # | 用例 | 断言 | 层级 |
 |---|---|---|---|
@@ -620,12 +677,23 @@ bool Win32PlatformWindow::Release() noexcept{
 | **T16-4** | 钩子生命周期（C6） | 经 `HookObserverFn` 计数：`Set(Desktop)` ⇒ `true`×1；`Set(Normal)` ⇒ `false`×1；`Hide()` → `Show()` ⇒ **计数不变**；`Release()` ⇒ `false`×1（且不重复） | 自动 |
 | **T16-5** | `Normal` 档不参与维护（C3） | `Normal` 档下触发 `WM_WINDOWPOSCHANGING` ⇒ `hwndInsertAfter` 保持调用方给的值 | 自动（`SendMessageW` 直发 + 观察 z 序邻居） |
 | **T16-6** | 配置期契约（C10） | `Show()` 后调 `SetWindowLayer` ⇒ 档位**不变** + Warning（沿用 `RuntimeApiRejectedBeforeShow` 同款手法） | 自动 |
+| **T16-7** ★ | **`ResolveTarget` 真值表**（O3 = C 的兑现——**不需要窗口 / explorer**） | 五条逐条断言：`Normal ⇒ nullptr` · `Bottom ⇒ HWND_BOTTOM` · `Desktop + nullptr ⇒ nullptr` · `Desktop + 无效句柄 ⇒ nullptr` · `Desktop + 有效句柄 ⇒ GetWindow(desktop, GW_HWNDPREV)`（用本进程真实窗口作「有效句柄」样本） | 自动 |
 | **手测** | 真机六判据 + 闪烁 | 复用 `.workbuddy/spike/desktop_layer_probe.cpp` 的 `--auto` 三态采样；ModelProbe `--layer desktop` | 手测（需求稿 §6 L3） |
 
-> 📌 **测试边界的自洽**：本阶段**唯一无法自动化的**是 C1 的**真实 z 序位置**（依赖 explorer 的 `Progman`）；其余全部可自动。这是需求稿 §6 三层分层的直接落实。
+> 📌 **测试边界的自洽（v1.1 修正——原表述超前于本稿状态）**：v1.0 时只有 `Normal` / `Bottom` 两支可自动断言，**C2（`Desktop` + 无效句柄）当时依赖未定的 O3**（§3.7 也照实写了），故原句「唯一无法自动化的是 C1」**与 §3.7 自相矛盾**（评审第 13 点）。**v1.1 把 O3 定为 C 后矛盾消除**，目标态为：
+
+| 契约 | 自动化 |
+|---|---|
+| **C1**（真实 z 序位置 = 紧贴桌面之上） | **真机手测**——依赖 explorer 的 `Progman`，本阶段**唯一**不可自动项 |
+| **C2**（不可用 ⇒ 不修改） | **自动**（经 `ResolveTarget` 纯函数——O3 = C，T16-7） |
+| **C3–C12** | **自动** |
+
+> 这是需求稿 §6 三层分层的直接落实。
 
 ---
 
 ## 8. 修订记录
 
 - v1.0（2026-09-19）初步设计初稿：① **§1.1** 需求阶段已定决策汇总（D1/D2/D3/D4/D5/D6/D7/D8/D11 + §8.1②）；② **§1.2 代码基线 B1–B9**（全部带行号）；③ **§1.3 ★ 需求稿勘误**——K13 声称「`Bottom` 档已有跨工具链验证的 z 序用例」**实核不成立**（`WindowChromeTests.cpp` 9 用例零 `WindowLayer` 覆盖）⇒ R2 零回归缺测试保护，本稿 **T16-1 补**；④ **§1.4 §8.2 八问的答案索引**；⑤ **§2 头文件改动**——**公共头净增 0**（逐头确认 + **不新增 pure virtual ⇒ 3 个替身零同步**）+ `Win32PlatformWindow.h` 内部头增量；⑥ **§3 实现分解**——`TargetInsertAfter` 按档位分流（含 **`nullptr` 前置检查哨兵的语义澄清**：**不是**「插到最底」）+ 等价性核对表（`Normal` / `Bottom` **逐位等价**）+ `ApplyDesktopStyle` 幂等可逆 + **`hook → 实例` 反查**（本稿核心设计，**否**进程级广播方案）+ 重插前判在位（§8.1② 落实）+ `Release` 顶部脱钩（**修 B4 的 `hwnd` 空判陷阱**）+ 四态语义**「零代码」**对照 + K2 文案修正；⑦ **§4 契约 C1–C10**；⑧ **§5 影响面**（含「修改 Public 头 1 处但仅注释」与两处索引同改的提醒）；⑨ **§6 开放决策点 O1–O5**；⑩ **§7 测试 T16-1..6**（含 ★ T16-1 补 Phase 12 的空缺）。待评审。
+
+- v1.1（2026-09-19）**外部评审处置（「基本通过，带 3 项收敛进入详细设计」——14 条中 12 条采纳 / 1 条已完成 / 1 条转为实验）**：① **状态行**改为「评审通过（带 3 项收敛）」+ 标注 **O1 为进详设的闸门**（skill 条 74：状态由评审结论决定）；② **★ O3 定为 C**——拆出**纯函数** `ResolveTarget(layer, desktop)`（§2.2 public static 声明 + §3.1 ① 定义），**C2 由「需 O3 / 代码审查」升级为 T16-7 全自动**；§3.7 的「需注入状态 ⇒ O3」同步作废；③ **★ O2 倾向由「加」反转为「不加」**——`TOOLWINDOW` 改的是任务栏 / Alt+Tab / 激活 / 系统菜单语义，**不属本阶段需求**；「桌面常驻物不该占任务栏」成立但属**未立项需求**，等真实消费者驱动；④ **新增契约 C11 / C12**——C11 钉死 `IsDirectlyAboveDesktop()` **不可判定**返回值（`true`）的语义是「禁止无依据的 z-order 操作」而非「已满足 C1」（三态，§3.3 已内联注释）；C12 钉死「**钩子独立于 `HWND`**」（`Release()` 判空不得覆盖脱钩——B4 的根因，与 Phase B 所有权教训同族）；⑤ **修 §5 方法计数**（原「+10」把 `FindDesktopWindow` / `DesktopForegroundProc` 两个静态记成了一个 ⇒ **+12**）；⑥ **修 §7 自洽**（原「唯一不可自动 = C1」与 §3.7 矛盾 ⇒ 改为契约级自动化对照表，并新增 **T16-7**）；⑦ **补 §1.2 B10**——`DropFilesTests.cpp:13` 已 include 内部头，作为 O3 取 C 的前提证据；⑧ **★ O1 由「倾向不需要」升级为「详设前置实验」**——并指出本稿此前推理的**缺口**：既有 4 组是**创建期**设样式，框架是**创建后** `SetWindowLongPtrW`，**两者不等价** ⇒ 新增 **§6.1 实验方案**（探针 v4 `--strip-after` / `--framechanged`，打印样式回读 + 非客户区尺寸前后对比）。
