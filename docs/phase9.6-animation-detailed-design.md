@@ -202,7 +202,8 @@ void Window::OnAnimationTick() {
 |---|---|---|
 | 1 | TextBox（`kCaretBlinkTimer`） | 光标闪烁（不迁移） |
 | 2 | AnimationManager（`kAnimationTickTimer`） | 动画统一 tick |
-| 3–15 | 框架保留 | 新 timer 依序登记于此表 |
+| 3 | Win32PlatformWindow（`kDesktopFollowTimerId`） | Phase 16 A5：桌面跟随的短延时重插（16ms × ≤4 拍） |
+| 4–15 | 框架保留 | 新 timer 依序登记于此表 |
 
 - 约定落点：各 owner 头文件常量处注释「框架 timerId 保留段 1–15，登记表见本文档 §7」；新增 timer 必须更新本表
 
