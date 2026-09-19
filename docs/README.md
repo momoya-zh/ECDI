@@ -211,7 +211,7 @@
 | [phase12-windowchrome-detailed-design.md](phase12-windowchrome-detailed-design.md) | 详细设计（**9 开放决策点全收** + 平台实现全文 6 case + **10 方法**（7 override + 3 私有辅助）；`TestWindow::Handle()` 三跳取 HWND；dwmapi 双构建系统；测试 **9** 自动用例含 spike 全文） | ✅ **v1.5 已实施（2026-09-12）**：v1.1 外部评审 → v1.2 内部复核 → v1.3 AI 核验补正 → v1.4 **实施期回写 4 处缺口**（D-DWM-1 零兜底 / `NCCALCSIZE_PARAMS` / 2 个测试替身补 override / Handle() include）→ **v1.5 实施后缺陷修复**（`TestWindow` 改持非拥有 `Window*` + `Create()`——原直构窗口未登记，销毁时触发 `Application.cpp:92` 断言；**仅 MSVC 构建暴露**，因 `FRAMEWORK_ASSERT` 只在 `_DEBUG` 下存在）；`ecdi_tests` **183/183**（MinGW，含带 `-D_DEBUG` 的一次；MSVC/Clang/ClangCL 待用户确认） |
 | [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 2 Phase、**残差登记 G-1~G-4**） | ✅ **v1.7 已回写**（框架侧 2 Phase 全部落地 · R-1/R-6/R10 已出清 · 判据①–⑥全通过 · **残差 G-1~G-4 已登记**——G-1 `Desktop` 档未实现为唯一阻断项；应用侧待需求确认） |
 
-## Phase16 桌面驻留层（`WindowLayer::Desktop`）（✅ 需求确认 v1.2 —— 勘察完成，可进初设）
+## Phase16 桌面驻留层（`WindowLayer::Desktop`）（✅ 需求确认 v1.3 —— 可进初步设计）
 
 `desktopnest-roadmap.md` v1.7 §5 登记的 **G-1**——**全项目唯一「已取证但未落地」的能力**。Phase 12 立 `WindowLayer::Desktop` 时只定了语义（`D-DESK-1`：语义状态 ≠ 实现路径），实现按 `Bottom` 降级执行；2026-09-15 spike 已把路线实测清楚（**E 路线：紧贴桌面窗口正上方 + 前台钩子重插**）。本阶段把该路线**真正实现进 `Win32PlatformWindow`**。
 
@@ -219,7 +219,7 @@
 
 **★ v1.2 事实勘察的核心发现**：§8 的 9 项已由真机实测全部回答（探针 `.workbuddy/spike/desktop_layer_probe.cpp`，4 形态 × 3 轮 + 用户目视确认）。**「显示桌面」只最小化「可最小化窗口」** ⇒ 真因是 **`WS_MINIMIZEBOX`**，**不是 `WS_POPUP` 本身** ⇒ D1 的最优解从「换 `WS_POPUP`」变为「**只移除一个样式位**」（保留除「最小化」外的全部 Phase 12 红利）。另钉死：不加 `WS_EX_NOACTIVATE`（交互实测正常）· 不加 tick 心跳（钩子单独够用，tick 是 3 倍开销且零收益）· `GetShellWindow()` ≡ `FindWindowW("Progman")` · 多显示器下 `Progman` 唯一。
 
-| [phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) | 需求确认（**K1–K14 现状勘察（全部带行号）** · **F-1/F-2/F-3 三条会改形态的事实** · **R1–R12 四组** · **D0–D11 全部给倾向** · 非目标 8 项 · **§8 事实勘察 9 项（已完成）** · **§8.1 两条新约束**）；**v1.2（2026-09-19）勘察完成回写**：§8 整章重写为「事实勘察结果」（9 项逐条附实测判据）· **§1.3 F-1 收窄**（原「⚠️ 结构性」措辞**过强**——实测显示差异是**一位可修**的）· **D1 新增选项 A′ 并改为首选**（`WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX`）· **D2/D4 实测钉死** · D3 取 B（A′ 下**必需**）· **§8.1 登记「像素采样非主屏不可用」（G-4 直接表现）+「重插前先判在位」** | ✅ **v1.2 定稿**（勘察完成，**D0–D11 可拍板 → 可进初步设计**；4 形态判决：`WS_OVERLAPPEDWINDOW` ❌ FAIL · **`& ~WS_MINIMIZEBOX`** ✅ PASS · `WS_POPUP` ✅ PASS） |
+| [phase16-desktop-layer-requirements.md](phase16-desktop-layer-requirements.md) | 需求确认（**K1–K14 现状勘察（全部带行号）** · **F-1/F-2/F-3 三条会改形态的事实** · **R1–R12 四组** · **D0–D11 全部给倾向** · 非目标 8 项 · **§8 事实勘察 9 项（已完成）** · **§8.1 两条新约束**）；**v1.2（2026-09-19）勘察完成回写**：§8 整章重写为「事实勘察结果」（9 项逐条附实测判据）· **§1.3 F-1 收窄**（原「⚠️ 结构性」措辞**过强**——实测显示差异是**一位可修**的）· **D1 新增选项 A′ 并改为首选**（`WS_OVERLAPPEDWINDOW & ~WS_MINIMIZEBOX`）· **D2/D4 实测钉死** · D3 取 B（A′ 下**必需**）· **§8.1 登记「像素采样非主屏不可用」（G-4 直接表现）+「重插前先判在位」**）；**v1.3（2026-09-19）外部评审「方向已可进初设」+ 3 处自洽性修正**：状态行/§8 引言由「9 项全部实测回答」严谨化为「**9 项均已形成处置结论**」（P0–P2 真机闭环 · **§8-7/§8-8 顺延初设**）· §2「维持住」改为「**钩子 + 重插前位置判定 + 句柄即时重查**」（与 D4/D6 对齐）· **R9 去掉「句柄缓存」**（与 D6 对齐）· **新增 §8.2「留给初设的问题清单」**（8 项，含边界纪律） | ✅ **v1.3 定稿**（**可进初步设计**——9 项均已形成明确处置结论，P0–P2 由真机闭环；4 形态判决：`WS_OVERLAPPEDWINDOW` ❌ FAIL · **`& ~WS_MINIMIZEBOX`** ✅ PASS · `WS_POPUP` ✅ PASS） |
 
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
