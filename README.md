@@ -133,7 +133,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ECDI/       framework sources (include/ = 92 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       design documents (119 files; requirements → preliminary → detailed, per phase)
+docs/       design documents (120 files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
@@ -151,6 +151,7 @@ docs/       design documents (119 files; requirements → preliminary → detail
 | 13 | Caption bar (self-drawn title bar, `NCHITTEST` → widget-tree delegation, window-state query API) | ✅ |
 | **14** | **Tray icon + file drop**: application-level platform seam (`PlatformApplication` + internal hidden top-level host window), `NOTIFYICON_VERSION_4` callback translation, self-healing after explorer restart, window-level `WM_DROPFILES` | ✅ |
 | **15** | **Scroll container (`ScrollView` + scrollbar)**: content-offset seam (`GetContentOffsetX/Y`, consumed by paint / hit test / absolute position), `ClipsChildren` hit-test gate, two-pass dual-axis viewport, single-source offset with self-drawn scrollbars, internal `ScrollContent` as the root of the content coordinate space, ModelProbe list migrated off its hand-rolled container | ✅ |
+| **16** | **Desktop-resident layer (`WindowLayer::Desktop`)**: ships the route the spike validated — a top-level window wedged directly above the desktop window, held there by a foreground event hook. The fact survey traced the failure to a single style bit (Show Desktop only minimizes minimizable windows), so desktop windows drop `WS_MINIMIZEBOX` instead of switching to `WS_POPUP`. No public API change. | 🚧 Requirements confirmed → ready for preliminary design |
 
 ## License
 
