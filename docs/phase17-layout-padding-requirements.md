@@ -1,6 +1,6 @@
 ﻿# Phase 17 · 布局内边距（Layout padding）—— 需求确认
 
-> 状态：**v1.0 待评审**（2026-09-20）
+> 状态：**v1.1**（2026-09-20）——v1.0 已评审通过；**v1.1 为向后回填同步**（按详设 v1.0 定稿口径更新 §6 用例名与 §7 的 N / 断言特征串）。**需求条目 R1–R10 与决策 D0–D5 未变。**
 > 立项依据：`docs/roadmap-deferred.md` §7.6 条目 **#38「容器级内边距」**（2026-09-19 新立，候选 Phase 17）
 > 方案：**方案 B（框架侧）**——用户 2026-09-20 拍板
 > 前置解除：Phase 16 已收口 ⇒ #38 原文「⛔ 不得并入 Phase 16」的约束自动失效
@@ -111,20 +111,22 @@
 
 ## 6. 测试 / 验证方向
 
-沿用 `LayoutTests.cpp`（现有 11 条 `Layout.*` 用例）的风格，新增用例建议：
+沿用 `LayoutTests.cpp`（现有 11 条 `Layout.*` 用例）的风格。下表为**定稿口径**（**详设 v1.0 定案**，本表已于 **v1.1** 回填——初稿的「建议名」中 1 处换名、1 处换位、1 处被合并、1 处新增）：
 
-| # | 用例（建议名） | 判据 |
-|---|---|---|
-| T17-1 | `Layout.PaddingDefaultZero` | `padding=0` 时定位/尺寸与改动前**逐位相同**（回归护栏） |
-| T17-2 | `Layout.PaddingSingleChild` | 单子 + `padding=p` ⇒ 子位于 `(p, p)`、跨轴尺寸 = `父 − 2p` |
-| T17-3 | `Layout.PaddingCrossAxisWidth` | `fillCrossAxis=true` + padding ⇒ 子宽 = `父宽 − 2p`（K4 的修正） |
-| T17-4 | `Layout.PaddingWithStretch` | stretch 子 + padding ⇒ `Σ 主轴尺寸 + spacing + 2p == 父主轴`（R5 的不变式） |
-| T17-5 | `Layout.PaddingEmptyAndSingle` | 空容器不崩；单子不越界（边界） |
-| T17-6 | `Layout.PaddingNested` | 嵌套两级各配 padding ⇒ 内层子坐标 = 两级 padding 之和（R8 累加语义） |
-| T17-7 | `Layout.PaddingNegativeClamped` | 负值构造 ⇒ 钳 0（R6） |
-| T17-8 | `Layout.PaddingHorizontalSymmetric` | `HorizontalLayout` 的对称面（R7） |
+| # | 用例（**定稿名**） | 判据 | 断言 |
+|---|---|---|---|
+| T17-1 | `Layout.PaddingDefaultZero` | `padding=0` **显式传参**重跑三个既有场景（`SpacingPositions` / `CrossFill` / `StretchBasic`）⇒ 与既有期望值**逐位相同**（回归护栏） | 14 |
+| T17-2 | `Layout.PaddingSingleChild` | 单子 + `p` ⇒ 子位于 `(p, p)`；`fillCrossAxis=false` ⇒ **不碰跨轴尺寸** | 8 |
+| T17-3 | `Layout.PaddingCrossAxisWidth` | `fillCrossAxis=true` + `p` ⇒ **每子**跨轴 = `父跨轴 − 2p`（V/H 各一块） | 14 |
+| T17-4 | `Layout.PaddingWithStretch` | 黄金数据 `父=500 / p=20 / spacing=10 / 3×stretch` ⇒ `146 / 146 / 148`；等式 `146+146+148+10×2+20×2 == 500` | 7 |
+| T17-5 | `Layout.PaddingOverflow` | A **溢出混排**：`remaining=0` 时 **fixed 保持自身尺寸 / stretch 归零**（把 `fixedTotal` 与 `remaining` 是两个量测死）；B **跨轴钳 0 + 坐标不钳**（硬 inset） | 10 |
+| T17-6 | `Layout.PaddingNested` | 外层 `p=10` + 内层 `p=20` ⇒ 内层子**绝对坐标 = 30**（**累加**，非 `max` / 非继承） | 9 |
+| T17-7 | `Layout.PaddingIdempotent` | padding + spacing + stretch + fillCrossAxis **全开**下连续两次 `Arrange()` ⇒ 几何逐项一致 | 15 |
+| T17-8 | `Layout.PaddingNegativeClamped` | **Release**：负值构造 ⇒ 钳 0（**Debug 侧归 A2 结构性验收，不是本用例的一部分**——见详设 §5.5 的分工表） | 8 |
 
-**注**：T17-1 是**最重要的回归护栏**——它把「默认 0 时逐位退化」钉死，保证本次改动不动既有的 11 条用例行为。
+**相对初稿的两处演进**：① 初稿 **T17-5 `PaddingEmptyAndSingle`** → 定稿 **`PaddingOverflow`**（overflow 语义的测试价值更高）；**「空容器」不单设用例**——`count == 0` 的早退在任何 padding 计算**之前**，属**结构性保证**，且既有 `Layout.VerticalLayout` / `Layout.HorizontalLayout` 的 0 子块已覆盖（`padding=0` 情形）。② 初稿 **T17-8 `PaddingHorizontalSymmetric`** 取消——**对称面并入各用例的块 B**（T17-2B / T17-3B / T17-8 的 H 面）；腾出的位置给了**新增**的 `PaddingIdempotent`（初稿无此用例，初设 Q3 提出、详设冻结为契约 C5）。
+
+**注**：T17-1 是**最重要的回归护栏**——它把「默认 0 时逐位退化」钉死，保证本次改动不动既有的 11 条用例行为。**判据与断言数一律以详设 §5 为准**（本表为索引摘要）。
 
 ---
 
@@ -132,15 +134,15 @@
 
 | 项 | 实测（2026-09-20） | 影响 |
 |---|---|---|
-| `VerticalLayout.h` / `.cpp` | 各 1 处 | 加形参 + 成员 + `Arrange` 改 4 处 |
+| `VerticalLayout.h` / `.cpp` | 各 1 处 | 加形参 + 成员 + `Arrange` 改 4 处（**详设细化为 `△1–△8` 八个行级改动点；`Arrange` 内代码 6 行**——新增 1 · 修改 5） |
 | `HorizontalLayout.h` / `.cpp` | 各 1 处 | 同上（对称） |
 | `Layout.h` | **不动** | D2——基类保持纯接口 |
 | 公共头 | 92 → **92（净增 0）** | 只改既有头的签名，**不新增头** |
 | 现有调用点 | 生产/示例 **20** + 测试 **20** + README 示例 **1** | **零改动**（追加可选参数；K10） |
 | `examples/ModelProbe/main.cpp` | `:262`（root） | ★ **须单独授权**（skill 条 2——AI 不得自行修改 `main.cpp`）；若只求「ModelProbe 留白」可改为 `ModelProbe.cpp:155` 的 page 一级，**但 root 才是全局留白**（R3） |
 | `examples/ModelProbe/ModelProbe.cpp` | `:155`（page） | 可选：可在此处也配 padding |
-| 测试用例 | 218 → **218 + N** | 新增 T17-1..T17-8（N 待定） |
-| 断言特征串 | 10 → **10** | 若 T17-7 引入新 `FRAMEWORK_ASSERT`，则特征串 +1（**待初设确认**——也可改用测试断言而非框架断言） |
+| 测试用例 | 218 → **226** | **+8**（T17-1..T17-8，详设 v1.0 定案）；断言 **+85**（Release）/ **+77**（Debug，T17-8 整块不编译） |
+| 断言特征串 | 10 → **11** | **已定案**（初设 O1 冻结 / 详设 △2）：新增 `FRAMEWORK_ASSERT(padding >= 0)`（V/H 各一处）⇒ **11** 条；A2 判据随之更新 |
 
 **⚠️ 触角提醒**：R3「root 一级即全局留白」在本项目里**必然碰到 `main.cpp`**（ModelProbe 的 root 在那儿构造）⇒ 该处修改**须用户单独授权**。
 
@@ -159,5 +161,7 @@
 ---
 
 ## 9. 修订记录
+
+- **v1.1**（2026-09-20）**向后回填同步**（第三轮详设评审要求「以详细设计为准，把需求文档的 T17-5 更新」）：① **§6 用例表整表回填为定稿口径**——`PaddingEmptyAndSingle` → **`PaddingOverflow`**、取消 `PaddingHorizontalSymmetric`（对称面并入各用例块 B）、新增 `PaddingIdempotent`（T17-7）、原 `PaddingNegativeClamped` 由 T17-7 移到 **T17-8**；并补「空容器」的**结构性保证**说明（不单设用例）与每例断言数。② **§7 影响面回填**：测试用例 `218 + N（N 待定）` → **`218 → 226`**；断言特征串 `10 → 10（待初设确认）` → **`10 → 11`（O1 已冻结）**；`Arrange` 改动量补详设计数。③ **需求条目 R1–R10 / 决策 D0–D5 / 非目标 N1–N7 逐字未动**——本次只同步「前阶段占位符在后阶段定案后的回填」，不构成需求变更。
 
 - **v1.0**（2026-09-20）**需求确认初稿**。立项依据 #38；现状勘察 K1–K10 全部带行号复核；澄清「贴边不是 AutoSize 的缺陷」这一归因；技术路线定为方案 B；需求条目 R1–R10；决策点 D0–D5（**D0 已由 Phase 9.7 的 F3 纪律锁定 = 构造参数**）；非目标 N1–N7；测试方向 T17-1..T17-8（含 T17-1「默认 0 逐位退化」这一回归护栏）；影响面已含 `main.cpp` 须单独授权的提醒。**待评审。**
