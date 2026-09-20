@@ -45,7 +45,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Anti-aliasing**: supersampled corner coverage masks for rounded rects (`S=8`), cached per radius — GDI has no native AA, so arcs are composited through a premultiplied alpha path that composes with the theme's corner radius
 - **Window chrome**: borderless mode (`WM_NCCALCSIZE` interception) with a self-drawn caption bar — title plus vector min/max/close buttons — and `NCHITTEST` delegated into the widget tree, so interactive controls inside the caption stay clickable while the rest drags the window
 - **Shell integration**: tray icon (application-level — lives on `PlatformApplication`, not on any `Window`, so closing/rebuilding every window leaves it intact) with a native popup menu, plus window-level file drop (`WM_DROPFILES` → UTF-8 path list; the `HDROP` is released before the event is emitted). Both stay behind platform seams — the public API exposes no Win32 types.
-- **Testing**: self-hosted test framework (210 cases, zero dependencies) with a recording backend for paint assertions
+- **Testing**: self-hosted test framework (218 cases, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -72,7 +72,7 @@ Targets:
 | Target | Type | Description |
 |---|---|---|
 | `ECDI` | static library | The framework (`include/ECDI/*.h` — 92 public headers; internal implementation lives in `src/`) |
-| `ecdi_tests` | executable | Self-hosted test suite — 210 cases, zero dependencies |
+| `ecdi_tests` | executable | Self-hosted test suite — 218 cases, zero dependencies |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `visualtest` | executable | Side-by-side visual check for image decoding (Phase 11) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
@@ -133,7 +133,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ECDI/       framework sources (include/ = 92 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       design documents (122 files; requirements → preliminary → detailed, per phase)
+docs/       design documents (125 files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
@@ -152,6 +152,7 @@ docs/       design documents (122 files; requirements → preliminary → detail
 | **14** | **Tray icon + file drop**: application-level platform seam (`PlatformApplication` + internal hidden top-level host window), `NOTIFYICON_VERSION_4` callback translation, self-healing after explorer restart, window-level `WM_DROPFILES` | ✅ |
 | **15** | **Scroll container (`ScrollView` + scrollbar)**: content-offset seam (`GetContentOffsetX/Y`, consumed by paint / hit test / absolute position), `ClipsChildren` hit-test gate, two-pass dual-axis viewport, single-source offset with self-drawn scrollbars, internal `ScrollContent` as the root of the content coordinate space, ModelProbe list migrated off its hand-rolled container | ✅ |
 | **16** | **Desktop-resident layer (`WindowLayer::Desktop`)**: ships the route the spike validated — a top-level window wedged directly above the desktop window, held there by a foreground event hook. The fact survey traced the failure to a single style bit (Show Desktop only minimizes minimizable windows), so desktop windows drop `WS_MINIMIZEBOX` instead of switching to `WS_POPUP`. No public API change. | 🚧 Requirements confirmed · preliminary design reviewed (the `SWP_FRAMECHANGED` question is measured and closed: not needed) · detailed design approved; all three implementation batches landed, acceptance pending (A1-A8) |
+| **17** | **Layout padding**: one optional `int` on each of `VerticalLayout` / `HorizontalLayout`, applied at four points in `Arrange` — the main-axis start, the remaining-space computation, the cross-axis size and the cross-axis position — so setting it on the root insets the whole client area. Padding is a hard inset: when there is not enough room the content area collapses to zero and the coordinates stay put, rather than the padding being shrunk to fit. No new headers; four existing files change. | 🚧 Requirements confirmed · preliminary design v1.1 (the overflow test was corrected: `remaining` is the space shared out among stretch children, not the total main-axis size) · detailed design v1.0 awaiting review |
 
 ## License
 

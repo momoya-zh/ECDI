@@ -1,6 +1,6 @@
 ﻿# Phase 17 · 布局内边距（Layout padding）—— 初步设计
 
-> 状态：**v1.0 待评审**（2026-09-20）
+> 状态：**v1.1 待评审**（2026-09-20 · v1.1 修订：采纳评审对 **T17-5 / §3.4** 的指正，并**冻结 O1**）
 > 输入：需求确认 v1.0（`docs/phase17-layout-padding-requirements.md`）
 > 评审前置：外部评审结论「**需求本身成立，技术路线基本合理，可以进入初步设计；Q2 是当前唯一真正需要重点解决的语义问题**」——无阻塞项
 
@@ -47,6 +47,11 @@
 | 12 | Q5 不应成为阻塞项 | ✅ **采纳** |
 | 13 | 不得重排参数（追加而非前插） | ✅ **采纳**（D3 已定） |
 | 14 | 初设冻结 Q1–Q4 | ✅ **本稿 §3.1 / §3.3 / §6 逐项冻结** |
+| 15 | **T17-5 判据错误**：`remaining` 是「给 stretch 子的可用空间」，**不是**「所有子的主轴尺寸总和」 | ❌→✅ **指正成立，已修正**（v1.1）：`fixed` 子的主轴尺寸**根本不被布局改写**（`VerticalLayout.cpp:55-57` 的 `SetSize` 只动跨轴）⇒ 旧判据 `Σ == remaining == 0` 会被 fixed 子击穿。改用「fixed + stretch 混排」把两者测死（§7 T17-5） |
+| 16 | §3.4 的 overflow 措辞会被同一问题击穿；且「等式」**本来就是**「无 overflow 才成立」 | ⚠️→✅ **已重写 §3.4**：显式区分 `fixedTotal` 与 `remaining`；并澄清 **Phase 9.7 的 `max(0, …)` 早已意味着该等式只在无 overflow 区间成立**——不是 Phase 17 才让它失效（这处归因是原稿的误导） |
+| 17 | **O1 建议直接冻结**（不必留到详设） | ✅ **已冻结**（v1.1）：`FRAMEWORK_ASSERT(padding >= 0)` + **Release 侧钳 0**；断言特征串 **10 → 11** |
+| 18 | **T17-8 要区分 Debug assert / Release clamp** | ✅ **已采纳**：Debug 侧由**断言特征串核验**覆盖（不做「断言触发」的运行时测试），可自动化部分只测 Release 钳 0 |
+| 19 | D2 / 单值 / 第三参数 / 单层 `max` / 硬 inset / content-area 退化为 0 / 嵌套累加 / `padding=0` 逐位退化 —— 全部保持 | ✅ **保持**；其中「逐位退化」按评审建议**强化为最高优先级回归契约**（C1） |
 
 > ⚠️ **一处算术勘误（评审第 8 节的示例）**：原文以「`parent=500 / padding=20 / spacing=10 / 3 个 stretch`」举例，给出 `20 + 150 + 10 + 150 + 10 + 150 + 20 = 510`，并据此提示「还要注意扣除顺序」。**该例的加数与结论互相矛盾**（510 ≠ 500）。正确的分配是：`available = 500 − 40 = 460` → `remaining = 460 − 10×2 = 440` → 按整数截断 + 末位吃余数得 `146 / 146 / 148` ⇒ `20 + 146 + 10 + 146 + 10 + 148 + 20 = 500` ✓ **结论（必须先扣 `2p + spacing`）是对的，示例算式需更正**——本稿 §7 的 T17-4 采用更正后的数值。
 
@@ -150,13 +155,29 @@ const int cross = (std::max)(0, parent.GetWidth() - 2 * m_padding);
 
 **关于 Q4**：`Widget::SetSize` **本身无钳制**（B1）⇒ 本相位**不为 padding 引入任何额外约束**：布局传给 `SetSize` 的尺寸已是钳过的 `max(0, …)`，至于 `SetSize(0, h)` 之后的行为，**沿用既有语义**，不新增特例。
 
-### 3.4 与既有不变式的关系（评审第 9 条的精确化）
+### 3.4 与既有不变式的关系（v1.1 重写——采纳评审指正）
 
-原不变式（Phase 9.7）：`Σ 主轴尺寸 + spacing·(n−1) == parent主轴`（末位吃余数保证 Σ == remaining）
+**先澄清一个前提**：Phase 9.7 的 `remaining = max(0, …)` **本来就**意味着——当 fixed 子自身的尺寸之和就已超出 parent 时，`Σ 主轴尺寸 + spacing` **允许大于** parent。也就是说「各项之和恰好等于 parent」这条等式**从始至终只在「无 overflow」区间成立**，**不是** Phase 17 才让它失效（原稿把这一点写成「padding 导致等式失效」，是归因误导，v1.1 更正）。
 
-加 padding 后：`Σ 主轴尺寸 + spacing·(n−1) + 2p == parent主轴` —— **当且仅当 `remaining` 未触发钳制时成立**。
+**必须区分的两个量**（这是原稿真正搞错的地方）：
 
-> ⚠️ **钳制触发时（`2p + fixedTotal + spacing·(n−1) > parent`），等式不再成立**，正确的不变式退化为**非负可用空间模型**：`Σ 主轴尺寸 == remaining`（其中 `remaining = 0`）。**这是契约边界的刻意选择**，而非缺陷——T17-4 只在非钳制区间断言等式，钳制区间另立 T17-5 断 `remaining == 0` 且不崩。
+| 量 | 含义 | 是否被布局改写 |
+|---|---|---|
+| **`fixedTotal`** | 所有 `stretch == 0` 子的主轴尺寸之和 | ❌ **不被改写**——`Arrange` 对它们只 `SetPosition`（跨轴 `SetSize` 仅在 `fillCrossAxis` 时） |
+| **`remaining`** | 分给 `stretch > 0` 子的**可用主轴空间** | ✅ stretch 子的主轴尺寸由此分配（末位吃余数） |
+
+**无 overflow 区间**（`2p + fixedTotal + spacing·(n−1) <= parent主轴`）：
+
+- `Σ stretch子主轴尺寸 == remaining`
+- `fixedTotal + Σ stretch子主轴尺寸 + spacing·(n−1) + 2p == parent主轴`
+
+**overflow 区间**（上式不成立）：
+
+- `remaining == 0` ⇒ **所有 stretch 子主轴尺寸 == 0**
+- **fixed 子主轴尺寸保持其既有值**（布局不改写它们）——**这正是不能写 `Σ 主轴尺寸 == 0` 的原因**
+- 首子主轴起点仍为 `padding`；不崩溃
+
+**⇒ 完整模型**：`stretch 可用空间 = max(0, parent主轴 − 2p − fixedTotal − spacing·(n−1))`。T17-4 覆盖无 overflow 区间的等式，T17-5 覆盖 overflow 区间（并专门验证「fixed 保持、stretch 归零」）。
 
 ---
 
@@ -195,12 +216,12 @@ const int cross = (std::max)(0, parent.GetWidth() - 2 * m_padding);
 
 | # | 决策 | 倾向 | 说明 |
 |---|---|---|---|
-| **O1** | padding 的断言形态：`FRAMEWORK_ASSERT` / 仅测试断言 | ⚠️ **沿用 `FRAMEWORK_ASSERT`** | 与 `spacing`（`VerticalLayout.cpp:13`）和 `SetStretch`（`Widget.cpp:219`）同型；代价是**断言特征串 10 → 11**（A2 类核验需同步）。备选：只靠 T17-8 覆盖 ⇒ 特征串不变 |
+| **O1** | padding 的断言形态 | ✅ **已冻结（v1.1，采纳评审）**：`FRAMEWORK_ASSERT(padding >= 0)` + **Release 侧钳 0**（`m_padding = max(0, padding)`）。与 `spacing`（`VerticalLayout.cpp:13`）/ `SetStretch`（`Widget.cpp:219`）形成**一致的配置参数合法状态约束**——表达的是「合法状态是 `padding >= 0`」，而非「为测试而断言」。**代价：断言特征串 10 → 11**（A2 类核验需同步） |
 | **O2** | 是否提供 `GetPadding()` 访问器 | ❌ **不做** | 测试可直接观察**几何结果**（子坐标/尺寸），无需读回配置值；加 getter 会为「可测性」而无需求地扩 API（YAGNI） |
 | **O3** | ModelProbe 的 padding 取值 | 建议 **12 ~ 16 px** | 验收时目视定夺；不改 `main.cpp` 前不落地 |
 | **O4** | Root 的 padding 与 `CaptionBar`（Phase 13）的高度是否要联动 | ❌ **不联动** | 两者彼此独立（Phase 13 的 D7 已定「不联动」的同型先例） |
 
-**O1 是唯一需要在详设前收敛的一项**（它影响 A2 的断言特征串判据）。
+**O1 已在本稿 v1.1 冻结**（`FRAMEWORK_ASSERT` + Release 钳 0）⇒ 「唯一需在详设前收敛」的前置**已解除**。O2–O4 保持原倾向。
 
 ---
 
@@ -214,15 +235,17 @@ const int cross = (std::max)(0, parent.GetWidth() - 2 * m_padding);
 | **T17-2** | `Layout.PaddingSingleChild` | 单子 + `p` ⇒ 子位于 `(p, p)`、跨轴尺寸 `= max(0, 父跨轴 − 2p)` |
 | **T17-3** | `Layout.PaddingCrossAxisWidth` | `fillCrossAxis = true` + `p` ⇒ 每子跨轴 `= 父跨轴 − 2p` |
 | **T17-4** | `Layout.PaddingWithStretch` | 非钳制区间断言等式：**用评审示例的正确数值**——`父=500 / p=20 / spacing=10 / 3 个 stretch` ⇒ `available = 460`、`remaining = 440`、分配 `146 / 146 / 148`，验证 `20 + 146 + 10 + 146 + 10 + 148 + 20 == 500` ✓ |
-| **T17-5** | `Layout.PaddingOverflow` | `2p + spacing·(n−1) + fixedTotal > 父主轴`（如 `父=20 / p=15`）⇒ **不崩**、`Σ == remaining == 0`、坐标仍为 `padding`（C2） |
+| **T17-5** | `Layout.PaddingOverflow` | **用「fixed + stretch 混排」把 `fixedTotal` 与 `remaining` 是两个不同概念测死**（采纳评审给的更优结构）：`父=40 / p=20 / spacing=5`；Child A `stretch=0` **固定 10**、Child B `stretch=1` ⇒ `remaining = max(0, 40 − 40 − 10 − 5) = 0` ⇒ **A == 10（保持自身尺寸，而非 0）** · **B == 0** · 首子主轴起点 == `padding` · **不崩溃**（C2） |
 | **T17-6** | `Layout.PaddingNested` | 外层 `p=10` + 内层 `p=20` ⇒ 内层子相对外层的坐标 `= 30`（**累加**，非 max / 非继承） |
 | **T17-7** | `Layout.PaddingIdempotent` | 连续两次 `Arrange()` ⇒ 几何完全一致（C5） |
-| **T17-8** | `Layout.PaddingNegativeClamped` | 负值构造 ⇒ 钳 0（C6）；`HorizontalLayout` 的对称面另测 |
+| **T17-8** | `Layout.PaddingNegativeClamped` | **Debug / Release 语义分离**（O1 冻结后）：**Debug** 下负值构造触发 `FRAMEWORK_ASSERT`（由**断言特征串核验**覆盖，不做「断言触发」的运行时测试）；**Release** 下负值 ⇒ **钳 0**（本用例可自动化部分）。`HorizontalLayout` 的对称面另测 |
 
 **用例数**：218 → **218 + 8**（暂定；详设可拆并，N 以详设为准）。
 
 ---
 
 ## 8. 修订记录
+
+- **v1.1**（2026-09-20）**采纳第二轮评审：修正一处概念混淆 + 冻结 O1**。① **T17-5 判据修正**——原写 `Σ == remaining == 0`，但 `remaining` 是「**给 stretch 子的可用空间**」，而 **fixed 子的主轴尺寸根本不被布局改写**（`VerticalLayout.cpp:55-57` 的 `SetSize` 只动跨轴）⇒ 该判据会被 fixed 子击穿（评审给出的反例：`父=20 / p=15 / 一个 fixed 子 10` ⇒ `remaining=0` 但该子仍是 `10`）。**改为用「fixed + stretch 混排」测死两者之别**（`父=40 / p=20 / spacing=5 / A fixed 10 / B stretch1` ⇒ `A==10`、`B==0`）。② **§3.4 重写**——显式区分 `fixedTotal` 与 `remaining`，并**更正原稿的归因误导**：Phase 9.7 的 `max(0, …)` **早已**使等式只在无 overflow 区间成立，不是 padding 才让它失效。③ **O1 冻结**（`FRAMEWORK_ASSERT(padding >= 0)` + Release 钳 0）⇒ 断言特征串 **10 → 11**；「需在详设前收敛」的前置解除。④ **T17-8 语义分离**——Debug 由断言特征串核验覆盖，可自动化部分只测 Release 钳 0。⑤ 其余全部保持（§1.3 表新增第 15–19 条逐项处置）。
 
 - **v1.0**（2026-09-20）**初步设计初稿**。输入 = 需求确认 v1.0（外部评审「可进初步设计」）。① **§1.2 新增代码基线 B1–B6**（全部带行号）——其中 **B1（`SetSize` 无钳制）** 与 **B3（`ArrangeInternal` 递归重算）** 分别给 Q4 与 Q3 提供了**实证答案**，无需再凭推理；② **§1.3 对评审 14 条逐条处置**（全采纳；其中第 5 条**采纳目标但简化形式**——论证单层 `max` 与两层等价，且是最小 diff），并**指出评审示例的一处算术勘误**（示例加数 510 ≠ 500，正确分配为 `146/146/148`）；③ **§1.4 建立 Q1–Q5 → 本稿落点的答案索引**（五问全部收敛）；④ **§3.3 定案取值口径三项**（单层钳 / 跨轴钳 0 / 主轴起点不钳——硬 inset）；⑤ **§3.4 精确化不变式**：等式仅在非钳制区间成立，钳制区间退化为「非负可用空间模型」（这是契约边界的选择而非缺陷）；⑥ **契约 C1–C6**（C1「逐位退化」与 C2「硬 inset」为守护性契约）；⑦ **§7 测试口径**含**更正后的 T17-4 数值**；⑧ **开放点 O1–O4**，其中 **O1（断言形态）是唯一需在详设前收敛的一项**（影响断言特征串 10→11 与否）。**待评审。**
