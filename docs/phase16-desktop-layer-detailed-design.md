@@ -19,7 +19,7 @@
 | 2 | `ECDI/include/ECDI/Platform/PlatformWindow.h` | 修改 | **仅注释**（`SetWindowLayer` 的 `@details` 3 行） | §2.2 —— ★ **初设漏项**，见 §1.3 D-1 |
 | 3 | `ECDI/src/Platform/Win32/Win32PlatformWindow.h` | 修改 | +2 成员 · **+12 方法**（**10** 个类外定义：`ResolveTarget` / `TargetInsertAfter` / `FindDesktopWindow` / `IsDirectlyAboveDesktop` / `ReinsertAboveDesktop` / `ApplyDesktopStyle` / `SyncDesktopHook` / `SyncDesktopHookOff` / `OnForegroundChanged` / `DesktopForegroundProc`；**2** 个内联：观测缝 setter `SetDesktopHookObserverForTests` / 判据 `IsDesktopLayer`）· +1 `using` | §2.3（**v1.3 更正**：原「+9 方法 +1 缝 setter」把内联判据漏计、又把 setter 重复计数） |
 | 4 | `ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` | 修改 | **+2** 标准库 include（`<cwchar>` + `<unordered_map>`） · +2 匿名 namespace 实体 · **3 处既有代码改造** · +9 新方法体 | §2.4 |
-| 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-8（**实测 529 行 / 51 条 `EXPECT_*`**——v1.4 回写「435 行 / 47 条」，**v1.8 增补 T16-8** 后更新） | §2.5 |
+| 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-8（**实测 562 行 / 52 条 `EXPECT_*`**——v1.4 回写「435 行 / 47 条」，**v1.8 增补 T16-8** · **v1.10 重写 T16-8 的负状态造法**后更新） | §2.5 |
 | 6 | `ECDI/src/Tests/RunAllTests.h` | 修改 | +1 声明 | §2.6 |
 | 7 | `ECDI/src/Tests/RunAllTests.cpp` | 修改 | +1 调用 | §2.6 |
 | — | `CMakeLists.txt` | **零改动** | — | `GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库（新 `.cpp` 无需登记） |
@@ -625,7 +625,7 @@ void Win32PlatformWindow::SyncDesktopHookOff(){
 
 ### 2.5 新建 `ECDI/src/Tests/DesktopLayerTests.cpp`
 
-**结构（实测 **529 行 / 51 条 `EXPECT_*`**——立项估「约 250 行」未计项目「每语句间空行」排版惯例；v1.8 增补 T16-8 后由 444/47 更新）：include 段 → `LayerHost` → **4 个 helper** → 8 个用例 → `RegisterDesktopLayerTests()`。
+**结构（实测 **562 行 / 52 条 `EXPECT_*`**——立项估「约 250 行」未计项目「每语句间空行」排版惯例；v1.8 增补 T16-8 后由 444/47 更新 · **v1.10 重写后为 562/52**）：include 段 → `LayerHost` → **4 个 helper** → 8 个用例 → `RegisterDesktopLayerTests()`。
 
 #### 2.5.1 include 段（照抄 `DropFilesTests.cpp` 的骨架）
 
@@ -731,7 +731,7 @@ int g_hookOff = 0;
 void CountingHookObserver(bool installed){ installed ? ++g_hookOn : ++g_hookOff; }
 ```
 
-#### 2.5.4 七个用例的断言规格
+#### 2.5.4 八个用例的断言规格
 
 | # | 用例名 | 关键代码 / 断言 |
 |---|---|---|
@@ -742,7 +742,7 @@ void CountingHookObserver(bool installed){ installed ? ++g_hookOn : ++g_hookOff;
 | **T16-5** | `DesktopLayer.NormalLayerNotMaintained` | 三窗口 `ref` / `normal` / `bottom`；`ref.Show()` → **正对照** `bottom.SetWindowLayer(Bottom); bottom.Show()` ⇒ `IsAboveInZOrder(ref, bottom)` 为真（**证明维护机制在工作**）→ 被测 `normal.Show()` ⇒ `IsAboveInZOrder(normal, ref)` 为真（**Normal 不受维护、后显示者在上**，契约 C3） |
 | **T16-6** | `DesktopLayer.ConfigTimeContract` | `Set(Desktop)` → **`Show()` + 泵消息** → **然后**记 `styled` / `onBefore` / `offBefore`（★ 基线在 Show **之后**——`GWL_STYLE` 整值含**系统动态位** `WS_VISIBLE`，由 `ShowWindow` 写入；Show 前取基线 + 整值比较 = **假失败**，v1.5 实测）→ 运行期 `Set(Normal)` + `Set(Bottom)`；断言两个独立观测代理均未变：**`(style & ~kDynamic) == (styled & ~kDynamic)`**（`kDynamic = WS_VISIBLE \| WS_MINIMIZE \| WS_MAXIMIZE`——系统自管位，不归本契约；若被拒路径错跑 `ApplyDesktopStyle(false)`，`WS_MINIMIZEBOX` 被补回 ⇒ 掩码比较照样抓到）∧ `g_hookOn == onBefore` ∧ `g_hookOff == offBefore`（契约 C10） |
 | **T16-7** | `DesktopLayer.ResolveTargetTruthTable` | 五条纯逻辑断言（见下 §2.5.6）——**不需要 explorer、不需要 Show** |
-| **T16-8** | `DesktopLayer.DesktopFollowChain` | **A5 修复链的自动化覆盖（v1.8）**：`Set(Desktop)` → `Show` → 断言**正对照 A**（初始在位：`GetWindow(桌面, GW_HWNDPREV) == hwnd`）→ **`SetWindowPos(桌面窗口, HWND_TOP, …)` 制造「不在位」**（复刻 Win+D 的桌面抬升；变的是桌面 ⇒ **不触发**本窗口的 `WM_WINDOWPOSCHANGING`——若改成压自己会被 `ResolveTarget` 的持续维护当场纠正）→ 断言**正对照 B**（确实已不在位）→ `PostMessageW(hwnd, WM_APP + 2, 0, 0)` → **`PumpMessagesFor(300)`**（4 拍 × 16ms ≈ 64ms，留 5× 余量；`WM_TIMER` 需真实时间）→ 断言终点 `GetWindow(桌面, GW_HWNDPREV) == hwnd` → **还原**（桌面回 `HWND_BOTTOM`）。⚠️ 边界：覆盖「消息 → 多拍 → 终点在位」的机制与收敛，**不**覆盖「与外壳抢时序」（属手测 A5 判据①）；**拍数不可断言**（无观测缝）。⚠️ `kDesktopFollowMsg` 在 `.cpp` 匿名 namespace（测试不可见）⇒ 以字面量投递并注明**漂移保护**语义 |
+| **T16-8** | `DesktopLayer.DesktopFollowChain` | **A5 修复链的自动化覆盖（v1.8）**：`Set(Desktop)` → `Show` → 断言**正对照 A**（初始在位：`GetWindow(桌面, GW_HWNDPREV) == hwnd`）→ **用**参照窗口 `other`（**Normal 档**）**制造「不在位」**：`other.Show()` 后 `SetWindowPos(otherHwnd, hwnd, …)` 把 `other` 插到当前占位者 `hwnd` **之下** ⇒ `other` 取代它紧贴桌面、`hwnd` 被挤上去。⚠️ **不得搬动系统桌面（v1.10 修正——T16-8 首轮失败的根因）**：shell 会**异步修复**对 `Progman` 的 z 序改动，修复过程恰好**抹掉链在那 64ms 内的重插** ⇒ 用例**假失败**（实测 probe：稳定后同一条 `SetWindowPos` 一次成功 `ok=1/eq=1`）；旧写法一旦中途被中断（暂停 / kill / SEH），桌面 z 序会被**永久**留成异常态 ⇒ 须重启 explorer。改用**自己的窗口**占位后：状态稳定可控 · **零系统级副作用** · 更贴近真实场景（Win+D 之后桌面之上仍有其它窗口）→ 断言**正对照 B**（确实已不在位）→ `PostMessageW(hwnd, WM_APP + 2, 0, 0)` → **`PumpMessagesFor(300)`**（4 拍 × 16ms ≈ 64ms，留 5× 余量；`WM_TIMER` 需真实时间）→ 断言终点 `GetWindow(桌面, GW_HWNDPREV) == hwnd` → **无需还原**（全程不移动系统桌面 ⇒ 零系统级副作用）。⚠️ 边界：覆盖「消息 → 多拍 → 终点在位」的机制与收敛，**不**覆盖「与外壳抢时序」（属手测 A5 判据①）；**拍数不可断言**（无观测缝）。⚠️ `kDesktopFollowMsg` 在 `.cpp` 匿名 namespace（测试不可见）⇒ 以字面量投递并注明**漂移保护**语义 |
 
 #### 2.5.5 T16-4 的两窗口分工（**必须拆**，否则测不到）
 
@@ -906,7 +906,7 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 | **T16-5** | `DesktopLayer.NormalLayerNotMaintained` | 含**正对照**（先证 Bottom 档维护确实生效）⇒ 再断言 `Normal` 不受维护 | 自动（真窗口 z 序） |
 | **T16-6** | `DesktopLayer.ConfigTimeContract` | `Show()` 后 `SetWindowLayer` 被拒：**两个独立观测代理**（样式位 + 钩子计数）均不变 | 自动 |
 | **T16-7** | `DesktopLayer.ResolveTargetTruthTable` | 五条真值表（§3.1 逐行）+ 句柄失效正对照（§2.5.6 的顺序纪律） | 自动（**纯函数——不需要窗口 / explorer**） |
-| **T16-8** | `DesktopLayer.DesktopFollowChain` | 消息 → 多拍重试 → **终点紧贴桌面窗口正上方**；两条正对照（初始在位 / 制造后确实不在位）；自还原（桌面回 `HWND_BOTTOM`） | 自动（真窗口 + z 序 + 带等待的泵） |
+| **T16-8** | `DesktopLayer.DesktopFollowChain` | 消息 → 多拍重试 → **终点紧贴桌面窗口正上方**；两条正对照（初始在位 / 制造后确实不在位）；**零系统级副作用**（不移动系统桌面 ⇒ 无需还原） | 自动（真窗口 + z 序 + 带等待的泵） |
 
 **用例数**：210 → **+8 = 218**（T16-8 为 v1.8 增补）。
 
@@ -1029,6 +1029,9 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 ---
 
 ## 10. 修订记录
+
+- v1.10（2026-09-20）**T16-8 重写「制造不在位」的手段——根因：搬动系统桌面会被 shell 异步修复**（实测驱动）。① **症状**：T16-8 首轮起**只此一条**失败——终点断言 `GetWindow(desktop, GW_HWNDPREV) == hwnd`，而正对照 A（初始在位）与正对照 B（已离位）**均通过**；`ecdi_tests` 稳定输出 `217 passed, 1 failed, 218 total`。② **排障（三轮只读诊断，全部实测）**：`still queued = 0` ⇒ `WM_APP + 2` **已被泵走** ⇒ `HandleMessage` 必然收到 ⇒ **链执行了**（排除「链没跑」）· `prevNull = 0` ⇒ 桌面**不在** z 序最顶（排除 C11 的跳过分支）· `desktop` 类名 = **`Progman`** ⇒ 参照物正确 · 5 次采样 `prev` **恒定** ⇒ 无外部漂移。③ ★ **决定性实验**（置于断言**之后**，不影响断言）：用**同一 target** 直接 `SetWindowPos(hwnd, target, …)` ⇒ **`ok=1` 且 `prev == hwnd`** ⇒ **操作本身有效**，既非「自引用覆盖」亦非调用失败 ⇒ **差别只在时机**：链在 64ms 内重插（被抹掉），probe 在 300ms 后（稳定期）重插（成功）。④ **根因**：测试用**搬动 `Progman`** 制造「不在位」，而 **shell 会异步修复**对系统桌面的 z 序改动，修复过程重排 z 序 ⇒ **恰好抹掉跟随链那 64ms 内的重插**。**跟随链本身没有问题**——是测试所造的**负状态不稳定**。⑤ **修复**：改用**自己的参照窗口** `other`（**Normal 档** ⇒ 不参与 z 序维护 ⇒ 状态稳定可控）占住「紧贴桌面正上方」——把 `other` 插到当前占位者 `hwnd` **之下** ⇒ `other` 取代它紧贴桌面、`hwnd` 被挤上去 ⇒ 链的 `SetWindowPos(hwnd, otherHwnd)` 即可复位。**附带收益**：**完全不移动系统桌面** ⇒ 用例**无需还原、零系统级副作用**；且更贴近真实场景。⑥ **规模**：断言 **51 → 52**（正对照 B 拆为 `== otherHwnd` + `!= hwnd` 两条）；文件 **610 → 562 行**（临时诊断全部清除）；用例 **218** 不变。**实测 `218 passed, 0 failed`** ✓（在**移除全部诊断**后取得 ⇒ 非假绿）。⑦ **过程教训（两条自我纠正）**：(a) 初版 `PumpMessagesFor` 漏了**单轮上界** ⇒ 在测试替身不消费 update region 所致的 `WM_PAINT` 洪水中**永不退出** ⇒ 用例挂死（详见 v1.9 ⑧）；(b) 首轮诊断含**副作用**（多投一条消息 + 多泵 700ms）⇒ 把失败用例**救成假绿**（GDB 下曾报 `218/218`）⇒ **诊断必须只读**是硬纪律。⑧ **波及文档**：§2.5.4 T16-8 规格行 · §5 概览行 · §1.1/§2.5 规模锚点 · `docs/README.md`。
+- v1.9（2026-09-20）**T16-8 的中断安全修正（用户授权）——把「抬到全场最顶」改为「只挪一格」**。① **动机（实测暴露）**：初版用 `SetWindowPos(桌面窗口, HWND_TOP, …)` 制造「不在位」，这会把**系统桌面抬到 z 序最顶** ⇒ ① 盖住**所有**第三方窗口（用户跑测试时自己的 IDE 即被扰动）；② **更严重**：若进程在该行与下方还原（`:514`）之间被中断（IDE 暂停 / kill / **SEH——`catch(...)` 不捕获**），桌面会**永久**停在顶层、shell 的 z 序被留成异常态 ⇒ 此后 Win+D 不再产生可观察的桌面抬升 ⇒ 跟随链根本不启动，**现象酷似「功能回归」**，恢复须**重启 explorer**。② **修正**：改为 `SetWindowPos(桌面窗口, hwnd, …)`——把桌面插到**本窗口之上**（`hwndInsertAfter = hwnd`，z 序只**交换一格**）。**用例语义逐项不变**：负状态照样成立（我们落到桌面之下）· 变的是桌面窗口 ⇒ 照样**不触发**本窗口的 `WM_WINDOWPOSCHANGING` · 正对照 A/B 与终点断言均不受影响；而**影响面从「全屏」缩到「本窗口 ↔ 桌面」一格**，中断也不会波及用户桌面。③ **判据澄清**：本用例只需制造「不在位」这一**前提**，**并不追求复刻 Win+D 的全局效果** ⇒ 只交换一格已充分（原注释「复刻 Win+D 的机制」措辞一并更正，避免把手段写得比目的更强）。④ **触发线索**：用户在 CLion 调试中按 **Pause** 后报告「`P16Follow` 窗口不自己关 / Win+D 不插入 / 点 X 关不掉」——经查 GDB 的 `Thread N received signal SIGINT` + `KERNELBASE!CtrlRoutine` 即 **IDE 的 Pause**（非断点、非崩溃），上述现象**全部是暂停态假象**（消息循环冻结 ⇒ 钩子回调不派发、栈对象不析构）；**测试框架自身的收尾与报错健全**（`RunOne` 的 `try/catch(...)` 保证栈展开、`PrintSummary` 输出 `[FAIL] <名>` + `<文件>:<行号> <表达式>` + `Tests: N Passed: M Failed: K`）。但该事件**暴露了本用例的中断不安全**，故一并加固。⑤ **附带更正**：§2.5.4 标题「**七个**用例的断言规格」→「**八个**」（v1.8 增补 T16-8 时漏改的标题计数）。⑥ **规模**：用例 **218** · 断言 **51** 均不变；`DesktopLayerTests.cpp` **529 → 545 行**（1 行代码 + 注释；其中 `PumpMessagesFor` 的挂死修复见 ⑧）。⑦ **教训沉淀**：skill 条 85 **修正**（`hwndInsertAfter` 不得用 `HWND_TOP`）+ 条 86 **新增并补充**（调试器暂停态下的交互观察一律无效 · `SIGINT + CtrlRoutine` 的识别 · **以及「暂停态判读不得用来结案」**）。⑧ ★ **同批修复：`PumpMessagesFor` 的挂死缺陷**（T16-8 首轮实测暴露，是本用例无法收尾的真因）。**根因**：测试替身 `LayerHost::OnPaint()` 是**空实现** ⇒ **不消费窗口 update region**（生产环境由 `GDIBackend` 的 `BeginPaint`/`EndPaint` 配对消费——`GDIBackend.cpp:251` / `:799`，决策 17）⇒ update region 恒 dirty ⇒ 系统在消息队列**空**时**持续重新投递 `WM_PAINT`** ⇒ 初版 helper 的**无上限**内层 `while (PeekMessageW(…))` **永不退出** ⇒ 外层 300ms 时间检查**永远到不了** ⇒ 用例挂死、进程不退出、窗口残留、点关闭无响应。**探测特征（可复用）**：`IsHungAppWindow()==FALSE`（线程一直在取消息，故不被判为 hung）但 `GetUpdateRect()` **非空**；且 `P16Follow` 是**唯一**残留的 ECDI 窗口——T16-1..T16-6 的窗口均已正常析构，因为 `PumpMessages(n)` 有 `n` 次上限，而 `PumpMessagesFor` 是本次新增的 helper、**唯独它漏了上界**。**修复**：内层加 `burst < 256` **单轮上限**，保证外层时间检查可达。**文件行数** 529 → **545**。
 
 - v1.8（2026-09-20）**T16-8 增补：A5 修复链的自动化覆盖**。`5da1dca` 的桌面跟随链（消息延后一拍 + 固定 4 拍重试 + `WM_TIMER` 按 id 拦截）此前**零自动覆盖**——而它是本阶段唯一的「用户可见行为」实现（性质同 T16-1 补 `Bottom` 回归）。① **新增 T16-8 `DesktopLayer.DesktopFollowChain`**（见 §2.5.4 / §5）；② **新增 helper `PumpMessagesFor(ms)`**——`SetTimer` 的 `WM_TIMER` 需**真实时间**，而 `PumpMessages` 是「有多少泵多少」即刻返回 ⇒ 必须「泵 + 小睡」；③ 规模更新：测试文件 444 → **529 行**、断言 47 → **51 条**、用例 **217 → 218**。**零实现改动**（常量留在 `.cpp` 匿名 namespace，测试以字面量 + 漂移保护语义投递）。
 

@@ -70,7 +70,17 @@ void PumpMessagesFor(int ms){
 
 	while (GetTickCount64() < end){
 
-		while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)){
+		// ⚠️ 单轮**必须有上限**——这是 T16-8 首轮实测挂死的根因（本 helper 初版漏了它）：
+		//   测试替身 `LayerHost::OnPaint()` 是**空实现** ⇒ **不消费窗口的 update region**
+		//   （生产环境由 `GDIBackend` 的 `BeginPaint`/`EndPaint` 配对消费——
+		//   `GDIBackend.cpp:251` / `:799`）⇒ update region 恒为 dirty ⇒ 系统在消息队列
+		//   **空**时持续**重新投递 `WM_PAINT`** ⇒ 无上限的内层循环**永不退出**，
+		//   外层的时间检查永远到不了 ⇒ 用例挂死（现象：进程不退出 · 窗口残留 ·
+		//   点关闭无响应。探测特征 = `IsHungAppWindow()==FALSE`（线程一直在取消息，
+		//   故不被判为 hung）但 `GetUpdateRect()` **非空**）。
+		int burst = 0;
+
+		while (burst++ < 256 && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)){
 
 			TranslateMessage(&msg);
 
@@ -457,16 +467,27 @@ void TestResolveTargetTruthTable(){
 // ── T16-8：桌面跟随链（A5 修复：延后一拍 + 有界重试）────────────────────────
 // ⚠️ 覆盖边界：本用例验证「**消息 → 多拍重试 → 终点紧贴桌面窗口正上方**」这一机制
 //    与收敛性；**不**覆盖「与外壳抬桌面抢时序」——那需要真实 Win+D ⇒ 属手测 A5 判据①。
-//    本环境没有外壳在竞争 ⇒ 第 1 拍即可命中；**拍数不可观测**（无观测缝——
-//    `follow ended but NOT above desktop (raise max steps)` 警告是其失败信号）。
+//    **拍数不可观测**（无观测缝——`follow ended but NOT above desktop (raise max steps)`
+//    警告是其失败信号）。
+// ⚠️ **不得用「搬动系统桌面」来制造「不在位」**（T16-8 首轮教训）：shell 会**异步修复**
+//    对 `Progman` 的 z 序改动，修复过程恰好抹掉链在那 64ms 内的重插 ⇒ 用例**假失败**；
+//    且一旦中途被中断，桌面 z 序会被永久留在异常态。⇒ 改用**自己的参照窗口**占位。
 
 void TestDesktopFollowChain(){
 
 	LayerHost host;
 
+	LayerHost hostOther;
+
 	Win32PlatformWindow window(host, "P16Follow", 200, 200);
 
+	// 参照窗口：**普通档**（不参与 z 序维护 ⇒ 状态稳定可控），稍后用来占住
+	// 「紧贴桌面正上方」那个位置。
+	Win32PlatformWindow other(hostOther, "P16FollowOther", 200, 200);
+
 	const HWND hwnd = window.GetHwndForTests();
+
+	const HWND otherHwnd = other.GetHwndForTests();
 
 	window.SetWindowLayer(WindowLayer::Desktop);
 
@@ -483,15 +504,27 @@ void TestDesktopFollowChain(){
 	// 正对照 A：配置期的初始插入已把窗口放在桌面窗口正上方
 	EXPECT_TRUE(GetWindow(desktop, GW_HWNDPREV) == hwnd);
 
-	// 制造「不在位」——把**桌面抬到普通带最顶**（复刻 Win+D 的机制：桌面被抬升，
-	// 我们因此落到它之下）。⚠️ 变的是桌面窗口 ⇒ **不会**触发本窗口的
-	// `WM_WINDOWPOSCHANGING`；若改成「压自己」，Desktop 分支会当场把 z 序纠正回来
-	// ⇒ 压不下去（这正是 `ResolveTarget` 持续维护的语义）。
-	SetWindowPos(desktop, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	// 制造「不在位」——让参照窗口 `other` 占住「紧贴桌面正上方」那个位置：把 `other` 插到
+	// **当前占位者（hwnd）之下** ⇒ `other` 取代 hwnd 紧贴桌面，hwnd 被挤到它上面。
+	// ⚠️ **不移动系统桌面（`Progman`）**——这是 T16-8 首轮失败的根因所在：实测 shell 会
+	//   **异步修复**对 `Progman` 的移动，修复过程重排 z 序，恰好**抹掉跟随链在那 64ms 内的
+	//   重插**；而等一切稳定（300ms 后）再插，同一条 `SetWindowPos` 一次就成功
+	//   （probe 实测 `ok=1 / eq=1`）⇒ 问题在**测试制造的「不在位」状态不稳定**，不在跟随链。
+	//   改用自己的窗口占位后状态**稳定可控**，且更贴近真实场景——Win+D 之后桌面之上通常
+	//   仍有其它窗口，不会孤零零位于 z 序最顶。
+	// ⚠️ 变的是 `other`（Normal 档）⇒ 不会触发本窗口的 `WM_WINDOWPOSCHANGING` 维护。
+	other.Show();
 
 	PumpMessages(16);
 
-	// 正对照 B：确实已不在位（否则下一条断言可能只是「本来就位」的**假绿**——条 75）
+	SetWindowPos(otherHwnd, hwnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	PumpMessages(32);
+
+	// 正对照 B：`other` 确实取代了 hwnd 的位置（否则下一条断言可能只是「本来就位」的
+	// **假绿**——条 75）。两条一起给：既证明占位成功，也证明 hwnd 确实已离位。
+	EXPECT_TRUE(GetWindow(desktop, GW_HWNDPREV) == otherHwnd);
+
 	EXPECT_TRUE(GetWindow(desktop, GW_HWNDPREV) != hwnd);
 
 	// 投递跟随消息。⚠️ 字面量与 `.cpp` 匿名 namespace 的 `kDesktopFollowMsg` 同源
@@ -501,13 +534,13 @@ void TestDesktopFollowChain(){
 	// 4 拍 × 16ms ≈ 64ms ⇒ 留约 5× 余量
 	PumpMessagesFor(300);
 
-	// ★ 被测量：跟随链把窗口插回桌面窗口正上方
+	// ★ 被测量：跟随链把窗口插回桌面窗口正上方（`other` 被挤到 hwnd 之上）
 	EXPECT_TRUE(GetWindow(desktop, GW_HWNDPREV) == hwnd);
 
-	// 还原：桌面回 z 序最底（系统常态——避免把副作用留给你）
-	SetWindowPos(desktop, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-
-	PumpMessages(16);
+	// ⚠️ 本用例**不移动系统桌面** ⇒ **无需还原，也没有系统级副作用**。这是换用参照窗口
+	//    方案的附带收益：旧版必须在末尾把 `Progman` 推回 `HWND_BOTTOM`，而一旦在那之前
+	//    被中断（暂停 / kill / SEH），桌面的 z 序就被**永久**留在异常态 ⇒ 此后 Win+D
+	//    不再产生可观察的桌面抬升，现象酷似「功能回归」，恢复须重启 explorer。
 
 }
 
