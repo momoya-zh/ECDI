@@ -1,4 +1,4 @@
-﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）详细设计（v1.6）
+﻿# Phase 16 桌面驻留层（`WindowLayer::Desktop`）详细设计（v1.8）
 
 > 阶段：详细设计（五阶段法 ③）
 > 日期：2026-09-19
@@ -19,7 +19,7 @@
 | 2 | `ECDI/include/ECDI/Platform/PlatformWindow.h` | 修改 | **仅注释**（`SetWindowLayer` 的 `@details` 3 行） | §2.2 —— ★ **初设漏项**，见 §1.3 D-1 |
 | 3 | `ECDI/src/Platform/Win32/Win32PlatformWindow.h` | 修改 | +2 成员 · **+12 方法**（**10** 个类外定义：`ResolveTarget` / `TargetInsertAfter` / `FindDesktopWindow` / `IsDirectlyAboveDesktop` / `ReinsertAboveDesktop` / `ApplyDesktopStyle` / `SyncDesktopHook` / `SyncDesktopHookOff` / `OnForegroundChanged` / `DesktopForegroundProc`；**2** 个内联：观测缝 setter `SetDesktopHookObserverForTests` / 判据 `IsDesktopLayer`）· +1 `using` | §2.3（**v1.3 更正**：原「+9 方法 +1 缝 setter」把内联判据漏计、又把 setter 重复计数） |
 | 4 | `ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` | 修改 | **+2** 标准库 include（`<cwchar>` + `<unordered_map>`） · +2 匿名 namespace 实体 · **3 处既有代码改造** · +9 新方法体 | §2.4 |
-| 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-7（**实测 435 行 / 47 条 `EXPECT_*`**——v1.4 回写，估算偏低见 §2.5） | §2.5 |
+| 5 | `ECDI/src/Tests/DesktopLayerTests.cpp` | **新建** | T16-1..T16-8（**实测 529 行 / 51 条 `EXPECT_*`**——v1.4 回写「435 行 / 47 条」，**v1.8 增补 T16-8** 后更新） | §2.5 |
 | 6 | `ECDI/src/Tests/RunAllTests.h` | 修改 | +1 声明 | §2.6 |
 | 7 | `ECDI/src/Tests/RunAllTests.cpp` | 修改 | +1 调用 | §2.6 |
 | — | `CMakeLists.txt` | **零改动** | — | `GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库（新 `.cpp` 无需登记） |
@@ -30,7 +30,7 @@
 | 量 | 前 | 后 | 说明 |
 |---|---|---|---|
 | **Public 头** | 92 | **92** | 净增 0——本阶段无新头、无新 public 类型 |
-| **测试用例** | 210 | **217** | +7（T16-1..T16-7）；`ecdi_tests` 注册总数（实测基线 210，21 个文件） |
+| **测试用例** | 210 | **218** | +8（T16-1..T16-8；T16-8 为 v1.8 增补）；`ecdi_tests` 注册总数（实测基线 210，21 个文件） |
 | **断言特征串** | 10 | **10** | ★ **零新增断言**——见 §1.3 D-5 |
 
 ### 1.3 本稿对初设的**六**处修正（逐条给理由）
@@ -625,7 +625,7 @@ void Win32PlatformWindow::SyncDesktopHookOff(){
 
 ### 2.5 新建 `ECDI/src/Tests/DesktopLayerTests.cpp`
 
-**结构（实测 **435 行 / 47 条 `EXPECT_*`**——立项估「约 250 行」未计项目「每语句间空行」排版惯例，偏差 +74%）：include 段 → `LayerHost` → 3 个 helper → 7 个用例 → `RegisterDesktopLayerTests()`。
+**结构（实测 **529 行 / 51 条 `EXPECT_*`**——立项估「约 250 行」未计项目「每语句间空行」排版惯例；v1.8 增补 T16-8 后由 444/47 更新）：include 段 → `LayerHost` → **4 个 helper** → 8 个用例 → `RegisterDesktopLayerTests()`。
 
 #### 2.5.1 include 段（照抄 `DropFilesTests.cpp` 的骨架）
 
@@ -742,6 +742,7 @@ void CountingHookObserver(bool installed){ installed ? ++g_hookOn : ++g_hookOff;
 | **T16-5** | `DesktopLayer.NormalLayerNotMaintained` | 三窗口 `ref` / `normal` / `bottom`；`ref.Show()` → **正对照** `bottom.SetWindowLayer(Bottom); bottom.Show()` ⇒ `IsAboveInZOrder(ref, bottom)` 为真（**证明维护机制在工作**）→ 被测 `normal.Show()` ⇒ `IsAboveInZOrder(normal, ref)` 为真（**Normal 不受维护、后显示者在上**，契约 C3） |
 | **T16-6** | `DesktopLayer.ConfigTimeContract` | `Set(Desktop)` → **`Show()` + 泵消息** → **然后**记 `styled` / `onBefore` / `offBefore`（★ 基线在 Show **之后**——`GWL_STYLE` 整值含**系统动态位** `WS_VISIBLE`，由 `ShowWindow` 写入；Show 前取基线 + 整值比较 = **假失败**，v1.5 实测）→ 运行期 `Set(Normal)` + `Set(Bottom)`；断言两个独立观测代理均未变：**`(style & ~kDynamic) == (styled & ~kDynamic)`**（`kDynamic = WS_VISIBLE \| WS_MINIMIZE \| WS_MAXIMIZE`——系统自管位，不归本契约；若被拒路径错跑 `ApplyDesktopStyle(false)`，`WS_MINIMIZEBOX` 被补回 ⇒ 掩码比较照样抓到）∧ `g_hookOn == onBefore` ∧ `g_hookOff == offBefore`（契约 C10） |
 | **T16-7** | `DesktopLayer.ResolveTargetTruthTable` | 五条纯逻辑断言（见下 §2.5.6）——**不需要 explorer、不需要 Show** |
+| **T16-8** | `DesktopLayer.DesktopFollowChain` | **A5 修复链的自动化覆盖（v1.8）**：`Set(Desktop)` → `Show` → 断言**正对照 A**（初始在位：`GetWindow(桌面, GW_HWNDPREV) == hwnd`）→ **`SetWindowPos(桌面窗口, HWND_TOP, …)` 制造「不在位」**（复刻 Win+D 的桌面抬升；变的是桌面 ⇒ **不触发**本窗口的 `WM_WINDOWPOSCHANGING`——若改成压自己会被 `ResolveTarget` 的持续维护当场纠正）→ 断言**正对照 B**（确实已不在位）→ `PostMessageW(hwnd, WM_APP + 2, 0, 0)` → **`PumpMessagesFor(300)`**（4 拍 × 16ms ≈ 64ms，留 5× 余量；`WM_TIMER` 需真实时间）→ 断言终点 `GetWindow(桌面, GW_HWNDPREV) == hwnd` → **还原**（桌面回 `HWND_BOTTOM`）。⚠️ 边界：覆盖「消息 → 多拍 → 终点在位」的机制与收敛，**不**覆盖「与外壳抢时序」（属手测 A5 判据①）；**拍数不可断言**（无观测缝）。⚠️ `kDesktopFollowMsg` 在 `.cpp` 匿名 namespace（测试不可见）⇒ 以字面量投递并注明**漂移保护**语义 |
 
 #### 2.5.5 T16-4 的两窗口分工（**必须拆**，否则测不到）
 
@@ -793,6 +794,7 @@ void ECDI::Test::RegisterDesktopLayerTests(){
 	GetTestRegistry().Add("DesktopLayer.NormalLayerNotMaintained",      &TestNormalLayerNotMaintained);
 	GetTestRegistry().Add("DesktopLayer.ConfigTimeContract",            &TestConfigTimeContract);
 	GetTestRegistry().Add("DesktopLayer.ResolveTargetTruthTable",       &TestResolveTargetTruthTable);
+	GetTestRegistry().Add("DesktopLayer.DesktopFollowChain",         &TestDesktopFollowChain);
 
 }
 ```
@@ -893,7 +895,7 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 
 ---
 
-## 5. 测试规格（`ecdi_tests`——T16-1..T16-7）
+## 5. 测试规格（`ecdi_tests`——T16-1..T16-8）
 
 | # | 用例 | 断言要点 | 层级 |
 |---|---|---|---|
@@ -904,8 +906,9 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 | **T16-5** | `DesktopLayer.NormalLayerNotMaintained` | 含**正对照**（先证 Bottom 档维护确实生效）⇒ 再断言 `Normal` 不受维护 | 自动（真窗口 z 序） |
 | **T16-6** | `DesktopLayer.ConfigTimeContract` | `Show()` 后 `SetWindowLayer` 被拒：**两个独立观测代理**（样式位 + 钩子计数）均不变 | 自动 |
 | **T16-7** | `DesktopLayer.ResolveTargetTruthTable` | 五条真值表（§3.1 逐行）+ 句柄失效正对照（§2.5.6 的顺序纪律） | 自动（**纯函数——不需要窗口 / explorer**） |
+| **T16-8** | `DesktopLayer.DesktopFollowChain` | 消息 → 多拍重试 → **终点紧贴桌面窗口正上方**；两条正对照（初始在位 / 制造后确实不在位）；自还原（桌面回 `HWND_BOTTOM`） | 自动（真窗口 + z 序 + 带等待的泵） |
 
-**用例数**：210 → **+7 = 217**。
+**用例数**：210 → **+8 = 218**（T16-8 为 v1.8 增补）。
 
 ### 5.1 自动化边界（与需求稿 §6 三层分层的对应）
 
@@ -913,7 +916,7 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 |---|---|---|
 | **C1**（真实 z 序 = 紧贴桌面之上） | **真机手测** | 依赖 explorer 的 `Progman` ⇒ 本阶段**唯一**不可自动项 |
 | **C2** | **自动**（T16-7 纯函数） | O3 = C 的兑现 |
-| **C3–C12** | **自动** | — |
+| **C3–C12**（含 A5 修复链——T16-8 覆盖其机制） | **自动** | — |
 
 > 📌 **测试纪律（本阶段新沉淀）**：凡「X 档不受影响 / X 不参与」这类**否定型断言**，必须同用例内配一条
 > **正对照**（证「探针/机制确实在工作」），否则「不变」与「机制根本没跑」不可区分。T16-5 的正对照即此
@@ -925,13 +928,13 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 
 | # | 项 | 判据 |
 |---|---|---|
-| **A1** | 四工具链构建 + 测试 | MSVC / ClangCL / Clang / MinGW 全绿；`ecdi_tests` 210 → **217**。★ 其中 **MinGW / Clang 侧须确认本阶段唯一新增的平台回调**（`CALLBACK` 签名 + `HWINEVENTHOOK` 类型 + 链接）**实际过一遍**——同型先例（`&Win32PlatformWindow::WindowProc`）**不可外推**，`WINEVENTPROC` 是另一个函数指针类型（§9.1 #7） |
+| **A1** | 四工具链构建 + 测试 | MSVC / ClangCL / Clang / MinGW 全绿；`ecdi_tests` 210 → **218**。★ 其中 **MinGW / Clang 侧须确认本阶段唯一新增的平台回调**（`CALLBACK` 签名 + `HWINEVENTHOOK` 类型 + 链接）**实际过一遍**——同型先例（`&Win32PlatformWindow::WindowProc`）**不可外推**，`WINEVENTPROC` 是另一个函数指针类型（§9.1 #7） |
 | **A2** | **断言启用核验** | 按 skill 条 50 取二进制证据：**10 条条件串**（★ **本阶段零新增断言** ⇒ 特征集**不变**）——`grep -c` 判据同 Phase 15（clang `-D_DEBUG` / clangcl `-MDd` / mingw `-D_DEBUG` / visual-studio `-MDd`） |
 | **A3** | **零回归** | 既有 210 用例**全部保持通过**——尤其 `WindowChromeTests` 9 条（`RuntimeApiRejectedBeforeShow` / `ChromeModeDecidedOnce` / `MaximizedClientWithinWorkArea`）与 `AnimationTests` / `ProgressBarTests` 的 `TestPlatformWindow`（3 个实现者，本阶段**无新增 pure virtual**） |
 | **A4** | ★ **C2 不容降级**（**本阶段特有的结构性验收**） | ① T16-7 五条全过；② **`HWND_BOTTOM` 出现点审查**：`grep -n 'HWND_BOTTOM' ECDI/src/Platform/Win32/Win32PlatformWindow.cpp` ⇒ 只允许出现在「`ResolveTarget` 的 Bottom 分支」与注释中，**不得**出现在 `WM_WINDOWPOSCHANGING` 或任何 Desktop 分支 |
 | **A5** | **手测**（需求稿 §6 L3 三层分层的手测层） | 六判据 + Win+D + explorer 重启 + 桌面图标可点：① Win+D 中仍可见（**允许一次瞬时遮挡**——见 L1 的判据措辞）② 被普通应用覆盖 ③ 桌面图标可点击 ④ 交互不降级 ⑤ explorer 重启后自愈 ⑥ 切回 `Normal` 后行为复原。载体：`ModelProbe --layer desktop` + `.workbuddy/spike/desktop_layer_probe.cpp` 的 `--auto` |
 | **A6** | `ecdi_public_header_test` | **92 头**各自独立可编译（**无新增头** ⇒ 条数不变；该目标同时是编码/BOM 探针） |
-| **A7** | **文档与索引同步** | 两份 README 的规模锚点（用例 210→217 · 头 92 不变）+ `desktopnest-roadmap.md` §5 **G-1 标 ✅**（验收后）+ 需求稿 K13 勘误（需求稿 **v1.4** 已回写，验收时复核） |
+| **A7** | **文档与索引同步** | 两份 README 的规模锚点（用例 210→218 · 头 92 不变）+ `desktopnest-roadmap.md` §5 **G-1 标 ✅**（验收后）+ 需求稿 K13 勘误（需求稿 **v1.4** 已回写，验收时复核） |
 | **A8** | **交付提示** | `CMakeLists.txt` 零改动（`GLOB_RECURSE … CONFIGURE_DEPENDS` 自动入库新 `.cpp`）；CLion 需 **Reload CMake Project**；VS 工程走 `cmake --preset vs2026`（skill 条 66） |
 
 **A2 特征串（10 条，与 Phase 15 同集）**：`it != m_windows.end()` · `m_rootWidget != nullptr` · `current == &GetRootWidget()` · `child->m_parent == nullptr` · `index < m_children.size()` · `!child->Contains(this)` · `it != m_children.end()` · `spacing >= 0` · `stretch >= 0` · `step >= 0`。
@@ -994,7 +997,7 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 |---|---|---|---|
 | **A** | `Win32PlatformWindow.h`（§2.3 全部落点）+ `.cpp` 的 **include**（§2.4.1）、**匿名 namespace**（§2.4.2）、**九个新方法体**（§2.4.6） | 纯新增 —— **零行为变化**（新方法尚未被任何路径调用） | 编译通过（四工具链任一）；`ecdi_tests` 仍 **210 全绿**（★ 这一步是「新增不接线」的零风险验证） |
 | **B** | `.cpp` 的**三处既有代码改造**（§2.4.3 `Release` / §2.4.4 `WM_WINDOWPOSCHANGING` / §2.4.5 `SetWindowLayer`）+ **注释修正**（§2.1 `WindowLayer.h` / §2.2 `PlatformWindow.h`） | 行为切换点 | 编译通过；`ecdi_tests` 仍 **210 全绿**（`Bottom` / `Normal` 逐位等价的实证）；**A4 的 `HWND_BOTTOM` 出现点审查** |
-| **C** | 新建 `DesktopLayerTests.cpp`（§2.5）+ `RunAllTests.h` / `.cpp` 接线（§2.6） | +7 用例 | `ecdi_tests` **217 全绿**（四工具链）；注册名去重扫描 |
+| **C** | 新建 `DesktopLayerTests.cpp`（§2.5）+ `RunAllTests.h` / `.cpp` 接线（§2.6） | +8 用例 | `ecdi_tests` **218 全绿**（四工具链）；注册名去重扫描 |
 
 **为什么 A 与 B 分开**：批 A 是**纯新增**——若它就能编译通过，则证明「新增的方法体自身无误」；批 B 再切换行为。两者混做时，任何编译错误都无法区分来自「新代码写错」还是「改动点写错」（Phase 15 的三批切分同款理由）。
 
@@ -1026,6 +1029,9 @@ Release()                 → SyncDesktopHookOff() **先于** hwnd 判空   ← 
 ---
 
 ## 10. 修订记录
+
+- v1.8（2026-09-20）**T16-8 增补：A5 修复链的自动化覆盖**。`5da1dca` 的桌面跟随链（消息延后一拍 + 固定 4 拍重试 + `WM_TIMER` 按 id 拦截）此前**零自动覆盖**——而它是本阶段唯一的「用户可见行为」实现（性质同 T16-1 补 `Bottom` 回归）。① **新增 T16-8 `DesktopLayer.DesktopFollowChain`**（见 §2.5.4 / §5）；② **新增 helper `PumpMessagesFor(ms)`**——`SetTimer` 的 `WM_TIMER` 需**真实时间**，而 `PumpMessages` 是「有多少泵多少」即刻返回 ⇒ 必须「泵 + 小睡」；③ 规模更新：测试文件 444 → **529 行**、断言 47 → **51 条**、用例 **217 → 218**。**零实现改动**（常量留在 `.cpp` 匿名 namespace，测试以字面量 + 漂移保护语义投递）。
+
 
 - v1.7（2026-09-19）**A5 手测暴露的真实缺陷与修复（`5da1dca`）——Desktop 档此前在真实应用上完全失效**。① **症状**：`modelprobe.exe --layer desktop` 下 Win+D 后窗口**被压到 `Progman` 后面**、不可见（`iconic=False`、`rect` 不变、`WindowFromPoint(窗口中心)=Progman`）——即 **L1 原模型把次序写反了**（见 §8 L1 的 v1.7 更正）。② **根因**：`EVENT_SYSTEM_FOREGROUND` **先到**（此刻本窗口仍在位）→ **外壳随后才抬桌面** ⇒ ① `ReinsertAboveDesktop()` 的「在位则跳过」判据在此刻读到 `true` 而**提前返回**；② 即便延后一拍（`PostMessage`）仍早于外壳动作（日志证据：那一拍的重插目标仍是 `IME`，外壳抬完之后才变成 `WinUIDesktopWin32WindowClass`）。③ **修复**：`OnForegroundChanged` 投递 `kDesktopFollowMsg`（`WM_APP + 2`，避开托盘回调占用的 `WM_APP + 1`）⇒ `FollowDesktopStep()` **固定 N 拍（16ms × 4）无条件重插**——「插上就停」不可用（成功只证明「插了」，**不证明「插在外壳之后」**）；`HandleMessage` 新增 `WM_TIMER` **按 id 拦截**（其余 id 仍走翻译器 ⇒ 动画 tick / 光标闪烁零回归）；`ReinsertAboveDesktop()` 退回 `void`（诊断期引入的 `bool` 已无消费者）。④ **实测**：`follow step #1` 恒命中 `WinUIDesktopWin32WindowClass`（外壳抬完后的真锚点），后续拍自动收敛为「已在位」⇒ **稳定留在原位**，闪烁**概率性**（优于 L1 原记账）。⑤ **波及文档**：§8 **L1**（模型更正）· §8 **L4**（补 `WinUIDesktopWin32WindowClass` 实测）· 需求稿 §8.1②（判据不可当「已完成」）· `phase9.6-animation-detailed-design.md §7`（TimerId 登记 **Desktop=3**）。⑥ **过程记账**：为定位曾临时加入 8 条诊断日志（提交 `4632b9d`），定位后**已整体回退**——本条提交即**干净修复态**。
 - v1.6（2026-09-19）**§7.1 实施（`main.cpp` 过期注释，用户授权）**。`:247` 行尾注释按规格落地；**按条 29③d 全库搜旧值时发现 `:212`（`--help` 用法说明）是同一过期事实的第二处复述**——只改一处会自相矛盾，一并更正。diff 仅 2 行、纯注释、零逻辑改动（`git diff -U1` 逐行核对）。此为「更正一个旧表述必须搜全库」在**代码注释**上的同型应用：注释是文档的行内形态，同样会跨位置复述。

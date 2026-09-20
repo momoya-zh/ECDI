@@ -59,6 +59,32 @@ void PumpMessages(int maxCount){
 
 }
 
+/// @brief 带等待的消息泵（毫秒级）——定时器驱动的链路需要**真实时间流逝**
+/// @details `PumpMessages` 是「有多少泵多少」即刻返回；而 `SetTimer` 的 `WM_TIMER`
+/// 要到期才进队列 ⇒ 桌面跟随的多拍重试必须配「泵 + 小睡」的循环。
+void PumpMessagesFor(int ms){
+
+	const ULONGLONG end = GetTickCount64() + static_cast<ULONGLONG>(ms);
+
+	MSG msg{};
+
+	while (GetTickCount64() < end){
+
+		while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)){
+
+			TranslateMessage(&msg);
+
+			DispatchMessageW(&msg);
+
+		}
+
+		Sleep(1);
+
+	}
+
+}
+
+
 /// @brief z 序判据：`upper` 是否位于 `lower` **之上**
 /// @details `GetWindow(h, GW_HWNDNEXT)` = 给定窗口**下方**的窗口 ⇒ 自 `upper` 沿链
 /// 向下走，遇到 `lower` 即为真。⚠️ 迭代上限防御异常 z 序造成的死循环（正常链长远小于该值）。
@@ -428,6 +454,64 @@ void TestResolveTargetTruthTable(){
 
 }
 
+// ── T16-8：桌面跟随链（A5 修复：延后一拍 + 有界重试）────────────────────────
+// ⚠️ 覆盖边界：本用例验证「**消息 → 多拍重试 → 终点紧贴桌面窗口正上方**」这一机制
+//    与收敛性；**不**覆盖「与外壳抬桌面抢时序」——那需要真实 Win+D ⇒ 属手测 A5 判据①。
+//    本环境没有外壳在竞争 ⇒ 第 1 拍即可命中；**拍数不可观测**（无观测缝——
+//    `follow ended but NOT above desktop (raise max steps)` 警告是其失败信号）。
+
+void TestDesktopFollowChain(){
+
+	LayerHost host;
+
+	Win32PlatformWindow window(host, "P16Follow", 200, 200);
+
+	const HWND hwnd = window.GetHwndForTests();
+
+	window.SetWindowLayer(WindowLayer::Desktop);
+
+	window.Show();
+
+	PumpMessages(32);
+
+	const HWND desktop = GetShellWindow();
+
+	EXPECT_TRUE(desktop != nullptr);
+
+	if (desktop == nullptr){ return; }
+
+	// 正对照 A：配置期的初始插入已把窗口放在桌面窗口正上方
+	EXPECT_TRUE(GetWindow(desktop, GW_HWNDPREV) == hwnd);
+
+	// 制造「不在位」——把**桌面抬到普通带最顶**（复刻 Win+D 的机制：桌面被抬升，
+	// 我们因此落到它之下）。⚠️ 变的是桌面窗口 ⇒ **不会**触发本窗口的
+	// `WM_WINDOWPOSCHANGING`；若改成「压自己」，Desktop 分支会当场把 z 序纠正回来
+	// ⇒ 压不下去（这正是 `ResolveTarget` 持续维护的语义）。
+	SetWindowPos(desktop, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	PumpMessages(16);
+
+	// 正对照 B：确实已不在位（否则下一条断言可能只是「本来就位」的**假绿**——条 75）
+	EXPECT_TRUE(GetWindow(desktop, GW_HWNDPREV) != hwnd);
+
+	// 投递跟随消息。⚠️ 字面量与 `.cpp` 匿名 namespace 的 `kDesktopFollowMsg` 同源
+	//（`WM_APP + 2`，测试无法引用 TU 内部常量）——若实现改号，本用例会失败 ⇒ 漂移保护。
+	PostMessageW(hwnd, WM_APP + 2, 0, 0);
+
+	// 4 拍 × 16ms ≈ 64ms ⇒ 留约 5× 余量
+	PumpMessagesFor(300);
+
+	// ★ 被测量：跟随链把窗口插回桌面窗口正上方
+	EXPECT_TRUE(GetWindow(desktop, GW_HWNDPREV) == hwnd);
+
+	// 还原：桌面回 z 序最底（系统常态——避免把副作用留给你）
+	SetWindowPos(desktop, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	PumpMessages(16);
+
+}
+
+
 }
 
 void ECDI::Test::RegisterDesktopLayerTests(){
@@ -439,5 +523,6 @@ void ECDI::Test::RegisterDesktopLayerTests(){
 	GetTestRegistry().Add("DesktopLayer.NormalLayerNotMaintained",      &TestNormalLayerNotMaintained);
 	GetTestRegistry().Add("DesktopLayer.ConfigTimeContract",            &TestConfigTimeContract);
 	GetTestRegistry().Add("DesktopLayer.ResolveTargetTruthTable",       &TestResolveTargetTruthTable);
+	GetTestRegistry().Add("DesktopLayer.DesktopFollowChain",         &TestDesktopFollowChain);
 
 }
