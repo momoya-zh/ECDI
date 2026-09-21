@@ -260,6 +260,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	}
 	ECDI::Widget& root = win.GetRootWidget();
 	root.SetLayout(std::make_unique<ECDI::VerticalLayout>(0, true));   // spacing 0 / fillCrossAxis——单子场景无间隙语义
+	// ★ Phase 17 A6：留白落在 **page 一级**（见 `ModelProbe.cpp` 的 SetLayout），**不放 root**——原因有二：
+	//   ① root 是裸 Widget（**无背景能力**），而 Backend 每帧以 WHITE_BRUSH 清屏
+	//      （`GDIBackend.cpp:261` 决策 16「Root 白底是平台语义」）⇒ root 一级 padding 让出的四边会**露出白色**，
+	//      深色窗口上形成一圈白框；
+	//   ② CaptionBar 也是本布局的子（`--borderless` 时位于上方、SetStretch(0)）⇒ root padding 会**连带把标题栏内缩**。
+	//   放 page 一级则相反：page 背景 `#0f1115` 铺满客户区 ⇒ 内容四边各缩 12px，而边缘仍是深色、标题栏保持贴边。
 	// ★ Phase 13：自绘标题栏（仅 Borderless——实体区高度与行为区 captionHeight 取同值；D7 不联动）。
 	// ⚠️ 顺序约束：必须在 page 之前 AddChild —— VerticalLayout 按 children 顺序排布竖直次序（先前 = 上方）；
 	//    bar 保持 SetStretch(0)（主轴固定高度），page 保持 stretch=1。

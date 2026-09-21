@@ -152,7 +152,9 @@ bool EnsureBackendExtracted(){
 ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	: m_process(std::move(process)){
 
-	SetLayout(std::make_unique<VerticalLayout>(10, true));   // 9.7：spacing=10 替代全部 MakeSpacer；fillCrossAxis 替代手写宽 600
+	SetLayout(std::make_unique<VerticalLayout>(10, true, 12));   // 9.7：spacing=10 替代全部 MakeSpacer；fillCrossAxis 替代手写宽 600
+	                                                              // 17 A6：padding=12——内容四边留白。root 保持 0：它是裸 Widget（无背景），
+	                                                              //   让出的边会露 Backend 白（`GDIBackend.cpp:261`），理由详见 main.cpp 同处注释
 
 	// ── 标题 ──
 	auto title = std::make_unique<Label>("模型探测工具");
