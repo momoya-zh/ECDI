@@ -138,9 +138,9 @@
 | `HorizontalLayout.h` / `.cpp` | 各 1 处 | 同上（对称） |
 | `Layout.h` | **不动** | D2——基类保持纯接口 |
 | 公共头 | 92 → **92（净增 0）** | 只改既有头的签名，**不新增头** |
-| 现有调用点 | 生产/示例 **20** + 测试 **20** + README 示例 **1** | **零改动**（追加可选参数；K10） |
-| `examples/ModelProbe/main.cpp` | `:262`（root） | ★ **须单独授权**（skill 条 2——AI 不得自行修改 `main.cpp`）；若只求「ModelProbe 留白」可改为 `ModelProbe.cpp:155` 的 page 一级，**但 root 才是全局留白**（R3） |
-| `examples/ModelProbe/ModelProbe.cpp` | `:155`（page） | 可选：可在此处也配 padding |
+| 现有调用点 | 生产/示例 **20** + 测试 **20** + README 示例 **1** | **零改动**（追加可选参数；K10）——**但 A6 实测主动改了 1 处**（`ModelProbe.cpp:155` 补第 3 参，见下两行） |
+| `examples/ModelProbe/main.cpp` | `:262`（root） | ✅ **已单独授权；最终仅加注释、未改行为**——A6 实测发现 root 一级 padding 会**露 Backend 白**（`GDIBackend.cpp:261`）且**连带内缩 `CaptionBar`** ⇒ 留白改落 page 一级（详见详设 **§1.3-8** / 局限 **L6**） |
+| `examples/ModelProbe/ModelProbe.cpp` | `:155`（page） | ✅ **A6 落点**：`VerticalLayout(10, true)` → **`(10, true, 12)`**——page 背景 `#0f1115` 铺满客户区 ⇒ 内容四边各留白 12px、**无白框**、标题栏保持贴边 |
 | 测试用例 | 218 → **226** | **+8**（T17-1..T17-8，详设 v1.0 定案）；断言 **+85**（Release）/ **+77**（Debug，T17-8 整块不编译） |
 | 断言特征串 | 10 → **11** | **已定案**（初设 O1 冻结 / 详设 △2）：新增 `FRAMEWORK_ASSERT(padding >= 0)`（V/H 各一处）⇒ **11** 条；A2 判据随之更新 |
 
@@ -161,6 +161,8 @@
 ---
 
 ## 9. 修订记录
+
+- **v1.2**（2026-09-21）**收口回填（A7）**：① **§7 影响面更正**——原写「现有调用点**零改动**」，实际 **A6 主动改了 1 处**（`ModelProbe.cpp:155` 补 `padding = 12`）；`main.cpp` 虽获单独授权，但最终**仅加注释、未改行为**（root 级 padding 会露 Backend 白且连带内缩标题栏 ⇒ 留白改落 page 一级，详见详设 §1.3-8 / 局限 L6）。② **需求条目 R1–R10 / 决策 D0–D5 / 非目标 N1–N7 逐字未动**——本次只回填实施结果。
 
 - **v1.1**（2026-09-20）**向后回填同步**（第三轮详设评审要求「以详细设计为准，把需求文档的 T17-5 更新」）：① **§6 用例表整表回填为定稿口径**——`PaddingEmptyAndSingle` → **`PaddingOverflow`**、取消 `PaddingHorizontalSymmetric`（对称面并入各用例块 B）、新增 `PaddingIdempotent`（T17-7）、原 `PaddingNegativeClamped` 由 T17-7 移到 **T17-8**；并补「空容器」的**结构性保证**说明（不单设用例）与每例断言数。② **§7 影响面回填**：测试用例 `218 + N（N 待定）` → **`218 → 226`**；断言特征串 `10 → 10（待初设确认）` → **`10 → 11`（O1 已冻结）**；`Arrange` 改动量补详设计数。③ **需求条目 R1–R10 / 决策 D0–D5 / 非目标 N1–N7 逐字未动**——本次只同步「前阶段占位符在后阶段定案后的回填」，不构成需求变更。
 

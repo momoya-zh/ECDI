@@ -1,6 +1,7 @@
 ﻿# Phase 17 · 布局内边距（Layout padding）—— 详细设计
 
-> 状态：**v1.1 待评审**（2026-09-20 · **v1.1 修订**：采纳第三轮评审——**T17-5 口径同步 / A2 与 T17-8 的概念边界 / A1 的「设计目标」标注 / 盯防项补第 7 条**，并新增 **§5.5 需求稿 R9 覆盖项的落地映射**）
+> 状态：**v1.2 已实现**（2026-09-21）——批 A / 批 B / A6 全部落盘，**A1–A6 实测通过**（`ecdi_tests` 226 全绿）。本版回写**实测值**（§1.2 / §5.4 / §6）与**实施期偏离**（**§1.3-8**：A6 落点由 root 改 **page 一级**）。
+> v1.1（2026-09-20）：**v1.1 修订**：采纳第三轮评审——**T17-5 口径同步 / A2 与 T17-8 的概念边界 / A1 的「设计目标」标注 / 盯防项补第 7 条**，并新增 **§5.5 需求稿 R9 覆盖项的落地映射**）
 > 输入：需求确认 v1.0（`docs/phase17-layout-padding-requirements.md`）· 初步设计 **v1.1**（`docs/phase17-layout-padding-preliminary-design.md`）
 > 评审前置：外部初设评审结论「**初步设计：通过，可进入详细设计**」——其要求的 3 项前置修正（**T17-5 判据** / **§3.4 overflow 不变式** / **O1 冻结**）**已在初设 v1.1 全部落实** ⇒ 本稿无阻塞项
 
@@ -17,6 +18,8 @@
 | 3 | `ECDI/include/ECDI/Layout/HorizontalLayout.h` | 同 1（对称） |
 | 4 | `ECDI/src/Layout/HorizontalLayout.cpp` | 同 2（对称） |
 | 5 | `ECDI/src/Tests/LayoutTests.cpp` | **新增 8 个用例**（+85 断言）+ 8 行注册；**既有 11 个用例一字不动** |
+| 6 | `examples/ModelProbe/ModelProbe.cpp` | `:155` page 的布局加第 3 参 **`12`**（**A6 落点——见 §1.3-8**） |
+| 7 | `examples/ModelProbe/main.cpp` | `:262` **仅注释**（撤回 root padding 的尝试并记明原因，**未改行为**）——★ 该文件**须单独授权**（skill 条 2），本次已获取 |
 
 **无新增文件**——8 个用例加入既有 `LayoutTests.cpp` ⇒ `RunAllTests.h` / `RunAllTests.cpp` / `CMakeLists.txt` **零改动**（不新增 TU）。
 
@@ -25,14 +28,15 @@
 | 量 | 前 | 后 | 说明 |
 |---|---|---|---|
 | 公共头 | 92 | **92** | 只改既有头的签名与注释，**不新增头** |
-| 用例 | 218 | **226**（**设计目标**） | +8（T17-1..T17-8）；**实施后以实测回填**，不强行追设计值（第三轮评审） |
+| 用例 | 218 | **226**（**✅ A1 实测通过**） | +8（T17-1..T17-8）· A1 实测 **226 passed, 0 failed**（2026-09-21 · CLion / clang 预设） |
 | 断言特征串 | 10 | **11** | 新增条件串 `padding >= 0`（V/H 各一处）——A2 判据随之更新 |
-| `LayoutTests.cpp` 断言 | 69 | **154**（Release）/ **146**（Debug） | 设计值 +85 / +77（Debug 下 T17-8 整块不编译）；**落盘后按 skill 条 29③c 实测核对** |
-| `LayoutTests.cpp` 行数 | 505 | **≈ 800**（落盘后实测回填） | 新增 8 个函数 + 8 行注册 |
+| `LayoutTests.cpp` 断言 | 69 | **154**（Release）/ **146**（Debug） | 设计值 +85 / +77（Debug 下 T17-8 整块不编译）；**✅ 实测一致**（2026-09-21，skill 条 29③c 核对通过） |
+| `LayoutTests.cpp` 行数 | 505 | **879**（✅ 实测；原估 ≈ 800） | 新增 8 个函数 + 8 行注册 |
 | 改动源文件 | — | **4** | 均为既有文件 |
-| `examples/ModelProbe/main.cpp` | — | **本稿不含** | 验收用的 ModelProbe padding 属 **A6——须单独授权**（skill 条 2） |
+| `examples/ModelProbe/main.cpp` | — | **仅注释**（**未改行为**） | A6——**已单独授权**（skill 条 2）；padding 最终落 page 一级，见 **§1.3-8** |
+| `examples/ModelProbe/ModelProbe.cpp` | — | **+1 形参**（`:155` 加 `padding = 12`） | A6 落点（**§1.3-8**）；page 背景 `#0f1115` 铺满客户区 ⇒ 内容四边留白且**无白框**、标题栏贴边 |
 
-### 1.3 本稿对初设的七处细化（逐条给理由）
+### 1.3 本稿对初设的八处细化（逐条给理由）
 
 | # | 项 | 初设 | 本稿 | 理由 |
 |---|---|---|---|---|
@@ -43,6 +47,7 @@
 | 5 | ★ **调用点构成（初设不准）** | 「生产示例 **20**」 | **20 = ModelProbe 9（`ModelProbe.cpp` 8 + `main.cpp` 1）+ `examples/VisualTest` 1 + `src/Demo` 10**；其中 **`src/Demo` 的 10 处不在任何 CMake 目标内** | 本稿 §7 实测枚举：`CMakeLists.txt:42` 把 `/Demo/` 排除出库、`:148`/`:151` 只 `add_subdirectory` ModelProbe 与 VisualTest ⇒ **`VisualTest` 是初设未列出的第 3 个消费者**，且它是 CMake 目标（`visualtest`） |
 | 6 | 测试用例数 | 「218 + N，N 归详设」 | **N = 8**，并给出逐用例**精确数值 + 断言清单** | 详设职责；数值已用「目标形态模拟脚本」复算（§5.3） |
 | 7 | **跨轴钳 0 的覆盖** | §3.3 定案② 有规则、**无用例** | 并入 **T17-5 第二个块** | 贯彻初设 §4 的表形制：**「有契约必有验证手段」** |
+| 8 | ★ **A6 的落点**（**实施期发现——本稿原计划是 root 一级**） | 计划：`main.cpp:262` 的 root 配 `padding = 12` | **实测改为 page 一级**（`ModelProbe.cpp:155`） | **根因**：`root` 是裸 `Widget`（**无背景能力**），而 Backend 每帧以 `WHITE_BRUSH` 清屏（`GDIBackend.cpp:261` **决策 16**「Root 白底是平台语义，不是 Widget 命令」）⇒ 未被 Widget 覆盖的客户区像素**恒为白** ⇒ **root 一级让出的四边会露出白色**（`#0f1115` 深色窗口上一圈白框）；且 `CaptionBar` 同为本布局的子（`SetStretch(0)`）⇒ 被**连带内缩 12px**。放 page 一级则 page 背景铺满客户区、边缘保持深色、标题栏贴边 ⇒ 同一目标且无需扩框架能力。⇒ 派生新记账 **L6** |
 
 > **与初设口径的对账**：初设 §3.2 写「`Arrange` 改 **4 处**」＝ 主轴起点 / `remaining` / 跨轴尺寸 / 跨轴坐标。本稿 §2.2 把它细化为 **8 个行级改动点**（△1–△8，含构造 2 处与注释 3 处）；**代码行仍只有 6 行**（新增 1 · 修改 5）。两处口径不矛盾，前者按「语义点」计、后者按「行」计。
 
@@ -275,7 +280,7 @@ void ECDI::Test::RegisterLayoutTests()
 
 | # | 契约 | 实现落点 | 验证 |
 |---|---|---|---|
-| **C1** | **默认 0 = 逐位退化**：`padding = 0` 时 `Arrange` 行为与改动前**逐位相同** | △1 默认值 + △3/△4/△6/△7/△8 在 `p = 0` 时逐位退化（`− 0` / `+ 0` / `cross == parent`） | **T17-1**（守门）＋既有 **11 条 `Layout.*` 用例一字不改仍全绿** |
+| **C1** | **默认 0 = 逐位退化**：`padding = 0` 时 `Arrange` 行为与改动前**逐位相同**（★ **隐含前提**：`parent` 的**跨轴尺寸 ≥ 0**——因为 `cross = max(0, P − 0)` 仅在 `P ≥ 0` 时逐位等于 `P`。该前提在本框架**恒成立**：`SetSize` 虽不钳制，但**无任何代码路径会产生负尺寸**——布局分配的 `remaining` 已钳 0，尺寸来源为测量或复制） | △1 默认值 + △3/△4/△6/△7/△8 在 `p = 0` 时逐位退化（`− 0` / `+ 0` / `cross == parent`） | **T17-1**（守门，✅ A1 实测全绿）＋既有 **11 条 `Layout.*` 用例一字不改仍全绿**（✅ A3） |
 | **C2** | **padding 是硬 inset**：空间不足时内容区退化为 0，绝不反向修改 padding，不引入中心化 / 自动缩减 | △4（`cross` 钳 0）＋ △6/△8（坐标不钳） | **T17-5**（两块：溢出混排 + 跨轴钳 0） |
 | **C3** | **嵌套 = 累加**（每级各自生效），不做继承 / 覆盖 / 级联 | 每级布局各自扣减 ⇒ 自然累加 | **T17-6** |
 | **C4** | **与 `spacing` / `stretch` / `fillCrossAxis` 正交**：padding 先扣减，其余分配逻辑逐字不变 | △3 扣减顺序 ＋ △7 只换取值来源 | **T17-3 / T17-4** ＋ 既有用例 |
@@ -384,7 +389,7 @@ T17-1 A/C · T17-2 A/B · T17-3 A/B · T17-4 · T17-5 A/B · T17-6 · T17-7 · T
 
 脚本落点 `.workbuddy/tmp/p17_dd_verify.py`（**临时物，交付后清理**）。
 
-### 5.4 断言数汇总（设计值）
+### 5.4 断言数汇总（设计值 · **✅ 实测核对一致**）
 
 | 用例 | 断言 |
 |---|---|
@@ -442,13 +447,13 @@ C6 负值钳 0 + Debug 断言
 
 | # | 判据 | 手段 / 口径 |
 |---|---|---|
-| **A1** | 四工具链 **Debug** 构建通过；`ecdi_tests` **226 passed, 0 failed**（⚠️ **226 是设计目标，不是既成事实**——本相位尚未实现。实施后以**实测结果**回填 §1.2 / §5.4；若实测的用例数或断言数与设计值不符，**以实测为准**，不强行追设计值——第三轮评审） | 用户（VS 2026 / CLion）。复跑：`cmake --build <dir> --target ecdi_tests` → 运行 |
-| **A2** | **断言特征串 11/11**：新增 `padding >= 0` 必须能在**库目标 obj**（`CMakeFiles/ECDI.dir/Layout/VerticalLayout.cpp.obj` 与 `…HorizontalLayout.cpp.obj`）+ exe 中搜到；既有 10 条不丢 | skill 条 50（**必须是窄串**、**落在库 obj**、宏为**单参数**）。⚠️ Release 恒 0/11 属预期 |
-| **A3** | **零回归**：既有 11 条 `Layout.*` 用例**未改动**（`git diff` 显示用例块 0 改动）＋ 全库既有 **218** 条全绿 | `git diff -U0` 逐行核对被删行 |
-| **A4** | **结构性判据（跨轴取值唯一入口）**：`VerticalLayout.cpp` 中 `parent.GetWidth()` **仅 1 处**且位于 `cross` 定义行；`HorizontalLayout.cpp` 中 `parent.GetHeight()` **仅 1 处**且位于 `cross` 定义行（**排除注释行**——skill 条 44） | grep + 逐行判定 |
-| **A5** | **结构性判据（旧写法零残留）**：`int y = 0` / `int x = 0` / `SetPosition(0, y)` / `SetPosition(x, 0)` 各 **0 处**；`SetPosition(m_padding, y)` / `SetPosition(x, m_padding)` 各 **1 处** | grep |
-| **A6** | **ModelProbe 目视**：内容四边不再贴死客户区、鼠标拖选不再越出窗口边界 | ★ **须 `main.cpp` 单独授权**（skill 条 2）。建议 root `padding = 12`（O3）；也可只在 `ModelProbe.cpp:155` 的 page 一级配（**但「全局留白」只有 root 级能做到**） |
-| **A7** | **文档同步**（收口时）：`docs/README.md` + 根 `README.md` 的 Phase17 状态与规模锚点 · `roadmap-deferred.md §7.6 #38` → **✅ 已实现（Phase 17）** · `.workbuddy/memory/MEMORY.md` 阶段索引 | 收口清单 |
+| **A1** | ✅ **实测通过**：`ecdi_tests` **226 passed, 0 failed**（2026-09-21 · CLion / clang 预设）。ⓘ 本轮只跑了 clang 预设，其余三工具链沿用既有基线 | 用户（VS 2026 / CLion）。复跑：`cmake --build <dir> --target ecdi_tests` → 运行 |
+| **A2** | ✅ **实测 11/11**：新增 `padding >= 0` 落在**两个库 obj**（`…/CMakeFiles/ECDI.dir/ECDI/src/Layout/VerticalLayout.cpp.obj` 与 `…HorizontalLayout.cpp.obj`，各 **2/11** = 本 TU 的 `spacing >= 0` + `padding >= 0`——每条断言只在其所在 TU 的 obj 里，**符合预期**）；`ECDI.lib` 与 `ecdi_tests.exe` 各 **11/11**（既有 10 条无丢失）⇒ **只增不减**成立。⚠️ **命令路径勘误**：obj 路径镜像的是**仓库根相对路径**（`…/ECDI.dir/ECDI/src/Layout/…`），不是 `…/ECDI.dir/Layout/…` | skill 条 50（窄串 · 落在库 obj · 宏单参数）。⚠️ Release 恒 0/11 属预期 |
+| **A3** | ✅ **实测通过**：既有 11 条 `Layout.*` 用例**源文件零改动**（`git diff` 仅新增块、无删除）＋ 全库 **226** 全绿 | `git diff -U0` 逐行核对被删行 |
+| **A4** | ✅ **批 A 自查 PASS**：`VerticalLayout.cpp` 中 `parent.GetWidth()` **仅 1 处**且在 `cross` 定义行、`parent.GetHeight()` 仅 1 处且在 `remaining` 行；`HorizontalLayout.cpp` 镜像同判 | grep（**排除注释行**——skill 条 44） |
+| **A5** | ✅ **批 A 自查 PASS**：`int y = 0` / `int x = 0` / `SetPosition(0, y)` / `SetPosition(x, 0)` 各 **0 处**；`SetPosition(m_padding, y)` / `SetPosition(x, m_padding)` 各 **1 处**（四文件均无残留） | grep |
+| **A6** | ✅ **实测通过（目视）**：内容四边不再贴死客户区、TextBox 拖选不再越出窗口边界（立项动机达成）。★ **落点与计划不同**——见 **§1.3-8**：padding 落 **page 一级**（`ModelProbe.cpp:155` = 12），**非 root** | `main.cpp` 与 `ModelProbe.cpp` **均已单独授权**（skill 条 2） |
+| **A7** | ✅ **已执行**（2026-09-21）：详设 → **v1.2**（实测回写）· 需求稿 → **v1.2**（§7 影响面更正）· `docs/README.md` + 根 `README.md` → **已实现** · `roadmap-deferred.md` **#38 → ✅ 已实现（Phase 17）** + 新增 **§7.7 / #39**（根/窗口背景能力）· `MEMORY.md` 阶段索引 | 收口清单 |
 
 > **O1 的收尾**（已冻结的断言形态）在 A2 落地：`FRAMEWORK_ASSERT(padding >= 0)` ⇒ 特征串 **10 → 11**。这是本相位**唯一**对「框架级可观测面」的净增。
 
@@ -460,8 +465,8 @@ C6 负值钳 0 + Debug 断言
 
 | 文件 | 行 | 实参形态 | 数量 | 参与构建 |
 |---|---|---|---|---|
-| `examples/ModelProbe/ModelProbe.cpp` | `:155` `:199` `:240` `:273` `:345` `:365` `:396` `:434` | `V(10,true)` / `H()` ×4 / `H(0,true)` / `V(0,true)` / `H(8,false)` | **8** | ✅ `modelprobe` |
-| `examples/ModelProbe/main.cpp` | `:262` | `V(0, true)` | **1** | ✅ `modelprobe`（★ AI 不得自改） |
+| `examples/ModelProbe/ModelProbe.cpp` | `:155` `:199` `:240` `:273` `:345` `:365` `:396` `:434` | `V(10,true)` / `H()` ×4 / `H(0,true)` / `V(0,true)` / `H(8,false)` | **8** | ✅ `modelprobe` · ★ **`:155` 已被 A6 改为 `V(10,true,12)`** |
+| `examples/ModelProbe/main.cpp` | `:262` | `V(0, true)` | **1** | ✅ `modelprobe`（★ AI 不得自改——**A6 已单独授权**，最终**仅加注释、未改行为**） |
 | `examples/VisualTest/main.cpp` | `:193` | `V(6, true)` | **1** | ✅ `visualtest`（**初设未列**） |
 | `src/Demo/Showcase.cpp` | `:83` `:112` `:149` `:205` `:285` `:317` `:360` `:397` `:492` | `V()` ×7 / `H()` ×2 | **9** | ❌ **无目标** |
 | `src/Demo/CollapsiblePanelDemo.cpp` | `:20` | `V()` | **1** | ❌ **无目标** |
@@ -484,7 +489,7 @@ C6 负值钳 0 + Debug 断言
 
 ---
 
-## 8. 已知局限与记账（L1–L5）
+## 8. 已知局限与记账（L1–L6）
 
 | # | 项 | 性质 | 说明 |
 |---|---|---|---|
@@ -493,6 +498,7 @@ C6 负值钳 0 + Debug 断言
 | **L3** | `spacing` 无 Release 钳 0 | **有意的不对称** | `spacing` 自 9.7 起只有 Debug 断言（`VerticalLayout.cpp:13`）。统一它属**本相位范围外的行为变更**。⇒ 若将来要统一，单独立项 |
 | **L4** | `src/Demo/*` 的 10 处调用点**未编译验证** | **既有孤儿状态** | `CMakeLists.txt:42` 把 `/Demo/` 排除出库，`:148`/`:151` 只加 ModelProbe 与 VisualTest ⇒ 该目录**不属于任何 CMake 目标**。本相位对它的影响为「源码文本兼容但未编译验证」——风险为零（追加可选形参），但**如实记账** |
 | **L5** | `src/Demo/Showcase.cpp:64` 注释已失实 | **既有账，不在本相位范围** | 原文「垂直间距占位（**VerticalLayout 无间距支持**——透明 Widget 撑高）」——**9.7 落地 `spacing` 后即已失实**。未改（该文件不参与构建，且改动会扩大本相位面）。⇒ 并入「孤儿目标清账」条目 |
+| **L6** | ★ **「root 一级即全局留白」（R3）在视觉上依赖「根/窗口有背景」这一缺失能力** | **本相位新发现（A6 实测）⇒ 已登记 `roadmap-deferred.md` §7.7 条目 #39** | `root` 是裸 `Widget`（**无背景能力**），而 Backend 每帧以 `WHITE_BRUSH` 清屏（`GDIBackend.cpp:261` **决策 16**）⇒ **未被 Widget 覆盖的客户区像素恒为白**。因此 root 级 padding 虽能缩进全部内容，却让四边**露出白色**（深色窗口上一圈白框），并**连带内缩 `CaptionBar`**。**本相位处置 = 绕开**（留白放 page 一级）；若将来要做「真·窗口四周留白」（露底色那种），前置是**根/窗口背景可配置**——**不在 Phase 17 范围**。详见 §1.3-8 |
 
 ---
 
@@ -518,6 +524,8 @@ C6 负值钳 0 + Debug 断言
 ---
 
 ## 10. 修订记录
+
+- **v1.2**（2026-09-21）**收口回写（A7）**：批 A（源码 4 文件 +38/−26）· 批 B（`LayoutTests.cpp` 505 → **879** 行 / 断言 69 → **154**（Release）/ 146（Debug）/ 注册 11 → 19）· A6（`ModelProbe.cpp:155` 加 `padding = 12`；`main.cpp:262` **仅注释**）全部落盘。① **§1.2 实测回填**：用例 **226**（原标「设计目标」）、行数 **879**（原估 ≈800）、断言 154/146（**实测一致**）；② **§1.3 新增第 8 条**——★ **A6 落点由 root 改 page 一级**（根因：root 无背景 ⇒ root 级 padding 露 Backend 白 + 连带内缩 `CaptionBar`）；③ **§4-C1 补隐含前提**（`parent` 跨轴尺寸 ≥ 0——框架内恒成立）；④ **§5.4 / §6 全部改标实测结论**（A1 ✅ 226 全绿 · A2 ✅ 11/11 · A3 ✅ 零回归 · A4/A5 ✅ 结构判据 · A6 ✅ 目视 · A7 ✅ 本条）；⑤ **§1.1 / §1.2 / §7.1 补 A6 实际改动**（`ModelProbe.cpp` 由「零改动」变「+1 形参」；`main.cpp` 仅注释）；⑥ **§8 新增 L6**（R3 依赖「根有背景」这一缺失能力 ⇒ 已登记 `roadmap-deferred.md` §7.7 #39）；⑦ **A2 命令路径勘误**（obj 镜像仓库根相对路径）。
 
 - **v1.1**（2026-09-20）**采纳第三轮评审（结论「🟢 可以进入实现」）的 3 项修正 + 1 项新增**。① **需求稿口径同步**：§5.5 记录初稿用例表的**两处演进**（`PaddingEmptyAndSingle` → `PaddingOverflow`；`PaddingHorizontalSymmetric` 取消、位置给新增的 `PaddingIdempotent`），并逐条映射需求 R9 的 7 个覆盖项（其中**「空容器」明确降级为结构性保证、不单设用例**）；需求稿本身同步至 **v1.1**。② **A2 与 T17-8 的概念边界**（评审第五、十三节）：§4 的 **C6 行**与 §5.2 的 T17-8 段均改写为「**Release 侧 = T17-8 运行时用例；Debug 侧 = A2 结构性验收**」的并列表述，并显式声明 **A2 不是 T17-8 的一部分**。③ **A1 的 226 标注为「设计目标」**（评审第六节）：§1.2 与 §6-A1 均补「实施后以实测回填、不强行追设计值」。④ **盯防清单新增第 7 条**（评审第十节红线）：`FRAMEWORK_ASSERT` 必须判**形参**，不得改判 `m_padding`。⑤ 评审第十一节的「`cross` 循环外求值」已在原盯防第 2 条覆盖，未重复新增。
 

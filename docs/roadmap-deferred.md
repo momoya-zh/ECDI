@@ -1,6 +1,6 @@
 ﻿# ECDI 延期事项排期总表（roadmap-deferred）
 
-> 状态：v1.10（2026-09-20）｜确认排期
+> 状态：v1.12（2026-09-21）｜确认排期
 > 作用：汇总全部"记账/延期/TODO/推迟"决策 → 对应实现阶段。README 技术债表的完整展开。
 > ⚠️ **已知缺口（2026-09-11 声明）**：本表内容主体停留在 v1.1（2026-08-15），**9.6 / 9.7 / 9.8 / 10 / 11 / 12 的延期项尚未批量补记**（含 9.6 的 Fade→PushOpacity / DrawArc / PushTransform / DoubleClick / Dirty Region 等记账项）。v1.2 仅补登记抗锯齿一项（#29）——**不要把本表当作完整清单**。
 
@@ -92,9 +92,21 @@
 
 | # | 延期项 | 来源 | 备注 |
 |---|---|---|---|
-| 38 | **容器级内边距**（`LinearLayout` padding——一次性解决「窗口四周留白」） | 用户 2026-09-19 观察（ModelProbe 内容四边贴死客户区，鼠标拖选极易越出 GUI 边界） | **现状（已核实：零边距是结构性的，不是配置疏漏）**：`Window` 把 root 设为**客户区全尺寸**（`Window.cpp:444-445`）；`VerticalLayout::Arrange` 从 `y=0` 起算、**跨轴坐标恒 0**（`VerticalLayout.cpp:59`，注释「契约 4，现状不变」）、`fillCrossAxis` 时子宽 = **父宽**（`:53`/`:56`）、`remaining` 只减 `spacing` 不减任何 inset（`:37-38`）⇒ ModelProbe 的 13 个子控件各 680 宽、贴死左右与底边。**框架当前无任何容器级 padding/margin**（全库唯一 `padding` 是 `TextBoxStyle::padding`——控件内文字内边距，与容器无关；`Layout.h` 只有 `Arrange(Widget&)`）。**Phase 9.8 曾明确拒绝过**（需求 §4 非目标 + 初设 §3.2 冻结「不要为 AutoSize 顺手搞一套完整 Padding/Style 系统」）——但那是「**不要顺手搞**」，理由是**需求未出现**；**现在需求已出现**。**倾向方案 B（框架侧）**：`VerticalLayout` / `HorizontalLayout` 各加 `int padding = 0` 形参，`Arrange` 改 **4 处**（起点 `y = padding` · `remaining − 2·padding` · 跨轴宽 `− 2·padding` · `SetPosition(padding, y)`）——**root 一处即全局留白**（root 自身也是 `VerticalLayout`），ModelProbe 只需改两处构造参数（`main.cpp:262` + `ModelProbe.cpp:155`），**无需 demo 侧包裹容器**。**备选方案 A（仅 demo 侧）**：`ModelProbePage` 加内层容器 + override `SetSize` 同步几何（`SetSize` 是虚、`TextBox` 有 override 先例，`Widget.h:88`）——代价是绕开框架缺能力，此后每个想留白的 demo 都要重复这套同步。**⛔ 不得并入 Phase 16**（Phase 16 的定性就是「纯实现层 · 公共 API 净增 0」）。**触角提醒**：只要动 root 一级就会碰到 `main.cpp`（**须单独授权**——skill 条 2）。重启：**✅ 已立项并推进——Phase 17**（2026-09-20：方案 B 经用户拍板；需求 `phase17-layout-padding-requirements.md` **v1.1** ✅（回填同步）· 初设 `phase17-layout-padding-preliminary-design.md` **v1.1** ✅ · 详设 `phase17-layout-padding-detailed-design.md` **v1.1** ✅ **评审通过——可进入实现**）。**实现未动**——详设 §2 已给出 `△1–△8` 行级 diff，等评审通过后才落地 |
+| 38 | **容器级内边距**（`LinearLayout` padding——一次性解决「窗口四周留白」） | 用户 2026-09-19 观察（ModelProbe 内容四边贴死客户区，鼠标拖选极易越出 GUI 边界） | **现状（已核实：零边距是结构性的，不是配置疏漏）**：`Window` 把 root 设为**客户区全尺寸**（`Window.cpp:444-445`）；`VerticalLayout::Arrange` 从 `y=0` 起算、**跨轴坐标恒 0**（`VerticalLayout.cpp:59`，注释「契约 4，现状不变」）、`fillCrossAxis` 时子宽 = **父宽**（`:53`/`:56`）、`remaining` 只减 `spacing` 不减任何 inset（`:37-38`）⇒ ModelProbe 的 13 个子控件各 680 宽、贴死左右与底边。**框架当前无任何容器级 padding/margin**（全库唯一 `padding` 是 `TextBoxStyle::padding`——控件内文字内边距，与容器无关；`Layout.h` 只有 `Arrange(Widget&)`）。**Phase 9.8 曾明确拒绝过**（需求 §4 非目标 + 初设 §3.2 冻结「不要为 AutoSize 顺手搞一套完整 Padding/Style 系统」）——但那是「**不要顺手搞**」，理由是**需求未出现**；**现在需求已出现**。**倾向方案 B（框架侧）**：`VerticalLayout` / `HorizontalLayout` 各加 `int padding = 0` 形参，`Arrange` 改 **4 处**（起点 `y = padding` · `remaining − 2·padding` · 跨轴宽 `− 2·padding` · `SetPosition(padding, y)`）——**root 一处即全局留白**（root 自身也是 `VerticalLayout`），ModelProbe 只需改两处构造参数（`main.cpp:262` + `ModelProbe.cpp:155`），**无需 demo 侧包裹容器**。**备选方案 A（仅 demo 侧）**：`ModelProbePage` 加内层容器 + override `SetSize` 同步几何（`SetSize` 是虚、`TextBox` 有 override 先例，`Widget.h:88`）——代价是绕开框架缺能力，此后每个想留白的 demo 都要重复这套同步。**⛔ 不得并入 Phase 16**（Phase 16 的定性就是「纯实现层 · 公共 API 净增 0」）。**触角提醒**：只要动 root 一级就会碰到 `main.cpp`（**须单独授权**——skill 条 2）。重启：**✅ 已立项并推进——Phase 17**（2026-09-20：方案 B 经用户拍板；需求 `phase17-layout-padding-requirements.md` **v1.1** ✅（回填同步）· 初设 `phase17-layout-padding-preliminary-design.md` **v1.1** ✅ · 详设 `phase17-layout-padding-detailed-design.md` **v1.1** ✅ **评审通过——可进入实现**）。**✅ 已实现——Phase 17**（2026-09-21 收口：批 A 源码 4 文件 +38/−26 · 批 B `LayoutTests.cpp` 505→**879** 行 / +8 用例 · A6 示例落盘；`ecdi_tests` **226 全绿** · 断言特征串 **10 → 11** · A1–A6 实测通过）。**★ 落地与计划的偏离**：留白最终落在 **page 一级**（`ModelProbe.cpp:155` = 12）而**非 root**——root 是裸 Widget（无背景），让出的边会露 Backend 白并连带内缩 `CaptionBar` ⇒ 派生新条目 **#39**（见 §7.7） |
+
+## 7.7 根/窗口背景能力（新立——2026-09-21，由 #38 实施派生；**已立项 Phase 18**）
+
+| # | 延期项 | 来源 | 备注 |
+|---|---|---|---|
+| 39 | **根 / 窗口的背景色可配置**（或让根能挂 `Panel` 背景） | Phase 17 A6 实测（2026-09-21） | **现象（已实测确认）**：`root` 是裸 `Widget`（**无背景能力**），而 Backend 每帧以 `WHITE_BRUSH` 清屏（`GDIBackend.cpp:261` **决策 16**「Root 白底是平台语义，不是 Widget 命令」）⇒ **任何未被 Widget 覆盖的客户区像素 = 白色**。因此在 root 一级配 `padding` 虽能缩进全部内容，却让**四边露出白色**（`#0f1115` 深色窗口上一圈白框），且 `CaptionBar` 作为同布局的子会被**连带内缩**。**Phase 17 的处置 = 绕开**（留白放 page 一级）。**重启条件**：出现「**真·窗口四周留白**」（露底色那一种）的真实设计需求——Phase 16 的 Desktop 档窗口、DesktopNest 的框体都可能触发 ⇒ 届时前置即本条目。**重启：✅ 已立项——Phase 18**（2026-09-21；需求稿 `docs/phase18-window-background-requirements.md` **v1.0** 🚧 待评审） |
+
+---
 
 ## 8. 修订记录
+
+- v1.12（2026-09-21）**#39 立项 → Phase 18**：**§7.7 标题标注「已立项 Phase 18」**，#39 备注追加重启记录；需求确认 **v1.0** 落地（`docs/phase18-window-background-requirements.md`）——**§1.2 现状勘察 K1–K8 全部带行号实测**（K1 `GDIBackend.cpp:261` 硬编码 `WHITE_BRUSH` · K2 `RenderingBackend` 无背景入口 · K3 `Window` 无背景 API · K4 root 是裸 `Widget` ⇒ 「客户区底色」**无任何可配置入口**；K8 记明库内 `RecordingBackend` 被 12 个测试文件依赖）；**§1.3 锁定 Phase 4 四层不变量**（清屏属能力层 / 颜色属决策层）；技术路线三案（**A 倾向**）；R1–R6 · D1–D7 · N1–N6 · Q1–Q4。头部版本 v1.11 → **v1.12**。
+
+- v1.11（2026-09-21）**#38 关闭（已实现）+ 新立 §7.7（#39）**。① **#38 标 ✅ 已实现——Phase 17**（批 A/B + A6 落盘；`ecdi_tests` **226 全绿**；断言特征串 10 → **11**；A1–A6 实测通过；文档详设 **v1.2** / 需求 **v1.2**）。② ★ **实施期偏离已记档**：留白由计划的 root 一级改为 **page 一级**（root 无背景 ⇒ 露 Backend 白 + 连带内缩标题栏）。③ **新立 §7.7「根/窗口背景能力」（条目 #39）**——由该偏离暴露出的框架侧缺失能力，重启条件 = 「真·窗口四周留白」需求出现。④ 头部版本 v1.10 → **v1.11**。
 
 - v1.10（2026-09-20）**#38 状态推进：立项 → 三阶段文档齐备**。原 v1.9 记「倾向方案 B」，本条记录实际推进：① 用户拍板**方案 B（框架侧）**；② 需求确认 **v1.0** 落地（K1–K10 现状勘察带行号 · R1–R10 · D0–D5 · N1–N7）；③ 初步设计 **v1.1** 落地（两轮外部评审：第二轮指出 **T17-5 判据错误**——`remaining` 是「给 stretch 子的可用空间」而非「所有子主轴尺寸总和」，已修正；并冻结 **O1** 断言形态）；④ 详细设计 **v1.0** 落地（`△1–△8` 行级 diff · 契约 C1–C6 · 测试 T17-1..T17-8 · 验收 A1–A7 · 局限 L1–L5）。**实现尚未开始**；头部版本 v1.9 → **v1.10**。
   - **同日后续**：第三轮详设评审判「**🟢 可进入实现**」（无阻塞项）。采纳其 3 项修正——需求稿 §6 用例表按详设定稿口径**回填为 v1.1**（`PaddingEmptyAndSingle` → `PaddingOverflow`；`PaddingHorizontalSymmetric` 取消、位置给新增的 `PaddingIdempotent`；「空容器」降级为结构性保证不单设用例）；**A2（断言特征串）与 T17-8 的概念边界**（A2 是**结构性验收**，不属 T17-8）；**A1 的 226 标为设计目标**（实施后以实测回填）。另补盯防项「`FRAMEWORK_ASSERT` 必须判**形参**、不得改判 `m_padding`」。详设 → **v1.1**（新增 §5.5 覆盖项映射）。
