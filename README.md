@@ -4,9 +4,21 @@
 
 > Currently under active development toward **v0.1.0** (first library release). Not yet stable — the API may change freely under SemVer `0.y.z`.
 
+## The goal: *Everyone Can Do It*
+
+The name is the mission — **E**veryone **C**an **D**o **I**t.
+
+ECDI is a **teaching-first** framework: it exists so that anyone can learn how a GUI framework is built, and put it to use, at the lowest possible learning cost. That is a design constraint rather than a slogan, so it shows up as rules:
+
+- **Plain public API** — a name says what it does; one word per concept, never two names for one idea.
+- **No speculative abstraction** — an abstraction arrives when a second real consumer appears, not before; "not yet" is written down in the deferred ledger (`docs/roadmap-deferred.md`) instead of being coded.
+- **The design trail is the textbook** — every phase ships requirements → preliminary design → detailed design *before* any code, so the reasoning is readable, not just the result.
+- **Runnable examples are the front door** — `examples/MinimalApp` is a complete app in about 20 lines, and `examples/ModelProbe` is a real tool built on the same public API.
+- **Adopting a new capability never breaks existing code** — new behaviour defaults to *bit-for-bit* what it did before; that has been a hard contract in every recent phase.
+
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 116 design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 129 design documents in Chinese).
 
 ## How this was built
 
@@ -45,7 +57,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Anti-aliasing**: supersampled corner coverage masks for rounded rects (`S=8`), cached per radius — GDI has no native AA, so arcs are composited through a premultiplied alpha path that composes with the theme's corner radius
 - **Window chrome**: borderless mode (`WM_NCCALCSIZE` interception) with a self-drawn caption bar — title plus vector min/max/close buttons — and `NCHITTEST` delegated into the widget tree, so interactive controls inside the caption stay clickable while the rest drags the window
 - **Shell integration**: tray icon (application-level — lives on `PlatformApplication`, not on any `Window`, so closing/rebuilding every window leaves it intact) with a native popup menu, plus window-level file drop (`WM_DROPFILES` → UTF-8 path list; the `HDROP` is released before the event is emitted). Both stay behind platform seams — the public API exposes no Win32 types.
-- **Testing**: self-hosted test framework (218 cases, zero dependencies) with a recording backend for paint assertions
+- **Testing**: self-hosted test framework (231 cases, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -72,7 +84,7 @@ Targets:
 | Target | Type | Description |
 |---|---|---|
 | `ECDI` | static library | The framework (`include/ECDI/*.h` — 92 public headers; internal implementation lives in `src/`) |
-| `ecdi_tests` | executable | Self-hosted test suite — 218 cases, zero dependencies |
+| `ecdi_tests` | executable | Self-hosted test suite — 231 cases, zero dependencies |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `visualtest` | executable | Side-by-side visual check for image decoding (Phase 11) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
@@ -133,7 +145,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ECDI/       framework sources (include/ = 92 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       design documents (125 files; requirements → preliminary → detailed, per phase)
+docs/       design documents (129 files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
@@ -153,6 +165,8 @@ docs/       design documents (125 files; requirements → preliminary → detail
 | **15** | **Scroll container (`ScrollView` + scrollbar)**: content-offset seam (`GetContentOffsetX/Y`, consumed by paint / hit test / absolute position), `ClipsChildren` hit-test gate, two-pass dual-axis viewport, single-source offset with self-drawn scrollbars, internal `ScrollContent` as the root of the content coordinate space, ModelProbe list migrated off its hand-rolled container | ✅ |
 | **16** | **Desktop-resident layer (`WindowLayer::Desktop`)**: ships the route the spike validated — a top-level window wedged directly above the desktop window, held there by a foreground event hook. The fact survey traced the failure to a single style bit (Show Desktop only minimizes minimizable windows), so desktop windows drop `WS_MINIMIZEBOX` instead of switching to `WS_POPUP`. No public API change. | ✅ Requirements confirmed · preliminary design reviewed (`SWP_FRAMECHANGED` measured and closed: not needed) · detailed design approved (v1.11) · implemented and closed 2026-09-21: three batches plus the follow-chain fix and T16-8; 218 tests green; A1-A8 accepted. Public API additions: none. |
 | **17** | **Layout padding**: one optional `int` on each of `VerticalLayout` / `HorizontalLayout`, applied at four points in `Arrange` — the main-axis start, the remaining-space computation, the cross-axis size and the cross-axis position. Padding is a hard inset: when there is not enough room the content area collapses to zero and the coordinates stay put. Four existing files change, no new headers. | ✅ Implemented — 226 tests green, acceptance A1–A6 passed. The demo puts the inset on the page rather than the root: the root is a bare widget with no background and the backend clears with a white brush, so padding there would expose a white frame and pull the caption bar in with it. |
+| **18** | **Window / root background**: the client-area clear color becomes configurable — `Window::SetBackgroundColor` → `Renderer::BeginFrame(const Color&)` → `RenderingBackend::BeginFrame(const Color&)`, so GDI clears with the frame’s color instead of a hard-coded white brush. The color lives on `Window` (the single source of the default), the backend stays stateless and Window-agnostic, and alpha is dropped (`COLORREF` has no alpha channel). Two public API additions; 226 → 231 cases. | ✅ Requirements, preliminary and detailed design all reviewed; implemented — 231 tests green across four toolchains. Visual outcome recorded: with the inset at the root the caption bar is pulled in along with the content, so the demo keeps the inset on the page and sets the clear color to match it. |
+| **18.1** | **Child inset**: give a child its own inset inside the slot its parent layout assigns, so that “window-level” padding can apply to content without dragging chrome (`CaptionBar`) along. Three routes are on the table — a per-child `Widget::SetInset` consumed by a single `Layout` helper (preferred), a layout-level padding exemption, or assembling an extra transparent `Panel` in the application (zero framework change). | 🚧 Requirements v1.0 under review (2026-09-22) — the first decision is whether the phase is needed at all. |
 
 ## License
 
