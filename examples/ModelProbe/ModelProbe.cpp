@@ -153,8 +153,9 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	: m_process(std::move(process)){
 
 	SetLayout(std::make_unique<VerticalLayout>(10, true, 12));   // 9.7：spacing=10 替代全部 MakeSpacer；fillCrossAxis 替代手写宽 600
-	                                                              // 17 A6：padding=12——内容四边留白。root 保持 0：它是裸 Widget（无背景），
-	                                                              //   让出的边会露 Backend 白（`GDIBackend.cpp:261`），理由详见 main.cpp 同处注释
+	                                                             // 17→18 A6 收口：padding=12 落在 **page 一级**（内容四周留白、标题栏贴边）——
+	                                                             //   18 曾把 12 上移到 root（R3 字面形态），实测标题栏被连带内缩 12px + 异色描边 ⇒ 回退到此。
+	                                                             //   根因：VerticalLayout::padding 单一 int / 无 per-child inset（详见 main.cpp 同处注释）。
 
 	// ── 标题 ──
 	auto title = std::make_unique<Label>("模型探测工具");
@@ -392,40 +393,22 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	fmtRow->AddChild(std::move(fmtCfg));
 	AddChild(std::move(fmtRow));
 
-	// ── 窗口控制（Phase 12 运行期 API 实测——Show 后可用；状态事件回流显示于右侧）──
+	// ── 事件行（最新一条通知：托盘 / 拖入 / 窗口状态——`AppendNotice` 的输出面）──
+	// ★ 清理（Phase 18 A6 顺带）：此行原有「最大化 / 还原 / 最小化」三个裸按钮，是 **Phase 12 的临时替代品**——
+	//   当时 Borderless 无系统标题栏，关窗只剩 Alt+F4（`phase13-captionbar-requirements.md:25` 原话：
+	//   「现有『窗口控制』按钮行是**临时替代品**」；`phase13-captionbar-preliminary-design.md:154/356` 亦记为
+	//   「挂 CaptionBar（**评估替换临时「窗口控制」按钮行**）」）。Phase 13 的 CaptionBar 已落地并默认挂载
+	//   （`--borderless`）⇒ 这三个按钮**功能重复**，故移除；窗口状态继续经 `AppendWindowState` → 本行 → 事件日志可见。
 	auto winRow = std::make_unique<Panel>();
 	winRow->SetSize(600, 36);
-	winRow->SetLayout(std::make_unique<HorizontalLayout>(8, false));
+	winRow->SetLayout(std::make_unique<HorizontalLayout>(0, true));   // fillCrossAxis：标签占满整行（更长的通知不早截断）
 
-	auto makeWinBtn = [&](const char* text){
-		auto btn = std::make_unique<Button>(text);
-		btn->SetSize(90, 36);
-		btn->SetStyle(ButtonStyleOverride{
-			.background = kSecondary(),
-			.cornerRadius = kRadius,
-			.hoverBackground = kSecondaryHover(),
-		});
-		btn->SetTextColor(kText());
-		return btn;
-	};
-
-	auto maxBtn = makeWinBtn("最大化");
-	maxBtn->SetOnClick([this]{ if (m_window) m_window->Maximize(); });
-
-	auto restoreBtn = makeWinBtn("还原");
-	restoreBtn->SetOnClick([this]{ if (m_window) m_window->Restore(); });
-
-	auto minBtn = makeWinBtn("最小化");
-	minBtn->SetOnClick([this]{ if (m_window) m_window->Minimize(); });
-
-	auto winEventLabel = std::make_unique<Label>("窗口事件：—");
-	winEventLabel->SetSize(280, 36);
+	auto winEventLabel = std::make_unique<Label>("事件：—");
+	winEventLabel->SetSize(600, 36);
+	winEventLabel->SetStretch(1);
 	winEventLabel->SetTextColor(kHint());
 	m_windowEventLabel = winEventLabel.get();
 
-	winRow->AddChild(std::move(maxBtn));
-	winRow->AddChild(std::move(restoreBtn));
-	winRow->AddChild(std::move(minBtn));
 	winRow->AddChild(std::move(winEventLabel));
 	AddChild(std::move(winRow));
 
