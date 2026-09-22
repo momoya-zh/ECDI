@@ -266,13 +266,13 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | [phase17-layout-padding-detailed-design.md](phase17-layout-padding-detailed-design.md) | 详细设计（**§1.3 七处细化**——其中**两处是查出的初设漏项**：① `@param fillCrossAxis` 与 `.cpp:59` 的「跨轴坐标恒 0」在 `padding > 0` 后**失实**、必须改（skill 条 80）；② 调用点构成更正——新增 `examples/VisualTest` 这个初设未列出的消费者，`src/Demo` 10 处**不参与构建**） · **§2 逐文件最小 diff `△1–△8`**（明确「哪些行动 / 哪些行逐字不动」+ V/H 同构对照） · **§3 关键行为冻结**（`cross` 循环外求值 · 三条取值口径落点 · 溢出区间的 `fixedTotal`／`remaining` 精确区分 · 与 content offset／HitTest／resize 链／AutoSize／CaptionBar 的逐项「不动」声明） · **契约 C1–C6**（每条绑实现落点与验证） · **§5 测试规格**（逐用例精确数值，全部期望值经**目标形态模拟脚本复算通过**；T17-8 定 `#ifdef NDEBUG` 分支） · **验收 A1–A7**（含 A4 跨轴取值唯一入口 / A5 旧写法零残留两条**结构性判据**） · **§8 局限 L1–L5** · **§9 两批实施顺序 + 6 条盯防清单**） | ✅ **v1.2 已实现**（A1–A6 实测通过 · 226 全绿；★ A6 落点由 root 改 page 一级，见详设 §1.3-8） |
 
 
-## Phase18 窗口/根背景能力（Window/Root background）（🚧 需求确认 v1.0 待评审）
+## Phase18 窗口/根背景能力（Window/Root background）（✅ 需求确认 **v1.1 评审通过，可进初步设计**（2026-09-22 外部评审：「没有看到需求层面的阻塞问题」））
 
 > **立项依据**：`roadmap-deferred.md` **§7.7 条目 #39**——**由 Phase 17 A6 实施实测派生**（root 级 padding 露白框）。
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase18-window-background-requirements.md](phase18-window-background-requirements.md) | 需求确认（**§1.2 现状勘察 K1–K8 全部带行号实测**——其中 **K1**（`GDIBackend.cpp:261` 硬编码 `WHITE_BRUSH`）· **K2**（`RenderingBackend` 接口无背景入口）· **K3**（`Window` API 无背景入口）· **K4**（root 是裸 `Widget`）四条共同界定缺口：「客户区底色」**无任何可配置入口**；**K8** 记明库内测试替身 `RecordingBackend` 被 **12 个测试文件**依赖 ⇒ 接口变动须同步）· **§1.3 锁定 Phase 4 四层不变量**（清屏属能力层、颜色属决策层）⇒ 约束 D1/Q2 · **技术路线三案**（A 窗口级配置 + Backend 消费〔倾向〕/ B 让根具备背景〔备选〕/ C 不做〔兜底〕）· **R1–R6**（**R3 是本项直接动机**：Phase 17 的 root 级留白在该能力落地后首次可用）· **D1–D7**（D1 落点 / D5 恢复默认 / D6 命名留初设；**D7** 处理「决策 16 注释将变假」）· **N1–N6** · **Q1–Q4**（**Q2 清屏形态**可能牵动 `RenderCommand` 变体 = 最大风险点） | 🚧 **v1.0 待评审** |
+| [phase18-window-background-requirements.md](phase18-window-background-requirements.md) | 需求确认（**§1.2 现状勘察 K1–K8 全部带行号实测**——其中 **K1**（`GDIBackend.cpp:261` 硬编码 `WHITE_BRUSH`）· **K2**（`RenderingBackend` 接口无背景入口）· **K3**（`Window` API 无背景入口）· **K4**（root 是裸 `Widget`）四条共同界定缺口：「客户区底色」**无任何可配置入口**；**K8** 记明库内测试替身 `RecordingBackend` 被 **10 个测试文件**依赖〔2026-09-22 实测复核〕⇒ 接口变动须同步）· **§1.3 锁定 Phase 4 四层不变量**（清屏属能力层、颜色属决策层）⇒ 约束 D1/Q2 · **技术路线三案**（A 窗口级配置 + Backend 消费〔倾向〕/ B 让根具备背景〔备选〕/ C 不做〔兜底〕）· **R1–R6**（**R3 是本项直接动机**：Phase 17 的 root 级留白在该能力落地后首次可用）· **D1–D7**（D1 落点 / D5 恢复默认 / D6 命名留初设；**D7** 处理「决策 16 注释将变假」）· **N1–N6** · **Q1–Q4**（**Q2 清屏形态**可能牵动 `RenderCommand` 变体 = 最大风险点） | 🚧 **v1.0 待评审** |
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
 > **独立契约文档**——不属任何 Phase，故不用 `phaseN-*` 命名（阶段由文档头部 / §8 跟踪）。
