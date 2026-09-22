@@ -34,7 +34,7 @@ struct Palette{
 	/// @brief 窗口底（内容留白露出的那圈）——#232936
 	/// @details 与 `.cpp` 的中性面色 `kSecondary()` **同值**：这圈留白读起来应与"抬起的表面"同一层，
 	/// 而不是另立一个色。两者是**两个角色共享一个值**（不互相耦合——改一个不会带动另一个）。
-	static constexpr Color WindowBackground() noexcept{ return Color::FromRGBA8(35, 41, 54, 255); }
+	static constexpr Color WindowBackground() noexcept{ return Color::FromRGBA8(15, 17, 21, 255); }
 };
 
 /// @brief TSV 行切分（按 `\t`；ModelProbe 协议自控——无引号语义；demo 工具公开供测试）
