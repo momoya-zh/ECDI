@@ -31,9 +31,10 @@ struct Palette{
 	/// @brief 页面底（内容区）——#0f1115
 	static constexpr Color PageBackground() noexcept{ return Color::FromRGBA8(15, 17, 21, 255); }
 
-	/// @brief 窗口底（内容留白露出的那圈）——#232936
-	/// @details 与 `.cpp` 的中性面色 `kSecondary()` **同值**：这圈留白读起来应与"抬起的表面"同一层，
-	/// 而不是另立一个色。两者是**两个角色共享一个值**（不互相耦合——改一个不会带动另一个）。
+	/// @brief 窗口底（内容留白露出的那圈）——#0f1115，**与 `PageBackground()` 同值**
+	/// @details 取同值 = **有意让留白视觉无缝**：留白露出的**确实是**窗口底色（Phase 18 能力在位），
+	/// 只是与页面底同色 ⇒ 看不出边界。想让那圈显形（例如确认留白是否真的生效），**只改这一行**即可。
+	/// ★ 与 `.cpp` 中性面色 `kSecondary()`（#232936）的**同值关系已解除**——两者各自演进，互不耦合。
 	static constexpr Color WindowBackground() noexcept{ return Color::FromRGBA8(15, 17, 21, 255); }
 };
 

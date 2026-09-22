@@ -318,11 +318,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	}
 	win.SetWindowLayer(layer);
 
-	// ★ Phase 18：客户区底色——18.1 C 之后它**第一次真的看得见**（`contentPanel` 留白让出的那 12px 就是它）。
+	// ★ Phase 18：客户区底色——`contentPanel` 留白让出的那 12px 露的就是它。
 	//   链路：`Window::SetBackgroundColor` → `Renderer::BeginFrame` → `RenderingBackend::BeginFrame`
 	//   （GDIBackend 以本帧背景色清屏，不再是硬编码 WHITE_BRUSH）。
-	//   取值 = `Palette::WindowBackground()`（#232936）——**取自 demo 调色板而非就地写死**：它是这个应用
-	//   "抬起的中性表面"那一层，留白露出来应与之一致，而不是另立一个色。
+	//   取值 = `Palette::WindowBackground()`——**取自 demo 调色板而非就地写死**（单一来源：`ModelProbe.h`）。
+	//   该值与页面底**同色** ⇒ 这圈留白**视觉无缝**（要的是"内容不贴边、但看不出边界"；
+	//   ③ 露底色从来不是需求——见 `docs/phase18.1-child-inset-requirements.md` §9.1）。
+	//   想让它显形（确认留白真的生效）：改 `ModelProbe.h` 里那**一个值**即可。
 	win.SetBackgroundColor(ECDI::Demo::Palette::WindowBackground());
 
 	// ── Phase 14 A7：托盘图标（应用级能力——与窗口无关；图标资源 ID 默认 102 = ModelProbe.rc 的 IDI_APP）──

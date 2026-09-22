@@ -226,6 +226,7 @@ contentPanel->SetLayout(std::make_unique<ECDI::VerticalLayout>(10, true, 12));  
 | **实现** | `examples/ModelProbe/main.cpp` 插一层透明 `Panel` 承接 `VerticalLayout(0, true, 12)`；`ModelProbe.cpp:155` 的 page `padding` 归零 |
 | **框架改动** | **0**（公共头 92 → 92 · 用例 231 → 231 · 无新断言） |
 | **目视** | 用户 2026-09-22 确认：标题栏贴边 + 内容四周 12px + 该 12px 为**窗口底色** ⇒ 三条同时成立 ✓ |
+| **后续（同日）** | ★ 用户自行把 `Palette::WindowBackground()` 改为**与页面底同值 `#0f1115`**（提交 `51097a9`）⇒ 这圈留白**视觉无缝**。**不推翻实施结论**——反而印证 §9.1 的分层：**①② 是要求、③ 从来不是**；能力在位（那 12px 露的**确实是**窗口底色），只是取同值故不显形。想显形改 `ModelProbe.h` 一个值即可 |
 | **路线 A 处置** | **降级为记账**（`roadmap-deferred.md` §7.8 #40）：与 C **等价**（同样只能达成 ③、同样要求"内缩落在内容上"），却**多引入一个近义词**（`padding` vs `inset`）——与 `docs/README.md`「项目定位」的「**一个概念只用一个词**」直接冲突；★ 且它**不能**让"root 一级配 padding 就自动贴边" |
 
 ### 9.4 重启条件（R-1..R-4，任一命中即重启；届时**优先 B/E，而非 A**）
