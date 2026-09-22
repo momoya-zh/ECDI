@@ -98,7 +98,7 @@
 
 | # | 延期项 | 来源 | 备注 |
 |---|---|---|---|
-| 39 | **根 / 窗口的背景色可配置**（或让根能挂 `Panel` 背景） | Phase 17 A6 实测（2026-09-21） | **现象（已实测确认）**：`root` 是裸 `Widget`（**无背景能力**），而 Backend 每帧以 `WHITE_BRUSH` 清屏（`GDIBackend.cpp:261` **决策 16**「Root 白底是平台语义，不是 Widget 命令」）⇒ **任何未被 Widget 覆盖的客户区像素 = 白色**。因此在 root 一级配 `padding` 虽能缩进全部内容，却让**四边露出白色**（`#0f1115` 深色窗口上一圈白框），且 `CaptionBar` 作为同布局的子会被**连带内缩**。**Phase 17 的处置 = 绕开**（留白放 page 一级）。**重启条件**：出现「**真·窗口四周留白**」（露底色那一种）的真实设计需求——Phase 16 的 Desktop 档窗口、DesktopNest 的框体都可能触发 ⇒ 届时前置即本条目。**重启：✅ 已立项——Phase 18**（2026-09-21；需求稿 `docs/phase18-window-background-requirements.md` **v1.0** 🚧 待评审） |
+| 39 | **根 / 窗口的背景色可配置**（或让根能挂 `Panel` 背景） | Phase 17 A6 实测（2026-09-21） | **现象（已实测确认）**：`root` 是裸 `Widget`（**无背景能力**），而 Backend 每帧以 `WHITE_BRUSH` 清屏（`GDIBackend.cpp:261` **决策 16**「Root 白底是平台语义，不是 Widget 命令」）⇒ **任何未被 Widget 覆盖的客户区像素 = 白色**。因此在 root 一级配 `padding` 虽能缩进全部内容，却让**四边露出白色**（`#0f1115` 深色窗口上一圈白框），且 `CaptionBar` 作为同布局的子会被**连带内缩**。**Phase 17 的处置 = 绕开**（留白放 page 一级）。**重启条件**：出现「**真·窗口四周留白**」（露底色那一种）的真实设计需求——Phase 16 的 Desktop 档窗口、DesktopNest 的框体都可能触发 ⇒ 届时前置即本条目。**重启：✅ 已立项——Phase 18**（2026-09-21）。**进展（2026-09-22）**：需求 **v1.1** ✅ · 初设 **v1.1** ✅ · 详设 **v1.1** ✅ **均评审通过（第二轮评审：🟢 可进入实现）——待实现**（`docs/phase18-window-background-{requirements,preliminary-design,detailed-design}.md`；**公共 API +2**、用例 226 → 231 为设计目标） |
 
 ---
 
