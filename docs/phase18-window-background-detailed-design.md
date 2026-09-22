@@ -138,7 +138,7 @@ EXPECT_TRUE(!recorder->frameBackgrounds.empty());
 | **△5** | `include/ECDI/Window/Window.h` | ① `public:` 区（配置 API 段，`SetWindowLayer` 附近）新增 `void SetBackgroundColor(const Color& color);` + 注释（★ 明写**副作用**：改状态 + **请求**重绘）；② `private:` 成员区新增 `Color m_backgroundColor = Color::White();`（**唯一默认值来源**，C2） | `Color` 经 `Window.h` 既有 include 链已可见（`Core/Color.h`）——实现时核对 |
 | **△6** | `src/Window/Window.cpp` | ① `:126` → `m_renderer.BeginFrame(m_backgroundColor);`；② 新增实现（**不是**纯转发形制，B16）：`void Window::SetBackgroundColor(const Color& color){ m_backgroundColor = color; Invalidate(); }` | 与 `SetCaptionHeight` 形制**不同**（那两个转发平台层；本方法改自身成员） |
 | **△7** | `include/ECDI/Application/Application.h:60` + `src/Application/Application.cpp:58` | 追加可选形参 `RenderServices services = CreateDefaultRenderServices()`；实现里 `std::move(services)` 传入 `Window` 构造（**其余逐字不动**） | §2.2（N1）；`Application.h` 需可见 `RenderServices`（实现时核对 include） |
-| **△8** | `src/Tests/AntiAliasingTests.cpp:339` · `src/Tests/RendererTests.cpp:217/231/280/284` | **6 处** `backend.BeginFrame()` → `backend.BeginFrame(Color::White())` | 显式表达既有默认行为（§1.1）；**不改语义** |
+| **△8** | `src/Tests/AntiAliasingTests.cpp:339` · `src/Tests/RendererTests.cpp:218` / `:281` | **3 处** `backend.BeginFrame()` → `backend.BeginFrame(Color::White())`（★ v1.2 勘误：原稿写「6 处」，实测 **6 = Begin + End 合计**——另有 `:232` / `:285` 与 `AntiAliasingTests.cpp:342` 的 `EndFrame()`，**无需改**） | 显式表达既有默认行为（§1.1）；**不改语义** |
 | **△9** | 新增 `src/Tests/WindowBackgroundTests.cpp` + `RunAllTests.h` 声明 + `RunAllTests.cpp` 调用 | T18-1..T18-5（§6） | **新增源文件须手工登记两处**（CMake 的 GLOB 自动入库，但测试声明/调用是手工——记忆「新增源文件只改一处」的例外） |
 
 **公共头 92 → 92**（无新增头）。**断言特征串 11 → 11**（O2：不新增框架断言）。
@@ -242,7 +242,7 @@ void GDIBackend::BeginFrame(const Color& background)
 
 > ★ **措辞纪律（评审第 8 条）**：T18-1 / T18-4 验证的是「**默认背景参数 == 显式 `Color::White()`**」，**不是**「GDI 像素输出与 Phase 17 逐位相同」——后者本相位**未测**（O3 不做像素级验收）。**实现后的测试报告、提交信息与文档一律不得把这条说大**：写「默认背景参数 = `Color::White()`」或「参数取值逐位一致」即可。
 
-**T18-6（适配，非新增）**：△8 的 6 处调用点传白后，`AntiAliasing` / `Renderer` 既有用例**全绿**（零回归）。
+**T18-6（适配，非新增）**：△8 的 **3 处**调用点传白后，`AntiAliasing` / `Renderer` 既有用例**全绿**（零回归）。
 
 **用例数**：**226 → 231**（**+5**；⚠️ **设计目标**——以实现后 `GetTestRegistry().Add` 的**实测注册数**为准，不符则**以实测回填**，不强行追设计值）。**注册**：`RunAllTests.h` 声明 5 个函数 + `RunAllTests.cpp` 调用（手工两处）。
 
@@ -254,11 +254,24 @@ void GDIBackend::BeginFrame(const Color& background)
 |---|---|---|
 | **A1** | 四工具链构建 + 全绿 | `ecdi_tests` **231 passed, 0 failed**（MSVC / ClangCL / Clang / MinGW）——⚠️ **231 是设计目标、非既成事实**；实现后以**实测**结果回填（含实际注册数），**不强行追设计值** |
 | **A2** | 断言启用核验 | 特征串 **11 条**（O2 定案：不新增）——`grep -c` 判据同 Phase 17 |
-| **A3** | 零回归 | 既有 **226** 全绿（尤其 △8 适配后的 6 处调用点） |
+| **A3** | 零回归 | 既有 **226** 全绿（尤其 △8 适配后的 **3 处**调用点） |
 | **A4** | ★ **结构性审查（三条合一）** | ① `RenderingBackend.h` **依赖零新增**（`Rect`/`Point`/`Color`/`Font`/`Image`；**无** `Window`/`Widget`/`PaintContext`）② GDI 清屏**只用 `ToColorRef`**、**无** `background.a` 分支、**无** `BlendAlphaSolid` 调用 ③ `Renderer` **仍纯转发**（`BeginFrame` 函数体只有一行转发） |
 | **A5** | ★ **唯一默认值来源（源码级）** | ① `BeginFrame` 声明**无默认实参** ② 渲染链路中 `Color::White()` 只出现在 `Window.h` 的成员初始值 ③ `GDIBackend` / `RecordingBackend` / `Renderer` 内**无**白色常量 |
 | **A6** | 目视 | ModelProbe：**root 级 padding + 非白底色** ⇒ 露出的四边呈**配置色**（R3 组合首次可用）。★ 需授权动 `examples/ModelProbe/main.cpp`（skill 条 2）——**实现阶段不得擅自修改**：核心代码与测试先行，A6 等**用户单独授权**后再做 |
 | **A7** | 文档与索引同步 | `GDIBackend.cpp:260` 决策 16 注释（D7）· `roadmap-deferred.md` §7.7 #39 收口 · 两份 README 规模锚点（用例 231 · 头 92）· `desktopnest-roadmap.md` 无需动（G-2 仍欠） |
+
+### 7.1 实现后实测回填（2026-09-22）——A1–A7
+
+| # | 实测结果 |
+|---|---|
+| **A1** | ✅ **四工具链**（MSVC / ClangCL / Clang / MinGW）`ecdi_tests` **231 passed / 0 failed**（226 既有 + 5 新增）——**实测 = 设计目标**，无需调整 |
+| **A2** | ✅ 断言特征串 **11 → 11**（未新增任何断言，O2 定案保持） |
+| **A3** | ✅ 既有 **226** 全绿——△8 适配的 **3 处** `BeginFrame` 传白后零回归 |
+| **A4** | ✅ **源码级核验通过**：① `RenderingBackend.h` 依赖仅 `Rect`/`Point`/`Color`/`Font`/`Image`（无 `Window`/`Widget`/`PaintContext`）② 清屏路径 `GDIBackend.cpp:263-269` **只用 `ToColorRef`**、无 `background.a` 分支、无 `BlendAlphaSolid` ③ `Renderer::BeginFrame` 仍是**单行转发**。★ **判据措辞精确化（v1.2）**：② 的「无 `BlendAlphaSolid` 调用」**只在清屏路径内成立**——全文有 **5 处** `BlendAlphaSolid`，属 AA / 图像 / 圆角既有能力，不在本相位范围 |
+| **A5** | ✅ **源码级核验通过**：① `virtual void BeginFrame(const Color& background) = 0;` **无默认实参** ② `Color::White()` 仅出现在 `Window.h:312` 的成员初始值（另 2 处是注释） ③ `GDIBackend` / `RecordingBackend` / `Renderer` 内 **0 次** `Color::White` |
+| **A6** | ✅ **能力达成、形态被否**：root 级 padding + 非白底色实测**确实露出配置色**（本相位能力验证通过）；但该形态**不可接受**——`CaptionBar` 被连带内缩 12px（`padding` 是布局级单一 int、框架无 per-child inset），且与**平台拖动区脱钩**（`Win32PlatformWindow.cpp:417` 的 caption 判据 `y < captionHeight` 是**全宽带**、不看 `CaptionBar` 几何 ⇒ ① 环上那块"背景"落在带内、**能拖窗口**；② 标题栏**下缘 12px** 落在带外、**拖不动**）。⇒ demo 落回 **page 级留白 + 底色同值**（`af1f080`）；「贴边 + 留白 + **露窗口底色**」三者兼得改由 **Phase 18.1 路线 C**（应用侧透明 `Panel`，**框架零改动**）落实 |
+| **A7** | ✅ **本批完成**：决策 16 注释已随实现落盘（`GDIBackend.cpp:260`）· `roadmap-deferred.md` §7.7 **#39 → ✅ 已实现** · 两份 README 锚点刷新（**231** 用例 / **92** 头 / **129** 文档）· 本表实测回填 · **△8「6 处 → 3 处」勘误已落**（v1.2） |
+
 
 ---
 
@@ -266,14 +279,14 @@ void GDIBackend::BeginFrame(const Color& background)
 
 | 项 | 实测 / 预计 |
 |---|---|
-| 改动文件 | 源码 **7**（`RenderingBackend.h` · `Renderer.h/.cpp` · `GDIBackend.h/.cpp` · `RecordingBackend.h` · `Window.h/.cpp` · `Application.h/.cpp`）+ 既有测试 **2**（6 处调用点）+ **新增测试 1** |
+| 改动文件 | 源码 **7**（`RenderingBackend.h` · `Renderer.h/.cpp` · `GDIBackend.h/.cpp` · `RecordingBackend.h` · `Window.h/.cpp` · `Application.h/.cpp`）+ 既有测试 **2**（**3 处**调用点）+ **新增测试 1** |
 | 公共头 | 92 → **92** |
 | **公共 API** | **+2**（`Window::SetBackgroundColor` + `Application::Create` 的 `services` 形参）——★ 与 Phase 16「净增 0」、Phase 17「净增 0」**都不同**，如实记 |
 | `RenderingBackend` | 1 个纯虚**改签名**（方法数不变） |
 | `Renderer` | `BeginFrame` 改签名（结构不变） |
 | `Application` | `Create` **追加带默认值的尾形参**（现有调用**逐字不动**） |
 | `RecordingBackend` | +1 公开记录成员；`BeginFrame` 由空实现改为记录 |
-| 测试 | 既有 6 处适配 + 新增 5 用例（**226 → 231**） |
+| 测试 | 既有 **3 处**适配 + 新增 5 用例（**226 → 231**） |
 | 断言特征串 | **11 → 11** |
 | 决策 16 注释 / `roadmap §7.7` | 落地时同步（D7） |
 | `examples/ModelProbe/main.cpp` | ★ A6 目视用，**须单独授权** |
@@ -290,6 +303,8 @@ void GDIBackend::BeginFrame(const Color& background)
 ---
 
 ## 10. 修订记录
+
+- **v1.2**（2026-09-22）**实现后回填 + 一处勘误**。① ★ **勘误**：△8 原写「**6 处** `backend.BeginFrame()`」——实测 **3 处**（`AntiAliasingTests.cpp:339` · `RendererTests.cpp:218/281`），**6 是 `BeginFrame` 与 `EndFrame` 的合计**（另 3 处 `EndFrame` 无需改）；§3/§6/§7/§8 共 **5 处**「6 处」表述同步订正，行号按实测更新（217/231/280/284 → 218/232/281/285）；**v1.0 修订记录内的同款表述按历史记录保留不改写**（条 61② 纪律）。② **§7.1 新增「实现后实测回填」**：A1–A7 逐项附实测结果。③ ★ **A4-② 判据措辞精确化**：「无 `BlendAlphaSolid` 调用」**只在清屏路径内成立**。④ ★ **A6 记录形态被否的根因**：`CaptionBar` 被 root padding 连带内缩 + 与 `WM_NCHITTEST` 的**全宽 caption 带**脱钩（拖动行为异常）⇒ 替代方案见 **Phase 18.1 路线 C**。
 
 - **v1.1**（2026-09-22）**第二轮评审（针对 v1.0）处置——评审结论「🟢 详细设计通过，可进入实现」**。① **§1.4 新增逐条处置表**（14 条，**全部采纳**）；② ★ **定性用词精确化**：B14 改称「**已登记的延迟设计，在第一个真实消费者出现后兑现**」——**Phase 7 完成「注入点」、Phase 18 完成「注入通路」**，且**不称「技术债」**（性质不同：有意不做 + 有明确触发条件）；§2.2 一律写「**打通 `RenderServices` 注入通路**」而**不写**「为测试加洞」（措辞会变先例）；③ ★ **§2.2 论证由三点扩为四点**——新增「**换后端 / 换平台时是否还得再改一次**」的判据（对照 `GetHwndForTests` 留在内部头）与**反事实**（不接通则测试**精准避开最脆弱的那半段**，且全绿看不出缺失）；④ ★ **新增 §3.1 实现盯防清单 9 条红线**（含评审第 11 条「**帧编排顺序不得重排**」）；⑤ ★ **新增措辞纪律**（§5-C1 + §6 表下注）：**「逐位相同」的范围仅限参数取值**，不是像素级——**不得把这条说大**；⑥ ★ **§6 用例数与 §7-A1 标注「设计目标」**，以**实测**回填（`231` 非既成事实）；⑦ §7-A6 补「实现阶段不得擅自修改 ModelProbe」；⑧ `Application::Create` 新增形参的注释改「测试/未来可注入」为「**支持注入**」（该通路在本相位后**已可达**——skill 条 91 的注释纪律）。
 
