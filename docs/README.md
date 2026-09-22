@@ -18,7 +18,7 @@
 
 ## 开发进度（2026-09-22 更新）
 
-> **当前规模锚点（防止各处历史数字误读）**：测试 **231** 用例（`GetTestRegistry().Add` 求和，**23 个含用例的测试文件**——`src/Tests/*.cpp` 共 26 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **92**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **129** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 127 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
+> **当前规模锚点（防止各处历史数字误读）**：测试 **231** 用例（`GetTestRegistry().Add` 求和，**23 个含用例的测试文件**——`src/Tests/*.cpp` 共 26 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **92**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **131** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 129 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
 
 ### ✅ 已完成
 
@@ -68,6 +68,7 @@
 - **Phase 17 布局内边距（Layout padding）—— 需求确认 **v1.2** ✅ · 初步设计 **v1.1** ✅ · 详细设计 **v1.2** ✅ —— **已实现（A1–A6 实测通过 · 用例 226 全绿 · 断言特征串 10→11）****：`roadmap-deferred.md` §7.6 **#38** 的立项落地（2026-09-20 用户拍板**方案 B（框架侧）**）。**动机**：内容四边贴死客户区、鼠标拖选极易越出 GUI 边界。⚠️ **归因澄清**：贴边**不是 AutoSize 的缺陷**（AutoSize 的定义即「窗口尺寸跟随内容」⇒ 内容从 `(0,0)` 铺满是其必然结果），**修复落点在布局层**——**详设 L1 进一步记明**：当前 `AutoSize()` 仅用于叶子标签（`ModelProbe.cpp:718`）⇒ 本场景**无需改 AutoSize**。**路线**：`VerticalLayout` / `HorizontalLayout` 各加 `int padding = 0` 构造形参 ⇒ **root 一级配置即全局留白**；**详设**给出 `△1–△8` 八个行级改动点 · 契约 **C1–C6** · 测试 **T17-1..T17-8**（+85 断言）· 验收 **A1–A7**；**公共头 92→92 · 用例 218→226 · 断言特征串 10→11**；调用点 **41 处零改动**（实测构成：ModelProbe 9 · `examples/VisualTest` 1 · `src/Demo` 10（不参与构建）· 测试 20 · README 示例 1）。详见下方 Phase17 段。
 - **Phase 18 窗口/根背景能力 —— 需求 v1.1 ✅ · 初设 v1.1 ✅ · 详设 v1.1 ✅（第二轮评审「🟢 通过，可进入实现」——见 §3.1 盯防清单 9 条红线）· ✅ **已实现并收口**（批 A/B · 四工具链 `ecdi_tests` **231 全绿** · **A1–A7 全过**）**：`roadmap-deferred.md` **§7.7 #39** 的立项落地（2026-09-21，**由 Phase 17 A6 实施实测派生**）。**动机**：Phase 17 的 **R3「root 一级即全局留白」在视觉上不可用**——root 无背景 ⇒ 让出的四边露出 Backend 清屏白（`#0f1115` 深色窗口上一圈白框），且标题栏被连带内缩。**缺口实测（K1–K4）**：客户区底色是 `GDIBackend.cpp:261` 的**硬编码 `WHITE_BRUSH`**，**无任何可配置入口**（无 `Window` API、无 `RenderingBackend` 接口位、root 亦是裸 `Widget`）。**路线已定**：**A 窗口级配置 + Backend 消费**——颜色存 `Window`（**唯一默认值来源**）· 每帧经 `Renderer::BeginFrame(const Color&)` 传入 · **Backend 不持状态、不认识 Window** · alpha 被忽略 · 清屏沿用决策 24。**★ 详设定出两处初设未覆盖的定案**：**N1 打通 `RenderServices` 注入通路**（`Application::Create` 追加带默认值尾形参——**Phase 7 已登记的延迟设计**，第一个真实消费者 = 端到端背景色测试）· **N2** 测试走 `Show()` + `PumpMessages`。**★ A6 视觉实测结论（2026-09-22）**：留白回到 root 一级后，**底色不再是白的**（能力达标），但**标题栏被连带内缩 + 异色描边** ⇒ **留白最终落回 page 一级**，并由此**派生 Phase 18.1**（见下）。★ **后续核查（2026-09-22）**：该形态还与**平台拖动区脱钩**——`Win32PlatformWindow.cpp:417` 的 caption 判据是 `y < captionHeight` 的**全宽带**、不看 `CaptionBar` 几何（环上那块"背景"**能拖窗口** · 标题栏**下缘 12px 拖不动**）⇒ **「chrome 贴边」升级为平台契约**。**公共 API +2**（★ 首个净增 API 的 Phase）· 用例 **226 → 231**。详见下方 Phase18 段。
 - **Phase 18.1 子节点内缩（Child inset）—— ⏸️ 已搁置（2026-09-22 立项当日结论）**：**由 Phase 18 A6 目视实测派生**（用户原话：「底色和原有底色不同，标题栏能不能做到不内缩」）。**缺口 = 留白的归属**：`Layout::padding` 是**布局级单一 int、对全部子一视同仁**（`VerticalLayout.cpp:38/42/45/63`），而 `CaptionBar` 与 `page` **同属 root 布局的子** ⇒ root 级留白**必然连带内缩标题栏**；**Phase 18 只解掉了「露出来的是不是白的」**（清屏改用本帧底色），未解「标题栏跟着走」。**★ 定形态事实（F-1）**：「让出的窟窿开在谁身上」决定看不看得见窗口底色——root 是裸 `Widget` 不绘制 ⇒ 开在 root **露窗口底色**；page 自绘背景 ⇒ 开在 page **看不见底色**。**★ 决定"可不开"的事实**：`Panel` 默认**背景透明**且官方语义即「**隐形布局容器**」（`DefaultTheme.cpp:44-47` / `Panel.cpp:78`）⇒ **应用侧包一层透明 `Panel` 承接 padding = 零框架改动达成同一视觉**（Phase 17 判该路线代价过高所依据的「需 override `SetSize` 同步几何」**已因 9.7 + Phase 15 而消失**）。**四案并列**：**A** 子节点 inset · **B** 布局豁免 · **C** 应用侧零改动 · **D** 不做。**★ 结论：走 C（已落 demo 侧，框架零改动）⇒ 本阶段搁置。** 理由：① **要求分三层**——chrome 贴边 / 内容留白是**基本要求**（前者更是**平台契约**），**露窗口底色是可选效果**；前两条在 `af1f080` 已成，C 的增量只有第三条。② 路线 **A 与 C 等价**（同样只能达成第三条），却多一个近义词（`padding` vs `inset`），与「一个概念只用一个词」冲突。**重启条件 = `roadmap-deferred.md` §7.8 #40 的 R-1..R-4**（届时优先 B/E，而非 A）。详见下方 Phase18.1 段。
+- **Phase 19 鼠标事件维度补全（Mouse event dimensions）—— 需求确认 v1.0 · 🚧 待评审（2026-09-22 立项）**：**框架缺陷修复队列第 ① 位**（审计 `framework-defect-audit.md` §4 **D-1** → `roadmap-deferred.md` **§7.9 #41**）。**定性 = 契约错误（丢信息）**：`MouseEvent` 基类只带坐标（`MouseEvent.h:41-44`），而 `WM_MOUSEMOVE` 的 `wParam`（`MK_LBUTTON` 等**按键位** + `MK_SHIFT`/`MK_CONTROL`）**被翻译器整个丢弃**（`WindowMessageHandler.cpp:92-106` 只取坐标）⇒ 任何"按住拖动"都得自己维护布尔，**代码里已有两处**（`ScrollBar::m_dragging` · `TextBox::m_mouseDown`）。**形态由既有原则锁定**：Event 层「原始值不归一化」——`MouseWheelEvent.h:11` 已落款 ⇒ **照抄平台位、不做语义结论**；修饰键**复用键盘侧既有的 `KeyModifier`**（`KeyBoard/KeyEvent.h:23/29/31/33`）。★ **顺带解锁 #36**（横向滚轮卡在"无修饰键 / 轴"）。**R1–R7 · D0–D6 · N1–N6 · 验收 A1–A5 · 留给初设 Q1–Q6**。详见下方 Phase19 段。
 
 ### 🔲 未来
 
@@ -307,6 +308,30 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [phase18.1-child-inset-requirements.md](phase18.1-child-inset-requirements.md) | 需求确认（**K1–K10 现状勘察全部带行号**——K1 `padding` 是布局级单一 int、对全部子一律〔`VerticalLayout.cpp:38/42/45/63`〕· K2 `Layout` 抽象无 per-child 概念 · K3 同类实例状态 `SetStretch` 是**零副作用 setter**（inset 的形态先例）· K4 root 恒客户区全尺寸 · K5 未覆盖像素 = 窗口底色 · K6 `Panel` 默认透明 · K8 `SetSize` 虚 + `CaptionBar` override · K10 root 裸 `Widget` 不绘制；**F-1 定形态事实** · **技术路线 A/B/C/D 对照**（**A** 子节点 inset〔倾向：`Widget::SetInset` + `Layout` 基类**唯一消费 helper**，公共头 92→92，`inset=0` 逐位退化〕/ **B** 布局豁免〔否：语义窄 + 主轴游标边界复杂〕/ **C** 应用侧零改动组装〔**可立即验证**〕/ **D** 不做）· **R1–R8** · **D0–D6**（**D0** 是否开/选路线 · **D4** 主轴游标按**槽位**推进 · **D6** 用 setter 而非构造参数）· **N1–N6** · 验收 **A1–A4**（A1 目视主判据；A2 零 inset 逐位退化；A3/A4 结构性可机检）· 留给初设 **Q1–Q6**） | ⏸️ **v1.1 归档（搁置）** |
+
+## Phase19 鼠标事件维度补全（Mouse event dimensions）（🚧 需求确认 **v1.0 待评审**，2026-09-22 立项）
+
+**框架缺陷修复队列第 ① 位**——`roadmap-deferred.md` **§7.9 #41** · 审计 `docs/framework-defect-audit.md` **§4 D-1**。
+
+**定性：契约错误（丢信息），不是缺能力**。平台层本来就有：`WM_MOUSEMOVE` 的 `wParam` 携带 `MK_LBUTTON`/`MK_RBUTTON`/`MK_MBUTTON`/`MK_XBUTTON1-2`（**按下的键**）与 `MK_SHIFT`/`MK_CONTROL`（**修饰键**）——而 `MouseEvent` 基类只定义了两个坐标成员（`MouseEvent.h:41-44`），翻译器也只取坐标就返回（`WindowMessageHandler.cpp:92-106`）。⇒ 任何"按住拖动"手势都得**自己维护布尔**，代码里**已有两处为此写的特例**（`ScrollBar::m_dragging`（置位 `:250`/`:268` · 消费 `:289-314` · 清位 `:277-286`）· `TextBox::m_mouseDown`）。
+
+**形态由既有原则锁定（F-1）**：Event 层「**轻量、只表示已发生的事实、原始值不归一化**」——这条落款**现成存在**于 `MouseWheelEvent.h:11`（Wheel 做到了，Move 连原始值都没带）⇒ 本项**照抄平台位**，**不做** `IsDragging()` 之类语义结论。修饰键**复用键盘侧既有的 `KeyModifier`**（`KeyBoard/KeyEvent.h:10/23/29/31/33`，含 `HasModifier`/`IsShiftDown`/`IsCtrlDown`/`IsAltDown` 先例）——「一个概念只用一个词」。
+
+**顺带解锁**：`roadmap-deferred` **#36**（横向滚轮——卡在"平台未翻译 `WM_MOUSEHWHEEL`"+"`MouseEvent` 无修饰键"）；是否**并入**本次由评审定（本稿倾向不并入，保持单一职责）。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase19-mouse-event-dimensions-requirements.md](phase19-mouse-event-dimensions-requirements.md) | 需求确认（**K1–K10 现状勘察全部带行号**——K3 ★ 平台有却被丢 · K5 键盘 `KeyModifier` 先例 · K6 ★ `MouseWheelEvent.h:11` 的「原始值不归一化」落款 · K7 两处手工状态 · K8 既有捕获机制 · K9 卡住 #36；**F-1 定形态事实** · **已排除的两个替代方案**（控件自维护布尔 / 消费侧 `GetKeyState`——后者查的是"查询时刻"而非"事件时刻"，消息积压时不等价）；**R1–R7**（R1 按键集合 · R2 修饰键 · R3 四类同源 · R4 原始值不归一化 · R5 零破坏 · R6 空=空而非未知 · R7 为 #36 留缝）；**D0–D6**（**D0 复用 `KeyModifier`**〔倾向〕· **D1 落基类**〔倾向〕· D3 **不做 Alt**〔`wParam` 不提供；**造成键鼠不对称，须显式声明**〕· **D4 不简化两处手工状态**〔它们另有捕获/拖选职责〕）；**N1–N6** · 验收 **A1–A5** · 留给初设 **Q1–Q6**（含 ★ **`MK_XBUTTON` 低位/高位陷阱**）） | 🚧 **v1.0 待评审** |
+
+## 框架缺陷审计与修复队列（✅ 审计 **v1.0**，2026-09-22 新建）
+
+**非阶段文档**（不占 Phase 编号，与 `window-ownership.md` / `desktopnest-roadmap.md` 同级）——**排期转向的产物**：用户 2026-09-22 拍板「**先做缺陷修复的优先级更高**」（demo 是"功能的用法示范"而非开发脚手架，能力未定型时写它 = 维护两份真相；**ModelProbe 继续承担「第一个真实消费者 + 回归载体」**）⇒ **DesktopNest 推迟**到框架缺失补齐之后。
+
+**三层各司其职、不重叠**：**审计**（本文件：证据 + 判据 + 顺序 + 重启条件）→ **总账**（`roadmap-deferred.md` **§7.9**）→ **实施**（`phaseN-*` 三件套）。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [framework-defect-audit.md](framework-defect-audit.md) | 缺陷审计与修复队列（**§3 该修 / 记账的分界判据**——该修三条（违反原则 / **平台有却被中途丢掉** / 无替代路径）vs 记账两条（有兜底 / 无消费者）· **§4 缺陷清单 D-1..D-5**（全部带行号；**D-1 的加重情节** = 已有两处手工状态 ⇒ 越晚改越贵）· **§5 desktop 侧缺口 G-5/G-6/G-7 + 多窗口×`Desktop` 未验项**（与前四者**分栏不混**）· **§6 队列顺序与理由** · **§7 记账不动清单 A-1..A-9**（含逐条**重启条件**）） | ✅ **v1.0**（2026-09-22） |
 
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
