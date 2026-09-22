@@ -36,7 +36,10 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		virtual void Initialize(const PlatformRenderContext& context) {}
 
 		/// @brief 帧开始（后端建立绘制目标：清屏/拿 HDC/建缓冲）
-		virtual void BeginFrame() = 0;
+		/// @param background 本帧客户区**底色**（Phase 18）——**决策层输入**：来源是 `Window`
+		///        （唯一默认值来源），能力层**不持有**该状态、也不感知窗口；形参**无默认实参**
+		///        （否则默认白就有了第二处来源）。⚠️ alpha **被忽略**（清屏为实色）。
+		virtual void BeginFrame(const Color& background) = 0;
 
 		/// @brief 绘制一个填充矩形（最终坐标）
 		/// @param rect  矩形区域（Rect(float)，决策 25：转换封闭在后端内）

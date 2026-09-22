@@ -14,7 +14,7 @@ namespace ECDI {
 	public:
 		explicit Renderer(RenderingBackend& backend);   
 
-		void BeginFrame();
+		void BeginFrame(const Color& background);   ///< Phase 18：透明转发（背景色是决策层输入，Renderer 不持有）
 		void Execute(const CommandBuffer& commands);
 		void EndFrame();
 

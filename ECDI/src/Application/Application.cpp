@@ -55,12 +55,14 @@ int Application::Run() {
 
 }
 
-Window& Application::Create(const std::string& title, int width, int height) {
+Window& Application::Create(const std::string& title, int width, int height,
+                            RenderServices services) {
 	// ⚠️ B1-t：必须写作 unique_ptr(new Window(...))，**不可**用 std::make_unique<Window>(...)。
 	//    原因：构造器为 private（B1），而 make_unique 的函数体**不是 Application 的成员**——
 	//    friend 授权只在"访问发生处"生效，make_unique 内部会因无权访问而编译失败。
 	//    此处 new 表达式就在本成员函数体内，friend 生效；所有权**立即**交给 unique_ptr（非裸指针）。
-	m_windows.emplace_back(std::unique_ptr<Window>(new Window(*this, title, width, height)));
+	m_windows.emplace_back(std::unique_ptr<Window>(new Window(*this, title, width, height,
+	                                                        std::move(services))));
 	Window& window = *m_windows.back();
 
 	// 手动派发 WindowCreatedEvent（不是 Win32 消息翻译的产物，是框架层语义事件）

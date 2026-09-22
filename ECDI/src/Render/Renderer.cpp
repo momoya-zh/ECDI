@@ -9,7 +9,7 @@ namespace ECDI {
 	{
 	}
 
-	void Renderer::BeginFrame() { m_backend.BeginFrame(); }
+	void Renderer::BeginFrame(const Color& background) { m_backend.BeginFrame(background); }
 
 	void Renderer::Execute(const CommandBuffer& commands)
 	{

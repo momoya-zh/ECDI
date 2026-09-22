@@ -35,7 +35,7 @@ public:
 
 	void Initialize(const PlatformRenderContext& context) override;   ///< 7.1.4：平台句柄注入（取代 SetHwnd）
 
-	void BeginFrame() override;            ///< 决策 16 清屏白 + 17 BeginPaint + 15/26 EnsureBackBuffer
+	void BeginFrame(const Color& background) override;   ///< 决策 16（18 修订）清屏用本帧背景色 + 17 BeginPaint + 15/26 EnsureBackBuffer
 	void DrawRect(const Rect& rect, const Color& color) override;   ///< 决策 21-25
 	void DrawText(const Point& pos, const std::string& text,
 	              const Color& color, const Font& font) override;   ///< D5/D6：TextOutW

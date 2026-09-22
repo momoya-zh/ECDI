@@ -121,6 +121,19 @@ class Window : public PlatformWindowHost {
 		/// reparent / WinEventHook）为平台细节，公共 API 不承诺任何具体机制。
 		void SetWindowLayer(WindowLayer layer);
 
+		// ── Phase 18：窗口客户区底色（运行期 API——Show 前后均可）────────────
+
+		/// @brief 设置窗口客户区底色（Phase 18）
+		/// @details 该色是渲染链路的**唯一默认值来源**：`Window` 持有，每帧经
+		/// `Renderer::BeginFrame(色)` 送入后端清屏；后端**不持有**默认值、也不感知窗口。
+		/// 恢复默认即 `SetBackgroundColor(Color::White())`（默认值 = 白，故无需单独的 Reset API）。
+		/// ⚠️ **副作用**：改状态 **+ 请求重绘**（`Invalidate()`）——下一次 `WM_PAINT` 生效，
+		/// 不是同步重绘。依据既有职责契约「谁改了可见状态，谁负责请求重绘」（同 TextBox）。
+		/// ⚠️ **alpha 被忽略**：清屏为实色（`COLORREF` 无 alpha 通道），本相位**不做**半透明窗口
+		/// （属 Phase 9 Alpha 合成范畴）——连「`a == 0` 就跳过清屏」这类分支也不做。
+		/// @param color 底色（默认 `Color::White()` = 改动前的行为）
+		void SetBackgroundColor(const Color& color);
+
 		// ── Phase 12：窗口状态（运行期——**Show() 之后**才有效）────────
 
 		/// @brief 最小化窗口——状态变化经 WindowStateChanged 事件回流
@@ -293,6 +306,10 @@ class Window : public PlatformWindowHost {
 		Renderer m_renderer;	///< 渲染执行器（引用 *m_renderBackend，决策 34）
 
 		CommandBuffer m_commands;	///< 命令缓冲（决策 4：Window 持有跨帧复用）
+
+		/// 窗口客户区底色（Phase 18）——**唯一默认值来源**：清屏色只在这里给出，
+		/// 每帧经 `m_renderer.BeginFrame(m_backgroundColor)` 传给后端（后端不持有默认值）。
+		Color m_backgroundColor = Color::White();
 
 };
 

@@ -82,8 +82,9 @@ namespace ECDI {
 		std::vector<ImageDraw> imageCalls;          ///< DrawImage 记录（Phase 8）
 		std::vector<ClipOp> clipOps;                ///< Push/Pop 共列保序（Phase 8）
 		std::vector<FocusRectDraw> focusRectCalls;  ///< DrawFocusRect 记录（Phase 8）
+		std::vector<Color> frameBackgrounds;        ///< BeginFrame 记录（Phase 18）：每帧清屏底色（**原样**记录——链路不替调用方做决策）
 
-		void BeginFrame() override {}           
+		void BeginFrame(const Color& background) override { frameBackgrounds.push_back(background); }           
 
 		void DrawRect(const Rect& rect, const Color& color) override;     
 

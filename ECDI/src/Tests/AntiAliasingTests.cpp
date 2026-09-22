@@ -336,7 +336,7 @@ void DrawOneFrame(HWND hwnd, bool antiAliasing, const Rect& target, float radius
     backend.SetAntiAliasing(antiAliasing);
 
     InvalidateRect(hwnd, nullptr, FALSE);   // 确保 BeginPaint 拿到有效 update region
-    backend.BeginFrame();
+    backend.BeginFrame(Color::White());   // Phase 18：显式传白 = 改动前的清屏色
     backend.DrawRect(Rect{ 0, 0, 200, 200 }, Color::Blue());
     backend.DrawRoundedRect(target, radius, color);
     backend.EndFrame();

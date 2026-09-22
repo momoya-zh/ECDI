@@ -53,11 +53,15 @@ public :
 	int Run();
 
 	/// @brief 创建一个新窗口
-	/// @param title  窗口标题
-	/// @param width  窗口总宽度
-	/// @param height 窗口总高度
+	/// @param title    窗口标题
+	/// @param width    窗口总宽度
+	/// @param height   窗口总高度
+	/// @param services 渲染服务（默认 GDIBackend+GDITextMeasurer；**支持注入其他后端**——
+	///        与 `Window` 构造的同一形参同义，见 `Window.h`；Phase 18 起本入口亦透出它，
+	///        注入通路自此全通（`Create` → `Window`。追加带默认值的尾形参 ⇒ 现有调用零改动）
 	/// @return 新创建窗口的引用
-	Window& Create(const std::string&title,int width,int height);
+	Window& Create(const std::string&title,int width,int height,
+	               RenderServices services = CreateDefaultRenderServices());
 
 	/// @brief 退出消息循环
 	void Exit();

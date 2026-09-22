@@ -241,7 +241,7 @@ void GDIBackend::Initialize(const PlatformRenderContext& context)
 	m_hwnd = static_cast<const Win32RenderContext&>(context).GetHandle();
 }
 
-void GDIBackend::BeginFrame()
+void GDIBackend::BeginFrame(const Color& background)
 {
 	// 决策 32：Begin/End 严格配对
 	FRAMEWORK_ASSERT(!m_inFrame);
@@ -257,8 +257,16 @@ void GDIBackend::BeginFrame()
 	RECT client{};
 	GetClientRect(m_hwnd, &client);
 
-	// 决策 16：清屏白（Root 白底是平台语义，不是 Widget 命令）
-	FillRect(m_memoryDC, &client, (HBRUSH)GetStockObject(WHITE_BRUSH));
+	// 决策 16（Phase 18 修订）：清屏用**本帧背景色**——默认白由 Window 给出（本层不持有默认值）
+	// 决策 24：画刷每次创建/销毁（无缓存）——与 DrawRect 同款
+	// 决策 21/23：ToColorRef 内含 ToByte Clamp；★ alpha 被忽略（COLORREF 无 alpha 通道）
+	HBRUSH brush = CreateSolidBrush(ToColorRef(background));
+	if (brush)
+	{
+		FillRect(m_memoryDC, &client, brush);
+		DeleteObject(brush);
+	}
+	// else：决策 30「失败 → 局部跳过」——底色不刷新，本帧其余绘制照常（不加断言）
 }
 
 void GDIBackend::EnsureBackBuffer()

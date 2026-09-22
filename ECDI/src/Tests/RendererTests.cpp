@@ -214,7 +214,8 @@ void TestGDIBackendAlphaBlend()
         // 2. 真实帧：纯蓝底 + 中央 100x100 半透明红
         GDIBackend backend;
         backend.Initialize(Win32RenderContext(hwnd));
-        backend.BeginFrame();
+        // Phase 18：清屏色改为每帧输入 ⇒ 显式传白（等价于改动前的行为——决策 16 清屏白）
+        backend.BeginFrame(Color::White());
         backend.DrawRect(Rect{ 0, 0, 200, 200 }, Color::Blue());
 
         Image img;   // 32x32 premultiplied 50% 纯红（B0 G0 R128 A128）
@@ -277,7 +278,7 @@ void TestDrawRectAlpha()
     {
         GDIBackend backend;
         backend.Initialize(Win32RenderContext(hwnd));
-        backend.BeginFrame();
+        backend.BeginFrame(Color::White());
         backend.DrawRect(Rect{ 0, 0, 200, 200 }, Color::Blue());
         // 50% 半透明红（Color.a = 0.5——未预乘输入，GDIBackend 内部预乘）
         backend.DrawRect(Rect{ 50, 50, 100, 100 }, Color::FromRGBA8(255, 0, 0, 128));

@@ -123,7 +123,7 @@ void Window::PaintFrame()
 	m_commands.clear();                              // 决策 4：复用缓冲
 	PaintContext ctx(m_commands, *m_textMeasurer);   // 7.1.4：测量独立指针（GDITextMeasurer）
 	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
-	m_renderer.BeginFrame();                         // 决策 13：转发
+	m_renderer.BeginFrame(m_backgroundColor);         // 决策 13：转发（Phase 18：携带本帧背景色）
 	m_renderer.Execute(m_commands);
 	m_renderer.EndFrame();
 }
@@ -202,6 +202,16 @@ void Window::SetResizeInset(int inset){
 void Window::SetWindowLayer(WindowLayer layer){
 
 	m_platformWindow->SetWindowLayer(layer);
+
+}
+
+void Window::SetBackgroundColor(const Color& color){
+
+	// Phase 18：改自身成员（**不是**转发平台层——与 SetCaptionHeight 一类的形制不同）
+	m_backgroundColor = color;
+
+	// 职责契约（O1）：改了可见状态 → **自身**负责请求重绘（同 TextBox.cpp:189 的既定写法）
+	Invalidate();
 
 }
 
