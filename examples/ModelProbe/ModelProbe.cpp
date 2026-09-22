@@ -174,7 +174,7 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	baseLabel->SetTextColor(kText());
 	AddChild(std::move(baseLabel));
 
-	auto baseBox = std::make_unique<TextBox>("https://api.longcat.chat/openai/v1");
+	auto baseBox = std::make_unique<TextBox>("https://api.example.chat/openai/v1");
 	baseBox->SetSize(600, 32);
 	baseBox->SetSingleLine(true);   // 单行输入（Enter 不换行——URL 语义）
 	baseBox->SetTextColor(kText());
