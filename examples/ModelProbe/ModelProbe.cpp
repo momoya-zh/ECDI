@@ -152,10 +152,9 @@ bool EnsureBackendExtracted(){
 ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	: m_process(std::move(process)){
 
-	SetLayout(std::make_unique<VerticalLayout>(10, true, 12));   // 9.7：spacing=10 替代全部 MakeSpacer；fillCrossAxis 替代手写宽 600
-	                                                             // 17→18 A6 收口：padding=12 落在 **page 一级**（内容四周留白、标题栏贴边）——
-	                                                             //   18 曾把 12 上移到 root（R3 字面形态），实测标题栏被连带内缩 12px + 异色描边 ⇒ 回退到此。
-	                                                             //   根因：VerticalLayout::padding 单一 int / 无 per-child inset（详见 main.cpp 同处注释）。
+	SetLayout(std::make_unique<VerticalLayout>(10, true));   // 9.7：spacing=10 替代全部 MakeSpacer；fillCrossAxis 替代手写宽 600
+	                                                          // 18.1 C 收口：padding **归零**——留白上移到 `main.cpp` 的 contentPanel（透明 Panel）。
+	                                                          //   两级各配 12 会叠成 24；且留白必须落在"不绘制"的那一层，才能露出窗口底色。
 
 	// ── 标题 ──
 	auto title = std::make_unique<Label>("模型探测工具");

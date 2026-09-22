@@ -260,20 +260,24 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	}
 	ECDI::Widget& root = win.GetRootWidget();
 	root.SetLayout(std::make_unique<ECDI::VerticalLayout>(0, true));   // spacing 0 / fillCrossAxis / 无 padding
-	// ★ 18 A6 实测收口：留白**落在 page 一级**（`ModelProbe.cpp` 的 SetLayout padding=12），root 保持 0。
-	//   曾试过「留白回 root 一级」（R3 的字面形态：`VerticalLayout(0,true,12)` + `SetBackgroundColor` 异色），
-	//   实测**视觉不可接受**：CaptionBar 与 page 同为本布局的子 ⇒ **标题栏被一起内缩 12px**，四周还多出一圈
-	//   异色描边。根因不在参数——`VerticalLayout::padding` 是**单一 int、四边一视同仁**，框架**无 per-child inset**
-	//   ⇒ root 级留白必然连带推走 chrome。故本 demo 采用 page 级留白（标题栏贴边，内容四周留白）。
-	//   ⇒ 派生候选（记 `roadmap-deferred.md`）：**Layout per-child inset / chrome 豁免**——那是「root 留白 + 标题栏贴边
-	//     + 底色显形」三者兼得的唯一路径（未来 Phase）。
-	// ── 沿革（Phase 17 A6 实测结论，保留以备回看）────────────────────────────────
-	//   当时 root 是裸 Widget（无背景能力）且 Backend 每帧以 WHITE_BRUSH 清屏 ⇒ root 级 padding 会让四边**露出白色**，
-	//   深色窗口上形成一圈白框；故当时把 12 放到 page 一级（page 自带 #0f1115 背景）。Phase 18 打通底色后「白框」
-	//   这一条限制消失，但上面那条「标题栏跟着内缩」的限制仍在 ⇒ 结论不变。
+	// ★ 18.1 路线 C 验证：留白改由**一层透明 `Panel`** 承接（root 仍为 0）⇒ 三条诉求首次同时成立：
+	//   ① 标题栏**贴边全宽**：`CaptionBar` 是 root 的直接子、root 无 padding ⇒ 不内缩；
+	//   ② 内容四周**留白 12px**：由 `contentPanel` 的 `VerticalLayout(0, true, 12)` 提供；
+	//   ③ 留白处**显示窗口底色**：`contentPanel` 用 `Panel` 的**默认背景透明**（9.6 语义即「隐形布局容器」，
+	//      `a == 0` 时跳过绘制）⇒ 那 12px 没被任何 Widget 画过 ⇒ 露出 Backend 每帧清屏色，
+	//      即 `Window::SetBackgroundColor` 的颜色（`GDIBackend.cpp:260-266`，Phase 18 落地）。
+	//   ⇒ **零框架改动**：不需要路线 A 的 `Widget::SetInset` / per-child inset。
+	//   ★ 判据一句话：让出的那块像素**最后显示的是谁的颜色**——节点不绘制 ⇒ 露更外层（最终 = 窗口底色）；
+	//     节点画了背景 ⇒ 把自己的颜色盖在最上面。同一个 12px，落在哪种节点上，视觉完全不同。
+	//   ⚠️ 代价：page 自身的 padding 必须归零（见 `ModelProbe.cpp` 的 SetLayout），否则与这里的 12 叠成 24。
+	// ── 沿革（Phase 17 / 18 A6 实测结论，保留以备回看）──────────────────────────────
+	//   17：root 是裸 Widget 且 Backend 以 WHITE_BRUSH 清屏 ⇒ root 级 padding 让四边**露白框** ⇒ 留白下沉 page。
+	//   18 A6：底色打通后「白框」消失，但留白回 root 会**连带内缩 CaptionBar**（`padding` 是布局级单一 int、
+	//          对全部子一律，无 per-child inset）⇒ 又退回 page 级（代价：留白处看不见窗口底色）。
+	//   18.1 C：把「承接留白」与「画背景」**拆到两个不同节点**——Panel 承接（不画）+ page 画背景 ⇒ 两全。
 	// ★ Phase 13：自绘标题栏（仅 Borderless——实体区高度与行为区 captionHeight 取同值；D7 不联动）。
 	// ⚠️ 顺序约束：必须在 page 之前 AddChild —— VerticalLayout 按 children 顺序排布竖直次序（先前 = 上方）；
-	//    bar 保持 SetStretch(0)（主轴固定高度），page 保持 stretch=1。
+	//    bar 保持 SetStretch(0)（主轴固定高度），contentPanel 保持 stretch=1（page 在它内部再 stretch=1）。
 	if (borderless){
 		auto bar = std::make_unique<ECDI::CaptionBar>(win, kWindowTitle);
 		bar->SetSize(680, captionHeight);   // 初始宽度（Arrange 会以真实宽度再次 SetSize）
@@ -284,7 +288,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
 	auto page = std::make_unique<ECDI::Demo::ModelProbePage>();   // 默认 ChildProcess::Create()——真实 probe.exe 管道
 	page->SetStretch(1);   // 9.7：主轴(height)+跨轴(width) 均随窗口
-	page->SetStyle(ECDI::PanelStyleOverride{ .background = ECDI::Color::FromRGBA8(15, 17, 21, 255) });   // #0f1115 全窗底
+	page->SetStyle(ECDI::PanelStyleOverride{ .background = ECDI::Demo::Palette::PageBackground() });   // #0f1115 内容区底（单一来源：ModelProbe.h）
 
 	application.SetProbePage(page.get());
 	application.SetWindow(&win);         // Phase 14 A7：托盘菜单的运行期窗口操作入口
@@ -295,7 +299,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	}
 	page->SetWindow(&win);   // Phase 12 实测接缝——非拥有 Window*（B 契约正确用法）
 
-	root.AddChild(std::move(page));
+	// ★ 18.1 C：透明 `Panel` 作「隐形布局容器」——默认无背景 ⇒ 不产生绘制命令 ⇒ 它 padding 让出的 12px
+	//   保持"没人画"的状态，最终露出窗口底色。（唯一子 = page，故本层 spacing 取 0 无意义）
+	auto contentPanel = std::make_unique<ECDI::Panel>();
+	contentPanel->SetStretch(1);                                                    // 主轴填满 CaptionBar 以下
+	contentPanel->SetLayout(std::make_unique<ECDI::VerticalLayout>(0, true, 12));   // 留白在此层（page 侧归零）
+	contentPanel->AddChild(std::move(page));
+
+	root.AddChild(std::move(contentPanel));
 	root.Arrange();
 
 	// ── 配置期 chrome 应用（Show 之前；ChromeMode 一次确定）──
@@ -307,12 +318,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	}
 	win.SetWindowLayer(layer);
 
-	// ★ Phase 18 A6：客户区底色 = 页面同值 #0f1115——**视觉无痕**，能力照走
-	//   `Window::SetBackgroundColor` → `Renderer::BeginFrame` → `RenderingBackend::BeginFrame`（GDIBackend 以本帧
-	//   背景色清屏，不再是硬编码 WHITE_BRUSH）。之所以取同值：page 铺满整个客户区（stretch=1 + fillCrossAxis），
-	//   底色只在**无子覆盖**处显形（resize 空档 / page 未铺满时）；取同值可让那些瞬间也不闪异色。
-	//   想看「底色确实可配置」，把它改成任意颜色（如 `FromRGBA8(34,41,52)`）即可——或注释掉看默认白。
-	win.SetBackgroundColor(ECDI::Color::FromRGBA8(15, 17, 21));
+	// ★ Phase 18：客户区底色——18.1 C 之后它**第一次真的看得见**（`contentPanel` 留白让出的那 12px 就是它）。
+	//   链路：`Window::SetBackgroundColor` → `Renderer::BeginFrame` → `RenderingBackend::BeginFrame`
+	//   （GDIBackend 以本帧背景色清屏，不再是硬编码 WHITE_BRUSH）。
+	//   取值 = `Palette::WindowBackground()`（#232936）——**取自 demo 调色板而非就地写死**：它是这个应用
+	//   "抬起的中性表面"那一层，留白露出来应与之一致，而不是另立一个色。
+	win.SetBackgroundColor(ECDI::Demo::Palette::WindowBackground());
 
 	// ── Phase 14 A7：托盘图标（应用级能力——与窗口无关；图标资源 ID 默认 102 = ModelProbe.rc 的 IDI_APP）──
 	if (trayIcon){

@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "ECDI/Core/Color.h"   // Palette（窗口/页面底色的单一真相源——值类型，仅 Core）
 #include "ECDI/Platform/ChildProcess.h"
 #include "ECDI/Widget/Panel.h"
 
@@ -20,6 +21,21 @@ class Window;   // 前置声明（Phase 12 实测接缝——非拥有指针）
 class DropFilesEvent;   // 前置声明（Phase 14：OnDropFiles override 形参——.cpp 侧含全头）
 
 namespace Demo{
+
+/// @brief ModelProbe 应用调色板——**窗口底 / 页面底两色的单一真相源**
+/// @details 为什么单独提出：这两个色由 **入口**（`main.cpp` 设置窗口底色与页面底色）使用，而其余控件色
+/// 在 `.cpp` 的匿名 namespace 里（`kText`/`kHint`/`kSecondary`…，入口拿不到）。若在 `main.cpp` 再写一遍
+/// 字面量，同一个色就有两个来源（改配色要改两处，且没有任何机制会提醒你漏了一处）。
+/// 命名取**用途**而非颜色——改配色只动这里，语义不变。
+struct Palette{
+	/// @brief 页面底（内容区）——#0f1115
+	static constexpr Color PageBackground() noexcept{ return Color::FromRGBA8(15, 17, 21, 255); }
+
+	/// @brief 窗口底（内容留白露出的那圈）——#232936
+	/// @details 与 `.cpp` 的中性面色 `kSecondary()` **同值**：这圈留白读起来应与"抬起的表面"同一层，
+	/// 而不是另立一个色。两者是**两个角色共享一个值**（不互相耦合——改一个不会带动另一个）。
+	static constexpr Color WindowBackground() noexcept{ return Color::FromRGBA8(35, 41, 54, 255); }
+};
 
 /// @brief TSV 行切分（按 `\t`；ModelProbe 协议自控——无引号语义；demo 工具公开供测试）
 std::vector<std::string> SplitTsv(const std::string& line);
