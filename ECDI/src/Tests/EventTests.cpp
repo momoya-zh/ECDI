@@ -12,7 +12,9 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyModifier.h"
@@ -39,7 +41,34 @@ struct ReceivedEvent
     char32_t codepoint = 0;
     int width = 0;
     int height = 0;
+    unsigned int pressedButtons = 0;             ///< 19：此刻按下的键（由谓词折叠而来）
+    KeyModifier modifiers = KeyModifier::None;   ///< 19：此刻的修饰键
+    int delta = 0;                               ///< 19：滚轮增量（证明 LOWORD 与 HIWORD 两条路径并存）
 };
+
+// ── P19 小工具：把公共谓词折叠成"可断言的记录值" ────────────────
+// ★ 只用公共 API（IsButtonDown / HasModifier），**不读私有掩码** ⇒ 断言的是公共可见行为；
+//   将来掩码换成命名类型时，这些小工具与断言都不必改。
+
+unsigned int SnapshotButtons(const MouseEvent& e)
+{
+    unsigned int mask = 0;
+    const MouseButton all[] = { MouseButton::Left, MouseButton::Right,
+                                MouseButton::Middle, MouseButton::X1, MouseButton::X2 };
+    for (MouseButton b : all)
+        if (e.IsButtonDown(b))
+            mask |= 1u << static_cast<unsigned int>(b);
+    return mask;
+}
+
+KeyModifier SnapshotModifiers(const MouseEvent& e)
+{
+    KeyModifier m = KeyModifier::None;
+    if (e.HasModifier(KeyModifier::Shift)) m = m | KeyModifier::Shift;
+    if (e.HasModifier(KeyModifier::Ctrl))  m = m | KeyModifier::Ctrl;
+    if (e.HasModifier(KeyModifier::Alt))   m = m | KeyModifier::Alt;   // 恒不成立——"照抄谓词"
+    return m;
+}
 
 class FakeHost : public PlatformWindowHost
 {
@@ -72,6 +101,18 @@ public:
             r.button = e.GetButton();
             r.x = e.GetMouseX();
             r.y = e.GetMouseY();
+            r.pressedButtons = SnapshotButtons(e);    // 19
+            r.modifiers = SnapshotModifiers(e);       // 19
+            break;
+        }
+        case EventType::MouseButtonUp:                // 19：新增（装置原先没有此分支）
+        {
+            const auto& e = static_cast<const MouseButtonUpEvent&>(event);
+            r.button = e.GetButton();
+            r.x = e.GetMouseX();
+            r.y = e.GetMouseY();
+            r.pressedButtons = SnapshotButtons(e);
+            r.modifiers = SnapshotModifiers(e);
             break;
         }
         case EventType::MouseMove:
@@ -79,6 +120,18 @@ public:
             const auto& e = static_cast<const MouseMoveEvent&>(event);
             r.x = e.GetMouseX();
             r.y = e.GetMouseY();
+            r.pressedButtons = SnapshotButtons(e);    // 19
+            r.modifiers = SnapshotModifiers(e);       // 19
+            break;
+        }
+        case EventType::MouseWheel:                   // 19：新增（装置原先没有此分支）
+        {
+            const auto& e = static_cast<const MouseWheelEvent&>(event);
+            r.x = e.GetMouseX();
+            r.y = e.GetMouseY();
+            r.pressedButtons = SnapshotButtons(e);
+            r.modifiers = SnapshotModifiers(e);
+            r.delta = e.GetDelta();                   // 唯一读 delta 的地方
             break;
         }
         case EventType::WindowCloseRequested:
@@ -255,6 +308,128 @@ void TestEventHierarchy()
     EXPECT_EQ(router.charCount, 1);
 }
 
+// ── P19：鼠标状态维度（T19-1..T19-9）——★ 全部经 FakeHost + Handle() 走真翻译路径 ──
+// 依据 docs/phase19-mouse-event-dimensions-detailed-design.md §5.2。
+// ★ 手工构造事件只能证明"字段存得下"，**不能**证明"平台信息没被丢掉" ⇒ 平台路径一律走翻译器；
+//   个别"位 ↔ 谓词"映射的自证用本地构造（probe），注释里标明它与平台路径的分工。
+
+// T19-1 / T19-2 / T19-5：此刻按下的键（含"两键同时在位"与"空 = 空"）
+void TestMouseStatePressedButtons()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    // T19-5：wParam = 0 ⇒ 空集合（"未按下"与"无信息"不作区分——契约 C4 / R6）
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, 0, 0);
+    EXPECT_EQ(host.received.size(), 1);
+    EXPECT_EQ(host.received[0].type, EventType::MouseMove);
+    EXPECT_EQ(host.received[0].pressedButtons, 0u);
+    EXPECT_EQ(host.received[0].modifiers, KeyModifier::None);
+
+    // T19-1：按住左键移动 ⇒ 从**移动事件本身**读到"左键按着"（A1 的核心诉求）
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(10, 20));
+    EXPECT_EQ(host.received.size(), 2);
+    EXPECT_EQ(host.received[1].x, 10);
+    EXPECT_EQ(host.received[1].y, 20);
+    EXPECT_EQ(host.received[1].pressedButtons, 0x01u);   // 严格相等 ⇒ 其余四位必为 0
+
+    // T19-2：左 + 右同时在位 ⇒ 0x03（它是"集合"，不是"某一个键"——R1）
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, MK_LBUTTON | MK_RBUTTON, 0);
+    EXPECT_EQ(host.received[2].pressedButtons, 0x03u);
+
+    // ★ mask 严格相等就够用的原因：ReceivedEvent.pressedButtons 是 SnapshotButtons() 用
+    //   IsButtonDown() 逐键折叠而来 ⇒ "== 0x01" 等价于「Left 真，Right/Middle/X1/X2 全假」。
+    //   （具名谓词形式的断言见 T19-4 / T19-7 的 probe。）
+}
+
+// T19-3 / T19-6：修饰键（并做"修饰键位不串进按键位"的双向验证——R2）
+void TestMouseStateModifiers()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    // T19-3：Ctrl + Shift 点击左键 ⇒ 按键事件读到修饰键（A2）；且按下集为**空**
+    //         （该 wParam 只含 MK_CONTROL|MK_SHIFT，不含任何按键位 ⇒ 两维天然不串）
+    handler.Handle(nullptr, nullptr, WM_LBUTTONDOWN, MK_CONTROL | MK_SHIFT, MAKELPARAM(1, 2));
+    EXPECT_EQ(host.received[0].type, EventType::MouseButtonDown);
+    EXPECT_EQ(host.received[0].button, MouseButton::Left);
+    EXPECT_EQ(host.received[0].modifiers, KeyModifier::Ctrl | KeyModifier::Shift);
+    EXPECT_EQ(host.received[0].pressedButtons, 0u);
+
+    // T19-6：只按 Shift 移动 ⇒ 修饰键在位、按下集仍为空（与 T19-3 反向）
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, MK_SHIFT, 0);
+    EXPECT_EQ(host.received[1].modifiers, KeyModifier::Shift);
+    EXPECT_EQ(host.received[1].pressedButtons, 0u);
+}
+
+// T19-4 ★：XBUTTON 的两维分离（LOWORD = 此刻按下的键 / HIWORD = 本次是哪个键）
+void TestMouseStateXButtonTrap()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    // wParam = MAKEWPARAM(低 = MK_XBUTTON1, 高 = XBUTTON2)
+    //   LOWORD = MK_XBUTTON1 (0x0020) ⇒ 按下集含 X1
+    //   HIWORD = XBUTTON2    (0x0002) ⇒ 本次是 X2
+    // ★ 陷阱：XBUTTON2 的 0x0002 恰等于 MK_RBUTTON ⇒ 若把 GET_XBUTTON_WPARAM 的返回值
+    //   当作"按下集"使用，就会**点亮右键**。下面的 probe 专门钉住这个后果。
+    handler.Handle(nullptr, nullptr, WM_XBUTTONDOWN, MAKEWPARAM(MK_XBUTTON1, XBUTTON2), 0);
+    EXPECT_EQ(host.received[0].type, EventType::MouseButtonDown);
+    EXPECT_EQ(host.received[0].pressedButtons, 0x08u);   // X1 = bit3；严格相等 ⇒ 其余全 0
+    EXPECT_EQ(host.received[0].button, MouseButton::X2);  // 来自 HIWORD
+
+    // probe：位 ↔ 谓词 的映射自证（本地构造——与上面的平台路径分工不同：
+    //        上面证明"平台事实完整抵达"，这里证明"谓词读的是哪一个位"）
+    MouseMoveEvent probe(nullptr, 0, 0, 0x08u, KeyModifier::None);
+    EXPECT_TRUE(probe.IsButtonDown(MouseButton::X1));
+    EXPECT_FALSE(probe.IsButtonDown(MouseButton::X2));
+    EXPECT_FALSE(probe.IsButtonDown(MouseButton::Right));   // ← 钉住"X1 位不会点亮右键"
+}
+
+// T19-7：Alt 边界（把"当前 Win32 映射不产生 Alt"钉成回归契约——D3 / C3）
+void TestMouseStateAltBoundary()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    // 平台路径：按住左键移动，实测**没有任何**修饰键（鼠标消息的 wParam 里没有 MK_ALT）
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, MK_LBUTTON, 0);
+    EXPECT_EQ(host.received[0].modifiers, KeyModifier::None);
+
+    // probe：具名谓词形式。★ 给一个**确实含修饰键**的状态再断言 Alt 为假——
+    //   否则"Alt 假"可能只是因为"本来就没有修饰键"，那样这条断言什么也没钉住。
+    //   ★ 注意这不是"事件模型不支持 Alt"：KeyModifier 本就含 Alt，缺的是当前 Win32 映射；
+    //     将来出现 Alt + 鼠标的真实消费者 ⇒ 只改 Win32 翻译器，事件 API 无需二次设计。
+    MouseMoveEvent probe(nullptr, 0, 0, 0u, KeyModifier::Shift | KeyModifier::Ctrl);
+    EXPECT_TRUE(probe.HasModifier(KeyModifier::Shift));
+    EXPECT_TRUE(probe.HasModifier(KeyModifier::Ctrl));
+    EXPECT_FALSE(probe.HasModifier(KeyModifier::Alt));
+}
+
+// T19-8 ★ / T19-9：滚轮的 HIWORD（delta）与新 LOWORD（状态）并存；抬起集的语义
+void TestMouseStateWheelAndUp()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    // T19-8：wParam = MAKEWPARAM(低 = MK_CONTROL, 高 = WHEEL_DELTA)
+    //   LOWORD = MK_CONTROL ⇒ 修饰键 Ctrl（本相位新增的读取路径）
+    //   HIWORD = 120        ⇒ delta（既有路径）
+    // ⇒ 两条读取路径在同一条消息里并存且互不干扰——本相位最容易写错的地方
+    // ⚠️ 不断言坐标：hwnd == nullptr ⇒ ScreenToClient 不生效（B10）
+    handler.Handle(nullptr, nullptr, WM_MOUSEWHEEL, MAKEWPARAM(MK_CONTROL, WHEEL_DELTA), 0);
+    EXPECT_EQ(host.received[0].type, EventType::MouseWheel);
+    EXPECT_EQ(host.received[0].modifiers, KeyModifier::Ctrl);
+    EXPECT_EQ(host.received[0].delta, WHEEL_DELTA);
+    EXPECT_EQ(host.received[0].pressedButtons, 0u);
+
+    // T19-9：抬起 ⇒ 按下集不含被抬起的键（该消息的 wParam 为 0）
+    handler.Handle(nullptr, nullptr, WM_LBUTTONUP, 0, MAKELPARAM(1, 2));
+    EXPECT_EQ(host.received[1].type, EventType::MouseButtonUp);
+    EXPECT_EQ(host.received[1].button, MouseButton::Left);
+    EXPECT_EQ(host.received[1].pressedButtons, 0u);
+}
+
 // ── TestFramework 自测（F1-F5：基础设施回归测试——局部 registry/runner，不污染全局）──
 
 void SelfPass() { EXPECT_TRUE(true); }
@@ -341,6 +516,13 @@ void ECDI::Test::RegisterEventTests()
     GetTestRegistry().Add("Event.TranslatorSurrogatePair", &TestTranslatorSurrogatePair);
     GetTestRegistry().Add("Event.TranslatorHandleFlow", &TestTranslatorHandleFlow);
     GetTestRegistry().Add("Event.EventHierarchy", &TestEventHierarchy);
+
+    // 19：鼠标状态维度（真翻译路径；命名与既有 Event.Translator* 并列）
+    GetTestRegistry().Add("Event.MouseStatePressedButtons", &TestMouseStatePressedButtons);
+    GetTestRegistry().Add("Event.MouseStateModifiers",      &TestMouseStateModifiers);
+    GetTestRegistry().Add("Event.MouseStateXButtonTrap",    &TestMouseStateXButtonTrap);
+    GetTestRegistry().Add("Event.MouseStateAltBoundary",    &TestMouseStateAltBoundary);
+    GetTestRegistry().Add("Event.MouseStateWheelAndUp",     &TestMouseStateWheelAndUp);
 }
 
 void ECDI::Test::RegisterTestFrameworkTests()

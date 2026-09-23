@@ -35,6 +35,38 @@ KeyModifier TranslateModifier(){
 	return m;
 }
 
+/// @brief 取「此刻按下的鼠标键」掩码（位序 = MouseButton 枚举序——本框架自有约定，与 MK_* 数值无关）
+/// @note ★ 只读 LOWORD(wParam)：WM_MOUSEWHEEL 的 HIWORD 是 wheel delta、WM_XBUTTON* 的 HIWORD
+///       是 XBUTTON1/2（"本次是哪个键"）——读整个 wParam 会把它们误当按下位。
+///       ★ 必须显式映射：5 个 MK_* 里有 3 个与框架位序数值不同（Middle / X1 / X2），移位捷径会静默写错。
+unsigned int TranslateMouseButtons(WPARAM wParam){
+	const WORD bits = LOWORD(wParam);
+	unsigned int mask = 0;
+	const auto AddIf = [&mask, bits](WORD mk, MouseButton b){
+		if (bits & mk)
+			mask |= 1u << static_cast<unsigned int>(b);
+	};
+	AddIf(MK_LBUTTON,  MouseButton::Left);
+	AddIf(MK_RBUTTON,  MouseButton::Right);
+	AddIf(MK_MBUTTON,  MouseButton::Middle);
+	AddIf(MK_XBUTTON1, MouseButton::X1);
+	AddIf(MK_XBUTTON2, MouseButton::X2);
+	return mask;
+}
+
+/// @brief 取「此刻的修饰键」——★ 与键盘侧**不同源**：此处走 wParam（事件发生时刻的权威值），故不含 Alt
+/// @note 键盘侧的 TranslateModifier() 走 GetKeyState（平台所迫：WM_KEYDOWN 的 wParam 是虚拟键码，
+///       不携带修饰位）。两者**都**不在消费侧查询，分层不变。
+KeyModifier TranslateMouseModifiers(WPARAM wParam){
+	KeyModifier m = KeyModifier::None;
+	const WORD bits = LOWORD(wParam);
+	if (bits & MK_SHIFT)
+		m = m | KeyModifier::Shift;
+	if (bits & MK_CONTROL)
+		m = m | KeyModifier::Ctrl;
+	return m;   // 无 Alt——平台不提供 MK_ALT（见初步设计 §2.3）
+}
+
 }
 
 WindowMessageHandler::WindowMessageHandler(PlatformWindowHost& host) noexcept: m_host(host){}
@@ -97,7 +129,9 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		MouseMoveEvent event(
 			window,
 			x,
-			y
+			y,
+			TranslateMouseButtons(wParam),    // 此刻按下的键（LOWORD 的 MK_*）
+			TranslateMouseModifiers(wParam)   // 此刻的修饰键（LOWORD 的 MK_SHIFT/CONTROL）
 		);
 
 		m_host.OnEvent(event);
@@ -115,7 +149,10 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			window,
 			GET_X_LPARAM(lParam),
 			GET_Y_LPARAM(lParam),
-			TranslateMouseButton(msg, wParam)
+			TranslateMouseButton(msg, wParam),   // 本次是哪个键（HIWORD——仅 X 键用）
+			false,                               // isDoubleClick（双击分支传 true）
+			TranslateMouseButtons(wParam),       // 此刻按下的键（LOWORD 的 MK_*）
+			TranslateMouseModifiers(wParam)      // 此刻的修饰键（LOWORD 的 MK_SHIFT/CONTROL）
 		);
 
 		m_host.OnEvent(event);
@@ -131,8 +168,10 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			window,
 			GET_X_LPARAM(lParam),
 			GET_Y_LPARAM(lParam),
-			MouseButton::Left,
-			true   // isDoubleClick——平台层事实
+			MouseButton::Left,                // 本次是哪个键（双击恒为左键）
+			true,                             // isDoubleClick——平台层事实
+			TranslateMouseButtons(wParam),    // 此刻按下的键（LOWORD 的 MK_*）
+			TranslateMouseModifiers(wParam)   // 此刻的修饰键（LOWORD 的 MK_SHIFT/CONTROL）
 		);
 
 		m_host.OnEvent(event);
@@ -150,7 +189,9 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			window,
 			GET_X_LPARAM(lParam),
 			GET_Y_LPARAM(lParam),
-			TranslateMouseButton(msg, wParam)
+			TranslateMouseButton(msg, wParam),   // 本次是哪个键（HIWORD——仅 X 键用）
+			TranslateMouseButtons(wParam),       // 此刻按下的键（LOWORD 的 MK_*）
+			TranslateMouseModifiers(wParam)      // 此刻的修饰键（LOWORD 的 MK_SHIFT/CONTROL）
 		);
 
 		m_host.OnEvent(event);
@@ -174,7 +215,9 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 			window,
 			point.x,
 			point.y,
-			delta
+			delta,                            // HIWORD：本消息的滚轮增量
+			TranslateMouseButtons(wParam),    // 此刻按下的键（LOWORD 的 MK_*）
+			TranslateMouseModifiers(wParam)   // 此刻的修饰键（LOWORD 的 MK_SHIFT/CONTROL）
 		);
 
 		m_host.OnEvent(event);
