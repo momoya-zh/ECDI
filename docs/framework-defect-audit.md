@@ -1,6 +1,6 @@
-﻿# ECDI 框架缺陷审计与修复队列（v1.2）
+﻿# ECDI 框架缺陷审计与修复队列（v1.3）
 
-> 状态：**v1.2**（2026-09-23）｜**盘点 + 队列**——实施时逐条立项，各占主线 Phase 号
+> 状态：**v1.3**（2026-09-23）｜**盘点 + 队列**——实施时逐条立项，各占主线 Phase 号
 > 类型：**非阶段文档**（跨阶段的长期参考，与 `window-ownership.md` / `desktopnest-roadmap.md` 同级）——**不占 Phase 编号**
 > 来源：用户 2026-09-22 拍板「**先做缺陷修复的优先级更高**」（排期转向见 §2）
 > 方法：**交互 / 操作类能力库存盘点**（对每个能力都查到「有 / 没有」的证据）+ 既有记账汇总（`roadmap-deferred.md` · `desktopnest-roadmap.md` §5 · 根 `README.md` 技术债表）
@@ -57,7 +57,7 @@
 
 | ID | 项 | 证据（文件:行号） | 类型 | 命中判据 | 顺位 |
 |---|---|---|---|---|---|
-| **D-1** ★ | **`MouseEvent` 家族只带坐标**——`WM_MOUSEMOVE` 的 `wParam`（`MK_LBUTTON` 等**按键位** + `MK_SHIFT`/`MK_CONTROL`）**被翻译器丢弃** | `MouseEvent.h:41-44`（成员仅 `m_mouseX/m_mouseY`）· `MouseEvent.h:18-23`（构造只有 window/x/y）· `WindowMessageHandler.cpp:92-106`（只取 `GET_X_LPARAM`/`GET_Y_LPARAM`，**`wParam` 未读**） | **契约错误（丢信息）** | **①②** | **①** |
+| **D-1** ★ | **`MouseEvent` 家族只带坐标**——`WM_MOUSEMOVE` 的 `wParam`（`MK_LBUTTON` 等**按键位** + `MK_SHIFT`/`MK_CONTROL`）**被翻译器丢弃** | `MouseEvent.h:41-44`（成员仅 `m_mouseX/m_mouseY`）· `MouseEvent.h:18-23`（构造只有 window/x/y）· `WindowMessageHandler.cpp:92-106`（只取 `GET_X_LPARAM`/`GET_Y_LPARAM`，**`wParam` 未读**） | **契约错误（丢信息）** | **①②** | **①** ✅ **已修复——Phase 19**（2026-09-23；四工具链 **236** 全绿） |
 | **D-2** | **进程为系统级 DPI 感知**（非 Per-Monitor V2）；且**框架无屏幕 / DPI 查询 API** | `Win32PlatformWindow.cpp:977` 注释预留替换点（`GetDeviceCaps` → `GetDpiForWindow`）· `MONITORINFO` 仅用于最大化修正 · Phase 16 spike **实测**跨屏 reparent 后矩形 ×0.8（`desktopnest-roadmap.md:247`，`0.8 = 96/120` 逐位吻合） | **真缺陷** | **③** | ② |
 | **D-3** | **`HICON` → `Image` 通路缺失**（= `desktopnest` **G-2**） | `Decode/ImageDecoder.h` 仅 `DecodeMemory`/`DecodeFile` · `Core/Image.h` 无工厂 · `HBITMAP` 只出现在 `GDIBackend` 内部（该头明写「HDC/HBITMAP/BitBlt 全是实现细节」） | 缺失能力（**接口形态已定**：`Image` 已是 premultiplied BGRA 契约） | — | ③ |
 | **D-4** | **无「工作线程 → UI 线程」投递机制**（= `desktopnest` **G-3**） | 全库仅 **1 处** `PostMessageW`（`Win32PlatformApplication.cpp:382`，托盘宿主唤醒）；应用层**够不着 HWND**（框架隐藏之） | 缺失能力 | — | ④（**有兜底**：`TimerEvent` 轮询，ModelProbe 轮询 `probe.exe` 即先例） |
@@ -115,6 +115,7 @@
 
 ## 8. 修订记录
 
+- **v1.3**（2026-09-23）**#41 实现并收口 ⇒ D-1 标 ✅ 已修复**。① **D-1 = #41**（`MouseEvent` 族新增按键位 + 修饰键）**已实现**：需求 v1.1 / 初设 v1.1 / 详设 v1.1 三份均评审通过，**四工具链 `ecdi_tests` 236 全绿**（231 + 5）· 断言特征串 **11 → 11** · 公共头 **92 → 92** · **公共 API +2**。② ★ **P1/P2/P3 实测回填**（详设 **§6.1**）：按下 / 抬起 / **拖动中**三阶段的按键位**全部可读**。③ ★ **D-1 的定性被实测加强**：**抬起那一刻该位已清** ⇒ 消费者在 `WM_LBUTTONUP` 上**不能**用 `IsButtonDown` 判「刚才是否在拖」——这也是 `ScrollBar::m_dragging` / `TextBox::m_mouseDown` 的 **D4 结论不变**的新证据。④ **队列推进**：首位（①）已完成，下一项 = **② DPI 感知**（本表 D-2）。⑤ 头部与标题 v1.2 → **v1.3**。
 - **v1.2**（2026-09-23）**新增 D-6（抗锯齿只覆盖圆角）**。① 来源：用户 2026-09-23 目视指出「多选控件中的勾是斜线，同样有锯齿」——**消费者已存在且可见**。② 证据：`CheckBox.cpp:99-102`（勾 = 两段 `DrawLine`）· `GDIBackend.cpp:401-420`（`CreatePen(PS_SOLID)` + `MoveToEx`/`LineTo`，GDI 该 API 本身无 AA）· AA 设施（`CornerCoverageMask` / `PatchSurface` / `BlendPatch`）**只被 `DrawRoundedRect` 的 AA 分支使用**。③ ★ **归类为「缺失能力」而非「该修的真缺陷」**——诚实按 §3 判据：它**不违反**既有原则（项目从未声明"所有绘制都要 AA"）· 平台**没有**现成能力可丢（GDI 本身不提供 AA；项目明确无 GDI+）· **有替代路径**（自家覆盖度方案，圆角即先例）⇒ **不硬塞进"该修"档**。④ **与「后端可替换性」（`roadmap-deferred.md` #44）同源**：两者都是「**视觉语义（AA / 点线 / 圆角）目前是 GDI 后端的私有实现，而非框架的共享能力**」的侧面。⑤ `D-1..D-5` 与 `A-1..A-10` 内容不变。⑥ 标题与头部 v1.1 → **v1.2**。
 
 - **v1.1**（2026-09-23）**#41 走完详设、新增 A-10**。① **#41（`MouseEvent` 维度）**：需求 **v1.1** / 初设 **v1.1** / 详设 **v1.1** 三份均**评审通过、无阻塞项**，**进入实现**；★ 详设期回正了三处初设估算（测试装置 **+3 字段 / +2 case**、登记**不涉及 `RunAllTests.*`**）与**用例数口径**（**240 → 236**）。② ★ **新增 A-10**：`HasModifier(KeyModifier::None)` **恒 true**（空集合空洞成立）——来源 = 详设第二轮评审，**已实测**；判据 = 与键盘侧同名同义 + 无消费者 + 属独立 API 语义问题。③ 头部与摘要行同步 **v1.0 → v1.1**。④ **§3–§6 与 A-1..A-9 全部原样保留**（本版**只增不改**）。
