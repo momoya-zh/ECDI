@@ -4,6 +4,7 @@
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
 #include "Platform/Win32/Win32RenderContext.h"
+#include "Render/CoverageRaster.h"
 
 #include <algorithm>
 #include <cmath>
@@ -870,43 +871,17 @@ void GDIBackend::DrawRoundedRectBlendedAA(const Rect& rect, int R, const Color& 
 void GDIBackend::FillPatchFromMask(const CornerCoverageMask& mask, const Color& color,
                                    CornerId corner)
 {
-	const auto ToByte = [](float v)
-	{
-		const float clamped = std::clamp(v, 0.0f, 1.0f);
-		return static_cast<BYTE>(clamped * 255.0f + 0.5f);
-	};
-
-	const int R = mask.radius;
-	// ⚠️ 行宽必须用 **DIB 实际行宽** = PatchSurface.size * 4，**不是** R * 4。
+	// Phase 19.1：像素合成已抽到平台无关的 `Render/CoverageRaster`（算法逐位不变）——
+	// 本函数只剩「提供目标缓冲」这一件 GDI 侧的事。这样一来，抗锯齿的**像素构造**不再
+	// 属于 GDI 后端，换后端时可直接复用（本相位后端可替换性分析的落点之一）。
+	//
+	// ⚠️ 行宽必须用 **DIB 实际行宽** = PatchSurface.size * 4，**不是** mask.radius * 4：
 	//    `PatchSurface` 只增不减（Ensure 仅在 requiredSize > size 时重建），故 size >= R 恒成立；
-	//    若按 R 定位行，则「同一后端先画过大半径、再画小半径」时本节整体行错位，
+	//    若按 R 定位行，则「同一后端先画过大半径、再画小半径」时整体行错位，
 	//    补丁内容被垂直压缩 → 圆角渲染错乱（2026-09-11 修复）。
 	//    每行只写前 R 个像素（R*4 字节），正好落在 [0,R)×[0,R) 有效区内。
-	const int stride = m_patchSurface.size * 4;
-	BYTE* dst = static_cast<BYTE*>(m_patchSurface.bits);
-
-	// 颜色分量（0~255）在循环外算好；每像素只再做一次 × c / 255
-	const int cb = static_cast<int>(ToByte(color.b));
-	const int cg = static_cast<int>(ToByte(color.g));
-	const int cr = static_cast<int>(ToByte(color.r));
-
-	for (int j = 0; j < R; ++j)
-	{
-		const int my = MaskIndexY(j, R, corner);
-		BYTE* line = dst + static_cast<size_t>(j) * stride;
-
-		for (int i = 0; i < R; ++i)
-		{
-			const std::uint8_t c = mask.At(MaskIndexX(i, R, corner), my);
-
-			// 预乘（约束 1）：color.a == 1 → A = c，RGB = colorByte × c（四舍五入）
-			// 不变量：RGB = round(colorByte × c / 255) <= c = A（因 colorByte <= 255）✓
-			line[i * 4 + 0] = static_cast<BYTE>((cb * c + 127) / 255);
-			line[i * 4 + 1] = static_cast<BYTE>((cg * c + 127) / 255);
-			line[i * 4 + 2] = static_cast<BYTE>((cr * c + 127) / 255);
-			line[i * 4 + 3] = c;
-		}
-	}
+	RasterizeCornerPatch(static_cast<std::uint8_t*>(m_patchSurface.bits),
+	                     m_patchSurface.size * 4, mask, color, corner);
 }
 
 void GDIBackend::BlendPatch(HDC target, int x, int y, int size)
