@@ -1,6 +1,6 @@
 ﻿# ECDI 延期事项排期总表（roadmap-deferred）
 
-> 状态：v1.15（2026-09-22）｜确认排期
+> 状态：v1.17（2026-09-23）｜确认排期
 > 作用：汇总全部"记账/延期/TODO/推迟"决策 → 对应实现阶段。README 技术债表的完整展开。
 > ⚠️ **已知缺口（2026-09-11 声明）**：本表内容主体停留在 v1.1（2026-08-15），**9.6 / 9.7 / 9.8 / 10 / 11 / 12 的延期项尚未批量补记**（含 9.6 的 Fade→PushOpacity / DrawArc / PushTransform / DoubleClick / Dirty Region 等记账项）。v1.2 仅补登记抗锯齿一项（#29）——**不要把本表当作完整清单**。
 
@@ -121,12 +121,18 @@
 | **（引用）** | **`HICON` → `Image` 通路** | 缺失能力（接口形态已定） | ③ | **登记处 = `desktopnest-roadmap.md` §5 的 G-2**——**不在此另开号**（避免三份账）。它是 desktop **唯一阻断项** |
 | **（引用）** | **工作线程 → UI 线程投递** | 缺失能力 | ④ | **登记处 = 同上 G-3**。有兜底（`TimerEvent` 轮询）⇒ 可等 |
 | **42** | **列表 / 网格容器**（`ListBox` / `ListView` / `TreeView`） | 缺失能力（**第二个消费者已出现**） | ⑤ | **新立**（2026-09-22）。★ 与 **#33（虚拟化）解耦**：先要"容器"，虚拟化是后一步；先例 = ModelProbe 的手工行池（`ModelProbe.cpp:715-753`） |
+| **43** | **抗锯齿只覆盖圆角**——斜线 / 曲线边缘为硬边（`DrawLine` 走 GDI `MoveToEx`/`LineTo`）= 审计 **D-6** | **缺失能力**（★ 消费者**已存在且目视可见**：多选控件的勾） | ⑥ | **新立**（2026-09-23）。★ **与 #44 同源**：都是「**视觉语义（AA / 点线 / 圆角）属于后端私有实现，而非框架共享能力**」的侧面。**实现方向** = **覆盖度光栅化的扩展**（沿用 `CornerCoverageMask` 的 pixel-square coverage 模型 —— 圆盘已实现 ⇒ 再加**线段覆盖度**即可）；★ **接缝已铺好**：`Render/CoverageRaster`（2026-09-23 新抽出的平台无关像素合成）就是它该落的地方 |
+| **44** | **后端可替换性（形态记账）**——`RenderingBackend` 对"换后端"**部分就绪** | **形态记账**（非缺陷；**第二后端未出现**） | — | **新立**（2026-09-23）。**已就绪**：operation-level 粒度 · 资源描述符平台无关（`Font`/`Image`/`Color`）· 测量能力独立注入 · 上下文空基类（`PlatformRenderContext`）· ★ **`RecordingBackend` = 第二实现的实证** · ★ **覆盖度像素合成已抽出**（`Render/CoverageRaster`）。**四个缺口（v1.17 修正 — 原判 M-3 过重，见下）**：**M-1 渲染目标不可指定**（`BeginFrame(const Color&)` 无尺寸 / 无目标；GDI 靠 `GetClientRect`+`BeginPaint` 自省 ⇒ **离屏 / 导出 / 无窗口无处落笔**；★ **Android/EGL 下最明显**——`EGLSurface` 必须显式创建）· **M-2 无 resize 接缝**（GPU 后端须重建 swapchain / RT / `EGLSurface`；`OnTargetResized` 不存在）· ★ **~~M-3~~ 降级为前瞻项**：`EndFrame` = submit + present **对 GDI / GL 这类「画完即呈现」的模型是正确抽象**（GL 的 `SwapBuffers` / `eglSwapBuffers` 恰好落在这一位）⇒ **只有 Vulkan / D3D12 那种需要分离 submit 与 present 的后端才会暴露**；**从"缺口"降为"Vulkan 阶段的前瞻项"**（2026-09-23 用户给出后端路线图后修正）· ★★ **M-4 文本栅格化属后端职责**：GDI 靠 `TextOutW` **由系统栅格化**；GL / Vulkan 必须**自己栅格化字形 + 维护纹理图集** ⇒ **这是 GPU 后端面里最大的一块工作量**，且与 `TextMeasurer` **成对替换**（Phase 7.1 预留的 `OpenGLRenderer + FreeTypeTextMeasurer` 配对**方向正确**）。**非缺口但须知的代价（M-5）**：GPU 后端需要**攒批**（operation-level 逐个 draw call 会打断批次、纹理切换更甚）⇒ **接口不必改**（后端内部可累积到 `EndFrame` 一次提交，`RenderCommand` 序列本身有序 ✓），但**后端复杂度由此上升**（纹理图集 / 状态排序）。★ **重启条件（任一命中即重启）**：**R-1** 要做**离屏渲染 / 导出 / headless 测试**；**R-2** 要上 **GPU 后端**；**R-3** 要**共享 device 的多 target**（多窗口 / 分层 / 合成）；**R-4** 要**后端间视觉等价**（AA / 点线 / alpha 契约化）。★ **届时优先加的三个位**：① `virtual void OnTargetResized(int w, int h) {}`（**带默认空实现、GDI 零改动**）② `BeginFrame` 带目标尺寸（或引入 `RenderTarget`）③ 契约补三条视觉语义。★ **后端路线图（用户 2026-09-23 明确，原样记）**：**Windows = GDI（默认）** → **Linux + 未来大概率会做的 Android = OpenGL / OpenGL ES** → **等都能用了再开始学 Vulkan**。⇒ ★ **重启条件补 R-5**：**Linux / Android 适配开工时即重启本条**（不必等到"要 GPU"）。★ **选库权衡（两条并存，不互斥）**：若 Windows 侧也要 GPU ⇒ 直接上 **GL**（与 Android 同一套代码）；若只求 Linux/Android 的 2D 表现且**想少写 M-4**（字形栅格化 + 图集）⇒ **Cairo / Skia** 更省（自带 AA 与文本）。★ **建议的验证方式**：真写 GL 后端之前先做**空壳 spike**（只画矩形 + 文本，跑通 `BeginFrame` / `EndFrame` / `PushClip`）——**用实测代替纸上分析**（沿用 Phase 16 spike 的做法）。★ **Android 侧预告的额外成本（不在本条范围，但别漏记）**：Android **没有鼠标**（是**多点触控**）⇒ 事件模型的「单指针 + 按键集合」不够用；且**键码表要写第三份**（`AKEYCODE_*`）⇒ **Android 的适配大头在平台层与事件模型，不在渲染** |
 
 **记账不动的项**（`Panel::ContainsPoint` 恒 false · `~Application` 析构序 · `m_running` 语义 · `DrawText` 改名 · 光标色 · 键盘三入口 · 多窗口焦点 · AA 遗留验收）**不重复登记**——它们已有各自条目（#6 / #33 等）或归 **v1.0 API 审查**；逐条理由与重启条件见审计文档 **§7**。
 
 ---
 
 ## 8. 修订记录
+
+- v1.17（2026-09-23）**按用户给出的后端路线图修正 #44 的判断**。① ★ **自我修正**：原把 **M-3「submit 与 present 合一」**列为缺口——**过重**。`EndFrame` 同时承担提交与呈现，对 **GDI / GL 这类"画完即呈现"的模型是正确抽象**（GL 的 `SwapBuffers` / `eglSwapBuffers` 恰好落在这一位）；**只有 Vulkan / D3D12**（需分离 submit 与 present）才会暴露 ⇒ **降级为"Vulkan 阶段的前瞻项"**。② ★★ **新增 M-4「文本栅格化属后端职责」**：GDI 靠 `TextOutW` 由**系统**栅格化，GL / Vulkan 必须**自己栅格化字形 + 维护纹理图集** ⇒ **GPU 后端的最大一块工作量**，且与 `TextMeasurer` **成对替换**（Phase 7.1 预留的配对**方向正确**）。③ **新增 M-5（非缺口但须知）**：GPU 后端需要**攒批**——**接口不必改**（后端内部累积到 `EndFrame` 一次提交，`RenderCommand` 序列本身有序），但**后端复杂度上升**（图集 / 状态排序）。④ ★ **记入用户的后端路线图**：**Windows = GDI → Linux + Android = OpenGL / GLES → 之后学 Vulkan**；**重启条件补 R-5**（Linux / Android 适配开工即重启）；附**空壳 spike 先行**的建议（实测代替纸上分析）。⑤ 另记 **Android 的额外成本**（多点触控 ≠ 单指针鼠标 · 键码表第三份 ⇒ 大头在平台层与事件模型）。⑥ 头部版本 v1.16 → **v1.17**。
+
+- v1.16（2026-09-23）**新立 #43 / #44（同源两条：抗锯齿与后端可替换性）**。① **#43 抗锯齿只覆盖圆角**（= 审计 **D-6**）：证据 = 勾线走 `DrawLine`（`CheckBox.cpp:99-102`）而 `GDIBackend::DrawLine` 用 GDI `MoveToEx`/`LineTo` 无 AA；★ 与 **#44 同源**——都是"**视觉语义属后端私有实现**"的侧面。② **#44 后端可替换性**（**形态记账**）：记**已就绪五项** + **缺口 M-1 / M-2 / M-3** + **重启条件 R-1..R-4** + 届时**优先加的三个位**；★ 附 **X11 选库建议**（Cairo 优于 Phase 7.1 注释里预留的 `OpenGLRenderer`）。③ ★ **同期落地一件实事**：#44 所指"覆盖度像素合成"已从 `GDIBackend` **抽为平台无关的 `Render/CoverageRaster`**（零拷贝、行为逐位不变）——**记账不是空账，第一个可复用积木已就位**。④ 头部版本 v1.15 → **v1.16**。
 
 - v1.15（2026-09-22）**新立 §7.9「框架缺陷修复队列」+ 排期转向**。① 用户拍板「**先做缺陷修复**」——desktop demo **推迟**到框架缺失补齐之后（demo 是"用法示范"，能力未定型时写它 = 维护两份真相；ModelProbe 继续承担验证职责）。② **§7.9 建档**：**#41 鼠标事件维度补全**（**契约错误**，顺带解锁 #36）**已立项 Phase 19** · **#8 复用为 DPI 感知**（优先级提升，不新开号）· **G-2 / G-3 引用 `desktopnest-roadmap`**（不重复开号）· **新立 #42 列表/网格容器**（第二个消费者已出现，与 #33 虚拟化解耦）。③ **配套审计文档**：`docs/framework-defect-audit.md` v1.0（证据 + **该修 / 记账分界判据** + 队列顺序 + **记账不动清单 A-1..A-9** 含重启条件）。④ 头部版本 v1.14 → **v1.15**。
 

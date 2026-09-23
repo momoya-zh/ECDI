@@ -1,6 +1,6 @@
-﻿# ECDI 框架缺陷审计与修复队列（v1.1）
+﻿# ECDI 框架缺陷审计与修复队列（v1.2）
 
-> 状态：**v1.1**（2026-09-23）｜**盘点 + 队列**——实施时逐条立项，各占主线 Phase 号
+> 状态：**v1.2**（2026-09-23）｜**盘点 + 队列**——实施时逐条立项，各占主线 Phase 号
 > 类型：**非阶段文档**（跨阶段的长期参考，与 `window-ownership.md` / `desktopnest-roadmap.md` 同级）——**不占 Phase 编号**
 > 来源：用户 2026-09-22 拍板「**先做缺陷修复的优先级更高**」（排期转向见 §2）
 > 方法：**交互 / 操作类能力库存盘点**（对每个能力都查到「有 / 没有」的证据）+ 既有记账汇总（`roadmap-deferred.md` · `desktopnest-roadmap.md` §5 · 根 `README.md` 技术债表）
@@ -62,6 +62,7 @@
 | **D-3** | **`HICON` → `Image` 通路缺失**（= `desktopnest` **G-2**） | `Decode/ImageDecoder.h` 仅 `DecodeMemory`/`DecodeFile` · `Core/Image.h` 无工厂 · `HBITMAP` 只出现在 `GDIBackend` 内部（该头明写「HDC/HBITMAP/BitBlt 全是实现细节」） | 缺失能力（**接口形态已定**：`Image` 已是 premultiplied BGRA 契约） | — | ③ |
 | **D-4** | **无「工作线程 → UI 线程」投递机制**（= `desktopnest` **G-3**） | 全库仅 **1 处** `PostMessageW`（`Win32PlatformApplication.cpp:382`，托盘宿主唤醒）；应用层**够不着 HWND**（框架隐藏之） | 缺失能力 | — | ④（**有兜底**：`TimerEvent` 轮询，ModelProbe 轮询 `probe.exe` 即先例） |
 | **D-5** | **无列表 / 网格容器**（`ListBox` / `ListView` / `TreeView` 均不存在）= `desktopnest` **G-7** | `ScrollView.h:21` 自述「**不推导**内容尺寸以外的语义（不做 ListBox/虚拟化/框选）」· ModelProbe 的模型列表 = `Panel`+`ScrollView`+**手工行池**（`ModelProbe.cpp:715-753`） | 缺失能力（**第二个消费者已出现**） | — | ⑤ |
+| **D-6** | **抗锯齿只覆盖圆角**——斜线 / 曲线边缘为硬边（`DrawLine` 走 GDI `MoveToEx`/`LineTo`，该 API 本身不做 AA） | `CheckBox.cpp:99-102`（勾 = **两段 `DrawLine`**）· `GDIBackend.cpp:401-420`（`CreatePen(PS_SOLID)` + `MoveToEx`/`LineTo`）· AA 设施（`CornerCoverageMask` + `PatchSurface` + `BlendPatch`）**只被 `DrawRoundedRect` 的三条 AA 分支使用** · 用户 2026-09-23 目视确认「多选控件的勾是斜线，同样有锯齿」 | **缺失能力**（★ **消费者已存在且目视可见**） | — | ⑥ |
 
 **D-1 的加重情节（为什么不只是"缺个字段"）**：代码里**已有两处为它写的手工状态**——`ScrollBar::m_dragging` / `m_dragGrabOffset`（`ScrollBar.h:122-123`，置位 `ScrollBar.cpp:250/268`，消费 `:289-314`，清位 `:277-286`）与 `TextBox::m_mouseDown`（`TextBox.h:278`，`TextBox.cpp:917/924`）。**第三个"按住拖动"类消费者会写第三份**。⇒ **契约越晚改越贵**。
 
@@ -114,6 +115,8 @@
 
 ## 8. 修订记录
 
+- **v1.2**（2026-09-23）**新增 D-6（抗锯齿只覆盖圆角）**。① 来源：用户 2026-09-23 目视指出「多选控件中的勾是斜线，同样有锯齿」——**消费者已存在且可见**。② 证据：`CheckBox.cpp:99-102`（勾 = 两段 `DrawLine`）· `GDIBackend.cpp:401-420`（`CreatePen(PS_SOLID)` + `MoveToEx`/`LineTo`，GDI 该 API 本身无 AA）· AA 设施（`CornerCoverageMask` / `PatchSurface` / `BlendPatch`）**只被 `DrawRoundedRect` 的 AA 分支使用**。③ ★ **归类为「缺失能力」而非「该修的真缺陷」**——诚实按 §3 判据：它**不违反**既有原则（项目从未声明"所有绘制都要 AA"）· 平台**没有**现成能力可丢（GDI 本身不提供 AA；项目明确无 GDI+）· **有替代路径**（自家覆盖度方案，圆角即先例）⇒ **不硬塞进"该修"档**。④ **与「后端可替换性」（`roadmap-deferred.md` #44）同源**：两者都是「**视觉语义（AA / 点线 / 圆角）目前是 GDI 后端的私有实现，而非框架的共享能力**」的侧面。⑤ `D-1..D-5` 与 `A-1..A-10` 内容不变。⑥ 标题与头部 v1.1 → **v1.2**。
+
 - **v1.1**（2026-09-23）**#41 走完详设、新增 A-10**。① **#41（`MouseEvent` 维度）**：需求 **v1.1** / 初设 **v1.1** / 详设 **v1.1** 三份均**评审通过、无阻塞项**，**进入实现**；★ 详设期回正了三处初设估算（测试装置 **+3 字段 / +2 case**、登记**不涉及 `RunAllTests.*`**）与**用例数口径**（**240 → 236**）。② ★ **新增 A-10**：`HasModifier(KeyModifier::None)` **恒 true**（空集合空洞成立）——来源 = 详设第二轮评审，**已实测**；判据 = 与键盘侧同名同义 + 无消费者 + 属独立 API 语义问题。③ 头部与摘要行同步 **v1.0 → v1.1**。④ **§3–§6 与 A-1..A-9 全部原样保留**（本版**只增不改**）。
 
-- **v1.0（2026-09-22）** 初稿。来源：用户拍板「缺陷修复优先」+ 本轮**交互 / 操作类能力库存盘点**（子代理按「有 / 没有都要证据」逐项查证）。内容：排期转向（§2）· **该修 / 记账分界判据**（§3，三条 vs 两条）· 缺陷清单 **D-1..D-5**（§4，全部带行号）· desktop 侧缺口 **G-5/G-6/G-7 + 多窗口×`Desktop` 未验项**（§5，与前四者**分栏不混**）· 修复队列与顺序理由（§6）· **记账不动清单 A-1..A-9**（§7，含重启条件；**v1.1 新增 A-10**）· 与既有文档的三层关系（§1）。**首项** = D-1（→ `phase19-mouse-event-dimensions-requirements.md`）。
+- **v1.0（2026-09-22）** 初稿。来源：用户拍板「缺陷修复优先」+ 本轮**交互 / 操作类能力库存盘点**（子代理按「有 / 没有都要证据」逐项查证）。内容：排期转向（§2）· **该修 / 记账分界判据**（§3，三条 vs 两条）· 缺陷清单 **D-1..D-5**（§4，全部带行号）· desktop 侧缺口 **G-5/G-6/G-7 + 多窗口×`Desktop` 未验项**（§5，与前四者**分栏不混**）· 修复队列与顺序理由（§6）· **记账不动清单 A-1..A-9**（§7，含重启条件；**v1.1 新增 A-10 · v1.2 新增 D-6**）· 与既有文档的三层关系（§1）。**首项** = D-1（→ `phase19-mouse-event-dimensions-requirements.md`）。
