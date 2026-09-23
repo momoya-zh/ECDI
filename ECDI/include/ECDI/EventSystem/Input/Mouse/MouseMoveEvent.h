@@ -26,8 +26,10 @@ public:
 	MouseMoveEvent(
 		Window* window,
 		int mouseX,
-		int mouseY
-	):MouseEvent(window, mouseX, mouseY){
+		int mouseY,
+		unsigned int pressedButtons = 0,
+		KeyModifier modifiers = KeyModifier::None
+	):MouseEvent(window, mouseX, mouseY, pressedButtons, modifiers){
 
 	}
 

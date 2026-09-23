@@ -15,8 +15,10 @@ public:
 		Window* window,
 		int mouseX,
 		int mouseY,
-		MouseButton button
-	) :MouseButtonEvent(window, mouseX, mouseY, button) {
+		MouseButton button,
+		unsigned int pressedButtons = 0,
+		KeyModifier modifiers = KeyModifier::None
+	) :MouseButtonEvent(window, mouseX, mouseY, button, pressedButtons, modifiers) {
 
 	}
 

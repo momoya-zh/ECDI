@@ -18,8 +18,10 @@ public:
 		int mouseX,
 		int mouseY,
 		MouseButton button,
-		bool isDoubleClick = false
-	):MouseButtonEvent(window,mouseX,mouseY,button), m_isDoubleClick(isDoubleClick){
+		bool isDoubleClick = false,
+		unsigned int pressedButtons = 0,
+		KeyModifier modifiers = KeyModifier::None
+	):MouseButtonEvent(window,mouseX,mouseY,button,pressedButtons,modifiers), m_isDoubleClick(isDoubleClick){
 
 	}
 

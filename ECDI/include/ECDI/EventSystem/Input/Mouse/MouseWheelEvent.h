@@ -33,8 +33,10 @@ public:
 		Window* window,
 		int mouseX,
 		int mouseY,
-		int delta
-	) :MouseEvent(window, mouseX, mouseY), m_delta(delta) {
+		int delta,
+		unsigned int pressedButtons = 0,
+		KeyModifier modifiers = KeyModifier::None
+	) :MouseEvent(window, mouseX, mouseY, pressedButtons, modifiers), m_delta(delta) {
 
 	}
 

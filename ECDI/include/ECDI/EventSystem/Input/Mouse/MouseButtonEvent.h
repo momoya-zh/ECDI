@@ -19,8 +19,10 @@ protected:
 		Window* window,
 		int mouseX,
 		int mouseY,
-		MouseButton button
-	):MouseEvent(window, mouseX, mouseY),m_button(button){
+		MouseButton button,
+		unsigned int pressedButtons = 0,
+		KeyModifier modifiers = KeyModifier::None
+	):MouseEvent(window, mouseX, mouseY, pressedButtons, modifiers),m_button(button){
 
 	}
 
