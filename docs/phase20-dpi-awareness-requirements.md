@@ -1,7 +1,7 @@
-﻿# Phase 20 · DPI 感知 —— 需求确认（v1.0）
+﻿# Phase 20 · DPI 感知 —— 需求确认（v1.1）
 
 > 来源：`roadmap-deferred.md` **§7.9 #8**（= §1.1 条 **8**「DPI 感知评估」的优先级提升）· `docs/framework-defect-audit.md` **§4 D-2**（= 队列 **②**）
-> 状态：**v1.0**（2026-09-24）——**待评审**（评审通过后方可进初步设计）
+> 状态：**v1.1**（2026-09-24）——★ **需求确认通过**（外部评审第一轮结论：需求边界成立，Q1–Q6 已正确归类为初设决策 ⇒ **可进初步设计**）。本轮修订 = **核实补充 + 论证加固**，**未调整方向**（G1–G5 / N1–N5 不变）
 > 前置输入：**Phase 13 详设 §12 的 D6 / L6**（明写「与 DPI 感知一并闭合」）· **Phase 16 spike §7.1**（跨屏 ×0.8 实测）
 
 ---
@@ -22,12 +22,13 @@
 | **K4** | `DipToPixels` **只有 2 个调用点**，都在 `WM_NCHITTEST` 里：`resizeInset` 与 `captionHeight` ⇒ **DIP 语义目前只覆盖 chrome 两项** | `:377` · `:379` |
 | **K5** | ★ **进程未声明 DPI 感知**：全库 `SetProcessDpiAwareness` / `SetProcessDPIAware` / `DPI_AWARENESS_CONTEXT` **0 命中**（仅 `.workbuddy/spike/` 里的探针显式调过，与本仓库无关）· **无 manifest**（`examples/ModelProbe/ModelProbe.rc.in` 里无 manifest 项） | grep 全库 · `ModelProbe.rc.in` |
 | **K6** | ★★ **`WM_NCHITTEST` 与 widget 几何的错位已在 Phase 13 记录并留待闭合**：`IsClientInteractiveAt(x, y)` 拿到**物理像素**，`HitTest` 用 **DIP 几何** ⇒「**两者仅在 100% DPI 下重合**」，处置写的是「**与「DPI 感知」技术债一并闭合**」 | `phase13-captionbar-detailed-design.md:795`（**L6**）· `:1051`（**D6**）· 错位点 `Win32PlatformWindow.cpp:423` |
-| **K7** | 鼠标 / 尺寸事件坐标**直接透传、无换算**：`WM_MOUSEMOVE` 取 `GET_X_LPARAM/GET_Y_LPARAM`；`WM_SIZE` 取 `LOWORD/HIWORD(lParam)` | `WindowMessageHandler.cpp:92-106` · `:104-118` |
+| **K7** | 鼠标 / 尺寸事件坐标**直接透传、无换算**：`WM_MOUSEMOVE` 取 `GET_X_LPARAM/GET_Y_LPARAM`；`WM_SIZE` 取 `LOWORD/HIWORD(lParam)` | `WindowMessageHandler.cpp:126-127` · `:106-108`（★ v1.1 行号修正——v1.0 的 `:92-106` 已过期） |
 | **K8** | ★ **`Font::size` 的语义是「GDI 像素高度」**（明确写着的），不是 DIP | `Core/Font.h:11` |
 | **K9** | 字体实例化**直接按像素用**：`lf.lfHeight = -lround(font.size)`（`MM_TEXT` 下 `lfHeight` 即像素） | `GDIBackend.cpp:771` |
 | **K10** | 文本测量走 GDI、返回**像素**：`GetTextExtentPoint32W` / `GetTextMetricsW`（`tmHeight`） | `GDITextMeasurer.cpp:76` · `:107-109` |
 | **K11** | IME 双通道用**框架坐标**（隐含 DIP 假设）：`SetCaretPos(geometry.rect.x, y)` + `COMPOSITIONFORM` / `CANDIDATEFORM` | `Win32PlatformWindow.cpp:683` · `:708-714` · `:718` |
 | **K12** | `MONITORINFO` **仅用于最大化修正**，框架**无面向应用的屏幕 / DPI 查询 API**；`PlatformWindow` 接口里**没有任何 DPI 方法** | `:1305` · `include/ECDI/Platform/PlatformWindow.h:31-134` |
+| **K13** | ★★ **客户区尺寸有 3 个入口，全部直取物理量（v1.1 新增——K7 只覆盖了 ③）**：① **构造期** `m_platformWindow->GetClientSize()`（内部 `GetClientRect`）→ `RootWidget::SetSize`；② **`WM_SIZE`** → `m_host.OnResized(LOWORD/HIWORD(lParam))` → **同步 RootWidget 尺寸 + 重排布局链 + 重绘**（9.7 触发链）；③ **`WM_SIZE`** → `WindowResizedEvent`（纯通知）。★ ①② 才是**布局几何的源头**，③ 只是事件——**漏改 ①② 时 ③ 改对也没用** | ① `Win32PlatformWindow.cpp:266-270` → `Window.cpp:76-78` · ② `Win32PlatformWindow.cpp:521` → `Window.cpp:449-452` · ③ `WindowMessageHandler.cpp:106-108` |
 
 ### 1.3 为什么现状「看起来能工作」
 
@@ -95,7 +96,7 @@
 | **窗口创建尺寸** | 直传 `CreateWindowEx`（隐式逻辑） | **DIP → 物理** | 入 |
 | **chrome**（caption / resizeInset） | ✅ 已 DIP（K1/K4） | DPI 来源换成 `GetDpiForWindow`（K3 预留点） | 已就位 |
 | **鼠标事件坐标** | 透传（K7） | **物理 → DIP** | 出 |
-| **窗口尺寸事件** | 透传（K7） | **物理 → DIP** | 出 |
+| **窗口尺寸**（★ **3 个入口**，见 K13） | 三处**均直取物理量** | **物理 → DIP**——① 构造期 `GetClientSize` → `RootWidget::SetSize` ② `OnResized`（**布局几何源头**）③ `WindowResizedEvent` | 出 |
 | **`WM_NCHITTEST` 委托** | ★ **错位**（K6） | 统一到 DIP 后**自动闭合 L6** | 出 |
 | **字体实例化** | 按像素（K9） | **DIP → 物理**（且**字体缓存 key 必须含 DPI**——否则跨屏复用错字体） | 入 |
 | **文本测量** | GDI 像素（K10） | 与 `Font` 语义**同源** | 定 |
@@ -104,6 +105,19 @@
 | **公共 API 缺口** | 无查询（K12） | **新增屏幕 / DPI 查询** | 新 |
 
 ★ **一句可判的总结**：**公共 API 与框架内部（Widget / 布局 / 事件）= DIP；平台边界 = 物理；渲染后端 = 物理。** 换算**只在边界的两个方向发生**。
+
+### 4.1 ★ 双空间共存：同一个 `GetClientRect`，两处要求两种单位（v1.1 新增）
+
+`GetClientRect` 在**平台侧**与**渲染后端侧**各被调用一次，V2 之后**只有一处需要换算**：
+
+| 调用处 | 它要的语义 | 处理后 |
+|---|---|---|
+| `Win32PlatformWindow::GetClientSize`（`:266-270`）→ 框架（K13 ①） | **框架层客户区尺寸 = DIP** | **必须 `PixelsToDip`** |
+| `GDIBackend`（DIB / 绘制目标 / `GetClientRect`） | **渲染目标 = 物理像素** | ✅ **原样不动** |
+
+⇒ ★ **同一个 Win32 API 产出物理值，但只有一处该转换**——**实现时不得把它们合并成一个"尺寸访问器"**，否则必然有一侧单位错。
+
+**可判判据**：`Window` / `Widget` / `Layout` / 事件里见到的尺寸与坐标**恒为 DIP**；`Renderer` / `RenderingBackend` 里见到的**恒为物理像素**；两者在**平台边界**这一条线上互换。★ 这条判据同时是 G2 与 R3 的操作化表述。
 
 ---
 
@@ -129,7 +143,7 @@
 |---|---|
 | **R1** | 进程 DPI 感知 = **Per-Monitor V2**；且**声明时机早于任何窗口创建** |
 | **R2** | 公共 API 的尺寸 / 坐标语义 = **DIP**（把 K1 的既有契约**贯彻到全部边界**） |
-| **R3** | 换算**只发生在平台边界**；框架内部（Widget / 布局 / 事件 / 命令缓冲）**不感知 DPI** |
+| **R3** | ★★ **【架构约束，非普通需求】** 换算**只发生在平台边界**；框架内部（Widget / 布局 / 事件 / 命令缓冲）**不感知 DPI**。★ **地位高于 G1**（评审第一轮特别指出）：守住它 = 阻止 `size * dpiScale` 渗入 Widget / Layout / Event / Renderer 各层——若把本阶段只理解为「支持 DPI」，极易演化成 **框架级 DPI 意面** |
 | **R4** | `WM_DPICHANGED` 后：几何正确 + 重布局 + 字体缓存失效 |
 | **R5** | 字体与文本测量的语义与 `Font::size` **同源**（D4 / Q2） |
 | **R6** | **零破坏**：100% DPI 下**逐位等价**（G5）；既有 236 用例全绿 |
@@ -159,12 +173,20 @@
 | **Q1** | **DIP 语义的边界画在哪**：`Application::Create(title, w, h)` 之后，`Widget::SetSize` / `Layout` 的参数是否也一律 DIP？（倾向：**是**——但需确认无「物理量」混入，例如 DIB 尺寸） |
 | **Q2** | ★ **文本测量的单位**：返回 DIP（浮点，会有累积误差）还是物理（整数，但布局须混合单位）？**这是本阶段最实际的取舍** |
 | **Q3** | **感知声明的落点**：manifest（应用侧 / CMake 注入）vs 运行时 API（框架侧）——**两者是否都要**？若走运行时，`Application::Create` 是否是最早的可靠时机？ |
-| **Q4** | **查询 API 的形状**：窗口级 `GetDpiScale()` 够不够？要不要屏幕枚举（多显示器信息）？命名如何避免与 `Viewport` 撞概念 |
-| **Q5** | **`WM_NCHITTEST` 的换算方向**：该消息给的是**物理像素**，而 K1 说「换算点唯一在此」——是把入参**换成 DIP** 再比对，还是把 widget 几何**换成物理**再比对？两者对 L6 的闭合效果相同，**但影响该函数的契约表述** |
-| **Q6** | **测试如何伪造 DPI**：换算函数可注入 DPI；但**平台层的事件翻译**（`WindowMessageHandler`）怎么在无头测试里注入非 96 的 DPI？沿用 Phase 19 的 `FakeHost` 路径是否足够 |
+| **Q4** | **查询 API 的形状**：窗口级 `GetDpiScale()` 够不够？要不要屏幕枚举（多显示器信息）？命名如何避免与 `Viewport` 撞概念。★ **YAGNI 护栏（评审第一轮）**：先确定**真实使用场景**再定形状——不得因「既然做 DPI 了」就一次塞入 `EnumerateAllMonitors` / `GetMonitorWorkArea` / `GetMonitorName` 等；**DPI API 极易膨胀成整个 Display 子系统** |
+| **Q5** | **`WM_NCHITTEST` 的换算方向**：该消息给的是**物理像素**，而 K1 说「换算点唯一在此」——**A：入参换成 DIP 再比对**（`:372-374` 求出窗口坐标后立刻 `PixelsToDip`，`caption` / `inset` / `w` / `h` 全留在 DIP）**vs B：把 widget 几何换成物理再比对**。两者对 L6 的闭合效果相同，**但影响该函数的契约表述**（K1 注释须改写）。★ **倾向 A**——★ **判据不是「符合 R3」**（B **同样**发生在平台边界内，R3 区分不了二者），而是：**`HitTest` 的入参语义必须恒为 DIP**（既有坐标语义不变量：`HitTest` 加回父偏移、与会话级「鼠标事件坐标为 DIP」同向）——选 B 会让 `HitTest` 在某次调用里收**物理坐标**，**同一个函数出现两种单位**。★ **连带**：走 A 后 `DipToPixels` 在 NCHITTEST 的 2 个调用点（K4）**消失**（改用 `PixelsToDip` 转 x/y），K1 的「换算点唯一」**仍成立但方向反转** |
+| **Q6** | **测试如何伪造 DPI**：换算函数可注入 DPI；但**平台层的事件翻译**（`WindowMessageHandler`）怎么在无头测试里注入非 96 的 DPI？沿用 Phase 19 的 `FakeHost` 路径是否足够。★ **判据（评审第一轮）**：**DPI 来源必须与坐标转换解耦**——若翻译器内部直接 `GetDpiForWindow(hwnd)`，则 `Handle(nullptr, nullptr, msg, ...)`（`EventTests.cpp:259` 既有形态，**hwnd = nullptr**）**无从伪造 DPI**。不要求引入 DPI provider 抽象，但至少做到：**① 纯换算独立可测** + **② 翻译器持有可设置的 DPI 成员**（平台层在翻译前写入），**两条路都要验** |
 
 ---
 
 ## 9. 修订记录
 
 - **v1.0**（2026-09-24）初稿。**输入**：`roadmap-deferred.md` #8（D-2）+ **Phase 13 详设 §12 的 D6/L6**（明写「与 DPI 感知一并闭合」）+ **Phase 16 spike §7.1 的 ×0.8 实测**。**内容**：K1–K12 现状勘察（全部带行号）· **§1.3 指出「现状不是正确，是两条错误互相抵消」**（K5 是全部原因）· G1–G5（含 **G5 逐位等价**护栏）· N1–N5 非目标 · 路线 A/B/C（**倾向 B**，并指出 **C 会让契约「半真」比现状更糟**）· ★ **§3.2 的连锁关系**（感知声明与 DIP 贯通**必须同批**，否则是纯破坏性变更）· §4 触面清单 · D0–D8 · R1–R9 · A1–A6（区分自动 / 人工）· Q1–Q6（★ Q2 测量单位是最实际的取舍）。
+- **v1.1**（2026-09-24）**外部评审第一轮处置**——结论：**需求确认通过，可进初步设计**（Q1–Q6 已正确归类为初设决策，**需求边界不再扩大**）。本版 = **核实补充 + 论证加固**，**方向未变**：
+  - ★ **新增 K13（实质补漏，评审未提）**：客户区尺寸有 **3 个入口**（构造期 `GetClientSize` · `OnResized` · `WindowResizedEvent`），而 v1.0 的 K7 只覆盖了 ③ 与"事件"通道 ⇒ **§4 触面清单同步改为「3 个入口」**，并点名 ② `OnResized` 是**布局几何源头**（漏改它则 ③ 改对也无效）。
+  - ★ **修正 K7 行号**（`:92-106` → `:126-127` / `:106-108`，v1.0 引用已过期）。
+  - ★ **新增 §4.1「双空间共存」**：**同一个 `GetClientRect` 在平台侧要 DIP、在后端要物理**，两处**不得合并成一个尺寸访问器**；并给出可判判据。
+  - ★ **R3 升级为「架构约束」**（采纳评审：**地位高于 G1**，否则易演化为框架级 DPI 意面）。
+  - ★ **Q5 增倾向 A**——并把判据从评审的「符合 R3」**修正为**「`HitTest` 入参语义恒为 DIP」（**B 同样在平台边界内，R3 区分不了二者**）；同时记下 **A 的连带效应**（NCHITTEST 里 `DipToPixels` 两个调用点消失、K1 注释方向反转）。
+  - ★ **Q4 增 YAGNI 护栏** · **Q6 增可测判据**（DPI 来源与翻译解耦；`Handle(nullptr, …)` 无法伪造 DPI）。
+  - ★ **未采纳 1 处**：评审 §2 链条把 K7 表述为「**直接透传物理坐标**」——现状（unaware + 虚拟化）下透传的是**逻辑像素**，正是这一点使「两条错误互相抵消」成立；K7 原文「直接透传、无换算」**准确故保留**，仅在 §4 触面清单标注 **V2 后**方向为「物理 → DIP」。
