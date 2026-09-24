@@ -301,6 +301,186 @@ void TestDrawRectAlpha()
     DestroyWindow(hwnd);
 }
 
+// ══ Phase 20.1：渲染层 DPI 缩放（T20.1-1..T20.1-5）═══════════════════════════════
+// ★ 落点 = Renderer 入口；装置 = 既有 RecordingBackend（它记录的**正是后端收到的几何**）
+//   ⇒ 本组**零窗口、零 GDI**。★ 断言口径由 Phase 20.1 详设 §6.2 冻结。
+
+void TestRendererScaleIdentity()
+{
+    // T20.1-1：scale == 1.0f ⇒ 折算**恒等**（G2 的纯函数锚 / 契约 C-2）
+    // ★ 一次走**默认实参**、一次走**显式 1.0f** ⇒ 同时验 C-9（默认值存在）与恒等
+    RecordingBackend backend;
+    Renderer renderer(backend);
+
+    CommandBuffer commands;
+    commands.emplace_back(DrawRectCommand{ Rect{ 1, 2, 3, 4 }, Color::Red() });
+
+    renderer.Execute(commands);          // 默认实参（= 1.0f）
+    renderer.Execute(commands, 1.0f);    // 显式实参
+
+    EXPECT_EQ(backend.draws.size(), 2);
+    // 两次结果一致，且与输入同值（折算恒等）
+    EXPECT_NEAR(backend.draws[0].rect.x, 1.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.y, 2.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.width, 3.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.height, 4.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[1].rect.x, backend.draws[0].rect.x, kEpsilon);
+    EXPECT_NEAR(backend.draws[1].rect.y, backend.draws[0].rect.y, kEpsilon);
+    EXPECT_NEAR(backend.draws[1].rect.width, backend.draws[0].rect.width, kEpsilon);
+    EXPECT_NEAR(backend.draws[1].rect.height, backend.draws[0].rect.height, kEpsilon);
+}
+
+void TestRendererScaleRectAndClip()
+{
+    // T20.1-2：Rect 与 Clip 都折算，且**走同一个 helper**（A1 / A4）
+    RecordingBackend backend;
+    Renderer renderer(backend);
+
+    CommandBuffer commands;
+    commands.emplace_back(DrawRectCommand{ Rect{ 1, 2, 3, 4 }, Color::Red() });
+    commands.emplace_back(PushClipCommand{ Rect{ 5, 6, 7, 8 } });
+
+    renderer.Execute(commands, 2.0f);
+
+    EXPECT_EQ(backend.draws.size(), 1);
+    EXPECT_NEAR(backend.draws[0].rect.x, 2.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.y, 4.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.width, 6.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.height, 8.0f, kEpsilon);
+
+    EXPECT_EQ(backend.clipOps.size(), 1);
+    EXPECT_TRUE(backend.clipOps[0].isPush);
+    EXPECT_NEAR(backend.clipOps[0].rect.x, 10.0f, kEpsilon);
+    EXPECT_NEAR(backend.clipOps[0].rect.y, 12.0f, kEpsilon);
+    EXPECT_NEAR(backend.clipOps[0].rect.width, 14.0f, kEpsilon);
+    EXPECT_NEAR(backend.clipOps[0].rect.height, 16.0f, kEpsilon);
+}
+
+void TestRendererScaleAllGeometryFields()
+{
+    // T20.1-3：覆盖**全部几何字段**（Rect / Point / width / cornerRadius）——A7
+    // ★ scale 取 1.5f 且输入**刻意取奇数** ⇒ 期望值落在**半整数**（1.5 / 4.5）
+    //   ⇒ 若实现偷偷 lround，本用例**必失败**（同时也是契约 C-8「不得取整」的回归锚）
+    // ★ 另验：DrawImage 的**源 image payload 不被 DPI 折算改动**（评审 §10 修正后的准确目的）
+    RecordingBackend backend;
+    Renderer renderer(backend);
+
+    Image img;                              // 与 TestImageValueSemantic 同款的非对称像素
+    img.width = 2;
+    img.height = 1;
+    img.stride = 8;
+    img.pixels = { 0, 0, 255, 255, 0, 255, 0, 255 };
+
+    CommandBuffer commands;
+    commands.emplace_back(DrawLineCommand{ Point{ 1, 2 }, Point{ 3, 4 }, 2.0f, Color::Black() });
+    commands.emplace_back(DrawRoundedRectCommand{ Rect{ 2, 4, 6, 8 }, 4.0f, Color::Gray() });
+    commands.emplace_back(DrawImageCommand{ Rect{ 8, 16, 32, 48 }, img });
+    commands.emplace_back(DrawFocusRectCommand{ Rect{ 1, 1, 2, 2 }, 3.0f, Color::Blue() });
+
+    renderer.Execute(commands, 1.5f);
+
+    // DrawLine：start / end / **width** 三个几何量都要折
+    EXPECT_EQ(backend.lineCalls.size(), 1);
+    EXPECT_NEAR(backend.lineCalls[0].start.x, 1.5f, kEpsilon);
+    EXPECT_NEAR(backend.lineCalls[0].start.y, 3.0f, kEpsilon);
+    EXPECT_NEAR(backend.lineCalls[0].end.x, 4.5f, kEpsilon);
+    EXPECT_NEAR(backend.lineCalls[0].end.y, 6.0f, kEpsilon);
+    EXPECT_NEAR(backend.lineCalls[0].width, 3.0f, kEpsilon);            // ★ 最易漏的一个
+
+    // DrawRoundedRect：rect / **cornerRadius**
+    EXPECT_EQ(backend.roundedRectCalls.size(), 1);
+    EXPECT_NEAR(backend.roundedRectCalls[0].rect.x, 3.0f, kEpsilon);
+    EXPECT_NEAR(backend.roundedRectCalls[0].rect.y, 6.0f, kEpsilon);
+    EXPECT_NEAR(backend.roundedRectCalls[0].rect.width, 9.0f, kEpsilon);
+    EXPECT_NEAR(backend.roundedRectCalls[0].rect.height, 12.0f, kEpsilon);
+    EXPECT_NEAR(backend.roundedRectCalls[0].cornerRadius, 6.0f, kEpsilon);   // ★ 最易漏
+
+    // DrawImage：**只折 dest**；★ 源 payload 逐字节不变
+    EXPECT_EQ(backend.imageCalls.size(), 1);
+    EXPECT_NEAR(backend.imageCalls[0].dest.x, 12.0f, kEpsilon);
+    EXPECT_NEAR(backend.imageCalls[0].dest.y, 24.0f, kEpsilon);
+    EXPECT_NEAR(backend.imageCalls[0].dest.width, 48.0f, kEpsilon);
+    EXPECT_NEAR(backend.imageCalls[0].dest.height, 72.0f, kEpsilon);
+    EXPECT_EQ(backend.imageCalls[0].image.width, 2);
+    EXPECT_EQ(backend.imageCalls[0].image.height, 1);
+    EXPECT_EQ(backend.imageCalls[0].image.stride, 8);
+    EXPECT_TRUE(backend.imageCalls[0].image.pixels == img.pixels);   // 内容/尺寸/stride 均未被改动
+
+    // DrawFocusRect：rect / cornerRadius
+    EXPECT_EQ(backend.focusRectCalls.size(), 1);
+    EXPECT_NEAR(backend.focusRectCalls[0].rect.x, 1.5f, kEpsilon);
+    EXPECT_NEAR(backend.focusRectCalls[0].rect.y, 1.5f, kEpsilon);
+    EXPECT_NEAR(backend.focusRectCalls[0].rect.width, 3.0f, kEpsilon);
+    EXPECT_NEAR(backend.focusRectCalls[0].rect.height, 3.0f, kEpsilon);
+    EXPECT_NEAR(backend.focusRectCalls[0].cornerRadius, 4.5f, kEpsilon);
+}
+
+void TestRendererScaleTextPositionOnly()
+{
+    // T20.1-4：★ **只折 pos，字号不折**（Q5 / G3）——本子阶段最危险的回归点
+    // 若此处也乘 scale ⇒ 与后端按 DPI 的换算**叠加** = 双重缩放（1.5 × 1.5 = 2.25）
+    RecordingBackend backend;
+    Renderer renderer(backend);
+
+    Font font;
+    font.size = 14.0f;
+
+    CommandBuffer commands;
+    commands.emplace_back(DrawTextCommand{ Point{ 5, 7 }, "AB", Color::Black(), font });
+
+    renderer.Execute(commands, 2.0f);
+
+    EXPECT_EQ(backend.textDraws.size(), 1);
+    EXPECT_NEAR(backend.textDraws[0].pos.x, 10.0f, kEpsilon);
+    EXPECT_NEAR(backend.textDraws[0].pos.y, 14.0f, kEpsilon);
+    EXPECT_NEAR(backend.textDraws[0].font.size, 14.0f, kEpsilon);   // ★ **未变**（不双重缩放）
+    EXPECT_EQ(backend.textDraws[0].text, "AB");                   // 文本亦未变
+}
+
+void TestRendererScaleLeavesBufferIntact()
+{
+    // T20.1-5：★★ A2 / A6 / C-10 的**唯一机器证据**——折算发生了，但**命令缓冲一字不动**
+    // ① 数量 / 类型 / 顺序不变（A6）  ② 源缓冲几何逐位不变（C-10）  ③ 后端收到的是物理（C-7）
+    RecordingBackend backend;
+    Renderer renderer(backend);
+
+    CommandBuffer commands;
+    commands.emplace_back(PushClipCommand{ Rect{ 0, 0, 100, 100 } });
+    commands.emplace_back(DrawRectCommand{ Rect{ 10, 20, 30, 40 }, Color::Red() });
+    commands.emplace_back(PopClipCommand{});
+
+    renderer.Execute(commands, 2.0f);
+
+    // ① 数量 / 类型 / 顺序不变（A6）
+    EXPECT_EQ(commands.size(), 3);
+    EXPECT_TRUE(std::holds_alternative<PushClipCommand>(commands[0]));
+    EXPECT_TRUE(std::holds_alternative<DrawRectCommand>(commands[1]));
+    EXPECT_TRUE(std::holds_alternative<PopClipCommand>(commands[2]));
+
+    // ② ★★ 源缓冲**逐位不变**（A2 / C-10）
+    const auto& clip = std::get<PushClipCommand>(commands[0]);
+    EXPECT_NEAR(clip.rect.x, 0.0f, kEpsilon);
+    EXPECT_NEAR(clip.rect.y, 0.0f, kEpsilon);
+    EXPECT_NEAR(clip.rect.width, 100.0f, kEpsilon);
+    EXPECT_NEAR(clip.rect.height, 100.0f, kEpsilon);
+    const auto& rectCmd = std::get<DrawRectCommand>(commands[1]);
+    EXPECT_NEAR(rectCmd.rect.x, 10.0f, kEpsilon);
+    EXPECT_NEAR(rectCmd.rect.y, 20.0f, kEpsilon);
+    EXPECT_NEAR(rectCmd.rect.width, 30.0f, kEpsilon);
+    EXPECT_NEAR(rectCmd.rect.height, 40.0f, kEpsilon);
+
+    // ③ 后端收到的**已是物理**——与 ② 并列 ⇒ 证明「折算了、但没改缓冲」
+    EXPECT_EQ(backend.draws.size(), 1);
+    EXPECT_NEAR(backend.draws[0].rect.x, 20.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.y, 40.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.width, 60.0f, kEpsilon);
+    EXPECT_NEAR(backend.draws[0].rect.height, 80.0f, kEpsilon);
+    EXPECT_EQ(backend.clipOps.size(), 2);
+    EXPECT_TRUE(backend.clipOps[0].isPush);
+    EXPECT_NEAR(backend.clipOps[0].rect.width, 200.0f, kEpsilon);
+    EXPECT_FALSE(backend.clipOps[1].isPush);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterRendererTests()
@@ -312,4 +492,9 @@ void ECDI::Test::RegisterRendererTests()
     GetTestRegistry().Add("Renderer.ImageValueSemantic", &TestImageValueSemantic);
     GetTestRegistry().Add("Renderer.GDIBackendAlphaBlend", &TestGDIBackendAlphaBlend);
     GetTestRegistry().Add("Renderer.DrawRectAlpha", &TestDrawRectAlpha);
+    GetTestRegistry().Add("Renderer.ScaleIdentity", &TestRendererScaleIdentity);
+    GetTestRegistry().Add("Renderer.ScaleRectAndClip", &TestRendererScaleRectAndClip);
+    GetTestRegistry().Add("Renderer.ScaleAllGeometryFields", &TestRendererScaleAllGeometryFields);
+    GetTestRegistry().Add("Renderer.ScaleTextPositionOnly", &TestRendererScaleTextPositionOnly);
+    GetTestRegistry().Add("Renderer.ScaleLeavesBufferIntact", &TestRendererScaleLeavesBufferIntact);
 }

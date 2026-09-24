@@ -133,7 +133,7 @@ void Window::PaintFrame()
 	PaintContext ctx(m_commands, *m_textMeasurer);   // 7.1.4：测量独立指针（GDITextMeasurer）
 	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
 	m_renderer.BeginFrame(m_backgroundColor);         // 决策 13：转发（Phase 18：携带本帧背景色）
-	m_renderer.Execute(m_commands);
+	m_renderer.Execute(m_commands, GetDpiScale());   // Phase 20.1：每帧取窗口 DPI 缩放（不缓存 ⇒ 跨屏下一帧自动跟随）
 	m_renderer.EndFrame();
 }
 
