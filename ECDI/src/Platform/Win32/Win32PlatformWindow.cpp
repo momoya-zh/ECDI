@@ -120,7 +120,8 @@ Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
 		// Phase 20（△10）：此处先按 **DIP 数值**创建——此刻 m_hwnd 尚未存在，拿不到窗口 DPI。
-		// 构造末尾再 SetWindowPos 到 DipToPixels(...) 对应的物理尺寸（并在 SetDpi 之后）。
+		// ★ 尺寸的 DPI 校正**已移到 `Show()`**（构造期调 `SetWindowPos` 会在 `Window`
+		//   未构造完时触发 `WM_SIZE` ⇒ UB；详见构造体末尾的说明）。
 		width,
 		height,
 		nullptr,
@@ -143,19 +144,21 @@ Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
 
 	// Phase 20：把当前窗口 DPI 交给翻译器（它据此把物理坐标折成 DIP）。
 	// ⚠️ 必须在窗口创建**之后**（GetDpiForWindow 需要 hwnd）；WM_DPICHANGED 时会再更新。
-	// ★ P3 待实测：窗口尚未 Show 时 GetDpiForWindow 是否已返回目标显示器 DPI。
-	const int dpi = GetDpiForWindow(m_hwnd);
+	// ★ P3 待实测：窗口尚未 Show 时 GetDpiForWindow 是否已返回目标显示器 DPI（Show 时会再取一次）。
+	m_messageHandler.SetDpi(GetDpiForWindow(m_hwnd));
 
-	m_messageHandler.SetDpi(dpi);
+	// ★★ Phase 20（崩溃修复）：**这里不再调 `SetWindowPos`**。
+	// 根因：调整窗口尺寸会**同步派发 `WM_SIZE`**，而本构造发生在 `Window` 的**成员初始化列表**中
+	//   ⇒ 回调 `Window::OnResized` 会访问「声明在 `m_platformWindow` 之后、生命周期尚未开始」
+	//   的成员 = **UB**（实测：主屏 125% DPI 下进程直接崩溃，错误码 **0xC000041D**
+	//   = `STATUS_FATAL_USER_CALLBACK_EXCEPTION`「用户回调内发生未处理异常」）。
+	//   ★ 100% DPI 下之所以"看起来正常"：`DipToPixels(w, 96) == w` ⇒ 尺寸不变 ⇒ **no-op、一条消息都不发**。
+	// ⇒ 把 DIP 目标尺寸**记下来**，延迟到 `Show()`（此时 `Window` 已完全构造、回调安全）再换算。
+	// ⚠️ `CreateWindowExW` **本身**的构造期 `WM_SIZE` 仍会到达——那条路由 `Window::OnResized`
+	//   的 `if (m_rootWidget)` 兜底（现已合法：`m_rootWidget` 已提前声明为已构造的 nullptr）。
+	m_startupWidthDip = width;
 
-	// Phase 20（△10 后半）：把客户区定到「DIP 语义」对应的**物理尺寸**。
-	// width/height 是公共 API 的 **DIP** 值，而创建时 m_hwnd 尚不存在（拿不到窗口 DPI）
-	// ⇒ 先按 DIP 数值创建窗口，此处再按实际 DPI 调整尺寸。
-	// ★ **必须在 SetDpi 之后**——本调用会触发 WM_SIZE，其换算要用新 DPI（顺序契约，§4.2）。
-	// ★ dpi == 96 时尺寸不变 ⇒ SetWindowPos 为 no-op（G5：100% 下与改前逐位一致）。
-	SetWindowPos(m_hwnd, nullptr, 0, 0,
-		DipToPixels(width, dpi), DipToPixels(height, dpi),
-		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	m_startupHeightDip = height;
 
 }
 
@@ -168,6 +171,25 @@ Win32PlatformWindow::~Win32PlatformWindow(){
 void Win32PlatformWindow::Show() {
 
 	if (m_hwnd != nullptr) {
+
+		// ★★ Phase 20（△10 落点迁移 + 崩溃修复）：按窗口 DPI 把客户区定到「DIP 语义」对应的**物理尺寸**。
+		// **为什么从构造搬到这里**：本调用会同步派发 `WM_SIZE` ⇒ 必须等 `Window` 完全构造
+		//   （`m_rootWidget` 就绪）之后才安全（构造期做会触发 UB —— 详见构造函数处注释）。
+		// ★ 顺序：「构造期已 SetDpi」→ 此处再取一次并更新（Show 时窗口的显示器关联已确定，
+		//   P3 的"未 Show 时 DPI 是否可靠"在此处不再是问题）。
+		// ★ 此刻窗口**尚未显示**（ShowWindow 在后）⇒ 改尺寸**不产生闪烁**。
+		// ★ dpi == 96 时尺寸不变 ⇒ `SetWindowPos` 为 no-op（G5：100% 下与改前逐位一致）。
+		if (m_startupWidthDip > 0 && m_startupHeightDip > 0){
+
+			const int dpi = GetDpiForWindow(m_hwnd);
+
+			m_messageHandler.SetDpi(dpi);
+
+			SetWindowPos(m_hwnd, nullptr, 0, 0,
+				DipToPixels(m_startupWidthDip, dpi), DipToPixels(m_startupHeightDip, dpi),
+				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+		}
 
 		m_shown = true;   // 配置期 → 运行期分界线（与 Window::Show() 一一对应）
 

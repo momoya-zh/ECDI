@@ -290,6 +290,16 @@ class Window : public PlatformWindowHost {
 
 		Application& m_application;	///< 所属 Application（B2：引用——构造器初始化列表注入；「无主窗口」在语法上不存在）
 
+		// ★★ Phase 20（崩溃修复）：**构造期回调可访问的成员，必须先于「回调源成员」构造**。
+		// 背景：`m_platformWindow` 在**初始化列表**里构造，而 `CreateWindowExW` 期间系统就
+		//   同步派发 `WM_SIZE` ⇒ 回调直达 `Window::OnResized`。此时若被回调访问的成员
+		//   「声明在 m_platformWindow 之后」，它的**生命周期尚未开始** ⇒ 读它就是 **UB**。
+		//   实测：主屏 125% DPI 下进程直接崩溃，错误码 **0xC000041D**
+		//   = `STATUS_FATAL_USER_CALLBACK_EXCEPTION`（「用户回调内发生未处理异常」）。
+		// ⇒ 把 `m_rootWidget` 提前声明：回调里读到的是**已构造的 nullptr**（判空合法且为假 ⇒ 安全跳过）。
+		// ⚠️ 今后新增「构造期回调可能访问的成员」时，一律声明在此行之前。
+		std::unique_ptr<Widget> m_rootWidget;	///< Widget 树的根节点（拥有所有权；★ **必须先于 m_platformWindow 构造**——构造期 `WM_SIZE` 回调会读它）
+
 		std::unique_ptr<PlatformWindow> m_platformWindow;	///< 平台窗口（组合，非拥有创建；7.1.1）
 
 		// 9.6：per-Window 动画管理器（能力接缝——构造注入 *m_platformWindow；
@@ -297,8 +307,6 @@ class Window : public PlatformWindowHost {
 		AnimationManager m_animationManager;	///< 动画管理器（9.6，表现层基础设施）
 
 		std::chrono::steady_clock::time_point m_lastAnimationTick{};	///< 动画 elapsed 锚点（timer 启动钩子重置）
-
-		std::unique_ptr<Widget> m_rootWidget;	///< Widget 树的根节点（拥有所有权）
 
 		Widget* m_focusedWidget = nullptr;	///< 当前拥有键盘焦点的 Widget（非拥有指针）
 

@@ -119,6 +119,15 @@ Widget& Window::GetRootWidget() noexcept {
 
 void Window::PaintFrame()
 {
+	// ★ Phase 20（崩溃修复）：**构造期防御**。本函数可经 `WM_PAINT → OnPaint` 进入，
+	// 而 `m_rootWidget` 要到 `Window` 构造体里才创建 ⇒ 在它之前访问就是 UB
+	// （原实现**连判空都没有**——同类回调入口都应至少判空）。
+	if (m_rootWidget == nullptr){
+
+		return;
+
+	}
+
 	// 决策 10/13/33：完整编排，严格配对
 	m_commands.clear();                              // 决策 4：复用缓冲
 	PaintContext ctx(m_commands, *m_textMeasurer);   // 7.1.4：测量独立指针（GDITextMeasurer）

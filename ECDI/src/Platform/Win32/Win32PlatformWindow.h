@@ -205,6 +205,12 @@ private:
 	int m_resizeInset = 8;	///< 缩放热区宽度（R3；逻辑坐标 DIP——默认 8）
 	WindowLayer m_windowLayer = WindowLayer::Normal;	///< 层级档位（R10——语义状态，不随实现路径降级）
 
+	// ★★ Phase 20（崩溃修复）：构造传入的 **DIP** 目标尺寸——**延迟到 `Show()` 再换算成物理**。
+	// 原因：构造期调 `SetWindowPos` 会**同步派发 `WM_SIZE`**，而那一刻 `Window` 尚在成员
+	//   初始化列表中（回调读到未构造成员 = UB；实测 125% DPI 下崩溃，0xC000041D）⇒ 见 .cpp 构造处注释。
+	int m_startupWidthDip = 0;	///< 启动目标宽（DIP；0 = 未设置 ⇒ `Show()` 跳过尺寸调整）
+	int m_startupHeightDip = 0;	///< 启动目标高（DIP）
+
 	bool m_shown = false;	///< 是否已调用过 Show()（配置期/运行期判据——「API 调用事实」，非「系统当前可见」）
 	bool m_chromeConfigured = false;	///< ChromeMode 是否已配置（D-CHROME-1：一次确定——重复调用一律 Warning + 忽略）
 	WindowState m_lastWindowState = WindowState::restored;	///< 状态事件去重锚（零值 = 窗口初始态）
