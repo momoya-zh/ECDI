@@ -42,6 +42,16 @@ public:
 	/// @brief 客户区尺寸（框架层 Size，非 Win32 RECT——类型封装在实现内）
 	virtual Size GetClientSize() const = 0;
 
+	/// @brief 窗口当前 DPI 缩放比（Phase 20 R7 / G4；1.0 = 100%）
+	/// @return 窗口所在显示器的 DPI ÷ 96（1.0 / 1.25 / 1.5 / 2.0 …）；
+	///         **查询失败 ⇒ 1.0**（与 G5「dpi == 96 ⇒ DIP == 像素」的恒等退化一致）
+	/// @details 事实来源在平台层（Win32 实现取 `GetDpiForWindow`）——沿 **D-SEAM-1
+	///          平台能力扩展惯例**：本接口加能力 virtual（接口即契约，零消息号），
+	///          `Window` 薄转发为应用层唯一入口，平台消息在实现内消化。
+	/// @note **单位语义**：公共 API 恒为 DIP（Phase 20 Q1）——本方法返回的是
+	///       「DIP 与物理像素之间的**缩放比**」，不是像素值本身。
+	virtual float GetDpiScale() const noexcept = 0;
+
 	/// @brief 平台渲染上下文（7.1.4：后端经此拿平台句柄——"参数识别"→"平台返回"，
 	/// Window 层零识别；识别发生在平台实现内部 static_cast）
 	virtual const PlatformRenderContext& GetRenderContext() const = 0;

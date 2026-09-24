@@ -32,6 +32,8 @@ public:
 
 	Size GetClientSize() const override{ return Size{ 800.0f, 600.0f }; }
 
+	float GetDpiScale() const noexcept override{ return 1.0f; }   // Phase 20：替身无 DPI 缩放（恒等退化）
+
 	const PlatformRenderContext& GetRenderContext() const override{ return m_context; }
 
 	void UpdateTextInputCaret(const CaretGeometry&) override{}

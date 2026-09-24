@@ -95,6 +95,15 @@ class Window : public PlatformWindowHost {
 		/// 返回抽象接口——实现是 Win32PlatformWindow，框架层零 Win32 类型）
 		PlatformWindow& GetPlatformWindow() noexcept;
 
+		/// @brief 本窗口的 DPI 缩放比（Phase 20 R7 / G4；1.0 = 100%）
+		/// @return 窗口所在显示器的 DPI ÷ 96（1.0 / 1.25 / 1.5 / 2.0 …）；**查询失败 ⇒ 1.0**
+		/// @details **应用层唯一入口**——薄转发到平台层（D-SEAM-1 第 ② 步：契约与
+		/// 事实来源都在平台层；与 `Invalidate` / `GetWindowState` 同风格）。
+		/// 用途：应用按 DPI 自行调整资源（图标 / 位图 / 自定义绘制）时读取。
+		/// @note **框架自身不用它**——Widget / 布局 / 事件一律 DIP，换算只发生在
+		/// 平台边界（Phase 20 R3 架构约束）。
+		float GetDpiScale() const noexcept;
+
 		// ── Phase 12：WindowChrome（配置期——构造后 / Show() 前调用）──────
 
 		/// @brief 设置窗口 chrome 形态（R1）

@@ -51,6 +51,48 @@ void Win32PlatformApplication::RequestExit(){
 
 }
 
+// ── Phase 20（△22）：进程 DPI 感知声明（★ 应用级接缝——不在 Application 直调 Win32）──
+
+void Win32PlatformApplication::DeclareDpiAwareness(){
+
+	// 支持基线 = **Windows 10 1703+**（详设 §5.3 已冻结）⇒ 直接静态链接，不做
+	// LoadLibrary / GetProcAddress 动态加载（YAGNI——失败容忍只覆盖"运行期"失败）。
+	// ★ Per-Monitor V2：窗口跨屏时系统自动发 WM_DPICHANGED 并附建议矩形
+	//   （Win32PlatformWindow 的 △14 处理块已就位）。
+	// ⚠️ 必须在**任何窗口创建之前**调用——之后调用会因 ERROR_ACCESS_DENIED 失败（属常态）。
+	if (SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)){
+
+		return;   // 成功：默认路径，不记日志（不污染输出）
+
+	}
+
+	// ★ 失败容忍（契约 C6）：**只记日志**——不抛异常、不断言、**不主动降级尝试**。
+	// ★ 诊断要点：把**实际感知级别**一并写出——框架「读取而非假定」，排查者须能看到真实状态。
+	//   失败 + 本就 unaware ⇒ GetDpiForWindow 恒 96 ⇒ 换算恒等 ⇒ **退化为现状**
+	//   （= G5 护栏），**不是"半降级"**——详设 §5.2。
+	const DPI_AWARENESS awareness =
+		GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+
+	const wchar_t* level = L"PER_MONITOR_AWARE_V2";
+
+	switch (awareness){
+
+	case DPI_AWARENESS_UNAWARE:           level = L"UNAWARE"; break;
+
+	case DPI_AWARENESS_SYSTEM_AWARE:      level = L"SYSTEM_AWARE"; break;
+
+	case DPI_AWARENESS_PER_MONITOR_AWARE: level = L"PER_MONITOR_AWARE"; break;
+
+	default: break;   // PER_MONITOR_AWARE_V2（含未识别值——按最高级处理）
+
+	}
+
+	Logger::Log(LogLevel::Warning,
+		std::wstring(L"DPI awareness declaration failed; actual level = ") + level
+		+ L" (framework reads the real DPI, so behaviour stays self-consistent)");
+
+}
+
 // ── Phase 14：托盘宿主（D2——懒创建；首次 SetTrayIcon 时）────────────────
 
 void Win32PlatformApplication::EnsureTrayHost(){

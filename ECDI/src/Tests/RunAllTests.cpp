@@ -30,6 +30,7 @@ int ECDI::Test::RunAllTests()
     RegisterScrollViewTests();   // Phase 15：滚动容器
     RegisterDesktopLayerTests();   // Phase 16：桌面驻留层
     RegisterWindowBackgroundTests();   // Phase 18：窗口底色
+    RegisterDpiTests();   // Phase 20：DPI 换算（纯函数层——T20-1..T20-6）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

@@ -41,8 +41,20 @@ public:
 		LPARAM lParam
 	);
 
+	/// @brief 设置当前窗口 DPI（Phase 20 Q6——**平台翻译器持有的正常状态**，非测试缝）
+	/// @param dpi 当前窗口 DPI（`GetDpiForWindow` 的返回值；`<= 0` ⇒ 视作 96）
+	/// @details 由 `Win32PlatformWindow` 在**构造末尾**与 **`WM_DPICHANGED`** 时写入；
+	///          换算用它把物理坐标折成 DIP（`PixelsToDip(·, m_dpi)`）。
+	/// @note ★ 为什么是「正常状态」而非「测试缝」：本类是 **Win32 专有件**——换平台时
+	///       整个组件被替换 ⇒ 持有当前窗口 DPI 是它的**职责**；且默认 96 让既有用例
+	///       行为**逐位不变**（`dpi == 96` ⇒ 换算恒等）。
+	void SetDpi(int dpi) noexcept{ m_dpi = (dpi > 0) ? dpi : 96; }
+
 private:
 	PlatformWindowHost& m_host;	///< 框架契约（非拥有；7.1.2 替代应用层指针）
+
+	/// @brief 当前窗口 DPI（Phase 20；默认 96 = 恒等换算 ⇒ 既有行为零回归）
+	int m_dpi = 96;
 
 	/// @brief 等待配对的 UTF-16 高位代理（0 = 无；代理对组合状态机的实例状态）
 	wchar_t m_pendingHighSurrogate = 0;

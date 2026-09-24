@@ -37,6 +37,8 @@ public:
 
 	void RequestExit() override;
 
+	void DeclareDpiAwareness() override;   ///< Phase 20 △22：进程 DPI 感知声明（应用级接缝）
+
 	void SetTrayIcon(const TrayIconOptions& options) override;
 
 	void RemoveTrayIcon() override;

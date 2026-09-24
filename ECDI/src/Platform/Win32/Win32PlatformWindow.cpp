@@ -1,6 +1,7 @@
 ﻿#include "Platform/Win32/Win32PlatformWindow.h"
 
 #include "Platform/Win32/Win32WindowClass.h"
+#include "Platform/Win32/DpiConversion.h"   // Phase 20：DPI 换算（唯一真相源——与 WindowMessageHandler 共用）
 #include "ECDI/Core/Logger.h"          // Phase 12：chrome/层级/状态契约的 Warning 日志
 #include "ECDI/Core/String.h"
 #include "ECDI/EventSystem/Window/WindowStateChangedEvent.h"   // Phase 12 R7：WM_SIZE 状态事件
@@ -118,6 +119,8 @@ Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
+		// Phase 20（△10）：此处先按 **DIP 数值**创建——此刻 m_hwnd 尚未存在，拿不到窗口 DPI。
+		// 构造末尾再 SetWindowPos 到 DipToPixels(...) 对应的物理尺寸（并在 SetDpi 之后）。
 		width,
 		height,
 		nullptr,
@@ -137,6 +140,22 @@ Win32PlatformWindow::Win32PlatformWindow(PlatformWindowHost& host,
 
 	// 7.1.4：hwnd 就绪后绑定渲染上下文（后端经 GetRenderContext() 拿句柄）
 	m_renderContext.SetHandle(m_hwnd);
+
+	// Phase 20：把当前窗口 DPI 交给翻译器（它据此把物理坐标折成 DIP）。
+	// ⚠️ 必须在窗口创建**之后**（GetDpiForWindow 需要 hwnd）；WM_DPICHANGED 时会再更新。
+	// ★ P3 待实测：窗口尚未 Show 时 GetDpiForWindow 是否已返回目标显示器 DPI。
+	const int dpi = GetDpiForWindow(m_hwnd);
+
+	m_messageHandler.SetDpi(dpi);
+
+	// Phase 20（△10 后半）：把客户区定到「DIP 语义」对应的**物理尺寸**。
+	// width/height 是公共 API 的 **DIP** 值，而创建时 m_hwnd 尚不存在（拿不到窗口 DPI）
+	// ⇒ 先按 DIP 数值创建窗口，此处再按实际 DPI 调整尺寸。
+	// ★ **必须在 SetDpi 之后**——本调用会触发 WM_SIZE，其换算要用新 DPI（顺序契约，§4.2）。
+	// ★ dpi == 96 时尺寸不变 ⇒ SetWindowPos 为 no-op（G5：100% 下与改前逐位一致）。
+	SetWindowPos(m_hwnd, nullptr, 0, 0,
+		DipToPixels(width, dpi), DipToPixels(height, dpi),
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 
 }
 
@@ -269,10 +288,16 @@ Size Win32PlatformWindow::GetClientSize() const{
 
 	if (GetClientRect(m_hwnd, &rc)){
 
+		// ★ Phase 20（△11 / 契约 C4）：平台侧把物理像素折成 **DIP** 后再返回。
+		// ⚠️ **不得与 GDIBackend 的 GetClientRect 合并成一个"尺寸访问器"**——
+		//    后端要的是**物理像素**（需求 §4.1）。两个调用**同源但单位不同**，
+		//    这正是「双空间共存」的落点：合并则必有一侧单位错。
+		const int dpi = GetDpiForWindow(m_hwnd);
+
 		// 直接返回 float（Size 成员为 float——转 int 会触发 C2397 narrowing）
 		return Size{
-			static_cast<float>(rc.right - rc.left),
-			static_cast<float>(rc.bottom - rc.top)
+			static_cast<float>(PixelsToDip(rc.right - rc.left, dpi)),
+			static_cast<float>(PixelsToDip(rc.bottom - rc.top, dpi))
 		};
 
 	}
@@ -369,18 +394,25 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 
 		GetWindowRect(hwnd, &rcWin);
 
-		const int x = pt.x - rcWin.left;
+		// ★ Phase 20（Q5 定案 A / △12）：入参先折成 **DIP**，之后整个判定都在 DIP 空间。
+		//   判据 = **`HitTest` 的入参语义恒为 DIP**（与 Widget 几何同空间）——故此处做
+		//   「物理 → DIP」，而非把 widget 几何折成物理（后者会让同一个 HitTest 出现两种单位）。
+		//   ★ K1「换算点唯一在此」仍成立，**方向反转为 物理 → DIP**。
+		const int dpi = GetDpiForWindow(hwnd);
 
-		const int y = pt.y - rcWin.top;
+		const int x = PixelsToDip(pt.x - rcWin.left, dpi);
 
-		// DIP → 物理像素（D-DPI-1：换算点唯一在此——公共 API 语义恒为 DIP）
-		const int inset = DipToPixels(m_resizeInset, hwnd);
+		const int y = PixelsToDip(pt.y - rcWin.top, dpi);
 
-		const int caption = DipToPixels(m_captionHeight, hwnd);
+		// m_captionHeight / m_resizeInset **本就是 DIP**（公共 API 语义）⇒ 与上面的 DIP 坐标
+		// 直接比较，**无需换算**（批一的临时 DIP → 物理换算已按定案 A 撤除）。
+		const int inset = m_resizeInset;
 
-		const int w = rcWin.right - rcWin.left;
+		const int caption = m_captionHeight;
 
-		const int h = rcWin.bottom - rcWin.top;
+		const int w = PixelsToDip(rcWin.right - rcWin.left, dpi);
+
+		const int h = PixelsToDip(rcWin.bottom - rcWin.top, dpi);
 
 		// 最大化态：系统不会进入 resize 循环，返回 HTLEFT/HTTOP 等会让人误以为可拖宽——
 		// 故四边四角 resize 判据整体跳过（D-HIT-1）。
@@ -518,7 +550,11 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 
 	case WM_SIZE: {
 		// 窗口大小变化 → Host 回调同步 RootWidget 尺寸；随后 fall-through 翻译器（WindowResizedEvent）
-		m_host.OnResized(LOWORD(lParam), HIWORD(lParam));
+		// ★ Phase 20（△13）：lParam 给的是**物理像素**，而框架内部（RootWidget / 布局）恒为 DIP
+		//   ⇒ 先折成 DIP。★ 这是**布局几何的真正源头**（B26）——漏改则事件那条改对也无效。
+		const int dpi = GetDpiForWindow(hwnd);
+
+		m_host.OnResized(PixelsToDip(LOWORD(lParam), dpi), PixelsToDip(HIWORD(lParam), dpi));
 
 		// Phase 12 R7：窗口状态变化 → 事件（尺寸同步已在 OnResized 完成——顺序契约：
 		// 消费者收到事件时 RootWidget 已是新尺寸）。
@@ -548,6 +584,32 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		}
 
 		break;   // 既有行为：继续走翻译器（WindowResizedEvent——零回归）
+	}
+
+	// ── Phase 20（△14）：DPI 变化（跨屏 / 系统缩放调整）──────────────────────
+	case WM_DPICHANGED: {
+		// ★ 硬约束（详设 §4.1）：**只做三件事**——更新 DPI、采纳系统建议矩形、
+		//   **让系统去发 WM_SIZE**（由其走既有的 OnResized → Arrange → Invalidate 链）。
+		//   **绝不在此自行调 OnResized**——那会与随后的 WM_SIZE 形成**两套 resize 路径**。
+		// ① 先更新翻译器：**必须早于 ②**——② 触发的 WM_SIZE 换算要用新 DPI（顺序契约）。
+		m_messageHandler.SetDpi(LOWORD(wParam));   // LOWORD = X 轴 DPI（本项目按单值处理）
+
+		const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+
+		if (suggested == nullptr){
+
+			break;   // 防御性：无建议矩形 ⇒ 只更新了 DPI，其余交 DefWindowProc
+
+		}
+
+		// ② 采纳系统建议的**窗口物理矩形**（新 DPI 下的正确尺寸/位置由系统算好）
+		SetWindowPos(hwnd, nullptr,
+			suggested->left, suggested->top,
+			suggested->right - suggested->left,
+			suggested->bottom - suggested->top,
+			SWP_NOZORDER | SWP_NOACTIVATE);
+
+		return 0;   // 已处理（字体缓存无需清理——DPI 已进缓存键，旧 DPI 的 HFONT 自然不命中）
 	}
 
 	case WM_EXITSIZEMOVE:
@@ -670,17 +732,24 @@ void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
 	// ① 系统 caret（TSF 输入法主路径——Win11 微软拼音查询 GetCaretPos 定位候选窗，最小实验已验证）
 	// 懒创建：首次调用（TextBox 获焦）创建；后续只 SetCaretPos
 	// 7.1.3：尺寸来自 rect（消灭硬编码 2x20——定位/绘制/输入同源，TextBox 输出完整几何）
+	// ★ Phase 20（△15）：geometry 是 **DIP**，而 CreateCaret / SetCaretPos / IMM 三处都要**物理像素**
+	//   ⇒ 本函数取一次窗口 DPI，三处各自换算（B22/修2：
+	//   **漏 CreateCaret 则 150% 下 caret 尺寸不缩放**）。
+	const int dpi = GetDpiForWindow(m_hwnd);
+
 	if (!m_caretCreated){
 
 		CreateCaret(m_hwnd, nullptr,
-			static_cast<int>(geometry.rect.width),
-			static_cast<int>(geometry.rect.height));
+			DipToPixels(static_cast<int>(geometry.rect.width), dpi),
+			DipToPixels(static_cast<int>(geometry.rect.height), dpi));
 
 		m_caretCreated = true;
 
 	}
 
-	SetCaretPos(static_cast<int>(geometry.rect.x), static_cast<int>(geometry.rect.y));   // 客户区坐标（caret 语义=左上角）
+	// 客户区坐标（caret 语义=左上角）——DIP → 物理像素
+	SetCaretPos(DipToPixels(static_cast<int>(geometry.rect.x), dpi),
+		DipToPixels(static_cast<int>(geometry.rect.y), dpi));
 
 	// ⚠️ 保持 5.6 行为：始终 HideCaret（**不自画双光标**——系统 caret 仅作 TSF 位置信标，
 	// 光标竖线由控件 OnPaint 自画）。visible=true 不做 ShowCaret（GPT 三轮认同——分歧消解）。
@@ -693,9 +762,9 @@ void Win32PlatformWindow::UpdateTextInputCaret(const CaretGeometry& geometry){
 	// 窗口移动时还叠加窗口偏移（"像素过多"）。故**不再 ClientToScreen，直接传客户区坐标**。
 	POINT pt{
 
-		static_cast<LONG>(geometry.rect.x),
+		static_cast<LONG>(DipToPixels(static_cast<int>(geometry.rect.x), dpi)),
 
-		static_cast<LONG>(geometry.rect.y)
+		static_cast<LONG>(DipToPixels(static_cast<int>(geometry.rect.y), dpi))
 
 	};
 
@@ -1294,6 +1363,17 @@ WindowState Win32PlatformWindow::GetWindowState() const noexcept{
 
 }
 
+float Win32PlatformWindow::GetDpiScale() const noexcept{
+
+	// Phase 20 R7/G4：事实来源 = GetDpiForWindow（跟随**窗口所在显示器**——D-DPI-1 沿用）。
+	// ⚠️ 失败 / 返回 0 ⇒ 1.0f —— 与 G5「dpi == 96 ⇒ DIP == 像素」的恒等退化一致
+	//    （fail-safe：宁可按 100% 处理，也不让缩放比变成未定义值）。
+	const int dpi = GetDpiForWindow(m_hwnd);
+
+	return (dpi > 0) ? (static_cast<float>(dpi) / 96.0f) : 1.0f;
+
+}
+
 void Win32PlatformWindow::AdjustMaximizedClientRect(HWND hwnd, RECT& rcClient){
 
 	// R4 验收基准：客户区不覆盖任务栏、不残留系统边框空白。
@@ -1316,33 +1396,6 @@ void Win32PlatformWindow::AdjustMaximizedClientRect(HWND hwnd, RECT& rcClient){
 	// ⚠️ D-COMP-1：刻意不引入任何基于 (rcWindow - rcMonitor) 差值的补偿——最大化时该
 	// 差值为负，「正负代入」的对称补偿会把客户区推出 rcWork。若 T4 在某 Windows 版本
 	// 失败，另起 R 立项修订（补偿只能「正内缩」：left += ix / right -= ix，ix >= 0）。
-
-}
-
-int Win32PlatformWindow::DipToPixels(int dip, HWND hwnd){
-
-	// D-DPI-1：DPI 来源 = GetDeviceCaps(LOGPIXELSX)（窗口 DC——非鼠标所在显示器）。
-	// 理由：caption/inset 描述窗口自身 UI 的几何语义，跟随窗口比跟随鼠标更一致。
-	// 公式：整数 half-up —— px = (dip * dpi + 48) / 96（dpi = 96 时恒等于 dip，无误差）。
-	// 当前项目未声明 PerMonitorV2 → 系统 DPI 虚拟化下 dpi 恒 96 → 现状 1:1。
-	// 未来启用 Per-Monitor V2 时仅替换 DPI 来源（GetDeviceCaps → GetDpiForWindow），
-	// 不改变调用位置、参数语义与换算公式。
-	// 溢出防护：dip 是公共 API 直收的 int，理论可传 INT_MAX——中间量升 long long。
-	HDC hdc = GetDC(hwnd);
-
-	if (hdc == nullptr){
-
-		return dip;   // DC 获取失败：1:1 降级（与「DPI 未落地」现状一致——fail-safe）
-
-	}
-
-	const int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
-
-	ReleaseDC(hwnd, hdc);
-
-	const long long scaled = static_cast<long long>(dip) * dpi;
-
-	return static_cast<int>((scaled + 48) / 96);
 
 }
 

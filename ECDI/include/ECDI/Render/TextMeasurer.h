@@ -16,9 +16,13 @@ namespace ECDI {
 		virtual ~TextMeasurer() = default;
 
 		/// @brief 测量文本尺寸（控件对齐偏移计算依赖此，D5 职责确认）
+		/// @return 文本尺寸——★ **单位恒为 DIP**（Phase 20 Q2；与 `Font::size` 同源）。
+		///         实现内部按「基准 DPI 换算进、同一 DPI 折回」的自洽方式产出
+		///         （详见 Phase 20 初步设计 §2.2），故返回值对基准 DPI 近似不敏感。
 		virtual Size MeasureText(const Font& font, const std::string& text) = 0;
 
 		/// @brief 字体行高（单行文本垂直居中用——精确值，非字号估算，P7）
+		/// @return 行高——★ **单位恒为 DIP**（同 MeasureText）
 		virtual float LineHeight(const Font& font) = 0;
 	};
 

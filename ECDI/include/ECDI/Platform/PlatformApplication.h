@@ -54,6 +54,19 @@ public:
 	/// @pre 无
 	virtual int ShowTrayMenu(const TrayMenu& menu) = 0;
 
+	// ── Phase 20：应用级 DPI 感知声明（★ 沿用上方应用级能力惯例的三步模板）────
+
+	/// @brief 声明进程 DPI 感知级别（Phase 20 △22——**应用级能力惯例第 ① 步**）
+	/// @details 由 `Application` 构造期调用，因此**早于任何窗口创建**（窗口只在 `Create` 内建）
+	///          ⇒ 使框架既有的「公共 API 语义恒为 DIP」契约真正生效（Phase 13 立 · Phase 20 兑现）。
+	///          ★ **失败容忍**：实现者失败时**只记日志**——**不抛异常、不断言、不主动降级尝试**
+	///          （「本进程已被声明过」「系统策略拒绝」均属常态，主动降级反而更差）。
+	///          ★ 框架**始终读取**当下真实 DPI、**不假定本声明成功**
+	///          （初步设计 §2.3.1「读取而非假定」）。
+	/// @note ★ 为何走应用级接缝、而**不在** `Application` 里直接调 Win32 API：
+	///       核心不变量「**每个 Win32 API 唯一归属**」+「应用级接缝 = `PlatformApplication → Application`」。
+	virtual void DeclareDpiAwareness() = 0;
+
 	/// @brief 注册托盘事件上行通道（D3——复刻 SetDeferredCleanup 的注入模式）
 	/// @param sink 事件接收器（**非拥有**；调用时 Application 必然存活——O-1 契约 A）
 	/// @details 与 SetDeferredCleanup 同款：基类持 std::function，实现者负责调用。

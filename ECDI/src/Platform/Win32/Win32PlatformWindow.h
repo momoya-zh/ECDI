@@ -62,6 +62,13 @@ public:
 
 	WindowState GetWindowState() const noexcept override;
 
+	// ── Phase 20：DPI 感知（R7 / G4——查询族，与 GetClientSize 同族）──────────
+
+	/// @brief 窗口当前 DPI 缩放比（1.0 = 100%）
+	/// @return `GetDpiForWindow(m_hwnd) / 96.0f`；**查询失败 / 返回 0 ⇒ 1.0f**（恒等退化）
+	/// @details 事实来源在**本层**（平台边界）——`Window::GetDpiScale` 薄转发到此处。
+	float GetDpiScale() const noexcept override;
+
 	// ── Phase 14：窗口显示控制 / 文件拖入 ──────────────────────────
 
 	void Hide() override;
@@ -121,9 +128,6 @@ private:
 
 	/// @brief 最大化客户区校正（R4——rcWork 唯一基准，D-COMP-1：不引入补偿）
 	void AdjustMaximizedClientRect(HWND hwnd, RECT& rcClient);
-
-	/// @brief DIP → 物理像素（D-DPI-1：窗口 DPI——非鼠标所在显示器）
-	static int DipToPixels(int dip, HWND hwnd);
 
 	/// @brief DWM 增强（R6——系统阴影 + Win11 圆角；失败容忍，仅日志不中断）
 	void ApplyDwmEnhancements(HWND hwnd);

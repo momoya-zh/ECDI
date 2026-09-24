@@ -1,4 +1,5 @@
 ﻿#include "Platform/Win32/WindowMessageHandler.h"
+#include "Platform/Win32/DpiConversion.h"   // Phase 20：物理像素 → DIP（坐标翻译的唯一换算来源）
 
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
@@ -103,9 +104,11 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 
 	case WM_SIZE: {
 		// 窗口大小变化 → 翻译为 WindowResizedEvent
-		const int width = LOWORD(lParam);
+		// Phase 20：lParam 是**客户区物理像素** ⇒ 折成 DIP（框架内部单位）。
+		// ⚠️ 与 `Win32PlatformWindow` 的 `OnResized` 是**同一条 lParam 的两条去向**，两处都要换算。
+		const int width = PixelsToDip(LOWORD(lParam), m_dpi);
 
-		const int height = HIWORD(lParam);
+		const int height = PixelsToDip(HIWORD(lParam), m_dpi);
 
 		WindowResizedEvent event(
 			window,
@@ -123,8 +126,10 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 
 	case WM_MOUSEMOVE: {
 
-		int x = GET_X_LPARAM(lParam);
-		int y = GET_Y_LPARAM(lParam);
+		// Phase 20：客户区坐标是**物理像素** ⇒ 折成 DIP
+		// （★ 鼠标在窗口外侧时坐标**为负**——走 C10 的对称舍入）
+		int x = PixelsToDip(GET_X_LPARAM(lParam), m_dpi);
+		int y = PixelsToDip(GET_Y_LPARAM(lParam), m_dpi);
 
 		MouseMoveEvent event(
 			window,
@@ -145,10 +150,11 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 	case WM_MBUTTONDOWN:
 	case WM_XBUTTONDOWN: {
 
+		// Phase 20：坐标是**客户区物理像素** ⇒ 折成 DIP（本组「按下 / 双击 / 抬起」三处同款）
 		MouseButtonDownEvent event(
 			window,
-			GET_X_LPARAM(lParam),
-			GET_Y_LPARAM(lParam),
+			PixelsToDip(GET_X_LPARAM(lParam), m_dpi),
+			PixelsToDip(GET_Y_LPARAM(lParam), m_dpi),
 			TranslateMouseButton(msg, wParam),   // 本次是哪个键（HIWORD——仅 X 键用）
 			false,                               // isDoubleClick（双击分支传 true）
 			TranslateMouseButtons(wParam),       // 此刻按下的键（LOWORD 的 MK_*）
@@ -166,8 +172,8 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 
 		MouseButtonDownEvent event(
 			window,
-			GET_X_LPARAM(lParam),
-			GET_Y_LPARAM(lParam),
+			PixelsToDip(GET_X_LPARAM(lParam), m_dpi),
+			PixelsToDip(GET_Y_LPARAM(lParam), m_dpi),
 			MouseButton::Left,                // 本次是哪个键（双击恒为左键）
 			true,                             // isDoubleClick——平台层事实
 			TranslateMouseButtons(wParam),    // 此刻按下的键（LOWORD 的 MK_*）
@@ -187,8 +193,8 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 
 		MouseButtonUpEvent event(
 			window,
-			GET_X_LPARAM(lParam),
-			GET_Y_LPARAM(lParam),
+			PixelsToDip(GET_X_LPARAM(lParam), m_dpi),
+			PixelsToDip(GET_Y_LPARAM(lParam), m_dpi),
 			TranslateMouseButton(msg, wParam),   // 本次是哪个键（HIWORD——仅 X 键用）
 			TranslateMouseButtons(wParam),       // 此刻按下的键（LOWORD 的 MK_*）
 			TranslateMouseModifiers(wParam)      // 此刻的修饰键（LOWORD 的 MK_SHIFT/CONTROL）
@@ -208,6 +214,10 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		point.y = GET_Y_LPARAM(lParam);
 
 		ScreenToClient(hwnd, &point);
+
+		// Phase 20：`ScreenToClient` 之后才是**客户区物理像素** ⇒ 折成 DIP（就地替换）
+		point.x = PixelsToDip(point.x, m_dpi);
+		point.y = PixelsToDip(point.y, m_dpi);
 
 		const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
 

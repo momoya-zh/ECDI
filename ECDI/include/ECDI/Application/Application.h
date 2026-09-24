@@ -43,6 +43,13 @@ class Application : public EventRouter{
 
 public :
 
+	/// @brief 构造（★ Phase 20：**进程 DPI 感知在本构造期声明**）
+	/// @details 构造期调用 `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`——
+	///          **早于任何窗口创建**（窗口只在 `Create` 内建），这保证框架声明
+	///          「公共 API 语义恒为 DIP」的既有契约（Phase 13 立 · Phase 20 兑现）成立。
+	///          **失败容忍**：仅记 `Log(Warning)` 并继续（「已被声明过」/「系统策略拒绝」
+	///          均属常态）——**不抛异常、不断言**。★ 框架**始终读取**当下真实 DPI，
+	///          **不假定 V2 已生效**（详见 Phase 20 初步设计 §2.3.1「读取而非假定」）。
 	Application();
 
 	/// @brief 显式析构（7.1.5：unique_ptr\<PlatformApplication\> 不完整类型成员——

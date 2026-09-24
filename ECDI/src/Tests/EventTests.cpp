@@ -507,6 +507,91 @@ void TestFrameworkExceptionSelfTest()
     EXPECT_TRUE(runner.GetResults()[0].failures[0].file == nullptr);
 }
 
+// ── Phase 20：DPI 注入后的**真翻译路径**（T20-7..T20-11）─────────────────────────
+// ★ 走 `FakeHost` + `Handle()`——**手工构造事件不得作为验收证据**（Phase 19 §7 纪律：
+//   手工构造只能证明"字段存得下"，不能证明"平台事实完整抵达 Event 层"）。
+// ★ `SetDpi` 的**默认值是 96** ⇒ 既有全部用例（T1..T4 等）行为**逐位不变**（G5）。
+
+// T20-7：dpi == 96 ⇒ 事件坐标**恒等**（G5 在翻译路径上的锚，与既有 T4 同型）
+void TestDpiMoveIdentity()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, 0, MAKELPARAM(42, 57));
+
+    EXPECT_EQ(host.received.size(), 1);
+    EXPECT_EQ(host.received[0].type, EventType::MouseMove);
+    EXPECT_EQ(host.received[0].x, 42);
+    EXPECT_EQ(host.received[0].y, 57);
+}
+
+// T20-8：dpi == 144 ⇒ 物理坐标折成 DIP（120,90 → 80,60）
+void TestDpiMoveScaled()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+    handler.SetDpi(144);
+
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, 0, MAKELPARAM(120, 90));
+
+    EXPECT_EQ(host.received.size(), 1);
+    EXPECT_EQ(host.received[0].x, 80);
+    EXPECT_EQ(host.received[0].y, 60);
+}
+
+// T20-9：dpi == 144 ⇒ **尺寸事件**同样折成 DIP（1200,900 → 800,600）
+// ★ 与 `Win32PlatformWindow::OnResized` 是同一 lParam 的两条去向——本用例覆盖翻译器那条
+void TestDpiResizeScaled()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+    handler.SetDpi(144);
+
+    handler.Handle(nullptr, nullptr, WM_SIZE, 0, MAKELPARAM(1200, 900));
+
+    EXPECT_EQ(host.received.size(), 1);
+    EXPECT_EQ(host.received[0].type, EventType::WindowResized);
+    EXPECT_EQ(host.received[0].width, 800);
+    EXPECT_EQ(host.received[0].height, 600);
+}
+
+// T20-10：滚轮——换算只碰**坐标**，delta 与状态位不受影响
+// ⚠️ **不断言坐标**：`hwnd == nullptr` ⇒ `ScreenToClient` 不生效（Phase 19 §7 已记）
+void TestDpiWheelUnaffected()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+    handler.SetDpi(144);
+
+    handler.Handle(nullptr, nullptr, WM_MOUSEWHEEL,
+                   MAKEWPARAM(MK_CONTROL, WHEEL_DELTA), MAKELPARAM(120, 90));
+
+    EXPECT_EQ(host.received.size(), 1);
+    EXPECT_EQ(host.received[0].type, EventType::MouseWheel);
+    EXPECT_EQ(host.received[0].delta, WHEEL_DELTA);                    // HIWORD 路径未受影响
+    EXPECT_TRUE(host.received[0].modifiers == KeyModifier::Ctrl);      // 只按 Ctrl ⇒ 恰为 Ctrl
+}
+
+// T20-11：非法 DPI（0 / 负）⇒ fail-safe 按 96 ⇒ 换算恒等（不崩、不抛）
+void TestDpiInvalidFallback()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    handler.SetDpi(0);   // 非法值：实现内部钳为 96
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, 0, MAKELPARAM(42, 57));
+    EXPECT_EQ(host.received.size(), 1);
+    EXPECT_EQ(host.received[0].x, 42);
+    EXPECT_EQ(host.received[0].y, 57);
+
+    handler.SetDpi(-7);   // 负数同样钳为 96
+    handler.Handle(nullptr, nullptr, WM_MOUSEMOVE, 0, MAKELPARAM(11, 13));
+    EXPECT_EQ(host.received.size(), 2);
+    EXPECT_EQ(host.received[1].x, 11);
+    EXPECT_EQ(host.received[1].y, 13);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterEventTests()
@@ -523,6 +608,13 @@ void ECDI::Test::RegisterEventTests()
     GetTestRegistry().Add("Event.MouseStateXButtonTrap",    &TestMouseStateXButtonTrap);
     GetTestRegistry().Add("Event.MouseStateAltBoundary",    &TestMouseStateAltBoundary);
     GetTestRegistry().Add("Event.MouseStateWheelAndUp",     &TestMouseStateWheelAndUp);
+
+    // 20：DPI 注入后的翻译路径（SetDpi 默认 96 ⇒ 既有用例行为逐位不变）
+    GetTestRegistry().Add("Event.DpiMoveIdentity",   &TestDpiMoveIdentity);      // T20-7
+    GetTestRegistry().Add("Event.DpiMoveScaled",     &TestDpiMoveScaled);        // T20-8
+    GetTestRegistry().Add("Event.DpiResizeScaled",   &TestDpiResizeScaled);      // T20-9
+    GetTestRegistry().Add("Event.DpiWheelUnaffected", &TestDpiWheelUnaffected);  // T20-10
+    GetTestRegistry().Add("Event.DpiInvalidFallback", &TestDpiInvalidFallback);  // T20-11
 }
 
 void ECDI::Test::RegisterTestFrameworkTests()

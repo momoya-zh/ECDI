@@ -28,6 +28,13 @@ namespace ECDI{
 Application::Application()
 	: m_platformApplication(std::make_unique<Win32PlatformApplication>()){
 
+	// ★ Phase 20（△22）：**进程 DPI 感知在此声明**——早于任何窗口创建（窗口只在 Create 内建）
+	//   ⇒ 框架「公共 API 语义恒为 DIP」的既有契约自此真正生效（Phase 13 立 · Phase 20 兑现）。
+	//   ★ 走**应用级接缝**（PlatformApplication）而非就地直调 Win32 API——
+	//     核心不变量「每个 Win32 API 唯一归属」。
+	//   ★ 失败容忍（契约 C6）：平台层只记日志；框架始终读真实 DPI、不假定本声明成功。
+	m_platformApplication->DeclareDpiAwareness();
+
 	// 7.1.5：延迟清理逻辑注册给平台循环（时机平台控制——每条消息后 PerformDeferredCleanup）
 	m_platformApplication->SetDeferredCleanup([this]{ ProcessDeferredDestroy(); });
 

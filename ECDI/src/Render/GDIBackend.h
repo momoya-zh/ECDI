@@ -16,6 +16,7 @@
 
 #include<map>
 #include<string>
+#include<tuple>
 #include<vector>
 
 namespace ECDI {
@@ -58,7 +59,7 @@ public:
 private:
 	void EnsureBackBuffer();               ///< 决策 15/19/26/38：懒创建 + 尺寸自检 + 先建后替
 	void ReleaseBackBuffer();              ///< 决策 20/31：SelectObject(old)→DeleteObject→DeleteDC
-	HFONT GetOrCreateFont(const Font& font);   ///< D1+D3：缓存取/建 HFONT（键 = size+family；DrawText 渲染用）
+	HFONT GetOrCreateFont(const Font& font);   ///< D1+D3+Phase20：缓存取/建 HFONT（键 = size+family+**dpi**；按**窗口 DPI** 把 DIP 字号换算为**物理** lfHeight）
 	static COLORREF ToColorRef(const Color& color);   ///< 决策 21/23：ToByte Clamp（DrawRect/DrawText 共用）
 
 	HWND m_hwnd = nullptr;
@@ -73,7 +74,10 @@ private:
 
 	std::vector<int> m_clipStack;          ///< Phase 8 §8.5：SaveDC 返回值栈（Push 时入、Pop 时出）
 
-	std::map<std::pair<float, std::string>, HFONT> m_fontCache;   ///< D1：Font→HFONT 缓存（渲染 DrawText 用；测量缓存归 GDITextMeasurer）
+	// ★ Phase 20（△20）：缓存键**含 DPI** ⇒ 跨屏后旧 DPI 的 HFONT 自然不命中
+	//   （需求 D3 的"清字体缓存"由**键隔离**达成——零新增 API，且比显式清理更强：
+	//    旧项仍在，只是永不命中）。键 = (size, family, dpi)。
+	std::map<std::tuple<float, std::string, int>, HFONT> m_fontCache;   ///< D1+Phase20：Font→HFONT 缓存（键含 DPI；测量缓存归 GDITextMeasurer）
 
 	// ── Phase 8.6：圆角覆盖度抗锯齿 ─────────────────────────────────
 

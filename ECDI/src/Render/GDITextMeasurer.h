@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+#include <tuple>
 
 namespace ECDI{
 
@@ -27,9 +28,13 @@ public:
 	float LineHeight(const Font& font) override;
 
 private:
-	HFONT GetOrCreateFont(const Font& font);   ///< 与 GDIBackend 同逻辑：缓存取/建 HFONT（键 = size+family）
+	/// @brief 缓存取/建 HFONT（与 GDIBackend 同逻辑；键 = size+family+**dpi**）
+	/// @param dpi ★ **测量基准 DPI**（= 调用点传入的测量 DC 的 `LOGPIXELSX`）
+	HFONT GetOrCreateFont(const Font& font, int dpi);
 
-	std::map<std::pair<float, std::string>, HFONT> m_fontCache;   ///< Font→HFONT 缓存（键必须完整覆盖 Font 语义字段）
+	/// ★ Phase 20（△21）：缓存键**含 DPI**——与 `GDIBackend` 同理（键隔离）。
+	/// 键 = (size, family, **测量基准 dpi**)。
+	std::map<std::tuple<float, std::string, int>, HFONT> m_fontCache;   ///< Font→HFONT 缓存（键含 DPI——必须完整覆盖 Font 语义字段 + 换算基准）
 };
 
 }

@@ -17,11 +17,16 @@ GDITextMeasurer::~GDITextMeasurer()
 	m_fontCache.clear();
 }
 
-HFONT GDITextMeasurer::GetOrCreateFont(const Font& font)
+HFONT GDITextMeasurer::GetOrCreateFont(const Font& font, int dpi)
 {
-	// D1：缓存键 = size + family（必须完整覆盖 Font 语义字段——未来加字段同步扩展键；
-	// 与 GDIBackend::GetOrCreateFont 同逻辑——拆类后各持一份缓存，技术债已记）
-	const auto key = std::make_pair(font.size, font.family);
+	// ★ Phase 20（△21）：与 GDIBackend 同逻辑，但**基准 DPI 不同**——本类"纯测量零 hwnd"，
+	//   基准 = **调用点传入的测量 DC 的 `LOGPIXELSX`**（屏幕 DC）。
+	//   测量链路"自己进、自己出"用同一基准 ⇒ 返回值对基准 DPI **近似不敏感**（初设 §2.2.4）；
+	//   与渲染侧（窗口 DC 基准）的差异是**已记的近似**（详设 O1）。
+	// D1：缓存键 = size + family + **dpi**（键隔离——与 GDIBackend 同理）
+	const int effectiveDpi = (dpi > 0) ? dpi : 96;
+
+	const auto key = std::make_tuple(font.size, font.family, effectiveDpi);
 	auto it = m_fontCache.find(key);
 	if (it != m_fontCache.end())
 	{
@@ -30,7 +35,8 @@ HFONT GDITextMeasurer::GetOrCreateFont(const Font& font)
 
 	// D3：CreateFontIndirectW + LOGFONTW（零初始化）
 	LOGFONTW lf{};
-	lf.lfHeight = -static_cast<LONG>(std::lround(font.size));   // 负值 = 字符高度；lround 非截断
+	// ★ Phase 20：DIP → 物理像素（float 口径）——使本地 HFONT 与渲染侧同尺度
+	lf.lfHeight = -static_cast<LONG>(std::lround(font.size * effectiveDpi / 96.0));
 	lf.lfCharSet = DEFAULT_CHARSET;                             // 关键：中文/Unicode 正常
 	lf.lfWeight = FW_NORMAL;
 
@@ -65,7 +71,11 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 		return result;
 	}
 
-	HFONT hfont = GetOrCreateFont(font);
+	// ★ Phase 20（△21）：**测量基准 DPI = 本测量 DC 的 `LOGPIXELSX`**
+	//   （契约 C7：`GetDeviceCaps` 在全库**仅此一处**，用途即"测量基准"）。
+	const int dpi = GetDeviceCaps(measureDC, LOGPIXELSX);
+
+	HFONT hfont = GetOrCreateFont(font, dpi);
 	if (hfont)
 	{
 		// D2 补充 3：SelectObject 后恢复原字体（GDI 纪律）
@@ -76,8 +86,12 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 		if (!wideText.empty() && GetTextExtentPoint32W(measureDC, wideText.c_str(),
 		                                               static_cast<int>(wideText.size()), &extent))
 		{
-			result.width = static_cast<float>(extent.cx);
-			result.height = static_cast<float>(extent.cy);
+			// ★ Phase 20：物理像素 → **DIP**（`TextMeasurer` 的接口语义）。
+			//   保留 **float**——测量链路口径（详设 §3.5：**不得**与 `PixelsToDip` 的整数口径合并）。
+			const float toDip = 96.0f / static_cast<float>((dpi > 0) ? dpi : 96);
+
+			result.width = static_cast<float>(extent.cx) * toDip;
+			result.height = static_cast<float>(extent.cy) * toDip;
 		}
 
 		SelectObject(measureDC, oldFont);
@@ -90,7 +104,7 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 float GDITextMeasurer::LineHeight(const Font& font)
 {
 	// D2：同 MeasureText 的帧无关测量模式；GetTextMetrics 精确行高（P7）
-	float height = font.size;   // 兜底：字号
+	float height = font.size;   // 兜底：字号（**已是 DIP**——与返回值单位一致）
 
 	HDC measureDC = GetDC(nullptr);
 	if (!measureDC)
@@ -98,7 +112,10 @@ float GDITextMeasurer::LineHeight(const Font& font)
 		return height;
 	}
 
-	HFONT hfont = GetOrCreateFont(font);
+	// ★ Phase 20（△21）：与 MeasureText 同一基准（本测量 DC 的 LOGPIXELSX）
+	const int dpi = GetDeviceCaps(measureDC, LOGPIXELSX);
+
+	HFONT hfont = GetOrCreateFont(font, dpi);
 	if (hfont)
 	{
 		HGDIOBJ oldFont = SelectObject(measureDC, hfont);
@@ -106,7 +123,9 @@ float GDITextMeasurer::LineHeight(const Font& font)
 		TEXTMETRICW metrics{};
 		if (GetTextMetricsW(measureDC, &metrics))
 		{
-			height = static_cast<float>(metrics.tmHeight);
+			// ★ Phase 20：物理像素 → DIP（保留 float——测量链路口径）
+			height = static_cast<float>(metrics.tmHeight)
+				* (96.0f / static_cast<float>((dpi > 0) ? dpi : 96));
 		}
 
 		SelectObject(measureDC, oldFont);

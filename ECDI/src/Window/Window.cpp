@@ -177,6 +177,20 @@ PlatformWindow& Window::GetPlatformWindow() noexcept{
 
 }
 
+float Window::GetDpiScale() const noexcept{
+
+	// Phase 20 R7/G4：薄转发到平台层（D-SEAM-1 第 ② 步——**应用层唯一入口**；
+	// 契约与事实来源都在平台层，与 Invalidate / GetWindowState 同转发风格）。
+	if (!m_platformWindow){
+
+		return 1.0f;   // 平台窗口未就绪：恒等退化（与 G5 一致——不返回未定义值）
+
+	}
+
+	return m_platformWindow->GetDpiScale();
+
+}
+
 // ── Phase 12 WindowChrome（配置期四件套 + 运行期三方法）──────────────
 // 全部为纯转发——契约判据（m_shown / m_chromeConfigured）在平台层，
 // Window 不重复实现（单一真相源；与既有 Invalidate 转发同风格）。

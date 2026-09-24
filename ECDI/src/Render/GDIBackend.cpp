@@ -758,8 +758,18 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 
 HFONT GDIBackend::GetOrCreateFont(const Font& font)
 {
-	// D1：缓存键 = size + family（必须完整覆盖 Font 语义字段——未来加字段同步扩展键）
-	const auto key = std::make_pair(font.size, font.family);
+	// ★ Phase 20（△20）：`Font::size` 是**公共 API 的 DIP**，而 `lfHeight` 要的是**物理像素**
+	//   ⇒ 按**窗口 DPI** 换算，并把 DPI 纳入缓存键（跨屏后旧 DPI 的 HFONT 自然不命中）。
+	// ⚠️ 此处**不调平台层的 `DipToPixels`**——契约 C2（换算函数只应出现在 `src/Platform/Win32/`）
+	//    与分层纪律（`src/Render/` 不得依赖 `src/Platform/Win32/`）。**后端自行做 DIP → 物理**
+	//    正是「后端内部 = 物理」这一层的职责。因 `Font::size` 是 float，本链路沿用
+	//    **float 口径**（与测量链路同族——详设 §3.5：文本链路口径 ≠ 几何链路口径）。
+	const int dpi = GetDpiForWindow(m_hwnd);   // 0 / 失败 ⇒ 按 96（fail-safe，与 DpiConversion 一致）
+
+	const int effectiveDpi = (dpi > 0) ? dpi : 96;
+
+	// D1：缓存键 = size + family + **dpi**（键隔离——见头文件成员注释）
+	const auto key = std::make_tuple(font.size, font.family, effectiveDpi);
 	auto it = m_fontCache.find(key);
 	if (it != m_fontCache.end())
 	{
@@ -768,7 +778,8 @@ HFONT GDIBackend::GetOrCreateFont(const Font& font)
 
 	// D3：CreateFontIndirectW + LOGFONTW（零初始化）
 	LOGFONTW lf{};
-	lf.lfHeight = -static_cast<LONG>(std::lround(font.size));   // 负值 = 字符高度；lround 非截断
+	// ★ Phase 20：DIP → 物理像素（float 口径）+ lround 取整（lfHeight 是 LONG）
+	lf.lfHeight = -static_cast<LONG>(std::lround(font.size * effectiveDpi / 96.0));
 	lf.lfCharSet = DEFAULT_CHARSET;                             // 关键：中文/Unicode 正常
 	lf.lfWeight = FW_NORMAL;
 
