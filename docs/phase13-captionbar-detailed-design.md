@@ -792,7 +792,7 @@ CaptionBar::OnPaint  → Window::GetWindowState()  → m_platformWindow->GetWind
 | L2 | **CaptionBar 没有公开的标题样式入口**（`m_title` 为 private，消费者拿不到该 Label）：O2 不提供样式 API + D5 不做主题集成 ⇒ 标题前景色由构造注入常量（P3） | 二次用例出现时优先开放（`SetTitleStyle` 或 `CaptionBarStyle` 入 Theme） |
 | L3 | 点击标题栏按钮（`CanFocus()==false`）会**清空焦点控件**（`Application::OnMouseButtonDown` 既有语义） | 可接受；拖拽路径不受影响（`HTCAPTION` 不产生客户区鼠标消息） |
 | L5 | 标题栏底色 / glyph 色为 v0.1 实现内常量（不支持主题切换） | 同 L2 |
-| L6 | **坐标系局限（实施期发现）**：`WM_NCHITTEST` 坐标为**物理像素**，而 widget 几何为**逻辑像素（DIP）**——`DipToPixels` 目前只作用于 `captionHeight` / `resizeInset`，故 **DPI ≠ 100% 时命中委托的入参会与 widget 几何错位**。根因是框架当前**无 DPI 缩放**（既有记账项，非本阶段引入） | 与「DPI 感知」技术债同源；做 DPI 缩放时一并闭合 |
+| L6 | **坐标系局限（实施期发现）**：`WM_NCHITTEST` 坐标为**物理像素**，而 widget 几何为**逻辑像素（DIP）**——`DipToPixels` 目前只作用于 `captionHeight` / `resizeInset`，故 **DPI ≠ 100% 时命中委托的入参会与 widget 几何错位**。根因是框架当前**无 DPI 缩放**（既有记账项，非本阶段引入） | 与「DPI 感知」技术债同源；做 DPI 缩放时一并闭合 ⇒ ★ **✅ 已闭合（2026-09-24）**：由 **Phase 20**（感知声明 + 平台边界 DIP 贯通；`WM_NCHITTEST` 现按 **Q5 定案 A** 把入参折成 DIP 再比对）+ **Phase 20.1**（渲染层折算）关闭，详见 Phase 20 详设 **§14.5** |
 
 > **关于 `minimized` 态（评审 §三 追问——原 L4 已移除）**：`ToggleMaximizeRestore()` 只在当前状态为 `maximized` 时调 `Restore()`，否则**一律**调 `Maximize()`。⚠️ `minimized` **不是 CaptionBar 的可达交互路径**——窗口最小化后本控件随之不可见、不可点，故该分支只体现**内部状态转换函数的完备性**，不是 UI 语义；本阶段**不为 `minimized` 加特判**，具体恢复行为由平台 / 系统决定。
 
@@ -1048,7 +1048,7 @@ CaptionBar::OnPaint  → Window::GetWindowState()  → m_platformWindow->GetWind
   - **D3（计数）**：测试用例 **183 → 188**、测试文件 17 → 18（实测 `GetTestRegistry().Add(` 求和 = 188，与预期完全一致）。
   - **D4（补 include）**：`AnimationTests.cpp` / `ProgressBarTests.cpp` 各补 `#include "ECDI/Window/WindowState.h"`（显式依赖；虽可经 `PlatformWindow.h` 传递获得，但显式声明更稳——与 `WindowChromeTests.cpp` 同款写法）。
   - **D5（探针调整）**：T13-1 探针 ⑦ 由详设的 `(300, 40)` 改为 `(300, kWinH/2)`。**原因**：`y = 40` 与 caption 的物理像素边界（`DipToPixels(32)`）耦合，DPI > 125% 时会落回 caption 分支使断言失效；取客户区中部与 Phase 12 T2 的 `(w/2, h/2)` 同款，DPI 稳健。
-  - **D6（L6 新局限）**：实施期发现 **`WM_NCHITTEST` 物理像素 vs widget 逻辑像素**的坐标系错位——`IsClientInteractiveAt(x, y)` 拿到的 `(x, y)` 是物理像素（与 `caption`/`inset` 同源），而 `HitTest` 用的是 widget 的 DIP 几何；两者仅在 **100% DPI** 下重合。**根因是框架当前无 DPI 缩放**（既有记账项），故**本阶段不引入换算**，列为局限 **L6**，与「DPI 感知」技术债一并闭合。
+  - **D6（L6 新局限）**：实施期发现 **`WM_NCHITTEST` 物理像素 vs widget 逻辑像素**的坐标系错位——`IsClientInteractiveAt(x, y)` 拿到的 `(x, y)` 是物理像素（与 `caption`/`inset` 同源），而 `HitTest` 用的是 widget 的 DIP 几何；两者仅在 **100% DPI** 下重合。**根因是框架当前无 DPI 缩放**（既有记账项），故**本阶段不引入换算**，列为局限 **L6**，与「DPI 感知」技术债一并闭合。★ **✅ 已闭合（2026-09-24）**：由 **Phase 20**（`WM_NCHITTEST` 按 Q5 定案 A 折成 DIP 再比对）+ **Phase 20.1**（渲染层折算）关闭；详见 Phase 20 详设 **§14.5**。
   - **验证状态**：AI 侧完成**静态自查**（A6：实现者枚举 / BOM / 见上）；**A1–A5 待用户执行**（MSVC+`_DEBUG` 全量测试、四工具链、ModelProbe 手测、Normal 模式零回归、`grep -c _DEBUG` 断言启用核验）。
 - v1.1（2026-09-14）**外部评审「通过——可进入实现」+ 2 条 P0 / 5 条 P1 已逐条处置**（新增 §11 评审响应）：
   - **P0-1（必须修）**：`TestPlatformWindow` 替身返回类型 `void` → **`WindowState`**（§2.3）——原规格的确凿编译错误；评审称「两处」，实际仅一处。
