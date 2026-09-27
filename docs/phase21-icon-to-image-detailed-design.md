@@ -1,8 +1,8 @@
-﻿# Phase 21 · 系统图标 → Image（icon to image）—— 详细设计（v1.0）
+﻿# Phase 21 · 系统图标 → Image（icon to image）—— 详细设计（v1.1）
 
-> 来源：`phase21-icon-to-image-requirements.md` **v1.1** · `phase21-icon-to-image-preliminary-design.md` **v1.2**（评审通过 + 前置探针修正）
-> 状态：**v1.0**（2026-09-26）——**待评审**（评审通过后方可实施）
-> 本稿输入：需求 **R1–R5 / D0–D5 / N1–N6 / A1–A6** ＋ 初设定案 **Q1–Q4 / C1–C8 / O1–O4 / △1–△6 / 资源清单第一版** ＋ ★★ **本稿新增实测 P9–P13**（`<32bpp + mask` 补测 · 多行方向 · `DrawIconEx` 替代方案）＋ ★ **构建级核实 B11–B13**
+> 来源：`phase21-icon-to-image-requirements.md` **v1.1** · `phase21-icon-to-image-preliminary-design.md` **v1.4**（评审通过 + 前置探针修正；★ **v1.3 = 回扫修正「引用旧判据的其它四处」** · **v1.4 = §2.9 回填 ①② 标 ✅ 收口**）
+> 状态：**v1.1**（2026-09-26）——★ **评审通过**（v1.0 外部评审的 **2 项微调已处置** + **1 项自查修正**；逐条见 **§1.5**）⇒ **允许进入实施**
+> 本稿输入：需求 **R1–R5 / D0–D5 / N1–N6 / A1–A6** ＋ 初设定案 **Q1–Q4 / C1–C8 / O1–O4 / △1–△6 / 资源清单第一版** ＋ ★★ **本稿新增实测 P9–P13**（`<32bpp + mask` 补测 · 多行方向 · `DrawIconEx` 替代方案）＋ ★ **构建级核实 B11–B14** ＋ ★ **v1.0 外部评审**
 
 ---
 
@@ -13,7 +13,7 @@
 | 项 | 内容 |
 |---|---|
 | **需求** | `docs/phase21-icon-to-image-requirements.md` **v1.1** |
-| **初设** | `docs/phase21-icon-to-image-preliminary-design.md` **v1.2**（★ 含 **§2.7 的实测修正**：不透明度判据由「位深」改为「**alpha 是否携带信息**」） |
+| **初设** | `docs/phase21-icon-to-image-preliminary-design.md` **v1.4**（★ 含 **§2.7 的实测修正**：不透明度判据由「位深」改为「**alpha 是否携带信息**」） |
 | **上游已定** | **D0** 放框架 · **D1 + 命名** `Decode::DecodeSystemIcon` · **Q1/Q4** `SHGFI_USEFILEATTRIBUTES` 一律使用 · **Q2** 不做 COM 初始化 · **Q3** 内核 / 外壳分离（两层都可无头）· **D2** 单档 `SHGFI_LARGEICON` 且**不假设尺寸** · **D5** premultiply 在框架内 |
 | **本稿新增** | ★★ **P9–P13 实测**（§1.2）＋ ★ **B11–B13 构建级核实**（§1.4） |
 
@@ -33,6 +33,7 @@
 
 1. **不透明度判据 = 「alpha 是否携带信息」**（**alpha 全 0 ⇒ 用 mask**），★ **不是「位深」**——按位深判会让**老式图标变成全透明（不可见）**（P10 / P11）。
 2. **`GetIconInfo` 归一化为 32bpp** ⇒ **内核无需处理调色板 / 低位深**，「老式图标兼容」由「一套调色板转换」压成「**一个判据 + 一个 mask 分支**」。
+   ★★ **口径收窄（v1.1，评审 R-①）**：本稿的「**老式图标兼容**」**专指** `GetIconInfo` 返回 **`hbmColor != nullptr`**、**而 color 位图不携带 alpha 信息**的形态（= P10 / P11 实测到的形态）；★ **不含**真正的 **monochrome `HICON`**（`ICONINFO::hbmColor == nullptr`——此时 `hbmMask` **自带 AND / XOR 双段**、bitmap 高度为 `2h`，是**另一种表示**）⇒ **该形态不在支持范围**（**C13**）。★★ **两个概念不得混称「老式图标」**。
 3. **排除 `DrawIconEx` 单路径方案**（对老式图标不可用）⇒ 取**手工路径**（`GetDIBits` + 自算 premultiply）——**一条路径 + 可逐字节断言**。
 4. **多行方向**（P9）⇒ `biHeight = -h`（top-down 请求）**正确**。
 
@@ -57,6 +58,18 @@
 | **B13** | **登记机制**：新测试文件 ⇒ `RunAllTests.h` 声明（现有 **25** 条）+ `RunAllTests.cpp` 调用（现有 **23** 条）**各 +1** | `RunAllTests.h:26` · `RunAllTests.cpp:24`（`RegisterDpiTests` 为最后一次插入的先例） | §3.4 |
 | **B14** | ★ **既有像素合成口径 = `(c * a + 127) / 255`** ⇒ **O2 的定案有既有先例支撑** | `src/Render/CoverageRaster.cpp:41-43` | §2.1 的舍入规则 |
 
+### 1.5 ★ v1.0 外部评审处置（2026-09-26）
+
+> 评审结论：**总体通过、允许进入实施**，要求实施前处置 **2 个技术点**（原表 🟡 × 2）。★ 本稿**逐条处置并升 v1.1**；★ 另附 **1 条自查发现**（v1.0 自带、评审未提）。
+
+| # | 评审意见 | 严重度 | 处置 | 落点 |
+|---|---|---|---|---|
+| **R-①** | ★ **真 monochrome `HICON`（`ICONINFO::hbmColor == nullptr`）未被覆盖**，而「老式图标兼容」表述偏宽 ⇒ 建议**明确「不在本阶段覆盖」**（评审**倾向方案 A：不扩范围**） | 🟡 | ✅ **采纳方案 A，并加严（不只是收窄措辞）**——① **定义收窄**（§1.2）· ② **该分支显式可观测**（§2.1 第 3 步拆两支 + **专属日志**）· ③ **立契约 C13** · ④ **记重启条件 + 备选 O7** | §1.2 · §2.1 · §2.5-⑪ · **C13** · §6.4 · **O7** |
+| **R-②** | ★ **「不抛异常」（C3）与 `std::vector::resize()` 的分配异常未闭合**；★ 评审**未能定案**——「**单从当前文档无法证明哪一种才是 ECDI 的既有规则**」，须结合 Phase 11 实现 | 🟡 | ✅ **已由源码定案**（★ **不是新策略，是把既成口径写清**）——`WicImageDecoder.cpp:152` 的 `pixels.resize(vectorSize)` **同为裸调用、同样不捕获**；★ **全框架生产代码零 `try` / `catch`** ⇒ **既有口径 = 「本层不主动抛」**，`std::bad_alloc` **不在 `Decode` 层捕获** ⇒ 立 **C14**（**精确化 C3，零行为变化**） | **C14** · §2.1 |
+| **S-①** | ★ **自查（v1.0 自带，评审未提）**：§3.3 声明 `LogIconError(const wchar_t*, unsigned long)`（**两参**），而 §2.1-1 / §2.2-1 的调用点是**单参** ⇒ **签名与调用点不一致，实施时必卡**；★ 同族：头部写「构建级核实 **B11–B13**」而 §1.4 已含 **B14** | 🟢 | ✅ 补默认实参 `code = 0` + 立**「日志口径」**；★ 头部范围订正为 **B11–B14** | §3.3 · §2.2 |
+
+★ **评审明确认可、本稿原样保留的部分**：内核 / 外壳算法路径 · **三个局部 RAII 守卫**（★ 评审**赞成**不泛化 `UniqueWin32Handle<T>`）· `SHGFI_USEFILEATTRIBUTES` 单一路径 · **排除 `DrawIconEx` 单路径** · `DecodeSystemIcon` 归属 `Decode` 层 · **两批实施序** · **测试矩阵 T21-1..T21-9** · **§2.3 的三条 ownership 事实**。
+
 ---
 
 ## 2. 算法规格
@@ -65,11 +78,14 @@
 
 **落点**：`src/Platform/Win32/ShellImageDecoder.h`（声明，**内部头**）+ `.cpp`（定义）。**平台层内部**，公共面不见 `HICON`（**C1**）。
 
+> ★ **编号仍为 11 步**——第 3 步**内部分两支**（**C13**），**不改编号**（避免 §1.3 / §7 / 索引的引用连锁）。★ 第 8 / 9 步用的 `bi32` / `bi1` 均由 **`FillBiTopDown`** 生成（§3.3）：`bi32 = FillBiTopDown(w, h, 32)` · `bi1 = FillBiTopDown(w, h, 1)`。
+
 ```text
  1  ICONINFO ii{};  if (!GetIconInfo(icon, &ii))                  → LogIconError(L"GetIconInfo") + return {}
  2  ★ RAII ①  IconBitmaps 守卫接管 { ii.hbmColor, ii.hbmMask }，析构 DeleteObject（nullptr 安全）
- 3  BITMAP bc{};  if (ii.hbmColor == nullptr
-                   || GetObject(ii.hbmColor, sizeof(bc), &bc) != sizeof(bc))  → Log + return {}
+ 3  ★ C13 支持边界：if (ii.hbmColor == nullptr) → LogIconError(L"monochrome HICON unsupported") + return {}
+    ★ 该日志**专属**此形态（盯防 ⑪），**不复用**下一支 `GetObject` 失败的日志
+    BITMAP bc{};  if (GetObject(ii.hbmColor, sizeof(bc), &bc) != sizeof(bc))  → Log + return {}
  4  w = bc.bmWidth; h = bc.bmHeight;   if (!ValidIconSize(w, h))  → Log + return {}          // §2.4
  5  stride = w * 4;  bufferSize = stride * h
  6  Image img;  img.width = w; img.height = h; img.stride = stride; img.pixels.resize(bufferSize);
@@ -121,7 +137,7 @@ out = static_cast<std::uint8_t>((c * a + 127) / 255);   // c / a 均为 0..255 �
  4  SHFILEINFOW sfi{};
       const DWORD_PTR r = SHGetFileInfoW(wide.c_str(), attrs, &sfi, sizeof(sfi),
                                          SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
-      if (r == 0 || sfi.hIcon == nullptr)    → Log + return {}        // C3
+      if (r == 0 || sfi.hIcon == nullptr)    → LogIconError(L"SHGetFileInfoW", GetLastError()) + return {}   // C3
  5  ★ RAII ③  UniqueIcon 守卫接管 sfi.hIcon，析构 DestroyIcon
  6  return ImageFromHIcon(sfi.hIcon);
 ```
@@ -175,6 +191,7 @@ ValidIconSize(w, h):
 | **⑧** | 在公共头里写出 `HICON` | **C1 的 grep 判据**（§5） |
 | **⑨** | 忘 `src/Tests` 的登记 | 登记数与 §6.4 一致；★ **不登记 = 用例静默不跑** |
 | **⑩** | 新 `.cpp` 里用了 `std::numeric_limits` 而没处理 `min`/`max` 宏 | ★ **本设计不需要** `<limits>`（§2.4 用 64 位中间量）⇒ 若确要加，须按条 10 加 `#ifdef max` / `min` 的 undef |
+| **⑪** ★ 新增 | ★ **把 monochrome `HICON`（`hbmColor == nullptr`）与「老式图标」混为一谈**（⇒ 两支并作一个 `return {}`，**边界不可观测**） | ★ 该分支**有专属日志**（`monochrome HICON unsupported`）——**字符级判据**：**实现代码里**该串**只出现 1 处**，且**就在该分支内**（★ 本稿正文因引用而另有 1 处，**不计**）（**C13**） |
 
 ---
 
@@ -253,7 +270,7 @@ namespace {
 constexpr int kMaxIconDim = 4096;
 constexpr std::uint64_t kMaxBytes = 256ull * 1024ull * 1024ull;   // 与 WIC 同源上限（§2.4）
 
-void LogIconError(const wchar_t* step, unsigned long code);       // ★ 自带一份（O1 定案：不复用 B2 的匿名件）
+void LogIconError(const wchar_t* step, unsigned long code = 0);   // ★ 自带一份（O1 定案：不复用 B2 的匿名件）；★ code 默认 0（v1.1，评审 S-①）
 bool ValidIconSize(int w, int h);
 bool AnyAlphaNonZero(const std::uint8_t* bgra, std::size_t pixelCount);
 void PremultiplyInPlace(std::uint8_t* bgra, std::size_t pixelCount);
@@ -274,6 +291,7 @@ Image DecodeSystemIcon(const std::string& utf8Path) { /* §2.2 的 6 步 */ }
 ```
 
 ★ **O1 定案 = 不复用 `WicImageDecoder.cpp` 的日志辅助**：① 两者错误上下文不同（一个带 `HRESULT`，一个带 `GetObject` / `GetDIBits` 的返回值与 `GetLastError`）；② 抽取要**动既有文件**（扩大影响面与回归面）；③ 「第二个消费者」虽已出现，但**收益 < 成本** ⇒ 记入 **O1** 备查。
+★ **日志口径（v1.1 补，评审 S-①）**：`code == 0` ⇒ 消息 `ImageDecoder: <step> failed`；`code != 0` ⇒ `ImageDecoder: <step> failed (code=%lu)`。★★ **只在 API 明确提供错误码处传参**——`SHGetFileInfoW` 失败 ⇒ `GetLastError()`（§2.2-4 已就地写出）；★ **`GetIconInfo` / `GetDIBits` 等 GDI 函数不保证设置 last error**（其**返回值本身即诊断量**）⇒ **一律用默认 `0`，不伪造 `0x00000000`**。
 ★ **本设计不需要 `<limits>`**（§2.4 用 64 位中间量）⇒ **不触发 `min`/`max` 宏问题**（盯防 ⑩）。
 
 ### 3.4 △4 + △5 测试文件与登记
@@ -285,9 +303,9 @@ Image DecodeSystemIcon(const std::string& utf8Path) { /* §2.2 的 6 步 */ }
 
 ---
 
-## 4. 契约（C1–C12）
+## 4. 契约（C1–C14）
 
-> **C1–C8 承接初设**（原样或加严；★ 标注加严处）；**C9–C12 本稿新增**。
+> **C1–C8 承接初设**（原样或加严；★ 标注加严处）；**C9–C12 本稿新增（v1.0）**；**C13–C14 本稿新增（v1.1 —— 评审处置）**。
 
 | # | 契约 | 判据 / 依据 |
 |---|---|---|
@@ -303,6 +321,8 @@ Image DecodeSystemIcon(const std::string& utf8Path) { /* §2.2 的 6 步 */ }
 | **C10** ★ 新增 | ★ **premultiply 口径**：`out = (c * a + 127) / 255`（**与 `CoverageRaster` 同族**）；★ mask 路径下**恒等无误差**；与 WIC 路径的 ±1 差记为**已知近似** | **B14** · 初设 **O2** |
 | **C11** ★ 新增 | ★ **`GetDIBits` 请求口径**：color **恒 32bpp**、mask **1bpp**、**两者均 top-down（`biHeight = -h`）**；★ **不处理调色板 / 低位深**（P10/P11/P12） | **P10–P12** |
 | **C12** ★ 新增 | ★ **尺寸校验**：维度 ∈ `[1, 4096]` 且总字节 ≤ 256MB（**64 位中间量**）——★ **不照抄 WIC 的四域检查**（理由见 §2.4） | §2.4 |
+| **C13** ★ 新增（v1.1） | ★ **支持边界**：仅支持 **`ICONINFO::hbmColor != nullptr`** 的图标；★ **真 monochrome `HICON`（`hbmColor == nullptr`）不在本阶段范围** ⇒ 行为 = **空 `Image` + 专属 Error 日志**（**不崩 · 不泄漏 · 可观测**）——★ 定义见 **§1.2-2**，**重启条件见 O7** | **评审 R-①** · §1.2 |
+| **C14** ★ 新增（v1.1） | ★ **异常边界（C3 的精确化，零行为变化）**：「不抛异常」= **本层不主动 `throw`**；平台失败 / 校验失败 / 语义边界一律 `return {}` + `Logger::Log(Error, …)`；★★ **标准容器的分配失败（`std::bad_alloc`）不在本层捕获**——**这是 Phase 11 的既成口径**（`WicImageDecoder.cpp:152` 的 `pixels.resize()` 同样不捕获；**全框架生产代码零 `try` / `catch`**，唯一的 `try` 在 `TestFramework.cpp:75` 且属**测试运行器**） | **评审 R-②** · `WicImageDecoder.cpp:152` · `TestFramework.cpp:75` |
 
 ---
 
@@ -363,6 +383,7 @@ Image DecodeSystemIcon(const std::string& utf8Path) { /* §2.2 的 6 步 */ }
 - ★ **「一个场景一条注册」**（9 条 `GetTestRegistry().Add`）——沿既有全部测试文件的惯例。
 - ★ **`nullptr` 不设用例**（评审 §15）：公共 API 收 `const std::string&` ⇒ **语法上不可表达**；且实现里指针来自 **`c_str()`（永不为 null）** ⇒ **该分支不可达**。
 - ★ **「平台调用失败」维度（评审 §17）**：归 **C3**，但★ **在本设计下难以构造**（P1–P7：`USEFILEATTRIBUTES` 对任意**非空**路径基本都成功）⇒ **详设实施时先尝试构造**（候选：超长路径 / 含非法字符）；★ **若确不可构造，则明确记为「防御性分支、无自动化用例」——不假称已覆盖**。
+- ★★ **monochrome 形态（`hbmColor == nullptr`）不在自动化覆盖内**（**C13**）——★ 本阶段**不为其补用例**（**O7**）。★★ **一句诚实的话**：现有 **T21-4..T21-7** 的「非空」断言**已在测试机上间接证明**「shell 对**普通文件 / 目录 / 不存在（有扩展名 / 无扩展名）**给出的图标**均走 color 携带路径**」（★ 若 shell 真返回 monochrome，这 4 条**会直接失败**）——★ **但这不是「所有路径」的证明**（shell 输入空间不可穷举）⇒ **不当作 C13 的证据**。
 
 ---
 
@@ -406,9 +427,12 @@ Image DecodeSystemIcon(const std::string& utf8Path) { /* §2.2 的 6 步 */ }
 | **O4** | 内核命名 / 归属 | ✅ **定案**：`ImageFromHIcon` 放**内部头**（§3.2，沿 `DpiConversion.h` / `CoverageRaster.h` 先例） |
 | **O5** ★ | **待授权（沿用初设 §2.9）**：① `desktopnest-roadmap.md` §3/§4 的 `SHGetFileInfo` 行**改判 + 补第三问** ② 「逐文件自定义图标」限制**立新记账项** | ★ **不在本阶段偷偷改**——**动手前须授权** |
 | **O6** ★ | ★ **待实测**：**Per-Monitor V2 进程下 `SHGFI_LARGEICON` 的实际尺寸**（初设 P8：本机系统 DPI = 96 ⇒ 不可判定） | ★ **不阻塞设计**（**C5**：框架不假设尺寸）；★ 若日后发现随 DPI 变，也只是 `Image` 尺寸变 ⇒ **API 形态不受影响** |
+| **O7** ★ 新增（v1.1） | ★ **C13 边界是否补「拒绝路径」用例**（用 `CreateIconIndirect` 造 `hbmColor == nullptr` 的 monochrome HICON，断言「返回空 `Image` + 不崩」） | ★ **倾向：本阶段不补**——① 评审明确建议**不为此扩大范围**；② ★ **`CreateIconIndirect` 是否接受 `hbmColor == nullptr` 本机未实测** ⇒ 补它**须先开一支探针 P14**，**不可凭推断写期望值**。★ 若采纳：用例 **261 → 262**。★★ **重启条件**：一旦出现**非 shell 的 `HICON` 来源**（`LoadIcon` / `LoadImage` / 应用侧自造并传入），**必须先补 P14 测量该形态**，再决定是否把 C13 从「不支持」改为「支持」 |
+| **O8** ★ 新增（v1.1）· ✅ **已收口（初设 v1.3，2026-09-26）** | ★ **初设 v1.2 的两处「代码草案」仍写旧判据**（★ 本轮**为处置评审而读源码时发现**，**评审未提**）：§3.2 内部头草案的 `/// @details 32bpp ⇒ 用 alpha；<32bpp ⇒ 用 mask` · §3.3 步骤草案的 `// 3) color 32bpp ⇒ 用 alpha；否则 ⇒ …` ⇒ ★ **与它自己的 §2.7（v1.2 已修正）矛盾**，且正落在**「会被照抄」的位置**（★ 本稿 §3.2 的草案**已是正确口径**） | ★ **定案：本轮不动初设**——① 初设是**已通过**文档，改动须开 **v1.3**（连带 **4 处版本引用**：本稿来源行 · `docs/README.md` · 审计 · roadmap）；② 其**规范章节 §2.7 本身是对的**，且**实施权威已转移到本稿**（§3.2 草案正确）⇒ **不阻塞实施**。★ ✅ **2026-09-26 已授权并订正**：初设升 **v1.3** ⇒ **旧判据四处全部回扫修正**（§1.3 D4 行 · §3.2 草案 · §3.3 草案 · ★★ **§4 C8 契约**）；★★ **本项原发现范围偏窄**——只报了 §3.2 / §3.3，**漏了契约 C8**（**契约漏改最严重**）⇒ **已由 v1.3 的全面回扫补上**。★ 另修 **6 项**（悬空 `§3.4` · **setext 陷阱** · §2.5/§7 口径矛盾 · △3 引注 · §5 用例数 · §2.9 ③ 过期）· ★ **设计结论零变动** |
 
 ---
 
 ## 10. 修订记录
 
+- **v1.1**（2026-09-26）**外部评审处置 —— ★ 2 项微调 + 1 项自查**（逐条表见 **§1.5**）。① **评审结论**：「**总体通过，可以进入 Implementation**」；要求实施前处置两项（🟡 × 2）。② ★★ **R-①（真 monochrome `HICON` 未被覆盖）**：★ 评审指出「**「老式图标兼容」表述过宽**」——实测覆盖的是「**有 color bitmap、但 color 不携带 alpha**」的低位深形态，**不等价于真 monochrome** ⇒ ✅ **采纳评审倾向的方案 A（不扩范围）+ 加严四步**：**定义收窄**（§1.2-2）· **该分支显式可观测**（§2.1 第 3 步拆两支 + **专属日志**）· **立 C13** · **O7 + 重启条件**。③ ★★ **R-②（「不抛异常」与 `resize()` 未闭合）**：★ 评审**未能定案**（「须结合 Phase 11 实现」）⇒ **本稿取证定案**——`WicImageDecoder.cpp:152` 的 `pixels.resize(vectorSize)` **同为裸调用、同样不捕获**，★ **全框架生产代码零 `try` / `catch`**（唯一 `try` 在 `TestFramework.cpp:75`，属**测试运行器**）⇒ **既有口径 = 「本层不主动抛」**，`std::bad_alloc` **不在 `Decode` 层捕获** ⇒ 立 **C14**（**精确化 C3，零行为变化**）。④ ★ **自查 S-①**：`LogIconError` **声明两参、调用单参** ⇒ 补默认实参 `code = 0` + 立**日志口径**（★ **不伪造 `0x00000000`**——GDI 的 `GetIconInfo` / `GetDIBits` **不保证设置 last error**，其返回值即诊断量）；★ 头部「构建级核实 **B11–B13**」订正为 **B11–B14**。⑤ **规模与结构零变动**：内核 11 步（**编号不变**）/ 外壳 6 步 · 资源与 RAII 三栏 · 算法 · 测试矩阵 **T21-1..T21-9** · 两批实施序 · **用例 252 → 261** · **公共头 92 → 92 而公共 API +1**。⑥ **清单类计数递增**：盯防清单 **10 → 11 条** · 契约 **C1–C12 → C1–C14** · **O1–O6 → O1–O8**（新增 **O7**「C13 边界是否补用例」· **O8**「初设 v1.2 代码草案的旧判据残留」）。⑦ 头部 v1.0 → **v1.1**。
 - **v1.0**（2026-09-26）初稿。**输入**：需求 **v1.1** · 初设 **v1.2**（含 §2.7 的实测修正）＋ ★★ **本稿新增实测 P9–P13**（`<32bpp + mask` 补测 / 多行方向 / `DrawIconEx` 替代方案）+ ★ **构建级核实 B11–B14**（**`shell32` 已链** · `WideToUTF8` 可用 · 登记锚点 · **`CoverageRaster` 的 `+127` 口径先例**）。**内容**：§2 **算法规格**（内核 **11 步** / 外壳 **6 步** · ★ **资源与 RAII 三栏** · 尺寸校验口径 · **盯防清单 10 条**）· §3 **逐文件改动 △1–△5**（含头全文草案）· §4 **契约 C1–C12** · §5 影响面 · §6 **T21-1..T21-9 逐条输入与逐字节期望** · §7 **两批 + 收尾** · §8 A1–A6 落地（★ A1 的口径说明）· §9 **O1–O6**（O2/O3/O4 已定案；O5 待授权 · O6 待实测）。**待评审。**
