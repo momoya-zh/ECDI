@@ -6,6 +6,7 @@
 #undef DrawText   // 防御性 undef（规范 10）：本文件含 Windows.h——防 DrawTextW 宏污染 ECDI 头声明
 #endif
 
+#include "Platform/Win32/DpiConversion.h"               // HitTestLocal：DIP → 物理（换算唯一真相源）
 #include "Platform/Win32/Win32RenderContext.h"          // TestWindow::Handle() 取 HWND（经 GetRenderContext 三跳）
 #include "ECDI/Platform/PlatformWindow.h"              // Handle() 需 PlatformWindow 完整类型（Window.h 仅前置声明）
 #include "ECDI/Application/Application.h"
@@ -108,13 +109,22 @@ void PumpMessages(int maxCount) {
     }
 }
 
-/// @brief 窗口局部坐标 → WM_NCHITTEST 查询（同步直达 WndProc——未显示窗口同样有效）
+/// @brief 窗口局部坐标（★ **DIP**）→ WM_NCHITTEST 查询（同步直达 WndProc——未显示窗口同样有效）
+/// @details ★ 入参语义 = **DIP**，与框架契约一致（`Win32PlatformWindow.cpp:419-427`：平台侧把
+///          收到的**物理**窗口坐标 `PixelsToDip` 折成 DIP 后才与 caption / inset 比较）
+///          ⇒ 本装置必须先折成物理、再加窗口原点，最终落点才等于调用者写的那个 DIP 坐标。
+///          ⚠️ Phase 20 引入 px→DIP 折叠后，直接投**物理**坐标会被平台**再缩一次**：
+///          125% 缩放下 `33` 折成 `26 < caption 32` ⇒ T5 / T13-1 出现假失败
+///          （实为**测试前提**失效，非框架缺陷）。
+///          ★ `dpi == 96` 时 `DipToPixels` 恒等（换算护栏 G5）⇒ **与历史行为逐位相同**。
 LRESULT HitTestLocal(HWND hwnd, int x, int y) {
 
     RECT wr{};
     GetWindowRect(hwnd, &wr);
 
-    const POINT pt{ wr.left + x, wr.top + y };
+    const int dpi = GetDpiForWindow(hwnd);
+
+    const POINT pt{ wr.left + DipToPixels(x, dpi), wr.top + DipToPixels(y, dpi) };
 
     return SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(pt.x, pt.y));
 }
@@ -218,8 +228,11 @@ void TestNCHitTestNineGrid()
     RECT wr{};
     GetWindowRect(hwnd, &wr);
 
-    const int w = wr.right - wr.left;
-    const int h = wr.bottom - wr.top;
+    // ★ 全 DIP：与 HitTestLocal 的入参语义一致。⚠️ 若沿用**物理** w/h，DPI ≠ 96 时探针整体
+    //   漂移（实测 200% 下 T2 会连锁失败 6 处——`w - 4` 折成 DIP 后已越出右边界）。
+    const int dpi = GetDpiForWindow(hwnd);
+    const int w = PixelsToDip(wr.right - wr.left, dpi);
+    const int h = PixelsToDip(wr.bottom - wr.top, dpi);
 
     // 四角
     EXPECT_EQ(HitTestLocal(hwnd, 4, 4),           HTTOPLEFT);
@@ -252,18 +265,24 @@ void TestNCHitTestModeIsolation()
     TestWindow borderless(app, ChromeMode::Borderless, 4, 4);
 
     // 探测点动态生成：Normal 窗口顶部非客户区总高（不硬编码——主题/DPI 会变）
+    // ★ 三项 GetSystemMetrics 给的是**物理**度量，而 HitTestLocal 收 **DIP** ⇒ 折一次
+    //   （`dpi == 96` 时恒等，故历史行为不变）。
+    const int dpi = GetDpiForWindow(normal.Handle());
     const int sysNC = GetSystemMetrics(SM_CYCAPTION)
                     + GetSystemMetrics(SM_CYSIZEFRAME)
                     + GetSystemMetrics(SM_CXPADDEDBORDER);
-    const int yProbe = sysNC - 2;   // 确定落在 Normal 的 caption 区
+    const int yProbe = PixelsToDip(sysNC - 2, dpi);   // 确定落在 Normal 的 caption 区（物理落点不变）
 
     RECT wn{};
     GetWindowRect(normal.Handle(), &wn);
     RECT wb{};
     GetWindowRect(borderless.Handle(), &wb);
 
-    const LRESULT ra = HitTestLocal(normal.Handle(), (wn.right - wn.left) / 2, yProbe);
-    const LRESULT rb = HitTestLocal(borderless.Handle(), (wb.right - wb.left) / 2, yProbe);
+    const int xProbeN = PixelsToDip((wn.right - wn.left) / 2, dpi);
+    const int xProbeB = PixelsToDip((wb.right - wb.left) / 2, dpi);
+
+    const LRESULT ra = HitTestLocal(normal.Handle(), xProbeN, yProbe);
+    const LRESULT rb = HitTestLocal(borderless.Handle(), xProbeB, yProbe);
 
     // 断言只此一条：同一位置两模式语义不同（不校验具体 HT 值——
     // 测试目的是「Borderless 拦截生效」，而非「系统标题栏恰好多大」）
@@ -298,7 +317,7 @@ void TestMaximizedClientWithinWorkArea()
 }
 
 // ══════════════════════════════════════════════════════════════════
-// T5：单位契约（captionHeight = 逻辑坐标 DIP——当前 DPI 1:1 精确可断言）
+// T5：单位契约（captionHeight = 逻辑坐标 DIP——本用例探针坐标**同口径**，任意缩放均可断言）
 // ══════════════════════════════════════════════════════════════════
 
 void TestCaptionHeightUnit()
@@ -309,10 +328,10 @@ void TestCaptionHeightUnit()
     const HWND hwnd = win.Handle();
     RECT wr{};
     GetWindowRect(hwnd, &wr);
-    const int w = wr.right - wr.left;
+    const int w = PixelsToDip(wr.right - wr.left, GetDpiForWindow(hwnd));
 
-    EXPECT_EQ(HitTestLocal(hwnd, w / 2, 31), HTCAPTION);   // 31 < 32
-    EXPECT_EQ(HitTestLocal(hwnd, w / 2, 33), HTCLIENT);    // 33 >= 32
+    EXPECT_EQ(HitTestLocal(hwnd, w / 2, 31), HTCAPTION);   // 31 < 32（单位：DIP）
+    EXPECT_EQ(HitTestLocal(hwnd, w / 2, 33), HTCLIENT);    // 33 >= 32（单位：DIP）
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -325,6 +344,7 @@ void TestZeroBoundaryClamp()
     TestWindow zero(app, ChromeMode::Borderless, 0, 0);
     TestWindow negative(app, ChromeMode::Borderless, -5, -8);
 
+    // 探针 (400, 4) 为 DIP；caption = inset = 0 ⇒ 任意 DPI 下都不进 resize / caption 分支
     EXPECT_EQ(HitTestLocal(zero.Handle(), 400, 4),     HTCLIENT);   // 无 caption / inset 区
     EXPECT_EQ(HitTestLocal(negative.Handle(), 400, 4), HTCLIENT);   // 负值 clamp 到 0 → 同上
 }

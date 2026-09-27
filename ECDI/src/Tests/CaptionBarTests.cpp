@@ -20,6 +20,7 @@
 #include "ECDI/Window/ChromeMode.h"
 #include "ECDI/Window/Window.h"
 #include "ECDI/Window/WindowState.h"
+#include "Platform/Win32/DpiConversion.h"               // HitTestLocal：DIP → 物理（换算唯一真相源）
 #include "Platform/Win32/Win32RenderContext.h"
 #include "Render/RecordingBackend.h"
 #include "Window/CaptionButton.h"
@@ -36,6 +37,7 @@ namespace {
 // ══════════════════════════════════════════════════════════════════
 // Phase 13 CaptionBar：命中委托（D9 回归锚）/ 按钮命令 / 状态查询 / 绘制命令断言
 // 坐标常量与 CaptionBar.cpp 的布局常量同源（w=800 / 按钮宽 46 / 左距 12 / 右留白 8）
+// ★ **单位统一为 DIP** —— 与 HitTestLocal 的入参、以及事件坐标（客户区绝对）同一口径
 // ══════════════════════════════════════════════════════════════════
 
 constexpr int kWinW = 800;
@@ -122,13 +124,18 @@ struct CaptionFixture {
 
 };
 
-/// @brief 窗口局部坐标 → WM_NCHITTEST 查询（同步直达 WndProc——未显示窗口同样有效）
+/// @brief 窗口局部坐标（★ **DIP**）→ WM_NCHITTEST 查询（同步直达 WndProc——未显示窗口同样有效）
+/// @details ★ 入参语义 = **DIP** —— 与下面 `ClickAt` 的事件坐标、以及 `CaptionBar` 的布局
+///          常量**同一口径**（框架契约：`HitTest` 入参恒为 DIP）。本装置内部折成物理再加
+///          窗口原点。★ `dpi == 96` 时 `DipToPixels` 恒等 ⇒ **与历史行为逐位相同**。
 LRESULT HitTestLocal(HWND hwnd, int x, int y) {
 
     RECT wr{};
     GetWindowRect(hwnd, &wr);
 
-    const POINT pt{ wr.left + x, wr.top + y };
+    const int dpi = GetDpiForWindow(hwnd);
+
+    const POINT pt{ wr.left + DipToPixels(x, dpi), wr.top + DipToPixels(y, dpi) };
 
     return SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(pt.x, pt.y));
 
@@ -185,6 +192,15 @@ void TestHitTestDelegation()
 {
     TestApp app;
     CaptionFixture fx(app);
+
+    // ★★ 必须先 Show()：框架把「DIP → 物理」的窗口尺寸换算放在 **Show()**
+    //   （`Win32PlatformWindow.cpp:171-192`；构造期做会同步派发 `WM_SIZE` 撞上成员未就绪 = UB）。
+    //   ⇒ **未 Show 的窗口，在 DPI ≠ 96 时其「DIP 尺寸」≠ `Create` 的请求值**：
+    //     `CreateWindowExW` 收到的 `w/h` 是**物理**直传，125% 下 800 物理 = 640 DIP。
+    //   本用例的探针与 `CaptionBar` 宽度（`kWinW = 800`）**都是 DIP** ⇒ 若窗口只有 640 DIP 宽，
+    //   靠右的三个按钮（x ∈ [662, 800)）会落到窗口之外，平台按 `x >= w - inset` 判成右边界
+    //   ⇒ 全部返回 `HTRIGHT`（这正是 125% 缩放下本用例失败的真因）。
+    fx.window->Show();
 
     const HWND hwnd = fx.Handle();
 
