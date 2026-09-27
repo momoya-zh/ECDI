@@ -31,6 +31,7 @@ int ECDI::Test::RunAllTests()
     RegisterDesktopLayerTests();   // Phase 16：桌面驻留层
     RegisterWindowBackgroundTests();   // Phase 18：窗口底色
     RegisterDpiTests();   // Phase 20：DPI 换算（纯函数层——T20-1..T20-6）
+    RegisterIconDecodeTests();   // Phase 21：系统图标（T21-1..T21-9）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());
