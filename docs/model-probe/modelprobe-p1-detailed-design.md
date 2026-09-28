@@ -70,6 +70,9 @@ public:
 | Start | ① `CreatePipe`×2（SECURITY_ATTRIBUTES `bInheritHandle=TRUE`）② **`SetHandleInformation` 清父侧句柄继承**：`hStdinWrite` 与 `hStdoutRead` 的 `HANDLE_FLAG_INHERIT = 0`（**P0 硬问题**——否则子进程会意外继承父写端：父 `CloseInput()` 后子仍持写端 → **永远收不到 EOF**，`WaitForExit` 卡死）③ `CreateProcessW`（cmdline = 引号包裹的 UTF8ToWide 路径 + 逐参引号包裹（内嵌 `"` 转义为 `\"`——quoting 是 Win32 实现职责）；`CREATE_NO_WINDOW` **必设**——否则 GUI 弹控制台窗；`bInheritHandles=TRUE`）④ `STARTUPINFO{ cb, hStdInput=读端, hStdOutput=写端, hStdError=写端(合并 stderr→stdout——后端崩溃输出可排查), dwFlags=STARTF_USESTDHANDLES }` ⑤ 关闭父侧子端拷贝（pi.hThread / stdin 读端 / stdout 写端）⑥ 失败逐句柄清理 + 返回 false |
 
 > 句柄继承矩阵（GPT 评审冻结）：stdin 管道——子 Read 可继承 / 父 Write **不可继承**；stdout 管道——子 Write 可继承 / 父 Read **不可继承**。父侧两端清 `HANDLE_FLAG_INHERIT` 后，`CreateProcess(bInheritHandles=TRUE)` 只会让子进程拿到它真正需要的 2 个句柄。
+
+| 方法 | 说明 |
+|---|---|
 | WriteLine | `line + "\n"` → `WriteFile(m_hStdinWrite)`（UTF-8 原字节直写） |
 | ReadAvailable | `PeekNamedPipe` 查可用字节 → 0 返回空串；否则 `ReadFile` 读全量 → std::string |
 | CloseInput | `CloseHandle(m_hStdinWrite)` + 置 nullptr（幂等） |
@@ -379,7 +382,7 @@ ECDI::Application::OnWindowCloseRequested(event);            // ④ 转发基类
 | 3 | **应用图标** | `app.ico`（`IDI_APP = 102`，黑色圆角矩形 + 白色 "API"，4 尺寸 16/32/48/256）经 `LoadImageW` 在 `Win32WindowClass` 注册时加载 |
 | 4 | **TextBox `SetSingleLine`** | BaseURL / Key 两个输入框改为单行（§3.3 形态规格之外的追加能力） |
 | 5 | **窗口尺寸固定** | 680×780 单窗口；页面 640×710 @ (20,30)，`#0f1115` 垫层防白底 |
-| 6 | **Release 静态运行时** | Release|x64 配 `/MT`（单文件分发） |
+| 6 | **Release 静态运行时** | Release\|x64 配 `/MT`（单文件分发） |
 | 7 | **二次查询不清空列表（缺陷修复）** | `HandleLine` 的 `OK FETCH` 分支补 `m_models.clear() + RebuildRows() + UpdateStat()`——原实现只追加不清空，第二轮结果会叠在上一轮之后。修复于 2026-09-11，含回归用例 `ModelProbePage.FetchReplacesPrevious` |
 
 ## 11. 修订记录
