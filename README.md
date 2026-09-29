@@ -18,7 +18,7 @@ ECDI is a **teaching-first** framework: it exists so that anyone can learn how a
 
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 147 design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 148 design documents in Chinese).
 
 ## How this was built
 
@@ -145,7 +145,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ECDI/       framework sources (include/ = 92 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       design documents (147 files; requirements → preliminary → detailed, per phase)
+docs/       design documents (148 files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
@@ -172,7 +172,7 @@ docs/       design documents (147 files; requirements → preliminary → detail
 | **20.1** | **Render-layer DPI scaling**: the missing second conversion edge. Phase 20 declared that `Renderer` / `RenderingBackend` only ever see physical pixels, but confined conversion to the platform boundary -- and the renderer is not on that boundary, so geometry kept arriving in DIP and was painted as pixels (content shrank to ~2/3 at 150%). Adds the conversion at the `Renderer` entry, keeping the command buffer in DIP. | ✅ Requirements **v1.3 approved** · ✅ preliminary design **v1.2 approved** · ✅ detailed design **v1.3 approved** (2026-09-24); **implemented and accepted** -- the renderer now scales geometry at its entry, so Phase 20's A5/A6 acceptance is satisfied and the gap (recorded as `RG-1` in Phase 20 detailed design §14.5) is closed. |
 | **21** | **System icons to Image**: the third image source. WIC already decodes `.ico` *files* through `DecodeFile`, but a runtime `HICON` -- the icon the shell hands you for a path -- had no way to become pixels (`GetIconInfo` / `GetDIBits` / `SHGetFileInfo` had zero hits). Adds that path, producing the existing `Image` (premultiplied BGRA), so `Decode` gains its third source alongside memory and file. Testability was the open question; a probe settled it -- the shell lookup runs headless with no COM, so the whole path can be tested. | ✅ Requirements **v1.1 approved** · ✅ preliminary design **v1.4 approved** · ✅ detailed design **v1.2 approved and implemented** (2026-09-27). Test count 252 -> 261. Clears G-2, which the desktop roadmap lists as its only blocker. |
 | **22** | **DIP size contract on `Create`**: the contract states the window's total size in DIP, but the conversion ran in `Show`, so between `Create` and `Show` the size is not what was asked for -- at 125 percent, `Create(800, 600)` lands on 640x480 DIP. A Phase 20 crash fix had moved the conversion there, because resizing during construction dispatches `WM_SIZE` into members that are not built yet. A probe quantified the gap and showed the repair works, so the conversion becomes a named platform seam, `ApplyStartupSize`, called at the end of `Create` and again in `Show` as a cross-monitor re-check. | ✅ Requirements **v1.1 approved** · ✅ preliminary design **v1.1 approved** · ✅ detailed design **v1.3 approved and implemented** (2026-09-29). A single batch across 9 files (4 production, 5 test). Test count 261 -> 264. All four toolchains report 264/264 green at DPI 120 with assertions on -- Clang, ClangCL and MinGW locally, MSVC on the user's side. Closes audit item D-7, queue entry 7. |
-| **23** | **Worker-to-UI dispatch**: provide an application-level asynchronous handoff from worker threads to the UI message thread without exposing HWND or turning the framework into a thread pool. | 🚧 Requirements **v1.1** (review feedback absorbed, pending re-review) · preliminary design **v1.2** (second review absorbed: the P0 dispatch race is fixed by moving the wake call inside the critical section with in-place rollback, and the owner-thread precondition is now stated as new; pending re-review) (2026-09-29); implementation pending review. |
+| **23** | **Worker-to-UI dispatch**: provide an application-level asynchronous handoff from worker threads to the UI message thread without exposing HWND or turning the framework into a thread pool. | 🚧 Requirements **v1.1** (review feedback absorbed, pending re-review) · preliminary design **v1.2** (second review absorbed: the P0 dispatch race is fixed by moving the wake call inside the critical section with in-place rollback, and the owner-thread precondition is now stated as new; pending re-review) · detailed design **v1.0 pending review** -- the implementation spec: file-by-file changes 1-8 (8 files = 5 production + 3 test, 1 new), test count 264 -> 275 (T23-1..T23-11), 10 machine-checkable guard items, limitations L1-L6. (2026-09-29) |
 
 ## License
 
