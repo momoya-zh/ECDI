@@ -1,7 +1,7 @@
-﻿# Phase 23 · 工作线程 → UI 线程投递（worker-to-UI dispatch）——初步设计（v1.0）
+﻿# Phase 23 · 工作线程 → UI 线程投递（worker-to-UI dispatch）——初步设计（v1.1）
 
 > 来源：`docs/phase23-worker-to-ui-dispatch-requirements.md` **v1.1**（外部评审 v1.0 已通过；v1.1 已吸收评审补强，待复评）· 审计 `framework-defect-audit.md` **D-4** · `roadmap-deferred.md` §7.9 顺位 ④。
-> 状态：**v1.0 待评审**（2026-09-29）——本稿是接口 / 数据流 / 生命周期的初步设计，不修改源码，不进入详细设计级的逐行实现规格。
+> 状态：**v1.1 待复评**（2026-09-29）——v1.1 已吸收设计评审的 5 条补强（见 §1.4：判别字段完备性 · 用例锚点 · A→C→T 闭合 · 退出漏斗证据 · 返回值三义）；本稿是接口 / 数据流 / 生命周期的初步设计，不修改源码，不进入详细设计级的逐行实现规格。
 > 本稿的核心结论：**新增一个最小的 `Application::PostToUi(std::function<void()>)` 公共入口；平台接缝由 `PlatformApplication` 承担；Win32 实现用 UI 线程消息队列唤醒，队列和唤醒消息均留在平台实现内部；callback 永不 inline 执行。**
 > 设计输入复核：当前 `Win32PlatformApplication::Run()` 的消息泵为 `GetMessageW` → `TranslateMessage` → `DispatchMessageW`（`src/Platform/Win32/Win32PlatformApplication.cpp:26-46`）；`PlatformApplication` 已有 `std::function` sink 与应用级能力扩展惯例（`include/ECDI/Platform/PlatformApplication.h:19-28,30-34,70-100`）；生产代码现有 `PostMessageW` 仅服务托盘菜单 / Desktop 跟随两个具体功能。
 
@@ -45,6 +45,18 @@
 - 若未来第二个平台出现，`PlatformApplication::PostToUi` 仍是同一语义接缝，但它可以选择自己的唤醒机制与队列存储。
 
 这与「平台接口表达能力、平台实现持有资源」的既有分工一致，不是新增一个 `Dispatcher` 对象层。
+
+### 1.4 本稿评审处置（2026-09-29 · v1.0 → v1.1）
+
+> 设计评审结论：**v1.0 方向与质量通过**——`PostToUi` 最小入口 + `PlatformApplication` 应用级接缝 + `PostThreadMessageW` 唤醒 + 平台内部队列，均符合账本纪律（YAGNI · 每个 Win32 API 唯一归属 · 应用级接缝 = `PlatformApplication → Application`）；本稿的源码引用自检**全部命中、无腐坏**。采纳 5 条补强进入 v1.1，**无架构性推翻**。
+
+| # | 评审发现 | 处置 |
+|---|---|---|
+| **R-①** ★★ | §3.3 的 `Run()` 分支判据**只比消息号、未比 `hwnd`**；本仓库已占用 `WM_APP + 1`（托盘回调，`Win32PlatformApplication.cpp:20`）与 `WM_APP + 2`（Desktop 跟随，`Win32PlatformWindow.cpp:73`），且测试会**向窗口**投递 `WM_APP + 2`（`DesktopLayerTests.cpp:532`）⇒ 消息号一旦碰撞，该分支会把窗口消息**静默吞掉**（不再走 `DispatchMessageW`） | ✅ **采纳**——判据改为 `message.hwnd == nullptr && message.message == kUiDispatchMessage`（线程消息的 `hwnd` **恒为 NULL**）；§3.3 补**消息号占位登记纪律**；§4 的 **C8** 与 §7.3 的**结构验收项 8** 同步 |
+| **R-②** ★ | §5 影响面**缺用例锚点**（项目惯例以用例数作规模锚点） | ✅ **采纳**——§5 新增「用例」行：**264 → 273**（T23-1..T23-9 = 9 条） |
+| **R-③** ★ | 需求 **A6**（真实消费者形态载荷）在 T23 表内**无对应用例** ⇒ **A→C→T 可追溯性缺口**，一条验收项无人认领 | ✅ **采纳**——新增 **T23-9**（「异步解码完成通知」样式的小载荷） |
+| **R-④** | `PostToUi` 返回 `false` 存在**三义合流**（空工作 / 关闭中 / 唤醒失败），与 **O5** 同源 | ✅ **采纳**——§8 的 **O5** 补实证；详设须给出 Debug 断言或明确区分 |
+| **R-⑤** | 「退出路径是单一漏斗」的实测证据未写入初设 | ✅ **采纳**——§3.5 补：生产 `PostQuitMessage` **仅 1 处** + 隐式退出亦经 `Application::Exit()` |
 
 ---
 
@@ -208,7 +220,7 @@ bool Win32PlatformApplication::PostToUi(std::function<void()> work){
 
 ```cpp
 while (GetMessageW(&message, nullptr, 0, 0)){
-    if (message.message == kUiDispatchMessage){
+    if (message.hwnd == nullptr && message.message == kUiDispatchMessage){
         DrainUiDispatch();
     } else {
         TranslateMessage(&message);
@@ -218,6 +230,10 @@ while (GetMessageW(&message, nullptr, 0, 0)){
     PerformDeferredCleanup();
 }
 ```
+
+★★ **判据必须同时判别 `hwnd`**（v1.1 补 R-①）：线程消息的 `hwnd` **恒为 NULL**，故 `message.hwnd == nullptr` 是**精确且零成本**的第一判别字段。仅比消息号**不安全**——本仓库已占用 `WM_APP + 1`（托盘回调，`Win32PlatformApplication.cpp:20`）与 `WM_APP + 2`（Desktop 跟随，`Win32PlatformWindow.cpp:73`），且 `DesktopLayerTests.cpp:532` 会**向窗口**投递 `WM_APP + 2` ⇒ 一旦新消息号与任一**窗口消息**号碰撞，本分支会把窗口消息**静默吞掉**（不再走 `DispatchMessageW`），且极难定位。
+
+★ **消息号取值与占位登记**：具体取值留详细设计钉死；**取值纪律** = 沿用既有的**注释式占位登记**（先例 = `Win32PlatformWindow.cpp:71`，其注释显式记「`WM_APP + 1` 已被 … 占用，仍避开以免同号两义」），须避开 `WM_APP + 1` / `WM_APP + 2`，候选 **`WM_APP + 3`**。
 
 不得把 dispatch 消息送入 `WindowMessageHandler`：它不是窗口事件，也不应伪造 `Window*` 来源；也不得把 callback 包成 `TimerEvent`，否则会错误进入焦点控件派发链（`Application.cpp:184-189`）。
 
@@ -242,7 +258,11 @@ while (GetMessageW(&message, nullptr, 0, 0)){
 
 ### 3.5 退出与析构顺序
 
-`Application::Exit()` 现有路径是 `m_running = false` → `PlatformApplication::RequestExit()`（`Application.cpp:92-97`）。`Win32PlatformApplication::RequestExit()` 当前直接调用 `PostQuitMessage(0)`（`:48-52`），因此**不能把工作线程直接调用 `Application::Exit()` 当作本阶段安全用法**：它会同时碰到 `m_running` 的跨线程访问与退出消息归属问题。工作线程需要请求退出时，设计用法是 `PostToUi([...] { application.Exit(); })`。本阶段不新增 `Application::CloseDispatch()`：
+`Application::Exit()` 现有路径是 `m_running = false` → `PlatformApplication::RequestExit()`（`Application.cpp:92-97`）。`Win32PlatformApplication::RequestExit()` 当前直接调用 `PostQuitMessage(0)`（`:48-52`），因此**不能把工作线程直接调用 `Application::Exit()` 当作本阶段安全用法**：它会同时碰到 `m_running` 的跨线程访问与退出消息归属问题。工作线程需要请求退出时，设计用法是 `PostToUi([...] { application.Exit(); })`。
+
+★ **退出路径是单一漏斗（v1.1 补 R-⑤ 实测证据）**：全库生产代码 `PostQuitMessage` **仅 1 处**（`Win32PlatformApplication.cpp:50`），且**隐式退出**（最后一个窗口关闭）也经 `Application::Exit()`（`Application.cpp:147-148`，由 `OnWindowDestroyed` 调用）⇒ 「在 `RequestExit()` 内关闭队列即可覆盖**全部**退出路径」**成立**，无需在每个退出点各加一次关闭。
+
+本阶段不新增 `Application::CloseDispatch()`：
 
 - `Win32PlatformApplication::RequestExit()` 先调用 `CloseUiDispatch()`，再调用既有 `PostQuitMessage(0)`；
 - `CloseUiDispatch()` 加锁设置 `m_dispatchClosing = true`、清空共享队列、清除 `m_dispatchWakePending`；
@@ -280,7 +300,7 @@ try{
 | `ECDI/include/ECDI/Platform/PlatformApplication.h` | 修改 | 新增 `PostToUi` 纯虚能力与契约注释 |
 | `ECDI/src/Platform/Win32/Win32PlatformApplication.h` | 修改 | override、队列成员、互斥量、owner thread 状态 |
 | `ECDI/src/Platform/Win32/Win32PlatformApplication.cpp` | 修改 | owner thread / `PostThreadMessageW` / Run 分支 / drain / close / 异常边界 |
-| `ECDI/src/Tests/ApplicationDispatchTests.cpp` | **新建** | T23-1..T23-8，走真实消息泵与真实 `Application` 入口 |
+| `ECDI/src/Tests/ApplicationDispatchTests.cpp` | **新建** | T23-1..T23-9，走真实消息泵与真实 `Application` 入口 |
 | `ECDI/src/Tests/RunAllTests.h` | 修改 | 声明 `RegisterApplicationDispatchTests()` |
 | `ECDI/src/Tests/RunAllTests.cpp` | 修改 | 注册新测试文件 |
 
@@ -299,7 +319,7 @@ try{
 | **C5** | 队列不持有 `Window*` / `Application*` 的自动保活 | callback 只作为用户载荷保存 | T23-6；代码审查 |
 | **C6** | 关闭态拒绝新工作并丢弃未执行工作 | `RequestExit` / 析构前 `CloseUiDispatch` | T23-7 |
 | **C7** | 正在执行的 callback 不被强制终止；其异常隔离在 dispatch 边界 | `try/catch` 包围单项执行 | T23-7 / T23-8 |
-| **C8** | `PostToUi` 与消息泵 / Timer / Window Event 分层，不伪造 `TimerEvent` 或 Window Event | `Run()` 私有消息分支，不进 `WindowMessageHandler` | 结构审查；既有测试零回归 |
+| **C8** | `PostToUi` 与消息泵 / Timer / Window Event 分层，不伪造 `TimerEvent` 或 Window Event | `Run()` 私有消息分支（★ **同时判别 `hwnd`**，见结构验收项 8），不进 `WindowMessageHandler` | 结构审查；既有测试零回归 |
 | **C9** | 唤醒失败不得留下永远不消费的已接受工作 | `PostThreadMessageW` 失败后的关队列清理 | T23-8；结构审查 |
 | **C10** | `Run()` 必须在构造 owner thread 执行 | `m_uiThreadId` 记录与 Run 前检查 | T23-2；错误路径留 O1 |
 
@@ -315,6 +335,7 @@ try{
 | Public API | **源码接口集合 +2**：`Application::PostToUi` + `PlatformApplication::PostToUi`；1.0 前不承诺 ABI 兼容 |
 | 生产文件 | 5 个：2 个公共头 / 1 个应用实现 / 1 个平台内部头 / 1 个平台实现 |
 | 测试文件 | 3 个触点：新建 1 个测试文件，`RunAllTests.h/.cpp` 各登记 1 处 |
+| 用例 | **264 → 273**：新增 **T23-1..T23-9**（9 条） |
 | 新增 Event | **0**；不新增 `WorkerEvent` / `AsyncEvent` |
 | 新增平台对象 | **0**；不新增 dispatcher 类、不新增托盘宿主、不绑定 Window |
 | 构建配置 | 预期 **0**；CMake 自动发现源文件，测试登记手工完成 |
@@ -347,7 +368,7 @@ try{
 
 ---
 
-## 7. 测试方向（T23-1..T23-8）
+## 7. 测试方向（T23-1..T23-9）
 
 ### 7.1 测试承载与通用装置
 
@@ -373,6 +394,7 @@ try{
 | **T23-6** | callback 捕获业务对象；先把工作入队，再销毁窗口 / 清理测试对象；不让 callback 访问失效对象 | 框架队列不自动访问 Window；测试只验证队列不保存隐式窗口指针，具体用户捕获生命周期由调用方负责 |
 | **T23-7** ★★ | A 入队后先让其调用 `Exit()`，B 已在队列或同一批次等待 | A 可以完成；B 不执行；后续新 `PostToUi` 返回 false；消息泵正常返回 |
 | **T23-8** ★★ | callback A 抛出 `std::runtime_error`，callback B 记录执行并退出 | 异常不穿出消息循环；B 仍执行；错误日志存在（日志字符串判据留详设）；若唤醒失败分支可注入，则再验证队列清理 |
+| **T23-9** ★ | 以「异步解码完成通知」样式的**载荷**（小结构体 + 结果码，模拟消费者形态）由工作线程提交；公共头不含该消费者类型 | 载荷按值随 `std::function` 移动入队；UI 线程读到有效载荷；★ 对应需求 **A6**（真实消费者形态可接入），补上 v1.0 的 **A→T 缺口** |
 
 ### 7.3 结构性验收
 
@@ -382,7 +404,8 @@ try{
 4. `RequestExit()` 与析构路径均在清理托盘资源前关闭 dispatch；
 5. `TimerEvent` 的 `WM_TIMER` 分支与 `Application::OnTimer` 路径保持原样；
 6. 新测试登记完整：`RunAllTests.h` 1 处声明、`RunAllTests.cpp` 1 处调用；
-7. 不出现 `WorkerEvent` / `AsyncEvent` / `ThreadPool` / `Future` 等本阶段非目标符号。
+7. 不出现 `WorkerEvent` / `AsyncEvent` / `ThreadPool` / `Future` 等本阶段非目标符号；
+8. ★ `Run()` 的 dispatch 分支**同时判别消息号与 `hwnd`**（`message.hwnd == nullptr`）——线程消息的判别**不依赖消息号唯一性**（v1.1 补）。
 
 ### 7.4 验证纪律
 
@@ -403,11 +426,12 @@ try{
 | **O2** | `PostThreadMessageW` 失败时是否将所有排队工作一次性丢弃、是否保留最后一次错误原因 | 影响可诊断性与队列状态，但不应引入无限重试或全局错误总线 |
 | **O3** | callback 异常日志是否需要 `what()` 的 UTF-8 → UTF-16 转换 | 当前 Logger 公共签名是 `std::wstring_view`（`include/ECDI/Core/Logger.h:25-31`）；转换会增加实现面，但不改变核心语义 |
 | **O4** | 测试 T23-8 如何稳定观察日志 | `Logger` 走 `OutputDebugStringW`，不能靠 stdout；可复用 DBWIN 监听，也可只断言后续 callback，需在详设选择 |
-| **O5** | 是否需要为“提交已接受但未来不会执行”增加返回状态枚举 | 当前 `bool` 已能表达 accepted / rejected；若需要区分 closing / wake failure，应先证明真实消费者有分支需求，再增加类型 |
+| **O5** | 是否需要为“提交已接受但未来不会执行”增加返回状态枚举 | ★ **v1.1 补实证（R-④）**：当前 `bool` 实际承载**三义**——**空工作**（§3.2 伪代码首段）· **`m_dispatchClosing`**（关闭中）· **唤醒失败**——**共用同一个 `false`** ⇒ 调用方无法区分「本来就没工作」「正在关闭」「系统唤醒失败」。详设至少给出 **Debug 断言或明确区分**；是否升级为小型状态枚举，仍应先证明真实消费者有分支需求（不无端造 `Promise` / 结果类型） |
 | **O6** | 第二平台出现后，是否沿用同名 `PostToUi` 语义 | 当前只定公共语义，不预建第二平台；届时必须复核其消息循环 / 调度模型，不照抄 Win32 载体 |
 
 ---
 
 ## 9. 修订记录
 
+- **v1.1**（2026-09-29）**设计评审意见吸收**（评审结论：方向与质量通过，采纳 5 条补强；逐条处置见 §1.4）。① ★★ **`Run()` 分支判据补 `hwnd` 判别**（`message.hwnd == nullptr`）——仅比消息号会与既有 `WM_APP + 1` / `WM_APP + 2` 碰撞并**静默吞掉窗口消息**；§3.3 同步补**消息号占位登记纪律**，§4 的 **C8** 与 §7.3 增**结构验收项 8**。② ★ **新增 T23-9**（真实消费者形态载荷）补齐需求 **A6** 的 A→T 缺口；§5 增**用例锚点 264 → 273**。③ ★ **§3.5 补退出漏斗实测证据**（生产 `PostQuitMessage` 仅 1 处 + 隐式退出亦经 `Application::Exit()` ⇒ 单点关闭即覆盖全部退出路径）。④ ★ **O5 补三义合流实证**（空工作 / 关闭中 / 唤醒失败共用 `false`）。★ 其余（`PostThreadMessageW` 方向 · 队列存储归属 · 契约 C1–C10 · 8 文件影响面 · O1–O6）**维持不变**。
 - **v1.0**（2026-09-29）初稿。输入 = 需求稿 **v1.1** · 当前 `PlatformApplication` / `Application` / `Win32PlatformApplication` 消息泵与托盘宿主源码。完成范围映射、接口草案、Win32 唤醒方向、队列 / 非重入 / 退出生命周期模型、契约 C1–C10、8 文件影响面、T23-1..T23-8 测试方向与 O1–O6 开放项。**待评审**；不修改源码、不运行测试。
