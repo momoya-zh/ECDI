@@ -71,7 +71,7 @@
 
 ### 🔄 当前
 
-- **Phase 22 `Create` 的 DIP 尺寸契约（pre-show DIP geometry）—— ✅ 需求确认 **v1.1 已通过评审** · ✅ 初步设计 **v1.1 已通过评审** · 🚧 详细设计 **v1.0 待评审**（2026-09-28 立项）**：**框架缺陷修复队列新增第 ⑦ 位**（审计 `framework-defect-audit.md` **§4 D-7**；★ 排在 ④⑤⑥ 之前——**它是唯一的「契约不成立」项**，其余三项皆「缺能力」）。★★ **来源 = Phase 21 收尾时的实测发现**（测试套件 DPI 脆弱的**框架侧根因**——当时**测试侧规避**、框架侧未处置）。**缺口** = 「**公共 API 语义恒为 DIP**」在 **`Create` → `Show()` 之间不成立**：★ 契约说的是**窗口总尺寸（含边框和标题栏）**，而换算落在 `Show()`（`Win32PlatformWindow.cpp:171-192`；成因 = **Phase 20 的崩溃修复**）⇒ ★ **125% 实测**：`Create(800,600)` 后外框 DIP = **640×480**、`Show` 后 = **800×600**。★ **初设定案 = `PlatformWindow::ApplyStartupSize()`**（`Show()` 的换算块**搬家**成方法；`Create` 末尾 + `Show()` 两处调用，**零新概念**）。★ 详见下方 Phase22 段。
+- **Phase 22 `Create` 的 DIP 尺寸契约（pre-show DIP geometry）—— ✅ 需求确认 **v1.1 已通过评审** · ✅ 初步设计 **v1.1 已通过评审** · ✅ 详细设计 **v1.1 已通过评审**（2026-09-28 立项）**：**框架缺陷修复队列新增第 ⑦ 位**（审计 `framework-defect-audit.md` **§4 D-7**；★ 排在 ④⑤⑥ 之前——**它是唯一的「契约不成立」项**，其余三项皆「缺能力」）。★★ **来源 = Phase 21 收尾时的实测发现**（测试套件 DPI 脆弱的**框架侧根因**——当时**测试侧规避**、框架侧未处置）。**缺口** = 「**公共 API 语义恒为 DIP**」在 **`Create` → `Show()` 之间不成立**：★ 契约说的是**窗口总尺寸（含边框和标题栏）**，而换算落在 `Show()`（`Win32PlatformWindow.cpp:171-192`；成因 = **Phase 20 的崩溃修复**）⇒ ★ **125% 实测**：`Create(800,600)` 后外框 DIP = **640×480**、`Show` 后 = **800×600**。★ **初设定案 = `PlatformWindow::ApplyStartupSize()`**（`Show()` 的换算块**搬家**成方法；`Create` 末尾 + `Show()` 两处调用，**零新概念**）。★ 详见下方 Phase22 段。
 ★ **上一个已收口**：**Phase 16 / 17 / 18 / 19 / 20 / 20.1 / 21** 已于 2026-09-28 全量迁入上方「✅ 已完成」表（18.1 标 ⏸️ 已搁置）；★ **其余候选**见「🔲 未来」与 `roadmap-deferred.md` 的「**🔲 待做**」区。
 
 ### 🔲 未来
@@ -449,7 +449,7 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | [phase21-icon-to-image-detailed-design.md](phase21-icon-to-image-detailed-design.md) | **详细设计（实施规格）**：**内核 11 步 / 外壳 6 步算法** · ★ **资源与 RAII 三栏**（`UniqueIcon` / `IconBitmaps` / `ScreenDc`）· **尺寸校验口径**（不照抄 WIC 的四域检查）· **盯防清单 12 条** · **△1–△5 逐文件改动**（含头全文草案）· **契约 C1–C14** · **T21-1..T21-9 逐条输入与期望**（★ T21-1 逐字节 / **T21-2 语义断言**） · **两批 + 收尾** · **§7.1 实施记录（8 条偏离）** · **§8.1 A1–A6 最终判定** · **O1–O9** | ✅ **v1.1 已通过**（2026-09-26 · ★ 外部评审「总体通过」+ **2 微调已处置**：**C13 支持边界** / **C14 异常边界**） → ★★ **v1.2 已实施（2026-09-27）** |
 
 
-## Phase22 `Create` 的 DIP 尺寸契约（pre-show DIP geometry）（✅ 需求确认 **v1.1** · ✅ 初步设计 **v1.1** 已通过评审 · 🚧 详细设计 **v1.0 待评审**，2026-09-28 立项）
+## Phase22 `Create` 的 DIP 尺寸契约（pre-show DIP geometry）（✅ 需求确认 **v1.1** · ✅ 初步设计 **v1.1** 已通过评审 · ✅ 详细设计 **v1.1** 已通过评审，2026-09-28 立项）
 
 > 来源：**Phase 21 收尾时的实测发现**（测试套件 DPI 脆弱的**框架侧根因**——当时**测试侧规避**、框架侧未处置）· ★ 登记处 = 审计 **§4 D-7** · `roadmap-deferred.md` §7.9 待做 **⑦**
 
@@ -477,7 +477,7 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 |------|------|------|
 | [phase22-preshow-dip-geometry-requirements.md](phase22-preshow-dip-geometry-requirements.md) | 需求确认（**K1–K8 现状勘察**（全部带行号）· **R1–R5** · **D0–D3 决策点** · **N1–N4 非目标** · **Q1–Q3** · **A1–A5** · ★ §1.7 = **Q2 的 `WM_SIZE` 计数实测**） | ✅ **v1.1 已通过评审** |
 | [phase22-preshow-dip-geometry-preliminary-design.md](phase22-preshow-dip-geometry-preliminary-design.md) | **初步设计**：**代码基线 B1–B10**（带行号）· ★★ **D1 形态定案**（`ApplyStartupSize()`——**搬家**而非新增；**DPI 与尺寸同源**）· ★ **惯例偏离声明**（不做 D-SEAM-1 第 ② 步）· **契约 C1–C10** · **影响面 6 文件**（头 92 → 92 · API **+1**）· **开放点 O1–O5** · **测试 T22-1..T22-3** | ✅ **v1.1 已通过评审** |
-| [phase22-preshow-dip-geometry-detailed-design.md](phase22-preshow-dip-geometry-detailed-design.md) | **详细设计（实施规格）**：**逐文件改动 △1–△9**（生产 4 + 测试 5，新建 1）· ★ **对初设的三处修正**（文件数 6→9 / `Application.cpp` 需 +1 include / `Show()` 是块级 `if`）· **代码基线 B11–B18** · **契约 C1–C10 → 落点 → 测试** · **盯防清单 10 条** · **测试规格 T22-1..T22-3** · **验收 A1–A6** · **局限 L1–L4** | 🚧 **v1.0 待评审** |
+| [phase22-preshow-dip-geometry-detailed-design.md](phase22-preshow-dip-geometry-detailed-design.md) | **详细设计（实施规格）**：**逐文件改动 △1–△9**（生产 4 + 测试 5，新建 1）· ★ **对初设的三处修正**（文件数 6→9 / `Application.cpp` 需 +1 include / `Show()` 是块级 `if`）· **代码基线 B11–B18** · **契约 C1–C10 → 落点 → 测试** · **盯防清单 10 条** · **测试规格 T22-1..T22-3** · **验收 A1–A6** · **局限 L1–L4** | ✅ **v1.1 已通过评审** |
 
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
