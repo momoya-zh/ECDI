@@ -74,6 +74,12 @@ public:
 	void Hide() override;
 	void SetFileDropEnabled(bool enabled) override;
 
+	// ── Phase 22：启动尺寸落实（`Create` 末尾 + `Show()` 两处调用）──────────
+
+	/// @brief 按当前窗口 DPI 落实启动尺寸 —— ★ 含翻译器 DPI 同步（契约 C9；详见基类契约）
+	/// @details 幂等；★ **未设置启动尺寸（`0`）⇒ 直接返回，连 `SetDpi` 也不执行**（契约 C10）。
+	void ApplyStartupSize() override;
+
 	/// @brief DragFinish 测试缝类型（v1.1 拍板：函数指针——不出实现层、保 final）
 	/// @details 声明必须位于首个使用点之前——GCC 对成员函数形参不做延迟名字查找
 	/// （放在 private 区会令 MinGW 报 "'DragFinishFn' has not been declared"）

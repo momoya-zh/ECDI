@@ -168,6 +168,34 @@ Win32PlatformWindow::~Win32PlatformWindow(){
 
 }
 
+void Win32PlatformWindow::ApplyStartupSize() {
+
+	// ★★ Phase 22：本方法由「原 Show() 里的换算块」**原样搬来**（零新增语义）。
+	// 搬家的理由：让同一段逻辑能在**两个时机**被调用——
+	//   ① `Application::Create` 末尾（让 DIP 契约在 `Create` 返回时即成立——本阶段的目标）；
+	//   ② `Show()`（保留跨屏复核——Phase 20 的既有理由：「Show 时窗口的显示器关联才确定」）。
+	// ⚠️ DPI 与尺寸**必须同源**：`SetDpi` 与 `DipToPixels` 用同一个 dpi，
+	//   否则「几何」与「命中判定」会按不同 DPI 换算。
+	// ★ **早退语义（契约 C10）**：无启动尺寸（`<= 0`）⇒ **整方法早退**，**连 `SetDpi` 也不执行**
+	//   —— ★ **刻意沿用既有行为**（本方法只管「启动几何」，不做泛化 DPI 同步）。
+	if (m_startupWidthDip <= 0 || m_startupHeightDip <= 0) {
+
+		return;
+
+	}
+
+	const int dpi = GetDpiForWindow(m_hwnd);
+
+	m_messageHandler.SetDpi(dpi);
+
+	SetWindowPos(m_hwnd, nullptr, 0, 0,
+		DipToPixels(m_startupWidthDip, dpi), DipToPixels(m_startupHeightDip, dpi),
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+	// ★ dpi == 96 时尺寸不变 ⇒ SetWindowPos 为 no-op（G5 恒真）——★ 实测届时连 WM_SIZE 都不派发。
+
+}
+
 void Win32PlatformWindow::Show() {
 
 	if (m_hwnd != nullptr) {
@@ -179,17 +207,10 @@ void Win32PlatformWindow::Show() {
 		//   P3 的"未 Show 时 DPI 是否可靠"在此处不再是问题）。
 		// ★ 此刻窗口**尚未显示**（ShowWindow 在后）⇒ 改尺寸**不产生闪烁**。
 		// ★ dpi == 96 时尺寸不变 ⇒ `SetWindowPos` 为 no-op（G5：100% 下与改前逐位一致）。
-		if (m_startupWidthDip > 0 && m_startupHeightDip > 0){
-
-			const int dpi = GetDpiForWindow(m_hwnd);
-
-			m_messageHandler.SetDpi(dpi);
-
-			SetWindowPos(m_hwnd, nullptr, 0, 0,
-				DipToPixels(m_startupWidthDip, dpi), DipToPixels(m_startupHeightDip, dpi),
-				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-
-		}
+		// ★★ Phase 22：**尺寸落实本身已由 `Application::Create` 末尾执行**（契约在 `Create`
+		//   返回时即成立）；此处保留调用是**跨屏复核**——同尺寸时为 no-op（实测不派发 WM_SIZE）
+		//   ⇒ **零运行期成本**（契约 C6）。
+		ApplyStartupSize();
 
 		m_shown = true;   // 配置期 → 运行期分界线（与 Window::Show() 一一对应）
 

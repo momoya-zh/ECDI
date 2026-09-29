@@ -2,6 +2,7 @@
 
 #include "Platform/Win32/Win32PlatformApplication.h"
 #include "ECDI/Window/Window.h"
+#include "ECDI/Platform/PlatformWindow.h"   // Phase 22：调用 ApplyStartupSize（Window.h:24 仅前置声明）
 #include "ECDI/Animation/AnimationManager.h"
 #include "ECDI/EventSystem/Window/WindowResizedEvent.h"
 #include "ECDI/EventSystem/Window/WindowDestroyEvent.h"
@@ -71,6 +72,13 @@ Window& Application::Create(const std::string& title, int width, int height,
 	m_windows.emplace_back(std::unique_ptr<Window>(new Window(*this, title, width, height,
 	                                                        std::move(services))));
 	Window& window = *m_windows.back();
+
+	// ★★ Phase 22：把构造期记录的 DIP 目标尺寸**按当前 DPI 落实**。
+	// 为什么在这里：此刻 `Window` **已完全构造**（成员就绪 ⇒ 回调安全，避开 Phase 20 的构造期 UB），
+	//   且**本函数尚未返回** ⇒ 「公共 API 语义恒为 DIP」在 `Create` 返回时即成立。
+	// 为什么在事件**之前**：`WindowCreatedEvent` 的监听者若读窗口几何，应当看到**已成立**的值。
+	// 幂等：`Show()` 会再调一次（跨屏复核），届时为 no-op（契约 C3 / C6）。
+	window.GetPlatformWindow().ApplyStartupSize();
 
 	// 手动派发 WindowCreatedEvent（不是 Win32 消息翻译的产物，是框架层语义事件）
 	WindowCreatedEvent event(&window);

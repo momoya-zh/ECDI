@@ -88,6 +88,10 @@ public:
 
 	void SetFileDropEnabled(bool) override{}
 
+	// ── Phase 22：新增 1 个纯虚（本替身不关心启动尺寸——空实现）──
+
+	void ApplyStartupSize() override{}
+
 	PlatformRenderContext m_context;	///< 空基类可实例化（无纯虚）——测试替身直接持有
 
 	int startCount = 0;

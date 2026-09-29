@@ -142,6 +142,25 @@ public:
 	/// @details 平台实现为 DragAcceptFiles 薄封装；幂等、可重复调用。
 	/// @pre Show() 之前调用记 Warning 并忽略（O-3 拍板：运行期分组——架构一致性选择）
 	virtual void SetFileDropEnabled(bool enabled) = 0;
+
+	// ── Phase 22：启动尺寸的落实（`Create` 末尾 + `Show()` 两处调用）────────
+
+	/// @brief 按当前窗口 DPI，把 `Create` 阶段记录的「启动 DIP 总尺寸」落实到物理尺寸
+	/// @details 语义：「**`Window` 已完成构造，现按当前平台 DPI 应用 `Create` 阶段记录的
+	///          DIP 总尺寸**」。★ 本方法**同时**刷新翻译器 DPI —— **两者必须同源**
+	///          （契约 C9）：尺寸换算用 `DipToPixels(w, dpi)`，翻译器用**同一个** `dpi`
+	///          把消息坐标折成 DIP；二者取自不同时刻则「几何」与「命中判定」会按
+	///          不同 DPI 换算（Phase 22 初设 §2.4）。
+	/// @pre 调用时机 = `Window` **完全构造之后**（`Application::Create` 内）——
+	///      ★ 构造期调用会同步派发 `WM_SIZE` 撞上未构造成员 = UB（见实现的构造处注释）。
+	///      窗口句柄有效性由实现内自行守卫。
+	/// @pre ★ **未设置启动尺寸（`0`）⇒ 直接返回**——★ **刻意**：「无启动尺寸 ⇒
+	///      **连 DPI 也不刷**」是**沿用既有行为**、**零语义变化**（契约 **C10**）。
+	///      理由 = 本阶段的对象是「`Create` 的启动几何」，**不是泛化的 DPI 同步**。
+	/// @note **幂等**：尺寸已正确 ⇒ 底层 `SetWindowPos` 为 no-op —— ★ **实测连
+	///       `WM_SIZE` 都不派发**（需求稿 §1.7），故 `Show()` 里的复核调用**零运行期成本**。
+	/// @note **不提供「运行期改窗口尺寸」能力**：尺寸来源唯一（构造期记录，契约 C4）。
+	virtual void ApplyStartupSize() = 0;
 };
 
 }

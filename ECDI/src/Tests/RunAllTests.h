@@ -34,5 +34,6 @@ void RegisterDesktopLayerTests();   ///< Phase 16：桌面驻留层（档位分�
 void RegisterWindowBackgroundTests();   ///< Phase 18：窗口底色（端到端注入 / 默认零回归 / 每帧传递 / alpha 原样）
 void RegisterDpiTests();   ///< Phase 20：DPI 换算（纯函数真值表 / 恒等护栏 G5 / 往返不恒等 C9 / 负数对称 C10）
 void RegisterIconDecodeTests();   ///< Phase 21：系统图标（内核 HICON→Image 逐字节 / 外壳路径矩阵 / 端到端 DrawImage）
+void RegisterPreshowGeometryTests();   ///< Phase 22：Create 的 DIP 尺寸契约（T22-1..T22-3）
 
 } // namespace ECDI::Test
