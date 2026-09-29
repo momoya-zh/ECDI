@@ -7,7 +7,11 @@
 #undef DrawText   // Win32 宏防护（与本工程其它平台头统一——条 10）
 #endif
 
+#include <atomic>
+#include <deque>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace ECDI{
@@ -36,6 +40,8 @@ public:
 	int Run() override;
 
 	void RequestExit() override;
+
+	bool PostToUi(std::function<void()> work) override;
 
 	void DeclareDpiAwareness() override;   ///< Phase 20 △22：进程 DPI 感知声明（应用级接缝）
 
@@ -73,6 +79,14 @@ public:
 	int GetLastAnchorXForTests() const noexcept{ return m_lastAnchorX; }
 	int GetLastAnchorYForTests() const noexcept{ return m_lastAnchorY; }
 
+	/// @brief UI 唤醒投递缝（★ 仅内部头——seam 不出实现层，不进公共 API）
+	/// @details 供 T23-10 注入「唤醒失败」，把详设 §3.2 的**失败回滚分支（S5）**变成可测
+	///          （初设 §1.5 补记 ① 自己指出该分支本无自动化覆盖）。
+	///          ★ `using` 必须先于首个使用点声明——GCC 对成员函数形参不做延迟名字查找。
+	using PostThreadMessageFn = BOOL (*)(DWORD idThread, UINT msg, WPARAM wParam, LPARAM lParam);
+
+	void SetPostThreadMessageSeamForTests(PostThreadMessageFn post){ m_postThreadMessage = post; }
+
 private:
 
 	/// @brief 托盘宿主窗口与窗口类的懒创建（D2——首次 SetTrayIcon 时；零消费者零开销）
@@ -93,6 +107,24 @@ private:
 	/// @brief Shell 调用测试缝适配器（类型定义见上方 public 区——默认真实 API）
 	static BOOL NotifyShellAdapter(UINT action, NOTIFYICONDATAW* nid);
 	static void DragFinishAdapter(HDROP hDrop);
+
+	/// @brief 取出当前待执行工作并逐项执行（★ 只由 `Run()` 的 dispatch 分支调用）
+	void DrainUiDispatch();
+
+	/// @brief 关闭投递通路（幂等；`RequestExit` 与析构在清理既有资源**之前**调用）
+	void CloseUiDispatch() noexcept;
+
+	/// @brief 唤醒投递缝适配器（默认真实 API = `PostThreadMessageW`）
+	static BOOL PostThreadMessageAdapter(DWORD idThread, UINT msg, WPARAM wParam, LPARAM lParam);
+
+	// ── Phase 23：UI 投递通路（★ 作为**一组**置于既有托盘状态之前；不改既有成员声明顺序）──
+	DWORD m_uiThreadId = 0;                    ///< 构造线程（owner）——`Run()` 必须在此线程执行
+	std::mutex m_dispatchMutex;                ///< 保护队列与唤醒标志（★ **不保护** callback 执行）
+	std::deque<std::function<void()>> m_dispatchQueue;   ///< UI 待执行工作
+	std::atomic<bool> m_dispatchClosing{false};///< ★ 必须原子：drain 在**锁外**逐项读它（详设 D-2）
+	bool m_dispatchWakePending = false;        ///< 已有在途唤醒消息或正在 drain（★ 仅锁内访问）
+
+	PostThreadMessageFn m_postThreadMessage = &PostThreadMessageAdapter;   ///< 唤醒缝（默认真实 API）
 
 	HWND m_trayHostHwnd = nullptr;         ///< 隐藏顶层宿主（内部资源——永不进 Application::m_windows）
 	std::unique_ptr<WindowClass> m_trayHostClass;   ///< 宿主窗口类（独立实例、懒创建——析构顺序见初设 §6.4）

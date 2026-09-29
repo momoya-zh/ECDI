@@ -27,6 +27,15 @@ public:
 	/// @brief 请求退出消息循环（异步——循环在下一轮判断退出）
 	virtual void RequestExit() = 0;
 
+	/// @brief 异步提交工作到平台 UI 消息线程（Phase 23 D-1——★ 应用级能力惯例第 ① 步）
+	/// @param work 待执行工作（按值；实现者取得其所有权）
+	/// @return true = 已入队；false = 空工作 / 平台已关闭 / 唤醒失败
+	/// @details 实现者负责**线程安全入队 + 唤醒**；★ **不得在调用栈内执行 work**（R9 / D7）。
+	///          本能力只解决「工作怎样到达 UI 线程」，**不表达任何 Framework Event**（N6）。
+	/// @note 本能力**不属于**「窗口级能力」（不挂 `PlatformWindow`）：工作线程可能没有窗口、
+	///       也可能服务多个窗口；且它必须在窗口生命周期之外成立（R5 / D5）。
+	virtual bool PostToUi(std::function<void()> work) = 0;
+
 	// ── Phase 14：应用级托盘能力（R1–R7 / D1 / D2）──────────────────
 	// ★ 应用级能力惯例（本阶段首次建立——与窗口级 R9 三步同构）：
 	//   ① PlatformApplication 加能力 virtual（本文件）；

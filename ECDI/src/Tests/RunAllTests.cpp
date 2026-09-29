@@ -33,6 +33,7 @@ int ECDI::Test::RunAllTests()
     RegisterDpiTests();   // Phase 20：DPI 换算（纯函数层——T20-1..T20-6）
     RegisterIconDecodeTests();   // Phase 21：系统图标（T21-1..T21-9）
     RegisterPreshowGeometryTests();   // Phase 22：Create 的 DIP 尺寸契约（T22-1..T22-3）
+    RegisterApplicationDispatchTests();   // Phase 23：工作线程 → UI 线程投递（T23-1..T23-11）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

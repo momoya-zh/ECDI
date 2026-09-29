@@ -1,7 +1,7 @@
 ﻿# Phase 23 · 工作线程 → UI 线程投递（worker-to-UI dispatch）——需求确认（v1.1）
 
 > 来源：`roadmap-deferred.md` **§7.9 待做区顺位 ④** = 审计 `framework-defect-audit.md` **§4 D-4** = `desktopnest-roadmap.md` **§5 G-3**。
-> 状态：**v1.1 评审意见已吸收，待复评**（2026-09-29）——本稿仍只确认职责、边界与决策点，不展开公共接口草案、消息载荷布局或具体排队算法。
+> 状态：**v1.1 已通过评审并实施**（2026-09-29）——★ **实现证据**：Phase 23 三件套已实施，**四链 275 / 275** 全绿（用户侧实测；见 `phase23-worker-to-ui-dispatch-detailed-design.md` §7.1）。原状态措辞「**评审意见已吸收，待复评**」保留在 §8 的 v1.1 条目（其后**详设通过 ⇒ 实施 ⇒ 收口**，未经 v1.2 内容修订 ⇒ **版本号不变**）。本稿仍只确认职责、边界与决策点，不展开公共接口草案、消息载荷布局或具体排队算法。
 > 归属：**框架缺失能力队列**（不是 DesktopNest 应用层实现）；DesktopNest 的 `ReadDirectoryChangesW` 文件监听是最早登记的消费者，Phase 21 又补出了框架自己的异步图标 / 大图解码消费者。
 > 本稿输入：审计 §3 的分界判据 · `PlatformApplication` / `Application` / `Event` / `TimerEvent` 现有契约 · Win32 消息泵与现有 `PostMessageW` 使用点 · Phase 21 图像解码需求稿 §4 / §8。
 

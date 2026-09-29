@@ -1,7 +1,7 @@
 ﻿# Phase 23 · 工作线程 → UI 线程投递（worker-to-UI dispatch）——初步设计（v1.2）
 
-> 来源：`docs/phase23-worker-to-ui-dispatch-requirements.md` **v1.1**（外部评审 v1.0 已通过；v1.1 已吸收评审补强，待复评）· 审计 `framework-defect-audit.md` **D-4** · `roadmap-deferred.md` §7.9 顺位 ④。
-> 状态：**v1.2 待复评**（2026-09-29）——★ v1.2 吸收第二轮设计评审：**采纳其 P0 并发竞态（「唤醒失败 + 并发提交」）的定性、但修正其修法**（把唤醒移入临界区 + 失败**就地**回滚，而非新增第 4 个状态，见 §1.5 / §3.2 / §3.4）；v1.1 已吸收首轮 5 条补强（见 §1.4）；本稿是接口 / 数据流 / 生命周期的初步设计，不修改源码，不进入详细设计级的逐行实现规格。
+> 来源：`docs/phase23-worker-to-ui-dispatch-requirements.md` **v1.1**（已通过评审并实施）· 审计 `framework-defect-audit.md` **D-4** · `roadmap-deferred.md` §7.9 顺位 ④。
+> 状态：**v1.2 已通过并实施**（2026-09-29）——★ **实现 / 收口证据**：Phase 23 三件套已实施，**四链 275 / 275** 全绿（用户侧实测；详设 **v1.3** §7.1）⇒ 本稿的接口 / 数据流 / 生命周期设计**全部落地**。★ v1.2 吸收第二轮设计评审：**采纳其 P0 并发竞态（「唤醒失败 + 并发提交」）的定性、但修正其修法**（把唤醒移入临界区 + 失败**就地**回滚，而非新增第 4 个状态，见 §1.5 / §3.2 / §3.4）；v1.1 已吸收首轮 5 条补强（见 §1.4）；本稿是接口 / 数据流 / 生命周期的初步设计，不修改源码，不进入详细设计级的逐行实现规格。
 > 本稿的核心结论：**新增一个最小的 `Application::PostToUi(std::function<void()>)` 公共入口；平台接缝由 `PlatformApplication` 承担；Win32 实现用 UI 线程消息队列唤醒，队列和唤醒消息均留在平台实现内部；callback 永不 inline 执行。**
 > 设计输入复核：当前 `Win32PlatformApplication::Run()` 的消息泵为 `GetMessageW` → `TranslateMessage` → `DispatchMessageW`（`src/Platform/Win32/Win32PlatformApplication.cpp:26-46`）；`PlatformApplication` 已有 `std::function` sink 与应用级能力扩展惯例（`include/ECDI/Platform/PlatformApplication.h:19-28,30-34,70-100`）；生产代码现有 `PostMessageW` 仅服务托盘菜单 / Desktop 跟随两个具体功能。
 
@@ -398,7 +398,7 @@ try{
 | Public API | **源码接口集合 +2**：`Application::PostToUi` + `PlatformApplication::PostToUi`；1.0 前不承诺 ABI 兼容 |
 | 生产文件 | 5 个：2 个公共头 / 1 个应用实现 / 1 个平台内部头 / 1 个平台实现 |
 | 测试文件 | 3 个触点：新建 1 个测试文件，`RunAllTests.h/.cpp` 各登记 1 处 |
-| 用例 | **264 → 273**：新增 **T23-1..T23-9**（9 条） |
+| 用例 | **264 → 273**：新增 **T23-1..T23-9**（9 条）——★ **详设定稿为 264 → 275（+2）**：补 **T23-10**（C9 唤醒失败回滚）与 **T23-11**（C10 owner-thread 拒绝），见详设 **§1.3 D-1** |
 | 新增 Event | **0**；不新增 `WorkerEvent` / `AsyncEvent` |
 | 新增平台对象 | **0**；不新增 dispatcher 类、不新增托盘宿主、不绑定 Window |
 | 构建配置 | 预期 **0**；CMake 自动发现源文件，测试登记手工完成 |

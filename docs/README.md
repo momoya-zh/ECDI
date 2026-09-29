@@ -18,7 +18,7 @@
 
 ## 开发进度（2026-09-29 更新）
 
-> **当前规模锚点（防止各处历史数字误读）**：测试 **264** 用例（`GetTestRegistry().Add` 求和，**26 个含用例的测试文件**——`src/Tests/*.cpp` 共 29 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **92**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **148** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 **146** 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
+> **当前规模锚点（防止各处历史数字误读）**：测试 **275** 用例（`GetTestRegistry().Add` 求和，**27 个含用例的测试文件**——`src/Tests/*.cpp` 共 30 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **92**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **148** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 **146** 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
 
 ### ✅ 已完成
 
@@ -69,11 +69,12 @@
 | Phase 20.1 | 渲染层 DPI 缩放（`Renderer::Execute(commands, scale)` + `DpiConversion.h`——Phase 20 的缺口补完） | ✅ 2026-09-24 |
 | Phase 21 | 系统图标 → `Image`（`Decode::DecodeSystemIcon` + `ImageFromHIcon`——`Decode` 的第三个来源） | ✅ 2026-09-27 |
 | Phase 22 | `Create` 的 DIP 尺寸契约（pre-show DIP geometry）——`PlatformWindow::ApplyStartupSize()`（+1 无参纯虚）；`Create` 末尾 + `Show()` 复核两处调用（审计 `D-7` / 队列 ⑦） | ✅ 已实施 2026-09-29（**四链** 264/264 全绿，含 `MSVC`） |
+| Phase 23 | 工作线程 → UI 投递（`Application::PostToUi` + `PlatformApplication` 应用级接缝 + `PostThreadMessageW` 线程消息唤醒 + mutex/deque 队列 + 批次 swap drain）——`desktopnest` G-3 出清 / 审计 `D-4` | ✅ 已实施并收口 2026-09-29（**四链** 275/275 全绿，含 `MSVC`；用例 264 → 275） |
 
 ### 🔄 当前
 
-- ★ **当前在研阶段**：**Phase 23 工作线程 → UI 线程投递**——需求确认稿 **v1.1（评审意见已吸收，待复评）** · 初步设计 **v1.2（评审意见已吸收，待复评）** · 详细设计 **v1.1（第三轮评审通过，可进入实施）**（2026-09-29）；实现范围暂限于应用级异步投递通路，不预建线程池或泛化 Event 总线。★ 详设定稿了 **△1–△8 逐文件规格**（8 文件 = 生产 5 + 测试 3，新建 1）· **用例 264 → 275**（T23-1..T23-11，★ 相对初设的 273 有 +2：补 C9 唤醒失败回滚与 C10 owner-thread 拒绝分支的覆盖）· **盯防清单 11 条**（含「唤醒必须在临界区内」「失败分支不得二次加锁」「无 UI 线程 fast path」）· **局限 L1–L7**。
-★ **上一个已收口**：**Phase 16 / 17 / 18 / 19 / 20 / 20.1 / 21 / 22** 均已迁入上方「✅ 已完成」表（18.1 标 ⏸️ 已搁置）；★ **Phase 22 的实施验证** = **四链** **264 / 264** 全绿（`MSVC` / `Clang` / `MinGW` / `ClangCL`，@DPI 120，断言启用）；★ **其余候选**见「🔲 未来」与 `roadmap-deferred.md` 的「**🔲 待做**」区（★ 当前待做区仍为 **④⑤⑥**，其中 ④ 已立项为 Phase 23）。
+- ★ **当前无在研阶段**：**Phase 23 工作线程 → UI 线程投递**已于 **2026-09-29 实施收口**（需求 **v1.1** · 初设 **v1.2** · 详设 **v1.3**；**四链 275 / 275** 全绿 · 用例 264 → 275 · 8 文件（生产 5 + 测试 3，新建 1）· 公共头 92 → 92）⇒ 已迁入上方「✅ 已完成」表。★ **待做区余 ⑤ `#42` 列表/网格容器 · ⑥ `#43` AA 只覆盖圆角**，下一步由用户拍板；★ 记账区 `#44`–`#47` 仍不动。
+★ **已收口**：**Phase 16 / 17 / 18 / 19 / 20 / 20.1 / 21 / 22 / 23** 均已迁入上方「✅ 已完成」表（18.1 标 ⏸️ 已搁置）；★ **Phase 23 的实施验证** = **四链** **275 / 275** 全绿（`MSVC` / `Clang` / `MinGW` / `ClangCL`，断言启用）；★ **其余候选**见「🔲 未来」与 `roadmap-deferred.md` 的「**🔲 待做**」区（★ 当前待做区为 **⑤⑥**）。
 
 ### 🔲 未来
 
@@ -233,7 +234,7 @@
 | [phase12-windowchrome-requirements.md](phase12-windowchrome-requirements.md) | 需求确认（无边框 NCCALCSIZE/HITTEST 拦截 / 保留 WS_OVERLAPPEDWINDOW / R9 能力式扩展点 / R10 WindowLayer Bottom+Desktop / 7 决策全拍板） | ✅ v1.2（外部评审通过——可进初设） |
 | [phase12-windowchrome-preliminary-design.md](phase12-windowchrome-preliminary-design.md) | 初步设计（4 新头 81→85 / NC 消息归平台状态同步区非翻译器 / **配置期·运行期 API 对称生命周期**（判据 `m_shown`；运行期三方法 Show 前 Warning+忽略）/ 最大化 `rcWork` 唯一基准 + 补偿不变量 / R9「惯例非抽象」/ R10 spike 规格 / 决策 7 降级配置期） | ✅ v1.3（三轮外部评审——**PASS，可进详设**：v1.2 修 P0 补偿方向；v1.3 修 P1 运行期生命周期 + P1 T3 断言逻辑） |
 | [phase12-windowchrome-detailed-design.md](phase12-windowchrome-detailed-design.md) | 详细设计（**9 开放决策点全收** + 平台实现全文 6 case + **10 方法**（7 override + 3 私有辅助）；`TestWindow::Handle()` 三跳取 HWND；dwmapi 双构建系统；测试 **9** 自动用例含 spike 全文） | ✅ **v1.5 已实施（2026-09-12）**：v1.1 外部评审 → v1.2 内部复核 → v1.3 AI 核验补正 → v1.4 **实施期回写 4 处缺口**（D-DWM-1 零兜底 / `NCCALCSIZE_PARAMS` / 2 个测试替身补 override / Handle() include）→ **v1.5 实施后缺陷修复**（`TestWindow` 改持非拥有 `Window*` + `Create()`——原直构窗口未登记，销毁时触发 `Application.cpp:92` 断言；**仅 MSVC 构建暴露**，因 `FRAMEWORK_ASSERT` 只在 `_DEBUG` 下存在）；`ecdi_tests` **183/183**（MinGW，含带 `-D_DEBUG` 的一次）★ **跨工具链确认经 Phase 13 验收回证**——四构建 **188/188**（183 既有 + 5 新增，2026-09-15） |
-| [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 3 Phase、**残差登记 G-1~G-7**） | ✅ **v1.12 已回写**（2026-09-29 · ★ 原停在 v1.7，**Phase 21 / 22 的收口未回写**——本次补齐；框架侧 3 Phase 全部落地 · R-1/R-6/R10 已出清 · 判据①–⑥全通过 · **残差 G-1~G-7 已登记**——**G-1 ✅（Phase 16）· G-2 ✅（Phase 21）· G-4 ✅（Phase 20 + 20.1）⇒ 仅余 G-3**〔工作线程 → UI 投递，已立项 Phase 23：需求 v1.1 待复评 · 初设 v1.2 待复评〕；应用侧待需求确认） |
+| [desktopnest-roadmap.md](desktopnest-roadmap.md) | DesktopNest 规划（跨框架/应用，不占 Phase 编号——阶段拆分与依赖链、置底 vs On Desktop 决策依据留档、框架侧 3 Phase、**残差登记 G-1~G-7**） | ✅ **v1.15 已回写**（2026-09-29 · ★ 原停在 v1.7，**Phase 21 / 22 的收口未回写**——v1.11 补齐；框架侧 3 Phase 全部落地 · R-1/R-6/R10 已出清 · 判据①–⑥全通过 · **残差 G-1~G-7 已登记**——**G-1 ✅（Phase 16）· G-2 ✅（Phase 21）· G-3 ✅（Phase 23）· G-4 ✅（Phase 20 + 20.1）⇒ 框架侧残差 4 项全部出清**；应用侧待需求确认） |
 
 ## Phase13 CaptionBar 自绘标题栏（✅ 已实现并验收，2026-09-14 ~ 09-15）
 
@@ -484,19 +485,19 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | [phase22-preshow-dip-geometry-preliminary-design.md](phase22-preshow-dip-geometry-preliminary-design.md) | **初步设计**：**代码基线 B1–B10**（带行号）· ★★ **D1 形态定案**（`ApplyStartupSize()`——**搬家**而非新增；**DPI 与尺寸同源**）· ★ **惯例偏离声明**（不做 D-SEAM-1 第 ② 步）· **契约 C1–C10** · **影响面 6 文件**（头 92 → 92 · API **+1**）· **开放点 O1–O5** · **测试 T22-1..T22-3** | ✅ **v1.1 已通过评审** |
 | [phase22-preshow-dip-geometry-detailed-design.md](phase22-preshow-dip-geometry-detailed-design.md) | **详细设计（实施规格）**：**逐文件改动 △1–△9**（生产 4 + 测试 5，新建 1）· ★ **对初设的三处修正**（文件数 6→9 / `Application.cpp` 需 +1 include / `Show()` 是块级 `if`）· **代码基线 B11–B18** · **契约 C1–C10 → 落点 → 测试** · **盯防清单 10 条** · **测试规格 T22-1..T22-3** · **验收 A1–A6** · **局限 L1–L4** ｜ ★ **v1.2 实施回写**：**§5.1 A1–A6 实测判定**（A1 = 125% 下 `Create` 后外框 DIP **800×600**，改前 640×480）· **§7.1 实施记录**（**9 文件**与 △1–△9 逐条吻合 · +75/−11 · 新建 153 行 · **盯防 10 条全过** · 观察 O-1..O-4）｜ ★ **v1.3 回填**：`MSVC` 链由用户侧跑通 ⇒ **四链齐备**（A2 / A3 判定由「三链」升「四链」） | ✅ **v1.3 · 已实施并收口（2026-09-29）**——**四链 264 / 264 全绿（断言启用，含 `MSVC`——由用户侧跑通）** |
 
-## Phase23 工作线程 → UI 线程投递（worker-to-UI dispatch）（🚧 需求确认 **v1.1 待复评** · 初步设计 **v1.2 待复评** · 详细设计 **v1.1 已评审通过（可进入实施）**，2026-09-29 立项）
+## Phase23 工作线程 → UI 线程投递（worker-to-UI dispatch）（✅ **已实施并收口** —— 需求 **v1.1** · 初步设计 **v1.2** · 详细设计 **v1.3**；四链 **275 / 275** 全绿，2026-09-29）
 
 > 来源：**框架缺陷审计 D-4** = `desktopnest-roadmap.md` **G-3** = `roadmap-deferred.md` §7.9 待做 **④**。
 
 ★★ **缺口**：框架没有一个供应用使用的、从工作线程异步提交到 UI 消息线程的通用通路。当前生产代码的两处 `PostMessageW` 都是具体功能内部唤醒（托盘菜单关闭后的 `WM_NULL`、Desktop 跟随延后一拍），并不提供应用级投递能力；`TimerEvent` 轮询只是兜底。★ **两个真实消费者**：DesktopNest 的 `ReadDirectoryChangesW` 文件监听，以及 Phase 21 已登记的异步图标 / 大图解码。
 
-★★ **需求稿 v1.1**：**K1–K15** 现状勘察（含对旧「全库仅 1 处 `PostMessageW`」口径的订正，以及既有 `Exit()` / `PostQuitMessage` 非跨线程契约）· **R1–R10**（新增非 inline / UI 线程调用一致性）· **D0–D7**（新增 UI 线程提交时机）· **N1–N9**（新增不扩张 `Run()` / `Exit()` 跨线程语义）· **Q1–Q10**（新增重入 / UI 线程提交语义）· **A1–A10**（新增非重入 / 调用者线程语义）· 外部评审意见处置（v1.0 通过，v1.1 待复评）· 影响面与既有约束对齐。★ 明确分开「投递机制」与「Framework Event」：不因线程切换顺手造 `WorkerEvent` / `AsyncEvent` 总类型；不预建线程池、Future 或跨平台消息系统。
+★★ **需求稿 v1.1**：**K1–K15** 现状勘察（含对旧「全库仅 1 处 `PostMessageW`」口径的订正，以及既有 `Exit()` / `PostQuitMessage` 非跨线程契约）· **R1–R10**（新增非 inline / UI 线程调用一致性）· **D0–D7**（新增 UI 线程提交时机）· **N1–N9**（新增不扩张 `Run()` / `Exit()` 跨线程语义）· **Q1–Q10**（新增重入 / UI 线程提交语义）· **A1–A10**（新增非重入 / 调用者线程语义）· 外部评审意见处置（v1.0 通过 → **v1.1 已通过评审并实施**）· 影响面与既有约束对齐。★ 明确分开「投递机制」与「Framework Event」：不因线程切换顺手造 `WorkerEvent` / `AsyncEvent` 总类型；不预建线程池、Future 或跨平台消息系统。
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase23-worker-to-ui-dispatch-requirements.md](phase23-worker-to-ui-dispatch-requirements.md) | 需求确认（**K1–K15** · **R1–R10** · **D0–D7** · **N1–N9** · **Q1–Q10** · **A1–A10** · 外部评审意见已吸收）；★ **不展开接口草案 / 消息载荷 / 具体排队算法** | 🚧 **v1.1 待复评** |
-| [phase23-worker-to-ui-dispatch-preliminary-design.md](phase23-worker-to-ui-dispatch-preliminary-design.md) | **初步设计**：范围映射 · **§1.4 首轮评审处置** · ★ **§1.5 第二轮评审处置（P0 并发竞态：唤醒移入临界区 + 失败就地回滚）** · `Application::PostToUi` / `PlatformApplication::PostToUi` 接口草案 · `PostThreadMessageW` 唤醒方向 · mutex + deque 队列 · **§3.4 状态转换表 S1–S7** · 批次 drain 非重入 · `RequestExit` / 析构关闭顺序 · callback 异常边界 · 契约 **C1–C10** · **8 文件**影响面 · **T23-1..T23-9** · **O1–O6** | 🚧 **v1.2 待复评** |
-| [phase23-worker-to-ui-dispatch-detailed-design.md](phase23-worker-to-ui-dispatch-detailed-design.md) | **详细设计（实施规格）**：**逐文件改动 △1–△8**（生产 5 + 测试 3，新建 1）· **代码基线 B1–B14**（全部带行号实测）· **契约 C1–C10 → 落点 → 测试**全映射 · **状态机 S1–S7 → 代码行对照** · **盯防清单 11 条**（可机检）· **用例正文 T23-1..T23-11** + **装置规则 5 条**（补投 `WM_QUIT` 确定终止 · 收尾清残留防跨用例污染）· **A1–A10 → T 全映射** · 影响面 · 实施顺序 · **局限 L1–L7** · ★ **v1.1（第三轮评审：详设 v1.0 通过、可进入实施）** = **§1.6 评审处置表** + **R-① 生命周期拆两层**（**载荷** / **`Application` 对象本体**——后者是跨线程调成员函数的固有前提；★ **不引入**引用计数 / `shared_ptr` / token）+ **R-② 机检补 11**（无 UI 线程 fast path）· ★ **对初设 6 处修正**（**D-1** 用例 **273 → 275**——补 C9 回滚与 C10 拒绝覆盖 · ★★ **D-2** `m_dispatchClosing` 必须 **`std::atomic<bool>`**（drain 在锁外读它、工作线程会写它）· **D-3** 新增内部测试缝 `SetPostThreadMessageSeamForTests` · **D-4** `std::bad_alloc` 可能传播 · ★★ **D-5** 每线程消息队列**跨用例共享** ⇒ 残留 `WM_QUIT` 会让下一个用例假失败 · **D-6** 失败分支的日志留锁内） | ✅ **v1.1 评审通过（可进入实施）** |
+| [phase23-worker-to-ui-dispatch-requirements.md](phase23-worker-to-ui-dispatch-requirements.md) | 需求确认（**K1–K15** · **R1–R10** · **D0–D7** · **N1–N9** · **Q1–Q10** · **A1–A10** · 外部评审意见已吸收）；★ **不展开接口草案 / 消息载荷 / 具体排队算法** | ✅ **v1.1** |
+| [phase23-worker-to-ui-dispatch-preliminary-design.md](phase23-worker-to-ui-dispatch-preliminary-design.md) | **初步设计**：范围映射 · **§1.4 首轮评审处置** · ★ **§1.5 第二轮评审处置（P0 并发竞态：唤醒移入临界区 + 失败就地回滚）** · `Application::PostToUi` / `PlatformApplication::PostToUi` 接口草案 · `PostThreadMessageW` 唤醒方向 · mutex + deque 队列 · **§3.4 状态转换表 S1–S7** · 批次 drain 非重入 · `RequestExit` / 析构关闭顺序 · callback 异常边界 · 契约 **C1–C10** · **8 文件**影响面 · **T23-1..T23-9** · **O1–O6** | ✅ **v1.2** |
+| [phase23-worker-to-ui-dispatch-detailed-design.md](phase23-worker-to-ui-dispatch-detailed-design.md) | **详细设计（实施规格）**：**逐文件改动 △1–△8**（生产 5 + 测试 3，新建 1）· **代码基线 B1–B14**（全部带行号实测）· **契约 C1–C10 → 落点 → 测试**全映射 · **状态机 S1–S7 → 代码行对照** · **盯防清单 11 条**（可机检）· **用例正文 T23-1..T23-11** + **装置规则 5 条**（补投 `WM_QUIT` 确定终止 · 收尾清残留防跨用例污染）· **A1–A10 → T 全映射** · 影响面 · 实施顺序 · **局限 L1–L7** · ★ **v1.1（第三轮评审：详设 v1.0 通过、可进入实施）** = **§1.6 评审处置表** + **R-① 生命周期拆两层**（**载荷** / **`Application` 对象本体**——后者是跨线程调成员函数的固有前提；★ **不引入**引用计数 / `shared_ptr` / token）+ **R-② 机检补 11**（无 UI 线程 fast path）· ★ **对初设 6 处修正**（**D-1** 用例 **273 → 275**——补 C9 回滚与 C10 拒绝覆盖 · ★★ **D-2** `m_dispatchClosing` 必须 **`std::atomic<bool>`**（drain 在锁外读它、工作线程会写它）· **D-3** 新增内部测试缝 `SetPostThreadMessageSeamForTests` · **D-4** `std::bad_alloc` 可能传播 · ★★ **D-5** 每线程消息队列**跨用例共享** ⇒ 残留 `WM_QUIT` 会让下一个用例假失败 · **D-6** 失败分支的日志留锁内） | ✅ **v1.2 已实施**（五处修正 · 机检 12/12）→ **v1.3 已收口**（**四链 275 / 275**） |
 
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 

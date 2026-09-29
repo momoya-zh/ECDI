@@ -1,7 +1,7 @@
-﻿# Phase 23 · 工作线程 → UI 线程投递（worker-to-UI dispatch）—— 详细设计（v1.1）
+﻿# Phase 23 · 工作线程 → UI 线程投递（worker-to-UI dispatch）—— 详细设计（v1.3）
 
 > 来源：初步设计 `docs/phase23-worker-to-ui-dispatch-preliminary-design.md` **v1.2** · 需求确认 `docs/phase23-worker-to-ui-dispatch-requirements.md` **v1.1** · 审计 `framework-defect-audit.md` **D-4**（= `desktopnest-roadmap.md` **G-3** = `roadmap-deferred.md` §7.9 顺位 ④）。
-> 状态：**v1.1 已评审通过，可进入实施**（2026-09-29）——★ v1.1 吸收第三轮评审（结论：**详设 v1.0 通过、可进入 Implementation**；唯一补强 = **R-① 生命周期两层表述**，另把评审的 9 条实施盯防与本稿机检清单逐条对照并补 1 条，见 §1.6）。本稿是**实施规格**：把初设的接口 / 数据流 / 生命周期落成**逐文件、逐行**的改动清单（△1–△8），闭合初设留下的 **O1–O6** 与 **V1–V6**，并给出可直接照做的测试装置与用例正文。
+> 状态：**v1.3 已实施并验证通过（四链 275 / 275）**（2026-09-29）——★ v1.3 = **收口回写**（**四链 275 / 275** 全绿，用户侧实测；见 §7.1 的验证状态）；★ v1.2 = **实施期回写**（△1–△8 已落码 · 静态机检 **12/12** · 修正**五处**，见 §7.1）；★ v1.1 吸收第三轮评审（结论：**详设 v1.0 通过、可进入 Implementation**；唯一补强 = **R-① 生命周期两层表述**，另把评审的 9 条实施盯防与本稿机检清单逐条对照并补 1 条，见 §1.6）。本稿是**实施规格**：把初设的接口 / 数据流 / 生命周期落成**逐文件、逐行**的改动清单（△1–△8），闭合初设留下的 **O1–O6** 与 **V1–V6**，并给出可直接照做的测试装置与用例正文。
 > 本稿**不修改任何源码 / 测试代码**，也不运行测试；实施由用户在自己的工具链完成（四链验证纪律见 §5.3）。
 > 用例锚点：**264 → 275**（★ 相对初设 v1.2 的 **273** 有 **+2** —— 见 §1.3 **D-1** 的如实报告）· Public 头 **92 → 92** · 设计文档 **147 → 148**。
 
@@ -528,18 +528,27 @@ namespace {
 // ══════════════════════════════════════════════════════════════════
 
 /// @brief 最小 Application（本组只测投递通路，不观测事件）
-struct TestApp : public Application {};
+/// @details ★ 构造即记录**本线程**为 UI owner thread（= `Win32PlatformApplication` 的 `m_uiThreadId`）
+///          ——终止装置用它把 `WM_QUIT` 投到**正确的**线程队列（见下方 `PostQuitTo`）。
+struct TestApp : public Application {
+
+	const DWORD uiThreadId = ::GetCurrentThreadId();
+
+};
 
 // ── 装置 ①：确定终止 ────────────────────────────────────────────────
 // ★★ 为什么需要它：`Run()` 阻塞在 `GetMessageW`，若实现漏了唤醒，用例会**挂死整个套件**
 //   （不是红字，是挂起）。补投一条 `WM_QUIT` 使「泵退出」**不依赖被测的唤醒是否成功**。
-/// @details 与 `PostToUi` 的唤醒消息**同属本线程队列且 FIFO** ⇒ 只要在**最后一次提交之后**
+// ★★ 为什么目标线程**必须显式传入**（★ v1.2 实施期修正，见 §7.1）：工作线程里调
+//   `GetCurrentThreadId()` 得到的是**它自己** —— 而非 UI 线程；`PostThreadMessageW` 投给一个
+//   **没有消息队列**的线程会**直接失败** ⇒ 终止消息根本没进 UI 队列 ⇒ `Run()` **永久阻塞**。
+//   本组的 T23-2 / T23-3 / T23-8 / T23-9 都是在**工作线程**里补投 ⇒ 原写法会让 4 条用例挂死。
+/// @param uiThreadId UI owner 线程 id（统一传 `app.uiThreadId` —— 构造线程即 owner）
+/// @details 与 `PostToUi` 的唤醒消息**同属 UI 线程队列且 FIFO** ⇒ 只要在**最后一次提交之后**
 ///          补投，泵就会先 drain 完所有工作、再取到 WM_QUIT 退出（顺序由队列保证，非时序假设）。
-///          ⚠️ `PeekMessageW` 的队列创建已在 `Win32PlatformApplication` 构造期完成，
-///          但本函数在**任何** `Run()` 之前调用仍需队列存在 ⇒ 本组用例都持有 `TestApp`（构造即建队列）。
-void PostQuitToThisThread(){
+void PostQuitTo(DWORD uiThreadId){
 
-	::PostThreadMessageW(::GetCurrentThreadId(), WM_QUIT, 0, 0);
+	::PostThreadMessageW(uiThreadId, WM_QUIT, 0, 0);
 
 }
 
@@ -581,18 +590,21 @@ void Test23SubmitBeforeRun(){
 
 	std::atomic<bool> accepted{false};
 
-	std::thread::id submitThread{};
+	// ★ 实施期修正 ⑤（见 §7.1）：线程身份用 **Win32 线程 ID（DWORD）**——
+	//   MinGW win32-threads 模型下 `std::thread::id` 不可靠：worker 退出后其 id 数据块被
+	//   主线程**首次** `get_id()` 复用 ⇒ 两者相等（探针实证，见 §7.1 ⑤）。
+	DWORD submitThread{};
 
-	std::thread::id executeThread{};
+	DWORD executeThread{};
 
 	std::thread worker([&]{
 
-		submitThread = std::this_thread::get_id();
+		submitThread = ::GetCurrentThreadId();
 
 		// ★ 工作线程内**不做断言**（`TestContext` 无跨线程保护——B13）；只记录，主线程断言
 		accepted.store(app.PostToUi([&]{
 
-			executeThread = std::this_thread::get_id();
+			executeThread = ::GetCurrentThreadId();
 
 			executed.fetch_add(1, std::memory_order_relaxed);
 
@@ -602,7 +614,7 @@ void Test23SubmitBeforeRun(){
 
 	worker.join();
 
-	PostQuitToThisThread();
+	PostQuitTo(app.uiThreadId);
 
 	EXPECT_EQ(app.Run(), 0);
 
@@ -629,29 +641,29 @@ void Test23SubmitWhileRunning(){
 
 	std::atomic<bool> accepted{false};
 
-	std::thread::id submitThread{};
+	DWORD submitThread{};
 
-	std::thread::id executeThread{};
+	DWORD executeThread{};
 
-	const std::thread::id uiThread = std::this_thread::get_id();
+	const DWORD uiThread = app.uiThreadId;
 
 	const bool gateAccepted = app.PostToUi([&]{
 
 		// G：在 drain 内执行。此处派生工作线程 ⇒ 其提交时刻**晚于** Run 进入泵
 		std::thread worker([&]{
 
-			submitThread = std::this_thread::get_id();
+			submitThread = ::GetCurrentThreadId();
 
 			accepted.store(app.PostToUi([&]{
 
-				executeThread = std::this_thread::get_id();
+				executeThread = ::GetCurrentThreadId();
 
 				executed.fetch_add(1, std::memory_order_relaxed);
 
 			}));
 
 			// ★ 提交**完成之后**再补投终止 QUIT ⇒ 队列序 = [唤醒 C, WM_QUIT]
-			PostQuitToThisThread();
+			PostQuitTo(app.uiThreadId);
 
 		});
 
@@ -694,7 +706,7 @@ void Test23SingleSourceFifo(){
 
 		allAccepted.store(ok);
 
-		PostQuitToThisThread();
+		PostQuitTo(app.uiThreadId);
 
 	});
 
@@ -739,7 +751,7 @@ void Test23NoReentrancyFromCallback(){
 
 		}));
 
-		PostQuitToThisThread();   // 队列序 = [唤醒 B, WM_QUIT]（B 的唤醒先入队）
+		PostQuitTo(app.uiThreadId);   // 队列序 = [唤醒 B, WM_QUIT]（B 的唤醒先入队）
 
 		aFinished.store(true);
 
@@ -773,7 +785,7 @@ void Test23UiThreadSubmitIsAlsoAsync(){
 
 	EXPECT_EQ(executed.load(), 0);
 
-	PostQuitToThisThread();
+	PostQuitTo(app.uiThreadId);
 
 	EXPECT_EQ(app.Run(), 0);
 
@@ -819,7 +831,7 @@ void Test23QueueSurvivesWindowDestroyed(){
 
 	}
 
-	PostQuitToThisThread();
+	PostQuitTo(app.uiThreadId);
 
 	EXPECT_EQ(app.Run(), 0);
 
@@ -889,7 +901,7 @@ void Test23CallbackExceptionIsolated(){
 
 		allAccepted.store(ok);
 
-		PostQuitToThisThread();
+		PostQuitTo(app.uiThreadId);
 
 	});
 
@@ -945,7 +957,7 @@ void Test23ConsumerShapedPayload(){
 
 		}));
 
-		PostQuitToThisThread();
+		PostQuitTo(app.uiThreadId);
 
 	});
 
@@ -1020,7 +1032,7 @@ void Test23RunOnOwnerThreadOnly(){
 
 	TestScopeCleanup cleanup;
 
-	const std::thread::id owner = std::this_thread::get_id();
+	const DWORD owner = ::GetCurrentThreadId();
 
 	// ① 非 owner 线程调用：被拒绝、**立即返回**（不进入跨线程消息泵——那会静默失效）
 	int foreignResult = -1;
@@ -1036,13 +1048,13 @@ void Test23RunOnOwnerThreadOnly(){
 
 	EXPECT_TRUE(app.PostToUi([&]{ executed.fetch_add(1, std::memory_order_relaxed); }));
 
-	PostQuitToThisThread();
+	PostQuitTo(app.uiThreadId);
 
 	EXPECT_EQ(app.Run(), 0);
 
 	EXPECT_EQ(executed.load(), 1);
 
-	EXPECT_EQ(owner, std::this_thread::get_id());   // 本用例确实在 owner 线程上运行
+	EXPECT_EQ(owner, app.uiThreadId);   // 本用例确实在 owner 线程上运行
 
 }
 
@@ -1171,7 +1183,7 @@ void RegisterApplicationDispatchTests();   ///< Phase 23：工作线程 → UI �
 |---|---|---|
 | **1** ★★ | `m_postThreadMessage(` 在 `Win32PlatformApplication.cpp` 出现 **恰好 1 次**，且该行位于 `std::lock_guard lock(m_dispatchMutex);` **之后**、`PostToUi` 闭括号**之前**（= 唤醒在临界区内） | `grep -n "m_postThreadMessage("` 数行号并比对上下文 |
 | **2** ★★ | `CloseUiDispatch()` 在该文件出现 **恰好 3 次**（1 处定义 + `RequestExit` + 析构）⇒ 唤醒失败分支**没有**第 4 处调用（自死锁防线） | `grep -c "CloseUiDispatch()"` |
-| **3** | `kUiDispatchMessage` 出现 **恰好 2 次**（匿名 namespace 定义 + `Run()` 分支），定义处带 `WM_APP + 1` / `+ 2` 的占位登记注释 | `grep -n "kUiDispatchMessage"` |
+| **3** | `kUiDispatchMessage` 出现 **恰好 3 次**（匿名 namespace 定义 + `Run()` 分支 + `PostToUi` 的唤醒调用——★ v1.2 修正：原判据漏了第三处），定义处带 `WM_APP + 1` / `+ 2` 的占位登记注释 | `grep -n "kUiDispatchMessage"` |
 | **4** | `std::lock_guard` 出现 **恰好 3 次**（`PostToUi` / `DrainUiDispatch` / `CloseUiDispatch`）；★ callback 执行区（`for` + `try`）**不在**任何 `lock_guard` 作用域内 | `grep -n "lock_guard"` + 人工看花括号范围 |
 | **5** | 公共面零 Win32：`Application.h` / `PlatformApplication.h` 内 `HWND` / `UINT` / `WPARAM` / `LPARAM` / `Windows.h` **零命中**；`PostToUi` 签名只用 `std::function<void()>` | `grep -nE "HWND\|WPARAM\|LPARAM\|Windows.h"` 两文件 |
 | **6** ★ | `m_dispatchClosing` 声明为 **`std::atomic<bool>`**；`m_dispatchWakePending` 为普通 `bool`（D-2） | `grep -n "atomic<bool> m_dispatchClosing\|bool m_dispatchWakePending"` |
@@ -1180,6 +1192,10 @@ void RegisterApplicationDispatchTests();   ///< Phase 23：工作线程 → UI �
 | **9** | 零回归：`git diff --name-only` **不含** `Win32PlatformWindow.cpp` / `WindowMessageHandler.cpp` / `AnimationManager.*`；`TimerEvent` 路径零改动 | `git diff --name-only` |
 | **10** | `PostThreadMessageW` 在**生产代码**中只出现 **1 次**（△5 的适配器内部）；测试侧的出现属于装置 | `grep -rn "PostThreadMessageW" ECDI/src --include=*.cpp` |
 | **11** ★ | **无 UI 线程 fast path**（v1.1 · 评审 R-②⑦）：`PostToUi` 内**不出现**任何「按调用线程分流」的判断（`GetCurrentThreadId` / `IsUiThread` / 当前线程比较）——提交一律入队（R10 / D7 / C3） | `grep -n "GetCurrentThreadId" Win32PlatformApplication.cpp` ⇒ 期望命中 **2 处**（构造期记录 owner + `Run()` 前置条件），★ `PostToUi` 函数体内 **0 处** |
+| **12** ★ | **注册项与定义一一对应**：注册函数里每个 `&Test23Xxx` 都能在**本文件**找到 `^void Test23Xxx(` —— ★ v1.2 实施期补（见 §7.1 ④） | 抽 `&(Test23\w+)\);` 与 `^void (Test23\w+)\(` 两个集合做差 ⇒ 必须为空 |
+
+> ★★ **计数判据必须先剥注释（v1.2 实施期修正）**：本清单的 **2 / 3 / 5 / 8 / 10** 条以「符号出现次数」判定，而**代码注释里会提及这些符号**——例：唤醒失败分支的注释写着「⚠️ 不得调用 `CloseUiDispatch()`」⇒ 它自己会被计成**第 4 次调用**；`Application.h` 的注释写着「不暴露 HWND」⇒ 被当成**公共面泄漏**。实测**首轮这 5 条全部假红**（真因是判据、非代码——条 107）。★ **判定方式** = 逐行 `line.split('//')[0]` 后再计数；★ **修正后的期望值**：**2 → 3 次**（`CloseUiDispatch()` = `RequestExit` 调用 + 定义 + 析构）· **3 → 3 次**（`kUiDispatchMessage` = 定义 + `Run()` 分支 + `PostToUi` 的唤醒调用；★ 原判据写 2 次是**漏了第三处**）· **5 → 0 命中** · **8 → 0 命中** · **10 → 1 处**。★ 教训：**凡「某符号只出现 N 次」的判据，先问一句「注释里会不会提到它」**。
+
 
 ---
 
@@ -1196,7 +1212,7 @@ void RegisterApplicationDispatchTests();   ///< Phase 23：工作线程 → UI �
 | **A5** 生命周期安全 | `Run()` 前 / 中 / `Exit()` 后 / 窗口销毁 / 析构 | T23-1 / T23-6 / T23-7 / T23-11 |
 | **A6** 真实消费者可接入 | 消费者形态小载荷走通 | T23-9 |
 | **A7** 既有 Timer 零回归 | 现有 264 用例保持通过 + dispatch 消息不进窗口翻译器 | 全量既有套件 + §4.3 机检 9 |
-| **A8** 四工具链可测 | MSVC / ClangCL / Clang / MinGW 均构建并运行新增用例 | 用户侧执行（§5.3） |
+| **A8** 四工具链可测 | MSVC / ClangCL / Clang / MinGW 均构建并运行新增用例 | ✅ **四链 275 / 275 全绿**（用户侧实测，见 §7.1） |
 | **A9** 无同步重入 | A 内提交 B，B 不在 A 返回前执行 | T23-4 |
 | **A10** UI 线程调用语义一致 | 提交返回时未执行；关闭后拒绝 | T23-5 / T23-7 |
 
@@ -1207,6 +1223,8 @@ void RegisterApplicationDispatchTests();   ///< Phase 23：工作线程 → UI �
 ### 5.3 验证纪律（由用户在 VS / CLion 执行，AI 不代跑）
 
 报告必须逐项写明：① **四链通过数**（MSVC / ClangCL / Clang / MinGW，`ecdi_tests`）；② **断言是否启用**（MSVC 系查 `/MDd`、GNU 系查 `-D_DEBUG`）；③ **本机显示器缩放**（本组以线程 / 消息为主，仍沿用项目全量纪律）。★ 若出现 **flaky**，**先查测试同步与消息泵时序**（本组无 `Sleep`，出现不稳定即指向实现或装置缺陷），不得用重复运行掩盖。
+
+★ **实测结果（2026-09-29 · 用户侧）**：**四链 275 / 275 全绿**（`MSVC` / `ClangCL` / `Clang` / `MinGW`）——★ 其中 **MinGW** 一度报 **`0xC0000139`（`STATUS_ENTRYPOINT_NOT_FOUND`）**，经 PE 级导入表排查证实为**运行环境的加载问题而非代码缺陷**（同一 exe 在 AI 沙箱内可正常加载并跑完 275 项）；修正装置缺陷（⑤）后用户侧四链全部正常。★ 断言启用与缩放口径见 §7.1 的验证状态。
 
 ---
 
@@ -1235,6 +1253,54 @@ void RegisterApplicationDispatchTests();   ///< Phase 23：工作线程 → UI �
 
 **实施后回写**（收口时）：`docs/README.md` 的 §Phase23 段与「当前」行 · 根 `README.md` 的 Status 表 **23** 行 · 审计 `framework-defect-audit.md`（D-4 状态 + 修订记录）· `roadmap-deferred.md`（顺位 ④ + 修订记录）· `desktopnest-roadmap.md`（G-3）· 本文件 §7.1 实施记录。
 
+### 7.1 实施记录（2026-09-29 · 单批 △1–△8）
+
+**范围**：**8 文件 = 生产 5 改 + 测试 3**（**新建 1**）——★ 与 §1.2 的预估**逐文件一致**（未增删文件）。
+
+| 文件 | 实测落点 |
+|---|---|
+| `ECDI/include/ECDI/Application/Application.h` | +1 include（`<functional>`）· +1 声明（含**两层生命周期**注释） |
+| `ECDI/src/Application/Application.cpp` | +1 include（`<utility>`）· +1 薄转发（`std::move`） |
+| `ECDI/include/ECDI/Platform/PlatformApplication.h` | +1 纯虚（应用级能力惯例第 ① 步） |
+| `ECDI/src/Platform/Win32/Win32PlatformApplication.h` | +4 include · +1 override · +1 测试缝（`using` 先于使用点）· +3 私有方法 · +6 成员 |
+| `ECDI/src/Platform/Win32/Win32PlatformApplication.cpp` | +1 include（`<exception>`——见下 ③）· 消息号登记 · 构造（建队列）· `Run()` 守卫 + dispatch 分支 · `RequestExit` · 4 个新函数 · 析构首行 |
+| `ECDI/src/Tests/ApplicationDispatchTests.cpp` | **新建 583 行**：11 用例 + 2 装置（+ `TestApp`） |
+| `ECDI/src/Tests/RunAllTests.h` / `.cpp` | 各 +1（声明 / 调用） |
+
+**规模（实测）**：用例 **264 → 275**（`GetTestRegistry().Add(` 全库求和 = **275**）· 公共头 **92 → 92** · CMake **0 改动** · 断言特征串 **11 → 11**。
+
+★★ **实施期发现的五处修正（本稿 v1.1 → v1.2；★ ①②③由实施 / 静态核验暴露 · ④由首次编译暴露 · ⑤由 MinGW 首次运行暴露，附探针实证）**：
+
+1. ★★ **装置 ① 的线程语义错误 —— 会让 4 条用例挂死**：v1.1 的 `PostQuitToThisThread()` 内部用 `GetCurrentThreadId()`。★ **在工作线程里调用它得到的是工作线程自己**，而 `PostThreadMessageW` 投给**没有消息队列**的线程会**直接失败** ⇒ 终止消息根本没进 UI 队列 ⇒ `Run()` **永久阻塞**（挂起整个套件，不是红字）。★ 而 v1.1 的 **T23-2 / T23-3 / T23-8 / T23-9 恰恰都在工作线程里补投**。**修正** = `TestApp` 记录 `const DWORD uiThreadId = ::GetCurrentThreadId();`（构造线程 = owner），装置改签名 **`PostQuitTo(DWORD uiThreadId)`**，9 个调用点统一写 `PostQuitTo(app.uiThreadId)`。★ **教训**：「当前线程」只在主线程语境下等于「UI 线程」——**跨线程用例的装置必须显式携带目标线程**。
+2. ★ **§4.3 的计数判据把注释计入 ⇒ 5 条假 FAIL**：见 §4.3 末尾的修正说明（期望值 2→3 / 3 次改为 3 次 / 5 与 8 改为 0 命中 / 10 改为 1 处）。
+3. ★ **补 1 处 include（`<exception>`）**：△5 的规格**未列 `.cpp` 侧的标准库 include 增量**，而 `DrainUiDispatch` 用了 `catch (const std::exception&)`——实测这是**本仓库首次使用 `std::exception`**（全库仅此一处），且该文件**既无 `<exception>` 也无 `<stdexcept>`** ⇒ 显式补上，**不赌四工具链的传递包含**。★ 连带影响：该文件其后所有行号 **+1**，下表已按**加 include 之后的实测值**给出。
+4. ★★ **注册项命名笔误（★ 由首次编译抓到；★ **是实施落码时抄错的，详设 △6 原文无误**——`grep` 核实本稿第 1082 行即 `&Test23RunOnOwnerThreadOnly`）**：实施时把 T23-11 的注册项写成 `&Test23RunOwnerThreadOnly`，而**定义**是 `Test23RunOnOwnerThreadOnly`（**少一个 `On`**）⇒ MSVC 报 **`C2065: 未声明的标识符`**。★ **订正**：注册项改为 `&Test23RunOnOwnerThreadOnly`；★ **并新增机检 12**（注册项 ↔ 定义**一一对应**）——这类"名字对不上"**编译期才暴露**，纯符号计数判据看不见它。
+
+★ **首次编译实测（用户侧 · MSVC Debug / `/MDd` · 2026-09-29）**：`ECDI` 静态库**编译通过**（含 `Win32PlatformApplication.cpp` / `Application.cpp` —— 即本阶段的全部**生产**改动）· `ecdi_tests` 的 **32 个测试 TU 中 30 个编译通过**，唯一失败 = 上述 ④；★ 构建日志同时证实 **CMake 的 `GLOB_RECURSE … CONFIGURE_DEPENDS` 自动发现**了新测试文件（`GLOB mismatch! The following files were added: ApplicationDispatchTests.cpp`）⇒ §1.2「**0 CMake 改动**」的实测印证。
+
+5. ★★ **装置的线程身份判据在 MinGW 上失效（`std::thread::id` 相等）——探针实证 + 已改用 Win32 线程 ID**：MinGW（win32-threads / gthr-win32）的 `std::thread::id` 背后是**按需分配的 per-thread 数据块**；worker 退出时块被释放，**主线程若在其后才第一次调 `this_thread::get_id()`，会复用同一块** ⇒ 两个线程的 id **相等**。★ 20 行探针实证（同一工具链 `D:\Environment\CPP\mingw64\bin\g++.exe`，两次运行结果一致）：**模式 A（main 首次取 id 在 worker `join()` 之后）= 相等**；**模式 B（先取 id 再建 worker）= 不等** —— 这正是 T23-1（唯一一个「主线程首次取 id 发生在 worker 退出之后」的用例）**单独失败**的原因，也解释了其余三链（MSVC / ClangCL / Clang）为何全过。★ **修正**：装置的线程身份一律改用 **Win32 线程 ID（`DWORD`，`GetCurrentThreadId()`）**（T23-1 / T23-2 / T23-11：5 处字段 + 4 处赋值 + 2 处比较），稳定、唯一、与工具链无关；★ **教训：跨线程身份判据不要用 `std::thread::id` 的值语义跨「线程退出」边界比较**。
+
+
+**★★ 机检结果（去注释后 · **12/12** · 2026-09-29 · AI 侧静态自查；★ 编译与运行由用户执行）**
+
+| # | 期望 | 实测 |
+|---|---|---|
+| **1** ★★ | `m_postThreadMessage(` 恰 1 次，且在 `PostToUi` 的 `lock_guard` 之后、函数闭括号之前 | ✅ 调用在第 **142** 行 · `PostToUi` = **112–167** · 锁在第 **124** 行 |
+| **2** ★★ | `CloseUiDispatch()` **3** 次（**不含**失败分支的注释） | ✅ **3** = `RequestExit`（104）+ 定义（215）+ 析构（770） |
+| **3** | `kUiDispatchMessage` **3** 次 | ✅ **3** = 定义（31）+ `Run()` 分支（78）+ 唤醒调用（142） |
+| **4** | `std::lock_guard` **3** 次 | ✅ **3** = `PostToUi`（124）· `DrainUiDispatch`（174）· `CloseUiDispatch`（218） |
+| **5** | 公共头零 Win32 类型（去注释） | ✅ 两文件 **0 命中** |
+| **6** ★ | `std::atomic<bool> m_dispatchClosing` + 普通 `bool m_dispatchWakePending` | ✅ 逐字一致 |
+| **7** | 三处登记齐备 + 全库 `Add(` = **275** | ✅ 275 |
+| **8** | 该 .cpp 零 `FRAMEWORK_ASSERT`；`Application::Exit()` 未加守卫 | ✅ 0 命中；`Exit()` **逐字未改** |
+| **9** | 改动清单不含既有路径 | ✅ 仅 §1.2 的 **8 个**文件 |
+| **10** | 生产 `PostThreadMessageW` **1** 处 | ✅ 仅适配器（第 **230** 行） |
+| **11** ★ | `GetCurrentThreadId` **2** 次且不在 `PostToUi` 内 | ✅ **41**（构造记录 owner）/ **60**（`Run()` 前置条件） |
+| **12** ★ | 注册项 ↔ 定义**一一对应** | ✅ **11 对全命中**（★ 首轮编译抓到 1 处不符 ⇒ 见 ④，订正后复验通过） |
+
+★ **验证状态（2026-09-29）**：★★ **四链 275 / 275 全绿**（`MSVC` / `ClangCL` / `Clang` / `MinGW`，**用户侧实测**）——★ **MinGW 在装置修正（⑤）后正常**；此前它一度报 **`0xC0000139`**，经 PE 级排查证实为**运行环境的加载问题、非代码缺陷**（同一 exe 在 AI 沙箱内可正常加载并跑完 275 项）。★ **首轮编译（修正前）实测**：`ECDI` 库**通过** + 32 个测试 TU 中 **30 个通过**，唯一错误 = ④（已修）。
+
+
 ---
 
 ## 8. 局限（L1–L7，如实记录）
@@ -1253,5 +1319,7 @@ void RegisterApplicationDispatchTests();   ///< Phase 23：工作线程 → UI �
 
 ## 9. 修订记录
 
+- **v1.3**（2026-09-29）**收口回写 —— 四链验证通过（275 / 275）**。① ★★ **用户侧实测：四链 275 / 275 全绿**（`MSVC` / `ClangCL` / `Clang` / `MinGW`）⇒ 需求验收 **A8**（四工具链可测）达成，A1–A10 全部有实测或结构判据支撑。② ★ **MinGW 的 `0xC0000139`（`STATUS_ENTRYPOINT_NOT_FOUND`）归因定案：不是代码缺陷** —— PE 级导入表解析显示 12 个 DLL 依赖全部可解析、三份 `libstdc++-6.dll` 均满足 60/60 所需符号，且**同一 exe 在 AI 沙箱内可正常加载并跑完 275 项** ⇒ 属**用户运行环境的加载问题**；修正装置缺陷（⑤ 的 `std::thread::id` 误判）后用户侧四链接通。③ ★ **就地更新**：§5.1 的 **A8** 行 · §5.3 补实测结果 · §7.1 的**验证状态**段 · 头部状态行 → **v1.3** · 本条目。④ ★ **范围零变化**：△1–△8 · 8 文件 · 用例 **264 → 275** · 公共头 **92 → 92** · 局限 **L1–L7** 均不变。
+- **v1.2**（2026-09-29）**实施期回写（△1–△8 已落码 · 静态机检 12/12 · 待四链验证）**。① ★★ **实施期五处修正**（详见 **§7.1**）：**(a)** v1.1 的测试装置 `PostQuitToThisThread()` 用 `GetCurrentThreadId()` ⇒ 在**工作线程**内调用会投给工作线程自己、`PostThreadMessageW` **失败** ⇒ `Run()` **永久阻塞**（★ 而 T23-2 / T23-3 / T23-8 / T23-9 正是工作线程补投）⇒ 改为 **`PostQuitTo(DWORD uiThreadId)`** + `TestApp::uiThreadId`（构造线程 = owner），9 个调用点统一 **`PostQuitTo(app.uiThreadId)`**；**(b)** §4.3 的**计数判据把注释计入**（注释会提及被判据统计的符号）⇒ 首轮 **5 条假 FAIL**（机检 2 / 3 / 5 / 8 / 10）⇒ 判据改为**先剥注释再计数**，并修正期望值（**机检 3：2 → 3 次**，原判据漏了 `PostToUi` 的唤醒调用）。② ★ **新增 §7.1 实施记录**（逐文件落点 · 规模实测 · 两处缺陷 · **机检结果表 11/11** · ★ 明确声明「未编译、未跑测试」）。③ ★ 第三处为 **include 补**（`.cpp` +1 `<exception>`——本仓库首次用 `std::exception`，不赌传递包含）。★ **第四处**：实施落码时 T23-11 的**注册项**少写一个 `On`（`&Test23RunOwnerThreadOnly` vs 定义 `Test23RunOnOwnerThreadOnly`；★ 详设 △6 原文无误）⇒ **首次编译 MSVC C2065** 抓到 ⇒ 订正 + **新增机检 12**（注册项 ↔ 定义一一对应）。★ **第五处**：装置线程身份改 **Win32 线程 ID（`DWORD`）**（§7.1 ⑤——MinGW 的 `std::thread::id` 数据块复用，探针实证）⇒ 身份判据跨四工具链稳定。★ **范围零变化**：仍 **8 文件** · 用例 **264 → 275** · 公共头 **92 → 92** · **△1–△8 的接口 / 契约 / 状态机全部未改**（缺陷只落在「装置」与「判据」两处）。④ ★ **未编译 / 未跑测试**——四链验证由用户执行。
 - **v1.1**（2026-09-29）**第三轮评审吸收（结论：详设 v1.0 通过，可进入 Implementation）**。① ★ **R-① 采纳（唯一实体改动）**：把生命周期**拆成两层**——**载荷**（`work` 捕获对象，框架不保活）与 **`Application` 对象本体**（调用 `PostToUi` 期间必须存活，属跨线程调成员函数的**固有 C++ 前提**）⇒ △1 的公共头注释补 **5 行**（含「`PostToUi` 自身线程安全；对象生命周期由调用方保证」）、§8 增 **L7**（★ **不引入**引用计数 / `shared_ptr` / token——评审明确不建议为它膨胀范围）。② ★ **R-② 采纳**：把评审的「9 条实施盯防」与 §4.3 机检清单**逐条对照**（§1.6 对照表）；★ 其中「**UI 线程无 fast path**」原先只有 T23-5 与 C3 文字、**缺机械判据** ⇒ **新增机检 11**（`PostToUi` 内零线程判断）。③ ★ **R-③**：其余各节为确认性意见，无待办；★ 评审未发现任何需退回详设的 P0。④ ★ **新增 §1.6 评审处置表**；用例锚点 / 文件数 / 契约骨架**均不变**（**仍为 △1–△8 · 264 → 275**）。**无源码改动**。
 - **v1.0**（2026-09-29）**详细设计初稿**。输入 = 需求 **v1.1** · 初设 **v1.2**（P0 竞态已修）。产出：**逐文件改动 △1–△8**（★ 8 文件 = 生产 5 + 测试 3，新建 1；**文件数与初设一致**）· **代码基线 B1–B14**（全部带行号实测）· **契约 C1–C10 → 落点 → 测试** 全映射 · **状态机 S1–S7 → 代码行对照** · **盯防清单 10 条**（全部可机检）· **用例正文 T23-1..T23-11**（含装置规则 5 条）· **A1–A10 → T 全映射** · 影响面 · 实施顺序 · **局限 L1–L6**。★ **对初设的 6 处修正 / 细化（§1.3）**：**D-1** 用例 273 → **275**（补 C9 的回滚覆盖与 C10 的拒绝覆盖，C10 的测试映射由 T23-2 订正为 T23-11）· **D-2** ★★ `m_dispatchClosing` 必须为 **`std::atomic<bool>`**（drain 在**锁外**逐项读它，而工作线程会写它）· **D-3** 新增**内部测试缝** `SetPostThreadMessageSeamForTests`（先例 `SetShellSeamsForTests`，不改公共 API）· **D-4** V6 定案（`std::bad_alloc` 可能传播，写进公共头注释）· **D-5** ★★ 补出**装置级缺陷**：每线程消息队列**跨用例共享** ⇒ 「每个 `Run()` 恰好一次终止 `WM_QUIT`」+「用例收尾清残留」，否则残留 `WM_QUIT` 会让**下一个**用例假失败 · **D-6** 失败分支的 `Logger::Log` **留在锁内**并声明理由（实测 `Core/Logger.cpp:35-51` 不执行用户代码）。★ **闭合初设 O1–O6 与 V1–V6**（§1.5），其中 **O1** 定案「**不加断言**、`Error` + `return 0`」（口径先例 = `Win32PlatformWindow.cpp:1038-1048`）。★ **不修改任何源码 / 测试代码，不运行测试**。

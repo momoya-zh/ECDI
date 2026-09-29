@@ -3,6 +3,7 @@
 #include "ECDI/Window/Window.h"
 #include "ECDI/EventSystem/EventRouter.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -69,6 +70,20 @@ public :
 	/// @return 新创建窗口的引用
 	Window& Create(const std::string&title,int width,int height,
 	               RenderServices services = CreateDefaultRenderServices());
+
+	/// @brief 把工作异步提交到本 Application 的 UI 消息线程（Phase 23 D-1）
+	/// @param work 待执行工作；**按值接收**，平台队列取得其所有权
+	/// @return true = 已接收入队（★ **不表示已执行**）；false = 空工作 / 已进入关闭阶段 / 平台唤醒失败
+	/// @details 无论调用者是否已经在 UI 线程，**都不会在本调用栈内执行 work**（R9 / R10 / D7）。
+	///          不绑定 Window、不暴露 HWND 或任何 Win32 类型（R3 / D1）。
+	/// @note 可能抛出 `std::bad_alloc`（入队分配失败）——框架**不吞、不转成 `false`**（V6 定案）。
+	/// @note ★★ **生命周期有两层，必须分开看**（v1.1 · 评审 R-①）：
+	///       ① **载荷**——`work` 捕获的对象：框架**不保活**，调用方保证其在 callback 执行时有效；
+	///       ② **`Application` 对象本体**——调用 `PostToUi` **期间**它必须存活（这是「跨线程调用
+	///          成员函数」的**固有 C++ 前提**，**不是**本能力新增的约束）；框架**不**提供引用计数 /
+	///          `shared_ptr` / 稳定 token 保活。
+	///       ⇒ **`PostToUi` 自身线程安全；`Application` 对象的生命周期由调用方保证**（详设 §8 **L7**）。
+	bool PostToUi(std::function<void()> work);
 
 	/// @brief 退出消息循环
 	void Exit();

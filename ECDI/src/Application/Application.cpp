@@ -23,6 +23,7 @@
 #include "ECDI/Core/Logger.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace ECDI{
 
@@ -87,6 +88,15 @@ Window& Application::Create(const std::string& title, int width, int height,
 
 
 	return window;
+}
+
+bool Application::PostToUi(std::function<void()> work){
+
+	// 7.1.5 / Phase 23：本函数**只做转发**——队列、唤醒、关闭态全部在平台实现内部。
+	//   ★ std::move：形参已是按值副本，若此处传左值会**二次拷贝** std::function（可能再分配）。
+	//   ★ 不 catch：std::bad_alloc 属资源耗尽，不属于"提交被拒绝"（V6 定案）。
+	return m_platformApplication->PostToUi(std::move(work));
+
 }
 
 void Application::Exit(){

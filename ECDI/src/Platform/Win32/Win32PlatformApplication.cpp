@@ -4,6 +4,7 @@
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
 
+#include <exception>   // Phase 23：DrainUiDispatch 的逐 callback 异常边界（std::exception）
 #include <Windows.h>
 #include <shellapi.h>                  // Phase 14：Shell_NotifyIconW / TrackPopupMenu
 #include <windowsx.h>                  // Phase 14：GET_X_LPARAM / GET_Y_LPARAM（v4 锚点提取）
@@ -19,22 +20,72 @@ namespace{   // 匿名 namespace：托盘内部常量
 constexpr UINT kTrayIconId = 1;              ///< 托盘图标 ID（单图标——多图标属非目标 O-8）
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;   ///< 托盘回调消息（NIF_MESSAGE）
 
+/// @brief UI 投递的唤醒消息（★ **线程消息**——其 `MSG::hwnd` 恒为 NULL）
+/// @details ★ 注释式占位登记（先例 `Win32PlatformWindow.cpp:71-72`）：
+///          `WM_APP + 1` = 托盘回调（本文件 `:20`）· `WM_APP + 2` = Desktop 跟随延后一拍
+///          （`Win32PlatformWindow.cpp:73`）⇒ 本项目取 **`WM_APP + 3`**。
+///          严谨性说明：线程消息与窗口消息**类别不同**（前者 `hwnd` 恒 NULL），
+///          数值相同也不会互相吞掉；此处仍显式避让，以免**同号两义**妨碍排查。
+///          ⚠️ 测试会向**窗口**投 `WM_APP + 2`（`DesktopLayerTests.cpp:532`）——这正是
+///          `Run()` 分支必须**同时判别 `hwnd`** 的实证理由（详设 §2 △5 改动 3）。
+constexpr UINT kUiDispatchMessage = WM_APP + 3;
+
 }
 
-Win32PlatformApplication::Win32PlatformApplication() = default;
+Win32PlatformApplication::Win32PlatformApplication(){
+
+	// ★ Phase 23：记录 owner thread，并**建立本线程的消息队列**。
+	//   为什么必须：`PostThreadMessageW` 要求目标线程**已有消息队列**（否则直接失败）
+	//   ⇒ 不建队列，「`Run()` 之前提交」（T23-1）在结构上不可能成立（详设 V2）。
+	//   ★ `PM_NOREMOVE`：只窥探、不移除、**不派发**任何消息（构造期不得触发回调——条 108）。
+	m_uiThreadId = GetCurrentThreadId();
+
+	MSG message{};
+
+	PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE);
+
+}
 
 // ── 7.1.5：消息循环（既有，不动——GetMessageW(nullptr) 自动覆盖宿主窗口，K9）──
 
 int Win32PlatformApplication::Run(){
+
+	// ★ Phase 23 · C10：owner-thread 前置条件（本阶段**新增**的约束，非既有事实重述）。
+	//   为什么在框架侧显式闭合、而不是放任跨线程：唤醒是 `PostThreadMessageW(m_uiThreadId, ...)`
+	//   ⇒ 队列归属**构造线程**；换线程泵消息会**永远取不到**投递工作（静默失败）。
+	//   处置口径 = 与既有生命周期前置条件**同形**（`Win32PlatformWindow.cpp:1038-1048` 的
+	//   `SetWindowLayer` 用 Warning + return）——★ 不加 FRAMEWORK_ASSERT：断言只在 _DEBUG 生效
+	//   （`Core/ECDIAssert.h:22`）⇒ Release 无守卫，且会让本项在前置条件下中止整个测试套件。
+	//   返回值沿用 0（与"立即收到 WM_QUIT"同形）：框架**没有** Run 错误码约定，不凭空造（详设 O1 / L4）。
+	if (m_uiThreadId != GetCurrentThreadId()){
+
+		Logger::Log(LogLevel::Error,
+			L"Run() called on a non-owner thread - the UI dispatch queue belongs to the constructing thread");
+
+		return 0;
+
+	}
 
 	// 标准 Win32 消息循环：GetMessage 返回 0 时退出（收到 WM_QUIT）
 	MSG message{};
 
 	while (GetMessageW(&message, nullptr, 0, 0)){
 
-		TranslateMessage(&message);
+		// ★ Phase 23：私有 dispatch 线程消息分支。
+		//   判据**必须同时判别 `hwnd`**——线程消息的 hwnd 恒为 NULL（`GetMessageW(nullptr, ...)`
+		//   会同时取出窗口消息与线程消息）；只比消息号一旦与窗口消息同号，
+		//   该分支会把窗口消息**静默吞掉**（不再走 `DispatchMessageW`），且极难定位（初设 R-①）。
+		if (message.hwnd == nullptr && message.message == kUiDispatchMessage){
 
-		DispatchMessageW(&message);
+			DrainUiDispatch();
+
+		} else {
+
+			TranslateMessage(&message);
+
+			DispatchMessageW(&message);
+
+		}
 
 		// 每条消息后的延迟清理时机（资源生命周期管理——框架经 SetDeferredCleanup 注册）
 		PerformDeferredCleanup();
@@ -47,7 +98,136 @@ int Win32PlatformApplication::Run(){
 
 void Win32PlatformApplication::RequestExit(){
 
+	// ★ Phase 23：**先关闭投递通路，再请求退出**。
+	//   退出路径是**单一漏斗**（生产代码 `PostQuitMessage` 仅此 1 处，`:50`；隐式退出亦经
+	//   `Application::Exit()`——`Application.cpp:147-149`）⇒ 单点关闭即覆盖全部退出路径。
+	CloseUiDispatch();
+
 	PostQuitMessage(0);
+
+}
+
+// ── Phase 23：UI 投递通路（入队 / 唤醒 / 批次 drain / 关闭）────────────────────
+
+bool Win32PlatformApplication::PostToUi(std::function<void()> work){
+
+	if (!work){
+
+		return false;   // 空工作不入队（★ 不进临界区、不触发唤醒——状态表 S3）
+
+	}
+
+	// ★★ 入队 / 唤醒 / 失败回滚：**同一临界区**（初设 §3.2 的 P0 竞态修法）。
+	//   为什么必须同锁：若"发唤醒"在锁外，则「A 解锁 → B 入队并拿到 true（见 wakePending=true
+	//   ⇒ 不唤醒）→ A 的唤醒失败并清队列」这条交错会**丢掉 B 已被 true 承诺的工作**；
+	//   已返回的 true **撤不回**，任何"事后补救状态"都拦不住在途提交者。
+	std::lock_guard lock(m_dispatchMutex);
+
+	if (m_dispatchClosing){
+
+		return false;   // 含"上次唤醒失败后已就地关闭"的情形（状态表 S4）
+
+	}
+
+	m_dispatchQueue.emplace_back(std::move(work));
+
+	if (m_dispatchWakePending){
+
+		return true;    // 已有在途唤醒消息：入队即视为完成（状态表 S2）
+
+	}
+
+	// ★ 唤醒**在锁内**发出：`PostThreadMessageW` 是内核快调用、**不执行用户代码** ⇒ 可持锁。
+	//   （反例见上：放到锁外即初设 §3.2 交错表的 bug。）
+	if (m_postThreadMessage(m_uiThreadId, kUiDispatchMessage, 0, 0) == FALSE){
+
+		// 唤醒失败 ⇒ 这批工作永远不会被 drain ⇒ **就地回滚本临界区的全部后果**。
+		// ⚠️ 不得调用 CloseUiDispatch()——它自己会加锁 ⇒ **自死锁**。
+		// ⚠️ 日志留在锁内是**有意**的：`Logger::Log` = 拼串 + `OutputDebugStringW`
+		//    （`Core/Logger.cpp:35-51`），不执行用户代码，与 PostThreadMessageW 同类。
+		m_dispatchWakePending = false;
+
+		m_dispatchQueue.clear();
+
+		m_dispatchClosing = true;   // ★「关闭态」同时就是「唤醒失败态」⇒ 无需第 4 个状态
+
+		Logger::Log(LogLevel::Error,
+			L"UI dispatch wake failed - the queue is closed and the pending work is dropped");
+
+		return false;   // 状态表 S5（★ 与 S1 共用同一临界区）
+
+	}
+
+	m_dispatchWakePending = true;
+
+	return true;   // 状态表 S1：true = 已入队并被队列拥有（**不表示已执行**）
+
+}
+
+void Win32PlatformApplication::DrainUiDispatch(){
+
+	// ★ 批次快照：先把当前全部待执行工作搬出共享队列，**再解锁**。
+	std::deque<std::function<void()>> batch;
+
+	{
+
+		std::lock_guard lock(m_dispatchMutex);
+
+		batch.swap(m_dispatchQueue);
+
+		m_dispatchWakePending = false;   // 允许后续提交再次唤醒（drain 之后的新提交）
+
+	}
+
+	// ★ 解锁后逐项执行——callback 是**用户代码**：用户在 callback 里反向 `PostToUi` 会
+	//   二次加锁 ⇒ 锁内执行即**自死锁**（初设 §3.2 关键点 4）。
+	for (std::function<void()>& work : batch){
+
+		// ★ 逐项查关闭态（状态表 S6 的收尾语义）：关闭可能在**本批次中途**由上一项产生
+		//   （T23-7：A 调 `Exit()` ⇒ B 及其余项丢弃）。★ 本读取在**锁外** ⇒ 该标志必须是
+		//   `std::atomic<bool>`（工作线程的失败回滚会写它——详设 D-2）。
+		if (m_dispatchClosing){
+
+			break;
+
+		}
+
+		try{
+
+			work();
+
+		} catch (const std::exception&){
+
+			Logger::Log(LogLevel::Error, L"ECDI UI dispatch callback threw std::exception");
+
+		} catch (...){
+
+			Logger::Log(LogLevel::Error, L"ECDI UI dispatch callback threw an unknown exception");
+
+		}
+
+	}
+
+	// batch 在此析构：剩余工作的**用户析构函数**也在锁外执行（同上，用户代码不入锁）。
+
+}
+
+void Win32PlatformApplication::CloseUiDispatch() noexcept{
+
+	// 幂等：可被 `RequestExit()` 与析构重复调用（后者是"析构前先断通路"的硬要求）。
+	std::lock_guard lock(m_dispatchMutex);
+
+	m_dispatchClosing = true;
+
+	m_dispatchQueue.clear();
+
+	m_dispatchWakePending = false;
+
+}
+
+BOOL Win32PlatformApplication::PostThreadMessageAdapter(DWORD idThread, UINT msg, WPARAM wParam, LPARAM lParam){
+
+	return PostThreadMessageW(idThread, msg, wParam, lParam);
 
 }
 
@@ -583,6 +763,11 @@ void Win32PlatformApplication::DragFinishAdapter(HDROP hDrop){
 // ── Phase 14：析构（四步不变量：NIM_DELETE → DestroyIcon → DestroyWindow → UnregisterClassW）──
 
 Win32PlatformApplication::~Win32PlatformApplication(){
+
+	// ★ Phase 23：**先关闭投递通路**（拒绝新工作 + 丢弃未执行工作），再做既有资源清理。
+	//   理由：此后任何工作线程的提交都拿不到 true；已排队但未执行的工作不会在托盘 / 窗口
+	//   资源清理过程中被 drain（`Run()` 已不在，且析构后对象即将消失）。
+	CloseUiDispatch();
 
 	// 2.1 幽灵图标防线（R1 硬要求）：registered 才删——无论 desired；
 	//     失败仅 Warning——不阻塞析构（§6.7，剩余风险 = 幽灵图标，记账）
