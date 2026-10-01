@@ -9,6 +9,7 @@
 #include "Render/RecordingBackend.h"
 #include "ECDI/Render/RenderCommand.h"
 #include "ECDI/Render/TextMeasurer.h"
+#include "ECDI/Widget/ScrollBar.h"
 
 using namespace ECDI;
 
@@ -1232,6 +1233,167 @@ void TestTextBoxShapeBorderRing()
 	EXPECT_NEAR(inner.cornerRadius, 5.0f, kEps);
 }
 
+
+// ── textbox-scrollbar v1.1：垂直滚动条（T1–T8；契约见 docs/textbox-scrollbar.md §6 / §7）──
+
+/// @brief 造 N 行文本（每行一个 'a'，`\n` 分隔）——行数驱动内容高（假测量器行高恒 16）
+std::string MakeLines(size_t n)
+{
+	std::string text;
+	for (size_t i = 0; i < n; ++i){
+		if (i != 0)
+			text += '\n';
+		text += 'a';
+	}
+	return text;
+}
+
+/// @brief 取命令流中第 n 个（0-based）`PushClipCommand` 的宽度；找不到返回 -1
+/// @details TextBox 命令流次序：第 0 个 = `Widget::Paint` 的**控件边界**，
+/// 第 1 个 = `TextBox::OnPaint` 的**文本区**（条自身的 clip 在其后 ⇒ 同前例 ClipTests `commands[2]`）
+float NthClipWidth(const CommandBuffer& commands, size_t n)
+{
+	size_t seen = 0;
+	for (const auto& command : commands){
+		if (const auto* clip = std::get_if<PushClipCommand>(&command)){
+			if (seen == n)
+				return clip->rect.width;
+			++seen;
+		}
+	}
+	return -1.0f;
+}
+
+/// T1：多行 + 内容溢出 ⇒ 条可见
+void TestTextBoxScrollBarVisibleOnOverflow()
+{
+	TextBox box(MakeLines(10));   // 10 行 × 16 = 160 内容高
+	box.SetSize(200, 40);         // 视口 40 ⇒ 溢出
+	EXPECT_TRUE(box.GetVerticalScrollBar() != nullptr);
+	EXPECT_TRUE(box.GetVerticalScrollBar()->IsVisible());
+}
+
+/// T2：多行 + 内容不溢出 ⇒ 条隐藏，且**不参与命中**（Widget::HitTest:117 既有语义）
+void TestTextBoxScrollBarHiddenWhenFits()
+{
+	TextBox box(MakeLines(2));    // 32 < 40
+	box.SetSize(200, 40);
+	EXPECT_FALSE(box.GetVerticalScrollBar()->IsVisible());
+	// 条区域内命中到的**不是条**（不可见 ⇒ 不参与命中）——不断言具体返回谁（依赖基类 ContainsPoint）
+	EXPECT_TRUE(box.HitTest(194, 20) != box.GetVerticalScrollBar());
+}
+
+/// T3：单行 ⇒ 条恒隐藏（即便视口极小、文本很长）
+void TestTextBoxScrollBarHiddenSingleLine()
+{
+	TextBox box(MakeLines(10));
+	box.SetSingleLine(true);
+	box.SetSize(200, 20);         // 即便视口只有 20
+	EXPECT_FALSE(box.GetVerticalScrollBar()->IsVisible());
+}
+
+/// T4：条**可命中**（最上层）+ ★ **偏移权威归 TextBox**（D9 / K10——条不是第二控制权）
+void TestTextBoxScrollBarHitAndAuthority()
+{
+	TestableTextBox box(MakeLines(10));
+	box.SetSize(200, 40);
+	ScrollBar* bar = box.GetVerticalScrollBar();
+	EXPECT_TRUE(bar->IsVisible());
+
+	// ① 可命中：条是**最后** AddChild ⇒ HitTest 逆序优先命中条（Widget.cpp:139-149）
+	EXPECT_TRUE(box.HitTest(194, 20) == bar);
+
+	// ② 权威归容器：条自身 SetOffset **不回触发回调**（K10）⇒ 手动改条不改 TextBox 的滚动状态
+	box.MoveCaretToEnd();
+	const float caretDriven = box.GetScrollOffsetY();
+	EXPECT_TRUE(caretDriven > 0.0f);
+	bar->SetOffset(0);
+	EXPECT_EQ(bar->GetOffset(), 0);
+	EXPECT_NEAR(box.GetScrollOffsetY(), caretDriven, kEps);   // TextBox 侧不受条影响
+}
+
+/// T5：**滚轮路径**（鼠标驱动 ⇒ 条跟随；口径 = int(TextBox 偏移)）
+void TestTextBoxScrollBarFollowsWheel()
+{
+	TestableTextBox box(MakeLines(10));
+	box.SetSize(200, 40);
+	ScrollBar* bar = box.GetVerticalScrollBar();
+	EXPECT_EQ(bar->GetOffset(), 0);
+
+	box.OnMouseWheel(MouseWheelEvent(nullptr, 0, 0, -120));   // 向下滚一行（kScrollLinePx = 16）
+	EXPECT_NEAR(box.GetScrollOffsetY(), 16.0f, kEps);
+	EXPECT_EQ(bar->GetOffset(), 16);
+	EXPECT_EQ(bar->GetOffset(), static_cast<int>(box.GetScrollOffsetY()));
+}
+
+/// T6：条可见时**文本区让位**（△5）——经命令流观测**用户可见后果**：文本区 Clip 真的变窄
+/// @note 原稿直测 `GetTextAreaWidth()`，但该函数是 **private**（`using` 不能提升访问权，
+/// 不像 protected 的 `CaretIndexFromPosition`）⇒ 改为观测其后果，反而更强端到端。
+/// 用「同尺寸有/无条」两态**相减**，不依赖 padding 默认值。
+void TestTextBoxScrollBarNarrowsTextArea()
+{
+	RecordingBackend backend;
+
+	TextBox fits(MakeLines(2));                              // 32 < 40 ⇒ 无条
+	fits.SetSize(200, 40);
+	CommandBuffer fitCommands;
+	{
+		PaintContext ctx(fitCommands, backend);
+		fits.Paint(ctx, 0, 0);
+	}
+	const float wide = NthClipWidth(fitCommands, 1);         // 文本区 Clip 宽
+	EXPECT_TRUE(wide > 0.0f);
+
+	TextBox over(MakeLines(10));                             // 160 > 40 ⇒ 有条
+	over.SetSize(200, 40);
+	ScrollBar* bar = over.GetVerticalScrollBar();
+	EXPECT_TRUE(bar->IsVisible());
+	CommandBuffer overCommands;
+	{
+		PaintContext ctx(overCommands, backend);
+		over.Paint(ctx, 0, 0);
+	}
+	const float narrow = NthClipWidth(overCommands, 1);      // 让位后的文本区 Clip 宽
+	EXPECT_TRUE(narrow > 0.0f);
+
+	EXPECT_NEAR(wide - narrow, static_cast<float>(bar->GetThickness()), kEps);
+}
+
+/// T7：★ **光标路径**（TextBox **自己**改 offset ⇒ 条跟随）——T5 只证明了鼠标驱动那一条
+void TestTextBoxScrollBarFollowsCaret()
+{
+	TextBox box(MakeLines(10));
+	box.SetSize(200, 40);
+	ScrollBar* bar = box.GetVerticalScrollBar();
+	EXPECT_EQ(bar->GetOffset(), 0);
+
+	box.MoveCaretToEnd();                                    // EnsureCaretVisible → 滚到底
+	EXPECT_TRUE(box.GetScrollOffsetY() > 0.0f);
+	EXPECT_EQ(bar->GetOffset(), static_cast<int>(box.GetScrollOffsetY()));
+}
+
+/// T8：★ **惰性同步兜底**（△6 / D10）——改文本**不走任何显式同步**，仅靠一次 Paint 送达条
+/// @note v1.1 原稿的 T8 写的是「字体路径」，但**无头环境下 `GetLineHeight()` 恒走 16px 兜底**
+/// （无 Window 分支）⇒ 字体变化在测试里不可观测。本用例改为验证**同一机制**：
+/// 「绕过全部显式钩子的变化，靠 OnPaint 起始处的惰性同步兜住」；字体路径留 A2 人工观感验收。
+void TestTextBoxScrollBarLazySyncOnPaint()
+{
+	TextBox box(MakeLines(2));                               // 32 < 40 ⇒ 不溢出
+	box.SetSize(200, 40);
+	ScrollBar* bar = box.GetVerticalScrollBar();
+	EXPECT_FALSE(bar->IsVisible());
+
+	box.SetText(MakeLines(10));                              // SetText 只置行缓存失效 + Invalidate
+	EXPECT_FALSE(bar->IsVisible());                          // ⇒ 未绘制前条仍未同步（证明无别处顺带同步）
+
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	box.Paint(ctx, 0, 0);                                    // ← 仅这一次绘制
+
+	EXPECT_TRUE(bar->IsVisible());                           // 内容高变化经惰性同步送达条
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterTextBoxTests()
@@ -1255,4 +1417,13 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SingleLinePreferred", &TestTextBoxPreferredSingleLine);  // 9.8：padding 修正 + 自然居中验证
     GetTestRegistry().Add("TextBox.ShapeRounded", &TestTextBoxShapeRounded);  // P1：圆角背景
     GetTestRegistry().Add("TextBox.ShapeBorderRing", &TestTextBoxShapeBorderRing);  // P1：双矩形描边环
+    // textbox-scrollbar v1.1：垂直滚动条（T1–T8）
+    GetTestRegistry().Add("TextBox.ScrollBarVisibleOnOverflow", &TestTextBoxScrollBarVisibleOnOverflow);
+    GetTestRegistry().Add("TextBox.ScrollBarHiddenWhenFits", &TestTextBoxScrollBarHiddenWhenFits);
+    GetTestRegistry().Add("TextBox.ScrollBarHiddenSingleLine", &TestTextBoxScrollBarHiddenSingleLine);
+    GetTestRegistry().Add("TextBox.ScrollBarHitAndAuthority", &TestTextBoxScrollBarHitAndAuthority);
+    GetTestRegistry().Add("TextBox.ScrollBarFollowsWheel", &TestTextBoxScrollBarFollowsWheel);
+    GetTestRegistry().Add("TextBox.ScrollBarNarrowsTextArea", &TestTextBoxScrollBarNarrowsTextArea);
+    GetTestRegistry().Add("TextBox.ScrollBarFollowsCaret", &TestTextBoxScrollBarFollowsCaret);
+    GetTestRegistry().Add("TextBox.ScrollBarLazySyncOnPaint", &TestTextBoxScrollBarLazySyncOnPaint);
 }

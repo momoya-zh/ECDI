@@ -13,8 +13,10 @@
 #include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/Platform/PlatformWindow.h"
 #include "ECDI/Theme/DefaultTheme.h"
+#include "ECDI/Widget/ScrollBar.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 namespace ECDI{
@@ -26,13 +28,35 @@ namespace{   // 匿名 namespace：TextBox 内部常量（不暴露）
 
 }
 
+// ── 垂直滚动条（textbox-scrollbar △2；两个构造共用一段组合逻辑——避免 10 行重复）──
+
+void TextBox::CreateVerticalScrollBar(){
+
+	// **最后 AddChild** ⇒ HitTest 逆序时条优先命中（同 ScrollView.cpp:21 的②）
+	auto vbar = std::make_unique<ScrollBar>(ScrollBar::Orientation::Vertical);
+	m_vBar = vbar.get();   // ★ C-3：非拥有缓存指针（生命周期归 Widget 子树——不 delete、不在析构解绑）
+	AddChild(std::move(vbar));
+	// 条 → 容器：仅**用户操作**（拖拽 / 轨道翻页）驱动的偏移变化——
+	// ScrollBar::SetOffset 不回触发自身回调 ⇒ 无递归环（K10）
+	m_vBar->SetOnOffsetChanged([this](int offset){
+		m_scrollOffsetY = static_cast<float>(offset);
+		Invalidate();
+		SyncTextInputCaret();   // 5.6 债务兑现：候选窗位置与滚动联动（同 OnMouseWheel:454-455）
+	});
+
+}
+
 TextBox::TextBox(): TextWidget(){
+	// textbox-scrollbar：**先**组合条，使紧随其后的 ApplyTheme 一次把主题下传到条（△7）
+	CreateVerticalScrollBar();
 	// TextWidget 构造已注入 TextStyle；TextBox 再注入 TextBoxStyle
 	// （基类构造期虚函数静态派发——必须在此重新调用以覆盖 TextBox::ApplyTheme）
 	ApplyTheme(GetDefaultTheme());
 }
 
 TextBox::TextBox(const std::string& text): TextWidget(text){
+	// textbox-scrollbar：（同上）
+	CreateVerticalScrollBar();
 	// TextWidget 构造已注入 TextStyle；TextBox 再注入 TextBoxStyle
 	ApplyTheme(GetDefaultTheme());
 }
@@ -52,6 +76,11 @@ void TextBox::ApplyTheme(const Theme& theme){
 	m_style.cornerRadius.Apply(defaults.cornerRadius.value);
 	m_style.borderWidth.Apply(defaults.borderWidth.value);
 	m_style.borderColor.Apply(defaults.borderColor.value);
+	// textbox-scrollbar △7 / C-4：主题**下传条自身**（条有自己的 ApplyTheme / ScrollBarStyle）——
+	// ★ 不在此复制 ScrollBarStyle 的各字段，否则 ScrollBarStyle 一演变就会长出平行的主题逻辑
+	if (m_vBar != nullptr){
+		m_vBar->ApplyTheme(theme);
+	}
 	Invalidate();
 
 }
@@ -158,6 +187,12 @@ void TextBox::SetSize(int w, int h){
 	// 9.5 R1 §4.8：基类改几何 → 重新保证光标可见（缩窗后光标越出可视区立即滚回，垂直/水平同时受益）
 	Widget::SetSize(w, h);
 	EnsureCaretVisible();
+	// textbox-scrollbar △3：条贴右、全高（照抄 ScrollView.cpp:251-254——视口空间，不受偏移）
+	if (m_vBar != nullptr){
+		m_vBar->SetSize(m_vBar->GetThickness(), GetHeight());
+		m_vBar->SetPosition(GetWidth() - m_vBar->GetThickness(), 0);
+	}
+	SyncScrollBar();
 	Invalidate();
 
 }
@@ -431,6 +466,9 @@ void TextBox::EnsureCaretVisible(){
 			TextWidget::m_style.font.value, display.substr(startByte, caretByte - startByte)).width;
 		m_scrollOffsetX = ClampScrollOffsetX(m_scrollOffsetX, prefixWidth, GetTextAreaWidth());
 	}
+
+	// textbox-scrollbar：光标跟随滚动改了 offset → 条即刻跟随（T7；守卫在 SyncScrollBar 内）
+	SyncScrollBar();
 }
 
 float TextBox::ClampScrollOffsetX(float current, float caretX, float viewWidth){
@@ -444,6 +482,45 @@ float TextBox::ClampScrollOffsetX(float current, float caretX, float viewWidth){
 	return current;
 }
 
+void TextBox::SyncScrollBar(){
+
+	if (m_vBar == nullptr)
+		return;   // 防御：条未就位（构造期/异常路径）
+
+	// 惰性重算行信息（GetMaxScrollOffset 依赖 m_lineStarts——与 OnMouseWheel/EnsureCaretVisible 同契约：
+	// 首个消费点自保证缓存）
+	if (m_needsLineRecalc)
+		RecalculateLines();
+
+	// 判据（D2/D3）：多行 且 内容高 > 视口高——与 ScrollView::SyncBars（:289）同一口径
+	const bool  need          = !m_singleLine && GetMaxScrollOffset() > 0.0f;
+	const int   contentExtent = static_cast<int>(GetMaxScrollOffset() + GetTextAreaHeight());   // R3：内容**总高**
+	const int   viewportExtent = static_cast<int>(GetTextAreaHeight());
+	const int   offset        = static_cast<int>(m_scrollOffsetY);   // D6：int 化仅限 UI 层，TextBox 内部精度不变
+
+	// ★★ C-2 值变化守卫——**这是正确性要求、不是优化**：
+	// 本方法在 OnPaint 起始被每帧调用，而 ScrollBar::SetRange 无同值守卫且无条件 Invalidate()
+	// ⇒ 无守卫将每帧请求重绘（自激励重绘循环）。四项全同 ⇒ 直接返回。
+	if (m_barSyncValid
+		&& m_barSyncNeed == need
+		&& m_barSyncContentExtent == contentExtent
+		&& m_barSyncViewportExtent == viewportExtent
+		&& m_barSyncOffset == offset){
+		return;
+	}
+
+	m_barSyncValid         = true;
+	m_barSyncNeed          = need;
+	m_barSyncContentExtent = contentExtent;
+	m_barSyncViewportExtent = viewportExtent;
+	m_barSyncOffset        = offset;
+
+	m_vBar->SetVisible(need);                        // 不可见 ⇒ 不参与 HitTest（Widget.cpp:117 既有语义）
+	m_vBar->SetRange(contentExtent, viewportExtent);
+	m_vBar->SetOffset(offset);                       // 外部驱动入口（不回调——K10）
+
+}
+
 void TextBox::OnMouseWheel(const MouseWheelEvent& event){
 	// 惰性重算（GetMaxScrollOffset 依赖 m_lineStarts——首个消费点自保证缓存，同 EnsureCaretVisible 契约）
 	if (m_needsLineRecalc)
@@ -453,6 +530,7 @@ void TextBox::OnMouseWheel(const MouseWheelEvent& event){
 	m_scrollOffsetY = (std::clamp)(m_scrollOffsetY, 0.0f, GetMaxScrollOffset());
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 债务兑现：候选窗位置与滚动联动
+	SyncScrollBar();        // textbox-scrollbar：滚轮改 offset → 条即刻跟随（T5）
 }
 
 // ── 光标几何（5.6 提取：与点击定位同源——CalculateTextPosition 单一入口）──
@@ -460,7 +538,13 @@ void TextBox::OnMouseWheel(const MouseWheelEvent& event){
 float TextBox::GetTextAreaWidth() const noexcept{
 	// 可视宽度 = 控件宽 − 内边距×2（提取为共享辅助：文本裁切/Selection 高亮/光标 三处共用，
 	// 改一处不漂移）——9.6 收尾方案 B：内边距常驻，不再随焦点变化
-	return static_cast<float>(GetWidth()) - m_style.padding.value * 2.0f;
+	float width = static_cast<float>(GetWidth()) - m_style.padding.value * 2.0f;
+	// textbox-scrollbar △5：条**可见**时文本区让位（单点改动 ⇒ 绘制裁切 / 光标 / 点击 / 拖选自动跟随）。
+	// ★ 不会反向影响内容高：GetMaxScrollOffset 只经 GetTextAreaHeight（高度）⇒ 无循环依赖（K9 / D4）
+	if (m_vBar != nullptr && m_vBar->IsVisible()){
+		width -= static_cast<float>(m_vBar->GetThickness());
+	}
+	return width;
 }
 
 Point TextBox::CalculateCaretPosition(TextMeasurer& measurer) const{
@@ -1047,6 +1131,12 @@ void TextBox::OnCharInput(const CharInputEvent& event){
 // ── 绘制（5.5.1.4 完整版：白底 + 焦点框 + 文本 + 光标同源）──
 
 void TextBox::OnPaint(PaintContext& ctx, int x, int y){
+
+	// textbox-scrollbar △6 / D10：**起始处惰性同步**条（先例 = 同函数内的 RecalculateLines 惰性重算）。
+	// ★ 一处覆盖全部同步路径——尤其**字体路径**：GetLineHeight 实时读 m_style.font，而
+	// TextWidget::SetFont / SetStyle 非虚且只 Invalidate ⇒ TextBox 无从挂钩（R1）。守卫在 SyncScrollBar 内。
+	SyncScrollBar();
+
 	const float fx = static_cast<float>(x);
 	const float fy = static_cast<float>(y);
 	const float fw = static_cast<float>(GetWidth());

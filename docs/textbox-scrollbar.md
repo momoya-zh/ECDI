@@ -3,7 +3,7 @@
 > **来源**：`examples/ModelProbe/ModelProbe.cpp:434` 的 JSON 预览区——用户 2026-09-30 反馈「JSON 那个位置似乎还是**老的手写滚动**」。
 > **勘察结论**：它**不是手搓**——`TextBox` 自带 Phase 8.5.2 的滚轮滚动（`OnMouseWheel`）+ 光标跟随（`EnsureCaretVisible`）+ `Ctrl+A/C` 复制；**真正缺的是滚动条**（模型列表的 `ScrollView` 自带 `ScrollBar`，TextBox 没有）。
 > **定位**：**跨阶段的框架能力扩展**（非新 Phase ⇒ 不用 `phaseN-*` 前缀，同 `window-ownership.md` 先例；阶段由本文件头部与 §8 修订记录跟踪）。
-> **状态**：**v1.1（2026-10-01）**——已吸收**外部评审（GPT，§1–§12 共 11 条处置意见）** + **本机源码复核（R1–R3，含 K3 计数订正）**；**待用户确认后实施**。
+> **状态**：**v1.2（2026-10-01）** —— ★ **已实施**（`TextBox.h` · `TextBox.cpp` · `TextBoxTests.cpp`）：**沙箱 MinGW @ `_DEBUG`（断言启用）283 / 283 全绿**（DPI 120 / 125%），**待四链（MSVC / ClangCL / Clang）复核**。承接 v1.1 的**外部评审（GPT 11 条）** + **本机源码复核（R1–R3）**；★ **实施期修正四处**见 §8 修订记录。
 
 ---
 
@@ -100,13 +100,13 @@
 | **T1** | 多行 + 内容溢出 ⇒ 条可见 | `GetVerticalScrollBar()->IsVisible() == true` |
 | **T2** | 多行 + 内容不溢出 ⇒ 条隐藏 | 同上 `== false`；且不可见 ⇒ **不参与命中**（`Widget::HitTest:117` 既有语义） |
 | **T3** | 单行 ⇒ 条恒隐藏 | 即便文本很长 |
-| **T4** | ★ **拖条 ⇒ TextBox ↔ 条 的同步契约**（语义订正，外部评审 §9） | 拖 Thumb 到轨道**中部附近** ⇒ `GetScrollOffsetY() ≈ static_cast<float>(GetVerticalScrollBar()->GetOffset())` **且** `0 < GetOffset() < max`。★ **不断言「中点 = max/2」**——那是 `ScrollBar` 内部 thumb/track 映射的比例算法，**归 `ScrollBar` 自己的测试**；本用例只证明**两态同步** |
+| **T4** | ★ **条可命中 + 偏移权威归容器**（★ v1.2 实施期重定义——见 §8 **修正 4**） | ① `HitTest` 在条区域**逆序优先命中条本身**（`== GetVerticalScrollBar()`）；② 条自身 `SetOffset(0)` **不改变** `TextBox::GetScrollOffsetY()`（**D9 / K10 的直接验收**——条不是第二控制权）。★ 原「拖条 ⇒ 同步」语义**无法无头观测**（条的 `OnMouseButtonDown/Move` 是 protected，且**不能** `static_cast` 成测试子类——UB）⇒ 该通道降级 **A2 人工验收** |
 | **T5** | **滚轮路径**：滚轮滚动 ⇒ 条滑块位置跟随 | `OnMouseWheel` 后 `GetVerticalScrollBar()->GetOffset() == static_cast<int>(GetScrollOffsetY())` |
-| **T6** | 条可见时文本区变窄 | `GetTextAreaWidth()` 扣除 `GetVerticalScrollBar()->GetThickness()` |
+| **T6** | 条可见时文本区变窄（★ v1.2：改**命令流观测**——见 §8 **修正 1**） | 同尺寸「有 / 无条」两态**相减**：命令流**第 2 个 `PushClip`**（`TextBox::OnPaint` 的文本区）宽度差 == `GetVerticalScrollBar()->GetThickness()`。★ 原稿直测 `GetTextAreaWidth()` 不可行——它是 **private**，`using` 暴露不成立 |
 | **T7** | ★★ **光标路径**（新增，外部评审 §5）：`EnsureCaretVisible()` 自动滚动 ⇒ 条同步 | 把光标移到文末（编辑操作或 `SetCaretIndex`）后：`GetScrollOffsetY() > 0` **且** `GetVerticalScrollBar()->GetOffset() == static_cast<int>(GetScrollOffsetY())`。★ 动机：T5 只证明**鼠标**驱动，T7 证明**TextBox 自己改 offset** 也驱动条——**这是组合设计最容易漏掉的一条同步路径** |
-| **T8** | ★★ **字体路径**（新增，R1 的验收）：改字体 ⇒ 条范围 / 可见性刷新 | 先构造「不溢出」（文本短、条隐藏）⇒ `SetFont(larger)` 使内容高跨过视口 ⇒ 经一次 `Paint`（测试可直调 `Paint(ctx, 0, 0)`）⇒ `IsVisible() == true` 且 `GetRange()` 随之更新。★ 动机：该路径**没有虚函数可挂钩**（△6），只能靠惰性同步兜住 |
+| **T8** | ★★ **惰性同步兜底**（△6 / D10；★ v1.2 重定义，原「字体路径」降级 A2——见 §8 **修正 2**） | 先构造「不溢出」（条隐藏）⇒ `SetText(长文本)`（**不走任何显式同步**：实测 `SetText` 只置行缓存失效 + `Invalidate`）⇒ 未绘制前 `IsVisible()` 仍 false ⇒ **仅一次 `Paint`** ⇒ `IsVisible() == true`。★ 无头环境 `GetLineHeight()` 恒走 16px 兜底 ⇒ 字体变化不可观测 |
 | **A1** | **既有 275 用例零回归** | 四链（MSVC / ClangCL / Clang / MinGW） |
-| **A2** | **ModelProbe JSON 预览观感** | 条随内容自动显隐、可拖拽翻页，与模型列表的条**同款** |
+| **A2** | **ModelProbe JSON 预览观感**（★ v1.2：**兼收两条无法无头观测的路径**——**字体路径** + **条 → TextBox 的用户操作通道**） | 条随内容自动显隐 · 可拖拽翻页 · **改字号后条的范围随之变化**，与模型列表的条**同款** |
 
 **规模预估**：公共头 **92 → 92** · 公共 API **+1**（`GetVerticalScrollBar()`）· 用例 **275 → ≈283**（+8）· CMake **0 改动** · 断言特征串 **11 → 11**。
 
@@ -126,5 +126,10 @@
 
 ## 8. 修订记录
 
+- **v1.2**（2026-10-01）★ **已实施 + 实施期修正四处**。① **产出**：`ECDI/include/ECDI/Widget/TextBox.h`（+25）· `ECDI/src/Widget/TextBox.cpp`（+92 / −1）· `ECDI/src/Tests/TextBoxTests.cpp`（+139）——合计 **3 文件 · +255 / −1**；**公共头 92 → 92** · **公共 API +1**（`GetVerticalScrollBar()`）· **用例 275 → 283**（+8）· CMake **0 改动**。② ★★ **验证**：**沙箱 MinGW @ `_DEBUG`（断言启用）· 283 / 283 全绿**（本机 DPI 120 / 125%）；★ **仍待四链**（MSVC / ClangCL / Clang）复核。③ **实施期修正四处**：
+  - **修正 1（T6 观测路径）**：`GetTextAreaWidth()` 是 **真 private** —— `using` 暴露**不成立**（编译器直接报 `is private within this context`；不同于 protected 的 `CaretIndexFromPosition`）。**不改框架可见性**，改为观测**用户可见后果**：命令流**第 2 个 `PushClip`**（文本区）宽度 + 两态相减。★ 反而更强端到端（证明 Clip 真的让位了）。
+  - **修正 2（T8 重定义）**：原稿「字体路径」在**无头环境不可观测**——`GetLineHeight()` 在无 Window 时恒走 **16px 兜底**，字体变化不改变内容高。⇒ 改为验证**同一机制**：「**绕开全部显式同步**的变化，靠 `OnPaint` 起始的惰性同步兜住」（`SetText` 实测只置行缓存失效 + `Invalidate`）。**字体路径归 A2 人工验收**。
+  - **修正 3（△2 落成形态）**：两构造的条创建抽成私有 **`CreateVerticalScrollBar()`**（避免 10 行重复）；★ **条先于 `ApplyTheme` 创建** ⇒ 主题在构造期即**一次下传**（△7 在构造路径也生效）。
+  - **修正 4（T4 语义再收一档）**：条是 TextBox 内部的普通 `ScrollBar`，其鼠标入口 **protected 且测试够不着**（`static_cast` 成测试子类 = UB）⇒ T4 改为两条**可无头观测**的断言（**可命中** + **偏移权威归容器**）。★ **条 → TextBox 的用户操作通道**由 **A2** 兜底（其 λ 与 `OnMouseWheel` 同款三行）。
 - **v1.1**（2026-10-01）**吸收外部评审（GPT，11 条）+ 本机源码复核（R1–R3）**。① **K3 计数订正**：`EnsureCaretVisible` 调用点 **8 → 21**（不含定义行 405）。② **R2 订正**：△2 的构造写法必须为 **`ScrollBar::Orientation::Vertical`**（枚举嵌套，`ScrollBar.h:32`）。③ **R3 定死**：△4 的公式 = `SetRange(GetMaxScrollOffset() + GetTextAreaHeight(), GetTextAreaHeight())`（先例 `ScrollView.cpp:288`）；并写明 int/float 取整差 ≤1px（D6）。④ ★★ **R1 改设计**：△6 由「触发点清单」改为 **`OnPaint` 起始处惰性同步**——触发点清单**盖不住字体路径**（`GetLineHeight()` 实时读字体，而 `TextWidget::SetFont`/`SetStyle` 非虚且只 `Invalidate`）；配套 **D10**。⑤ ★★ **新增 §7 实现约束 C-1–C-5**，其中 **C-2 的值变化守卫是正确性要求**——实测 `ScrollBar::SetRange` 无条件 `Invalidate()`，无守卫会**自激励重绘**。⑥ **新增 K14–K16**（三处实测事实）。⑦ **T4 语义订正**（外部评审 §9）：只测 TextBox ↔ 条 的**同步契约**，不绑 `ScrollBar` 内部比例算法。⑧ **新增 T7（光标路径）/ T8（字体路径）**——T8 是 R1 的验收（外部评审 §5 的 T7 与 R1 同族：**同步路径覆盖不全**）。⑨ **§5「逐位等价」措辞订正**（外部评审 §11）：改为「**默认不溢出时用户可见行为与现状一致**」，并注明多出的是**不可观测开销**。⑩ `GetVerticalScrollBar()` 定位写入 **D9**（外部评审 §8）。⑪ 生命周期 / 主题下传写入 **C-3 / C-4**（外部评审 §6/§7/§10）。⇒ **仍待用户确认后实施**。
 - **v1.0**（2026-09-30）初稿：现状勘察 **K1–K13**（全部带行号实测）· 范围 **△1–△7** · 决策 **D1–D8**（含倾向与理由）· 范围外（★ 含**否决「换 `ScrollView`」备选方案**的三条理由）· 与既有约束对齐 · 验收 **T1–T6 / A1–A2**。**待评审**。
