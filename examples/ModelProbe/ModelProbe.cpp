@@ -344,7 +344,10 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	auto shell = std::make_unique<Panel>();
 	shell->SetSize(600, 200);
 	shell->SetStretch(1);   // 9.7：模型列表垂直拉伸，吃剩余空间
-	shell->SetLayout(std::make_unique<VerticalLayout>(0, true));   // 唯一子（ScrollView）铺满
+	// padding=4：把 ScrollView 从 Panel 的圆角弧线内收——每层 Widget 的裁剪都是**矩形**
+	// （Widget::Paint PushClip 自身边界），内容贴到视口边缘时会从圆角弧线（r=8，对角内收
+	// ≈2.34px）里探出去；内收 4px 后最贴边的勾选框（视口左上角点距弧心 5.66 < 8）留在弧内
+	shell->SetLayout(std::make_unique<VerticalLayout>(0, true, 4));   // 唯一子（ScrollView）铺满（四周内收 4）
 	shell->SetStyle(PanelStyleOverride{
 		.background = kListBg(),
 		.cornerRadius = 8.0f,
