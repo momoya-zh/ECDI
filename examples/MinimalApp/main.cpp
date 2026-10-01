@@ -1,4 +1,11 @@
-﻿#include <ECDI/Application/Application.h>
+﻿#include <Windows.h>   // wWinMain 入口（WINAPI / HINSTANCE / PWSTR）
+
+// Windows.h 宏防护（DrawText 等宏不污染 ECDI 头声明——同 ModelProbe / VisualTest 先例）
+#ifdef DrawText
+#undef DrawText
+#endif
+
+#include <ECDI/Application/Application.h>
 #include <ECDI/Window/Window.h>
 #include <ECDI/Widget/Panel.h>
 

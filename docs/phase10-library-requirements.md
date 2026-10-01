@@ -135,7 +135,7 @@ target_link_libraries(MinimalApp PRIVATE ECDI::ECDI)
 - WindowChrome / GPU Backend / 新控件（能力阶段后置——Phase 10 后路线）
 - 预编译产物分发（GitHub Release 等——0.1.0 源码形态）
 - **vcpkg / Conan / system package**（生态分发 ≠ CMake 消费边界——前者不做，后者 R4 做）
-- CollapsiblePanelDemo/Showcase 的 examples 化（框架演示暂留 src/Demo——有二次用例再动）
+- CollapsiblePanelDemo/Showcase 的 examples 化 —— ★ **2026-09-30 最终处置 = 直接删除**（原条目措辞：「框架演示暂留 `src/Demo`——有二次用例再动」）。★ **处置理由**：**两套 demo 并存使定位模糊**——`Showcase` 的价值已由 `examples/ModelProbe` 吸收（用户裁决）；★ 该 4 个文件自 Phase 10 起**从未参与任何 CMake 目标**（孤儿源），保留只会继续腐化；★ 同时清掉 `phase17-layout-padding-detailed-design.md` 的 **L4 / L5** 两笔既有账。
 - 版本宏复杂化（VERSION_CHECK/ABI_VERSION——只三宏）
 
 ---

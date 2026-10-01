@@ -39,7 +39,7 @@ endif()
 file(GLOB_RECURSE FRAMEWORK_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src/*.cpp"
 )
-list(FILTER FRAMEWORK_SOURCES EXCLUDE REGEX "/Demo/|/Tests/")   # demo/测试不在库内
+list(FILTER FRAMEWORK_SOURCES EXCLUDE REGEX "/Tests/")   # 测试不在库内（★ 原「/Demo/」随 2026-09-30 删除 Showcase 一并移除）
 
 add_library(ECDI STATIC ${FRAMEWORK_SOURCES})
 
@@ -149,3 +149,6 @@ add_subdirectory(examples/ModelProbe)
 
 # ── 视觉验收 GUI（Phase 11——解码图 vs 期望图并排人工核）──
 add_subdirectory(examples/VisualTest)
+
+# ── 最小消费者（Phase 10 库化烟雾测试——in-tree / 外部消费者双路径见其 CMakeLists）──
+add_subdirectory(examples/MinimalApp)
