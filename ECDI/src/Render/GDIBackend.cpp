@@ -5,6 +5,7 @@
 #include "ECDI/Core/String.h"
 #include "Platform/Win32/Win32RenderContext.h"
 #include "Render/CoverageRaster.h"
+#include "Render/LineCoverage.h"
 
 #include <algorithm>
 #include <cmath>
@@ -402,8 +403,26 @@ void GDIBackend::DrawText(const Point& pos, const std::string& text,
 void GDIBackend::DrawLine(const Point& start, const Point& end,
                           float width, const Color& color)
 {
+	// 分支序即语义序（Phase 24 详设 △6-1 / 契约 C8）：
+	// ① AA 关 → legacy 逐位现状（R3——含 a<1 丢 alpha 的现状语义）
+	// ② a≥1 且 round 后轴对齐（含退化）→ legacy 逐位现状（R4 / D1——探针 A-2/A-3 的
+	//    cosmetic/几何笔足迹原样保留，不逆向 GDI）
+	// ③ 其余 → 覆盖度路径（斜线 a=1、一切 a<1——D0；L3：a<1 轴对齐在此获得 AA 边缘）
+	if (!m_antiAliasing ||
+	    (color.a >= 1.0f && IsAxisAlignedAfterRound(start.x, start.y, end.x, end.y)))
+	{
+		DrawLineLegacy(start, end, width, color);
+		return;
+	}
+	DrawLineCoverage(start, end, width, color);
+}
+
+void GDIBackend::DrawLineLegacy(const Point& start, const Point& end,
+                                float width, const Color& color)
+{
 	// Phase 8 §8.1：宽度 lround 取整 + 下限 1px（lround(0.4f)=0 → CreatePen(0) 实为 1px cosmetic pen，
 	// 显式下限使契约确定）；所有坐标同样 lround（亚像素线段 Phase 8 不做）
+	// ★ Phase 24：本函数 = 原 DrawLine 函数体逐字搬入（R3/R4 的逐位回归锚）——不得顺手修改
 	const LONG penWidth = (std::max)(1L, std::lround(width));
 	HPEN pen = CreatePen(PS_SOLID, penWidth, ToColorRef(color));
 	if (!pen)
@@ -418,6 +437,32 @@ void GDIBackend::DrawLine(const Point& start, const Point& end,
 	// 决策 24 风格：GDI 对象每次创建/销毁（避免 10,000 句柄上限）
 	SelectObject(m_memoryDC, oldPen);
 	DeleteObject(pen);
+}
+
+void GDIBackend::DrawLineCoverage(const Point& start, const Point& end,
+                                  float width, const Color& color)
+{
+	// S 来源 = 角缓存的同一旋钮（契约 C9 / O1：全框架 coverage AA 单一精度）
+	const int samples = m_cornerMaskCache.GetSamples();
+	const LineCoverageGrid grid = GenerateLineCoverage(start.x, start.y, end.x, end.y,
+	                                                   width, samples);
+	if (grid.Empty())
+	{
+		return;   // 第二层退化防线（第一层 = 分流谓词）
+	}
+
+	// fail-safe 沿圆角路径先例（:452-458）：宁可无 AA，不可缺绘制
+	if (!m_patchSurface.Ensure(m_memoryDC, grid.width, grid.height))
+	{
+		Logger::Log(LogLevel::Warning,
+		            L"GDIBackend: patch surface unavailable - line AA skipped");
+		DrawLineLegacy(start, end, width, color);
+		return;
+	}
+
+	RasterizeMask(static_cast<std::uint8_t*>(m_patchSurface.bits),
+	              m_patchSurface.width * 4, grid, color);
+	BlendPatch(m_memoryDC, grid.originX, grid.originY, grid.width, grid.height);
 }
 
 void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
@@ -449,7 +494,7 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	}
 
 	// ② a == 1 需要角补丁绘制面——准备失败则落 legacy（fail-safe：宁可无 AA，不可缺角）
-	if (color.a >= 1.0f && !m_patchSurface.Ensure(m_memoryDC, R))
+	if (color.a >= 1.0f && !m_patchSurface.Ensure(m_memoryDC, R, R))
 	{
 		Logger::Log(LogLevel::Warning,
 			L"GDIBackend: patch surface unavailable - rounded rect AA skipped");
@@ -865,7 +910,7 @@ void GDIBackend::DrawRoundedRectOpaqueAA(const Rect& rect, int R, const Color& c
 	for (const auto& c : kCorners)
 	{
 		FillPatchFromMask(mask, color, c.corner);         // 写入 PatchSurface（预乘 BGRA，R×R）
-		BlendPatch(m_memoryDC, static_cast<int>(c.x), static_cast<int>(c.y), R);
+		BlendPatch(m_memoryDC, static_cast<int>(c.x), static_cast<int>(c.y), R, R);
 	}
 }
 
@@ -886,43 +931,57 @@ void GDIBackend::FillPatchFromMask(const CornerCoverageMask& mask, const Color& 
 	// 本函数只剩「提供目标缓冲」这一件 GDI 侧的事。这样一来，抗锯齿的**像素构造**不再
 	// 属于 GDI 后端，换后端时可直接复用（本相位后端可替换性分析的落点之一）。
 	//
-	// ⚠️ 行宽必须用 **DIB 实际行宽** = PatchSurface.size * 4，**不是** mask.radius * 4：
-	//    `PatchSurface` 只增不减（Ensure 仅在 requiredSize > size 时重建），故 size >= R 恒成立；
+	// ⚠️ 行宽必须用 **DIB 实际行宽** = PatchSurface.width * 4，**不是** mask.radius * 4：
+	//    `PatchSurface` 两维各自只增不减（Ensure 仅在任一维不足时重建），故 width >= R 恒成立；
 	//    若按 R 定位行，则「同一后端先画过大半径、再画小半径」时整体行错位，
-	//    补丁内容被垂直压缩 → 圆角渲染错乱（2026-09-11 修复）。
+	//    补丁内容被垂直压缩 → 圆角渲染错乱（2026-09-11 修复；Phase 24 矩形化后行宽源由
+	//    size 改为 width——历史快照措辞按 O-4 纪律只登记不重写）。
 	//    每行只写前 R 个像素（R*4 字节），正好落在 [0,R)×[0,R) 有效区内。
 	RasterizeCornerPatch(static_cast<std::uint8_t*>(m_patchSurface.bits),
-	                     m_patchSurface.size * 4, mask, color, corner);
+	                     m_patchSurface.width * 4, mask, color, corner);
 }
 
-void GDIBackend::BlendPatch(HDC target, int x, int y, int size)
+void GDIBackend::BlendPatch(HDC target, int x, int y, int width, int height)
 {
 	BLENDFUNCTION blend{};
 	blend.BlendOp             = AC_SRC_OVER;
 	blend.SourceConstantAlpha = 255;
 	blend.AlphaFormat         = AC_SRC_ALPHA;   // 源为预乘 BGRA
 
-	AlphaBlend(target, x, y, size, size,
-	           m_patchSurface.dc, 0, 0, size, size, blend);
+	AlphaBlend(target, x, y, width, height,
+	           m_patchSurface.dc, 0, 0, width, height, blend);
 }
 
-bool GDIBackend::PatchSurface::Ensure(HDC reference, int requiredSize)
+bool GDIBackend::PatchSurface::Ensure(HDC reference, int requiredWidth, int requiredHeight)
 {
-	if (requiredSize <= 0 || reference == nullptr)
+	if (requiredWidth <= 0 || requiredHeight <= 0 || reference == nullptr)
 	{
 		return false;
 	}
 
-	if (dc != nullptr && size >= requiredSize)
+	if (dc != nullptr && width >= requiredWidth && height >= requiredHeight)
 	{
-		return true;   // 已够大（**只增不减**——初设 §6.2）
+		return true;   // 已够大（**两维各自只增不减**——初设 §6.2 / Phase 24 矩形化）
+	}
+
+	// 重建尺寸 = 两维各自取 max（旧内容无语义要求，无需保留——与原正方形行为一致）
+	const int newWidth  = (std::max)(width, requiredWidth);
+	const int newHeight = (std::max)(height, requiredHeight);
+
+	// O2 面积诊断（one-shot）：宽类型计算，诊断代码自身不得溢出（评审 §十三）
+	const long long area = static_cast<long long>(newWidth) * static_cast<long long>(newHeight);
+	if (area > 2'097'152 && !areaWarned)
+	{
+		areaWarned = true;
+		Logger::Log(LogLevel::Warning,
+		            L"GDIBackend: patch surface exceeded 2M pixels - check for oversized line/geometry");
 	}
 
 	// 先建后替（与 EnsureBackBuffer 决策 38 同款：新资源就绪前不动旧资源）
 	BITMAPINFO bmi{};
 	bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-	bmi.bmiHeader.biWidth       = requiredSize;
-	bmi.bmiHeader.biHeight      = -requiredSize;   // 负 = 顶降（行序自上而下）
+	bmi.bmiHeader.biWidth       = newWidth;
+	bmi.bmiHeader.biHeight      = -newHeight;   // 负 = 顶降（行序自上而下）
 	bmi.bmiHeader.biPlanes      = 1;
 	bmi.bmiHeader.biBitCount    = 32;
 	bmi.bmiHeader.biCompression = BI_RGB;
@@ -950,7 +1009,8 @@ bool GDIBackend::PatchSurface::Ensure(HDC reference, int requiredSize)
 	bitmap = newBitmap;
 	oldBitmap = oldInNewDC;
 	bits = newBits;
-	size = requiredSize;
+	width = newWidth;
+	height = newHeight;
 
 	return true;
 }
@@ -975,7 +1035,9 @@ void GDIBackend::PatchSurface::Release()
 	bitmap = nullptr;
 	oldBitmap = nullptr;
 	bits = nullptr;
-	size = 0;
+	width = 0;
+	height = 0;
+	areaWarned = false;
 }
 
 }

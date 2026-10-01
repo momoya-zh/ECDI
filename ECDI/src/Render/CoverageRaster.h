@@ -7,6 +7,8 @@
 
 namespace ECDI{
 
+struct LineCoverageGrid;   // Phase 24：前置声明（本头不依赖生成层——依赖单向：合成层认识网格，反向禁止）
+
 /// @brief 覆盖度 → 像素：把覆盖度掩码按指定角方向合成为**预乘 BGRA** 像素
 /// @details
 /// Phase 19.1 从 `GDIBackend::FillPatchFromMask` **原样抽出**（算法逐位不变）。
@@ -29,5 +31,17 @@ namespace ECDI{
 /// @param corner 目标角——决定索引变换方向（见 `MaskIndexX` / `MaskIndexY`）
 void RasterizeCornerPatch(std::uint8_t* dest, int stride,
                           const CornerCoverageMask& mask, const Color& color, CornerId corner);
+
+/// @brief 覆盖度网格 → 像素：一般化预乘合成（Phase 24 · **无角变换**，Corner 版保留不动）
+/// @details 契约 C6（初设 §5.2）：`e = (c*a8+127)/255`（**有效覆盖** = coverage × alpha）；
+///          输出 `A = e`、`RGB = (colorByte*e+127)/255`——a8=255 时 e == c，与
+///          `RasterizeCornerPatch` **逐位同公式**（B6）。不变量 C7：`RGB ≤ A` 恒成立
+///          （colorByte ≤ 255 ⇒ 每通道 (cb*e+127)/255 ≤ e）。
+/// @param dest   目标像素缓冲首地址（按 stride 逐行定位）
+/// @param stride 目标缓冲的**实际每行字节数**
+/// @param grid   覆盖度网格；`grid.Empty()` 时不做任何写入
+/// @param color  形状颜色（alpha 一般化消费——D0：a<1 的线段在此获得真半透明）
+void RasterizeMask(std::uint8_t* dest, int stride,
+                   const LineCoverageGrid& grid, const Color& color);
 
 }

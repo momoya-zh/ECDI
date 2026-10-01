@@ -1,6 +1,9 @@
 ﻿#include "Render/CoverageRaster.h"
 
+#include "Render/LineCoverage.h"   // Phase 24：网格类型（合成层 ← 生成层，单向）
+
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 
 namespace ECDI{
@@ -42,6 +45,47 @@ void RasterizeCornerPatch(std::uint8_t* dest, int stride,
 			line[i * 4 + 1] = static_cast<std::uint8_t>((cg * c + 127) / 255);
 			line[i * 4 + 2] = static_cast<std::uint8_t>((cr * c + 127) / 255);
 			line[i * 4 + 3] = c;
+		}
+	}
+}
+
+void RasterizeMask(std::uint8_t* dest, int stride,
+                   const LineCoverageGrid& grid, const Color& color)
+{
+	// 无意义组合直接跳过（与 Corner 版同款守卫形态）
+	if (dest == nullptr || stride <= 0 || grid.Empty())
+	{
+		return;
+	}
+
+	const auto ToByte = [](float v)
+	{
+		const float clamped = std::clamp(v, 0.0f, 1.0f);
+		return static_cast<int>(clamped * 255.0f + 0.5f);
+	};
+
+	// 颜色分量（0~255）在循环外算好；每像素只再做一次 ×e/255
+	const int cb = ToByte(color.b);
+	const int cg = ToByte(color.g);
+	const int cr = ToByte(color.r);
+	const int a8 = static_cast<int>(std::lround(std::clamp(color.a, 0.0f, 1.0f) * 255.0f));
+
+	for (int j = 0; j < grid.height; ++j)
+	{
+		std::uint8_t* line = dest + static_cast<std::size_t>(j) * static_cast<std::size_t>(stride);
+		const std::uint8_t* src = grid.coverage.data()
+			+ static_cast<std::size_t>(j) * static_cast<std::size_t>(grid.width);
+
+		for (int i = 0; i < grid.width; ++i)
+		{
+			const int c = src[i];
+			// 契约 C6：e = 有效覆盖 = round(c × a8 / 255)；a8 = 255 时 e == c（逐位等于 Corner 版）
+			const int e = (c * a8 + 127) / 255;
+			// 预乘（约束 1）：RGB = round(colorByte × e / 255) ≤ e = A（C7 不变量，colorByte ≤ 255）✓
+			line[i * 4 + 0] = static_cast<std::uint8_t>((cb * e + 127) / 255);
+			line[i * 4 + 1] = static_cast<std::uint8_t>((cg * e + 127) / 255);
+			line[i * 4 + 2] = static_cast<std::uint8_t>((cr * e + 127) / 255);
+			line[i * 4 + 3] = static_cast<std::uint8_t>(e);
 		}
 	}
 }

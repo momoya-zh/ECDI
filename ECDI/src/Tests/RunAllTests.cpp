@@ -34,6 +34,7 @@ int ECDI::Test::RunAllTests()
     RegisterIconDecodeTests();   // Phase 21：系统图标（T21-1..T21-9）
     RegisterPreshowGeometryTests();   // Phase 22：Create 的 DIP 尺寸契约（T22-1..T22-3）
     RegisterApplicationDispatchTests();   // Phase 23：工作线程 → UI 线程投递（T23-1..T23-11）
+    RegisterLineCoverageTests();   // Phase 24：DrawLine 线段抗锯齿（T24-1..T24-11）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

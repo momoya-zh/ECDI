@@ -81,20 +81,23 @@ private:
 
 	// ── Phase 8.6：圆角覆盖度抗锯齿 ─────────────────────────────────
 
-	/// @brief 角补丁绘制面（Phase 8.6）：32bpp 顶降**预乘** DIB，单个复用、**只增不减**
+	/// @brief 角/线补丁绘制面（Phase 8.6 · Phase 24 矩形化）：32bpp 顶降**预乘** DIB，单个复用、**两维各自只增不减**
 	/// @details ⚠️ 仅用于同步、顺序的 GDIBackend 绘制流程；**不保证并发/重入安全**。
-	/// 有效区域仅 `[0, R) × [0, R)`（R = 本次调用半径）——`size - R` 范围内的历史像素
-	/// **无语义要求**，调用方不得读取或混合该区域。
+	/// 角路径有效区域仅 `[0, R) × [0, R)`（R = 本次调用半径）——`width - R` / `height - R`
+	/// 范围内的历史像素**无语义要求**，调用方不得读取或混合该区域；线段路径有效区域 =
+	/// 本次覆盖度网格的 `width × height`（原点由网格的 originX/originY 携带）。
 	struct PatchSurface {
 
 		HDC dc = nullptr;
 		HBITMAP bitmap = nullptr;
 		HBITMAP oldBitmap = nullptr;   ///< SelectObject 返回值（释放时先恢复再删——GDI 铁律）
 		void* bits = nullptr;
-		int size = 0;                  ///< 当前边长（正方形；只增不减）
+		int width = 0;                 ///< 当前宽（Phase 24 矩形化：只增不减）
+		int height = 0;                ///< 当前高（只增不减）
+		bool areaWarned = false;       ///< O2：面积诊断 one-shot（2M 像素阈值）
 
-		/// @brief 确保边长 >= requiredSize（不足则重建；成功返回 true）
-		bool Ensure(HDC reference, int requiredSize);
+		/// @brief 确保宽/高各自 >= 要求（任一不足则重建为两维 max；成功返回 true）
+		bool Ensure(HDC reference, int requiredWidth, int requiredHeight);
 
 		/// @brief 释放（严格逆序：恢复 oldBitmap → DeleteObject → DeleteDC）
 		void Release();
@@ -115,8 +118,18 @@ private:
 	/// @brief 把掩码 + 颜色按角方向写入 PatchSurface（预乘 BGRA）
 	void FillPatchFromMask(const CornerCoverageMask& mask, const Color& color, CornerId corner);
 
-	/// @brief 把 PatchSurface 的 R×R 区域 AlphaBlend 到目标 (x, y)
-	void BlendPatch(HDC target, int x, int y, int size);
+	/// @brief 把 PatchSurface 的 width×height 区域 AlphaBlend 到目标 (x, y)
+	void BlendPatch(HDC target, int x, int y, int width, int height);
+
+	/// @brief Phase 24：线段覆盖度路径（AA 开且非「a≥1 轴对齐」时由 DrawLine 进入）
+	/// @details 覆盖度生成（`Render/LineCoverage.h`，纯几何）→ `RasterizeMask`（预乘合成）
+	///          → 复用 `m_patchSurface` → `BlendPatch`。坐标 **float 直入零取整**（R7）；
+	///          失败 fail-safe 落 legacy（沿圆角路径先例：宁可无 AA，不可缺绘制）。
+	void DrawLineCoverage(const Point& start, const Point& end, float width, const Color& color);
+
+	/// @brief Phase 24：legacy 线段路径——**原 `DrawLine` 函数体逐字搬入，一字不改**
+	/// @details R3/R4 的逐位回归锚：AA 关闭、或 a≥1 且 round 后轴对齐（含退化）时走此路。
+	void DrawLineLegacy(const Point& start, const Point& end, float width, const Color& color);
 
 	CornerMaskCache m_cornerMaskCache;   ///< Phase 8.6：覆盖度掩码缓存（键 = effective 整数半径）
 	PatchSurface m_patchSurface;         ///< Phase 8.6：角补丁绘制面（复用，只增不减）
