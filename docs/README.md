@@ -517,6 +517,7 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [textbox-scrollbar.md](textbox-scrollbar.md) | **需求 + 设计 + 验收合并稿**：现状勘察 **K1–K13**（全部带行号实测）· 范围 **△1–△7**（`TextBox` 组合 `ScrollBar` 子节点 · `SyncScrollBar` 同步 · 文本区宽度让位）· 决策 **D1–D8**（含倾向与理由）· ★ **范围外含「否决换 `ScrollView`」的三条理由** · 与既有约束对齐 · 验收 **T1–T6 / A1–A2** | 🚧 **v1.0 待评审** |
+
 ## ModelProbe Demo（✅ P1/P2 已实现，2026-09-01/11）
 
 > 第一个真实消费者（Phase 10 起从框架移出至 `examples/ModelProbe/`）。**文档独立子目录 `docs/model-probe/`**，与框架 `phaseN-*` 区隔；2026-09-11 从仓库根 `model-probe-docs/` 移入 docs/ 体系（统一文档入口）。

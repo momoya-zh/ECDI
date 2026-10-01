@@ -13,7 +13,7 @@
 本仓库为**双层 ECDI 命名**（评审易混点，先锚定）：
 
 ```text
-C:\Users\a1367\source\repos\ECDI\     ← 仓库根（CMakeLists.txt 在此）
+<仓库根>\                             ← 仓库根（CMakeLists.txt 在此；路径一律相对，不写死本机绝对路径）
 ├── CMakeLists.txt                    ← ${CMAKE_CURRENT_SOURCE_DIR} = 仓库根
 ├── ECDI\                             ← 框架子目录（名为 ECDI）
 │   ├── include\ECDI\…
