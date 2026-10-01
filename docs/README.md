@@ -509,14 +509,14 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | [window-ownership.md](window-ownership.md) | **契约主体（初步设计）**：三层归属（对象 / HWND / 注册表）· 三条闭环链（线性全链 + 源码锚点）· **5 条不变量** · 决策 B1–B5 + 关键陷阱（`make_unique` 与 `default_delete` 均无法访问私有成员）· **契约条款原文**（`Release ≠ delete Window`、回收依赖消息泵、断言与容错的双层含义、`PlatformWindowHost` 注释改写）· 验收（含 `static_assert` 编译期契约） | ✅ **v1.1 已实施（2026-09-12）**——契约落地，证据见详设 v1.2（183/183 + 编译期契约 + 静态检查） |
 | [window-ownership-detailed-design.md](window-ownership-detailed-design.md) | **详细设计（实施规格）**：逐文件 diff 级改动（`Window.h` 访问权限布局前/后 + `friend` 粒度说明 / `Application.h` 删友元 + 双向访问关系复核表 / `Application.cpp` `Create` 全文 + B1-t 陷阱 / `PlatformWindowHost.h` 注释改写 / 测试 `static_assert` ×3）· 编译期契约测试方案（**双工具链实证** + 中立上下文性质 + 四工具链待验 + 兜底负向探针）· 注释落点清单 · 实施 6 步 · 验收 A1–A6 | ✅ **v1.2 已实施（2026-09-12）**：`ecdi_tests` **183 passed / 0 failed**（MinGW + `-D_DEBUG`，断言层生效）；**A1** 编译期契约（`static_assert` ×3 + 人工反例实测编译失败）/ **A4** 静态检查（`new Window` 代码 1 处、`make_unique<Window>` 代码 0 处）通过；**A2/A6 ✅ 全部通过**——**四工具链**（MinGW / MSVC / Clang / ClangCL）实测运行、**无断言错误**；附带 `ECDI/ECDI开发规范.md:143` 过期措辞（「m_application 指针」→引用）已修；3 处实测偏差（`static_assert` 落点 / 连带过期注释 / 排版）已记录 |
 
-## TextBox 垂直滚动条（textbox-scrollbar）（🚧 **v1.0 待评审**，2026-09-30 新建）
+## TextBox 垂直滚动条（textbox-scrollbar）（🚧 **v1.1 待确认**，2026-09-30 新建 / 2026-10-01 吸收评审）
 
 > **来源**：ModelProbe 的 JSON 预览区（`examples/ModelProbe/ModelProbe.cpp:434`）——勘察后确认它**不是手搓滚动**（`TextBox` 自带 Phase 8.5.2 滚轮滚动 + 光标跟随 + `Ctrl+A/C` 复制），真正缺的是**滚动条**。
 > **定位**：**跨阶段的框架能力扩展**——非新 Phase ⇒ **不用** `phaseN-*` 命名（同 `window-ownership.md` 先例），阶段由文档头部与 §7 修订记录跟踪。
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [textbox-scrollbar.md](textbox-scrollbar.md) | **需求 + 设计 + 验收合并稿**：现状勘察 **K1–K13**（全部带行号实测）· 范围 **△1–△7**（`TextBox` 组合 `ScrollBar` 子节点 · `SyncScrollBar` 同步 · 文本区宽度让位）· 决策 **D1–D8**（含倾向与理由）· ★ **范围外含「否决换 `ScrollView`」的三条理由** · 与既有约束对齐 · 验收 **T1–T6 / A1–A2** | 🚧 **v1.0 待评审** |
+| [textbox-scrollbar.md](textbox-scrollbar.md) | **需求 + 设计 + 验收合并稿**：现状勘察 **K1–K16**（全部带行号实测）· 范围 **△1–△8**（`TextBox` 组合 `ScrollBar` 子节点 · `OnPaint` 惰性同步 + 值变化守卫 · 文本区宽度让位）· 决策 **D1–D10**（含倾向与理由）· ★ **范围外含「否决换 `ScrollView`」的三条理由** · ★ **§7 实现约束 C-1–C-5** · 与既有约束对齐 · 验收 **T1–T8 / A1–A2** | 🚧 **v1.1 待确认** |
 
 ## ModelProbe Demo（✅ P1/P2 已实现，2026-09-01/11）
 
