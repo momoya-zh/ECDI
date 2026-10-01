@@ -5,6 +5,8 @@
 #include "ECDI/EventSystem/Input/KeyBoard/KeyModifier.h"
 #include "ECDI/EventSystem/Window/TimerEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseWheelEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
+#include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/Render/PaintContext.h"
 #include "Render/RecordingBackend.h"
 #include "ECDI/Render/RenderCommand.h"
@@ -38,6 +40,11 @@ class TestableTextBox : public TextBox
 public:
     using TextBox::TextBox;
     using TextBox::OnKeyDown;   ///< 暴露键盘选择路径（Shift+方向/Home/End）
+    using TextBox::OnMouseButtonDown;   ///< scrollbar-placement-and-appearance T9：手势隔离守卫（protected override——无头验证）
+    using TextBox::OnMouseMove;         ///< scrollbar-placement-and-appearance T9：拖选扩展（同上）
+
+    /// @brief 文本内边距（protected `m_style` 的中转）——scrollbar-placement-and-appearance v1.5：条内缩 = max(padding, 2)
+    [[nodiscard]] float Padding() const noexcept{ return m_style.padding.value; }
     using TextBox::OnTimer;     ///< 8.5.1：光标闪烁（protected override——无窗口环境允许验证翻转逻辑）
     using TextBox::UpdateComposition;   ///< 8.5.1：Composition 状态机（protected——Window 转发入口）
     using TextBox::CommitComposition;
@@ -1234,7 +1241,7 @@ void TestTextBoxShapeBorderRing()
 }
 
 
-// ── textbox-scrollbar v1.1：垂直滚动条（T1–T8；契约见 docs/textbox-scrollbar.md §6 / §7）──
+// ── scrollbar-placement-and-appearance v1.1：垂直滚动条（T1–T8；契约见 docs/scrollbar-placement-and-appearance.md §6 / §7）──
 
 /// @brief 造 N 行文本（每行一个 'a'，`\n` 分隔）——行数驱动内容高（假测量器行高恒 16）
 std::string MakeLines(size_t n)
@@ -1334,7 +1341,7 @@ void TestTextBoxScrollBarNarrowsTextArea()
 {
 	RecordingBackend backend;
 
-	TextBox fits(MakeLines(2));                              // 32 < 40 ⇒ 无条
+	TestableTextBox fits(MakeLines(2));                      // 32 < 40 ⇒ 无条
 	fits.SetSize(200, 40);
 	CommandBuffer fitCommands;
 	{
@@ -1344,7 +1351,7 @@ void TestTextBoxScrollBarNarrowsTextArea()
 	const float wide = NthClipWidth(fitCommands, 1);         // 文本区 Clip 宽
 	EXPECT_TRUE(wide > 0.0f);
 
-	TextBox over(MakeLines(10));                             // 160 > 40 ⇒ 有条
+	TestableTextBox over(MakeLines(10));                     // 160 > 40 ⇒ 有条
 	over.SetSize(200, 40);
 	ScrollBar* bar = over.GetVerticalScrollBar();
 	EXPECT_TRUE(bar->IsVisible());
@@ -1356,7 +1363,9 @@ void TestTextBoxScrollBarNarrowsTextArea()
 	const float narrow = NthClipWidth(overCommands, 1);      // 让位后的文本区 Clip 宽
 	EXPECT_TRUE(narrow > 0.0f);
 
-	EXPECT_NEAR(wide - narrow, static_cast<float>(bar->GetThickness()), kEps);
+	// ★ v1.5：让位量 = 条厚 **+ 条的内缩**（内缩 = max(padding, 2px)）——条不再贴边，内缩段也要让出
+	const float inset = over.Padding() > 2.0f ? over.Padding() : 2.0f;
+	EXPECT_NEAR(wide - narrow, static_cast<float>(bar->GetThickness()) + inset, kEps);
 }
 
 /// T7：★ **光标路径**（TextBox **自己**改 offset ⇒ 条跟随）——T5 只证明了鼠标驱动那一条
@@ -1394,6 +1403,76 @@ void TestTextBoxScrollBarLazySyncOnPaint()
 	EXPECT_TRUE(bar->IsVisible());                           // 内容高变化经惰性同步送达条
 }
 
+/// T9：★ **手势隔离**——按下落在**条**上时不得进入文本拖选（缺陷修复 v1.4）
+/// @details 根因：Application 的鼠标派发在 `HitTest` 命中后**沿父链冒泡**（`Application.cpp:294-302`）
+/// ⇒ 按在条上时 `TextBox::OnMouseButtonDown` 照样被调用，曾被当成"文本点击"并进入拖选状态
+/// ⇒ 拖条时文字被拖选（蓝底白字）、单击条还会移动光标。
+void TestTextBoxScrollBarIgnoresPressOnBar()
+{
+	TestableTextBox box(MakeLines(10));
+	box.SetSize(200, 40);
+	ScrollBar* bar = box.GetVerticalScrollBar();
+	EXPECT_TRUE(bar->IsVisible());
+
+	// 条占据控件最右侧 thickness 宽（事件坐标 = 窗口客户区绝对）
+	const int onBarX  = static_cast<int>(bar->GetAbsolutePosition().x) + 5;
+	const int onTextX = 10;
+
+	// ① 按在**条**上 → 再拖到文本区 ⇒ ★ **不得**产生选区（手势不属于文本框）
+	box.OnMouseButtonDown(MouseButtonDownEvent(nullptr, onBarX, 20, MouseButton::Left));
+	box.OnMouseMove(MouseMoveEvent(nullptr, onTextX, 20));
+	EXPECT_FALSE(box.GetSelection().has_value());
+
+	// ② 对照：按在**文本区** → 拖到另一处 ⇒ 应当产生选区（守卫没有误伤正常拖选）
+	box.OnMouseButtonDown(MouseButtonDownEvent(nullptr, onTextX, 5, MouseButton::Left));
+	box.OnMouseMove(MouseMoveEvent(nullptr, 60, 20));
+	EXPECT_TRUE(box.GetSelection().has_value());
+}
+
+/// T10：★ 条**四边内缩**（v1.5）——不贴右缘、上下留边 ⇒ 不压 TextBox 的边框环 / 圆角
+/// @details 内缩量 = `max(padding, 2px)`：`padding = 0`（框架默认）⇒ 保底 2px；
+/// ModelProbe 的 `padding = 8` ⇒ 内缩 8px，与文本区内边距**对称**。
+void TestTextBoxScrollBarInset()
+{
+	// ① 默认（padding = 0）⇒ 保底内缩 2px：右 / 上 / 下都不贴边
+	{
+		TestableTextBox box(MakeLines(10));
+		box.SetSize(200, 40);
+		ScrollBar* bar = box.GetVerticalScrollBar();
+		EXPECT_TRUE(bar->IsVisible());
+
+		const Point boxAbs = box.GetAbsolutePosition();
+		const Point barAbs = bar->GetAbsolutePosition();
+		const float inset = 2.0f;   // padding = 0 ⇒ 保底
+
+		EXPECT_NEAR(barAbs.x + static_cast<float>(bar->GetWidth()),
+		            boxAbs.x + static_cast<float>(box.GetWidth()) - inset, kEps);   // 右缘留边
+		EXPECT_NEAR(barAbs.y - boxAbs.y, inset, kEps);                              // 顶边留边
+		EXPECT_NEAR(static_cast<float>(bar->GetHeight()),
+		            static_cast<float>(box.GetHeight()) - 2.0f * inset, kEps);      // 上下各留边
+	}
+
+	// ② ★ 仿 ModelProbe 的**调用次序**：先 SetSize、后 SetStyle 给 padding / 边框
+	//    ⇒ 摆位必须随样式变更重算（只在 SetSize 里算会漏，条会停在旧内缩）
+	{
+		TestableTextBox box(MakeLines(10));
+		box.SetSize(200, 40);
+		box.SetStyle(TextBoxStyleOverride{ .padding = 8.0f, .borderWidth = 1.0f });
+		ScrollBar* bar = box.GetVerticalScrollBar();
+		EXPECT_TRUE(bar->IsVisible());
+
+		const Point boxAbs = box.GetAbsolutePosition();
+		const Point barAbs = bar->GetAbsolutePosition();
+
+		EXPECT_NEAR(barAbs.y - boxAbs.y, 8.0f, kEps);                               // 上下内缩 8
+		EXPECT_NEAR(barAbs.x + static_cast<float>(bar->GetWidth()),
+		            boxAbs.x + static_cast<float>(box.GetWidth()) - 8.0f, kEps);    // 右侧内缩 8
+		// ★ 用户报的原始症状：条**不得**压住 1px 边框环（环占 [宽−1, 宽)）
+		EXPECT_TRUE(barAbs.x + static_cast<float>(bar->GetWidth())
+		            <= boxAbs.x + static_cast<float>(box.GetWidth()) - 1.0f);
+	}
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterTextBoxTests()
@@ -1417,7 +1496,7 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SingleLinePreferred", &TestTextBoxPreferredSingleLine);  // 9.8：padding 修正 + 自然居中验证
     GetTestRegistry().Add("TextBox.ShapeRounded", &TestTextBoxShapeRounded);  // P1：圆角背景
     GetTestRegistry().Add("TextBox.ShapeBorderRing", &TestTextBoxShapeBorderRing);  // P1：双矩形描边环
-    // textbox-scrollbar v1.1：垂直滚动条（T1–T8）
+    // scrollbar-placement-and-appearance v1.1：垂直滚动条（T1–T8）
     GetTestRegistry().Add("TextBox.ScrollBarVisibleOnOverflow", &TestTextBoxScrollBarVisibleOnOverflow);
     GetTestRegistry().Add("TextBox.ScrollBarHiddenWhenFits", &TestTextBoxScrollBarHiddenWhenFits);
     GetTestRegistry().Add("TextBox.ScrollBarHiddenSingleLine", &TestTextBoxScrollBarHiddenSingleLine);
@@ -1426,4 +1505,6 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.ScrollBarNarrowsTextArea", &TestTextBoxScrollBarNarrowsTextArea);
     GetTestRegistry().Add("TextBox.ScrollBarFollowsCaret", &TestTextBoxScrollBarFollowsCaret);
     GetTestRegistry().Add("TextBox.ScrollBarLazySyncOnPaint", &TestTextBoxScrollBarLazySyncOnPaint);
+    GetTestRegistry().Add("TextBox.ScrollBarIgnoresPressOnBar", &TestTextBoxScrollBarIgnoresPressOnBar);
+    GetTestRegistry().Add("TextBox.ScrollBarInset", &TestTextBoxScrollBarInset);
 }

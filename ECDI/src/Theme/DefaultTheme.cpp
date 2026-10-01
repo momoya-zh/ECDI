@@ -94,7 +94,12 @@ ScrollBarStyle DefaultTheme::GetScrollBarStyle() const{
 	// Phase 15 默认视觉：中性灰轨道 + 稍亮滑块（三态）
 	// ⚠️ thickness 不是纯视觉量——它参与 viewport 计算（详设 §3.3 双轴判定要扣它）
 	ScrollBarStyle s;
-	s.trackColor.value        = Color::FromRGBA8(240, 240, 245);
+	// ★ v1.6：轨道**默认透明**（alpha 0）——容器背景直接透出 ⇒ 暗底容器不再出现白条
+	//（ModelProbe 是暗色应用：kInputBg #1c212b，而原默认轨道是近白 (240,240,245) ⇒ 刺眼白条）。
+	// ★ 这**覆盖 Phase 15 的「中性灰轨道 + 稍亮滑块」默认视觉**（2026-10-01 用户拍板）：
+	//   观感变为「只有滑块」（现代风格）；★ **轨道的命中区不受影响**（翻页命中按条的矩形算，与是否画轨道无关）。
+	// ⚠️ 后端语义已核实：`GDIBackend::DrawRect` 对 `a < 1` 走 `BlendAlphaSolid` ⇒ alpha 0 **不产生像素**（不会变不透明白块）。
+	s.trackColor.value        = Color::FromRGBA8(240, 240, 245, 0);
 	s.thumbColor.value        = Color::FromRGBA8(190, 190, 200);
 	s.thumbHoverColor.value   = Color::FromRGBA8(160, 160, 175);
 	s.thumbPressedColor.value = Color::FromRGBA8(130, 130, 145);

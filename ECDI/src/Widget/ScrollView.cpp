@@ -10,6 +10,20 @@
 
 namespace ECDI{
 
+namespace{   // 匿名 namespace：ScrollView 内部常量（不暴露）
+
+	/// @brief 条的**四边内缩**（v1.6）——动机同 scrollbar-placement-and-appearance v1.5：条贴边 + 满高会压住
+	/// **外层容器**的边框环与圆角（ModelProbe 的模型列表 = 外层 Panel：1px 环 + 8px 圆角，ScrollView 铺满其内）。
+	/// ★ `ScrollView` **无样式能力**（装饰归外层容器，详设 §3.6）⇒ 内缩是**固定布局量**，不是样式字段（D13）。
+	constexpr int kBarInset = 2;
+
+	/// @brief 条在视口里占的**总尺寸** = 厚度 + 内缩——★ 4 处公式共用此处，防漂移
+	int BarFootprint(int thickness) noexcept{
+		return thickness + kBarInset;
+	}
+
+}
+
 ScrollView::ScrollView(){
 
 	// ① 内容节点：**偏移的消费者**——唯一进入内容坐标系的子树（详设 §3.3）
@@ -201,7 +215,7 @@ bool ScrollView::NeedsVerticalBar() const noexcept{
 
 	// 第二轮：按第一轮结论扣除后再判——**单调升级**
 	//（viewport 只会变小 ⇒ need 只会 false→true ⇒ 并集即不动点，最多 2 轮收敛）
-	const int tH = h0 - (nH1 ? t : 0);
+	const int tH = h0 - (nH1 ? BarFootprint(t) : 0);   // v1.6：条占「厚度 + 内缩」
 
 	return nV1 || (m_contentH > tH);
 
@@ -222,7 +236,7 @@ bool ScrollView::NeedsHorizontalBar() const noexcept{
 	const bool nV1 = m_contentH > h0;
 	const bool nH1 = m_contentW > w0;
 
-	const int tW = w0 - (nV1 ? t : 0);
+	const int tW = w0 - (nV1 ? BarFootprint(t) : 0);   // v1.6：条占「厚度 + 内缩」
 
 	return nH1 || (m_contentW > tW);
 
@@ -230,13 +244,15 @@ bool ScrollView::NeedsHorizontalBar() const noexcept{
 
 int ScrollView::ViewportWidth() const noexcept{
 
-	return GetWidth() - (NeedsVerticalBar() ? BarThickness() : 0);
+	// ★ v1.6：条不再贴边 ⇒ 视口要让出**厚度 + 内缩**（只让厚度会让内容最后一列永远压在条底下）
+	return GetWidth() - (NeedsVerticalBar() ? BarFootprint(BarThickness()) : 0);
 
 }
 
 int ScrollView::ViewportHeight() const noexcept{
 
-	return GetHeight() - (NeedsHorizontalBar() ? BarThickness() : 0);
+	// ★ v1.6：同上（内容最后一行）
+	return GetHeight() - (NeedsHorizontalBar() ? BarFootprint(BarThickness()) : 0);
 
 }
 
@@ -247,18 +263,21 @@ void ScrollView::ApplyLayout(){
 	const int t = BarThickness();
 
 	// ① 条几何（**视口空间**——固定在视口，不受偏移）
-	//    垂直条贴右、水平条贴底；交叉区不做缩角（记账 L2）
+	//    ★ v1.6：四边**内缩** `kBarInset`（不贴边、不压外层容器的边框环与圆角）；
+	//    垂直条贴右、水平条贴底；交叉区仍不做缩角（记账 L2 不变——两条照旧在角落重叠）
+	const int s = kBarInset;
+
 	if (m_vBar != nullptr){
 
-		m_vBar->SetSize(t, GetHeight());
-		m_vBar->SetPosition(GetWidth() - t, 0);
+		m_vBar->SetSize(t, (std::max)(0, GetHeight() - s * 2));   // 退化保护：过矮时钳 0
+		m_vBar->SetPosition(GetWidth() - t - s, s);
 
 	}
 
 	if (m_hBar != nullptr){
 
-		m_hBar->SetSize(GetWidth(), t);
-		m_hBar->SetPosition(0, GetHeight() - t);
+		m_hBar->SetSize((std::max)(0, GetWidth() - s * 2), t);    // ★ v1.6：同垂直条，四边内缩
+		m_hBar->SetPosition(s, GetHeight() - t - s);
 
 	}
 

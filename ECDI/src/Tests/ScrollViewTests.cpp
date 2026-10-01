@@ -239,10 +239,10 @@ void TestScrollBarNotAffectedByContentOffset(){
 
 	const auto& clipBase    = std::get<PushClipCommand>(cbBase[n - 5]);
 	const auto& clipShifted = std::get<PushClipCommand>(cbShifted[n - 5]);
-	EXPECT_NEAR(clipBase.rect.x, 188.0f, kEps);   // 200 − 厚度 12
-	EXPECT_NEAR(clipBase.rect.y, 0.0f, kEps);
+	EXPECT_NEAR(clipBase.rect.x, 186.0f, kEps);   // 200 − 厚度 12 − 内缩 2（v1.6）
+	EXPECT_NEAR(clipBase.rect.y, 2.0f, kEps);     // 上内缩 2（v1.6）
 	EXPECT_NEAR(clipBase.rect.width, 12.0f, kEps);
-	EXPECT_NEAR(clipBase.rect.height, 100.0f, kEps);
+	EXPECT_NEAR(clipBase.rect.height, 96.0f, kEps);   // 100 − 上下各 2（v1.6）
 	EXPECT_EQ(clipShifted.rect.x, clipBase.rect.x);
 	EXPECT_EQ(clipShifted.rect.y, clipBase.rect.y);
 	EXPECT_EQ(clipShifted.rect.width, clipBase.rect.width);
@@ -265,8 +265,8 @@ void TestScrollBarNotAffectedByContentOffset(){
 	// ③ GetAbsolutePosition：条自身视觉位置不含内容偏移
 	const Point absBase    = vBarBase->GetAbsolutePosition();
 	const Point absShifted = vBarShifted->GetAbsolutePosition();
-	EXPECT_NEAR(absBase.x, 188.0f, kEps);
-	EXPECT_NEAR(absBase.y, 0.0f, kEps);
+	EXPECT_NEAR(absBase.x, 186.0f, kEps);   // v1.6：200 − 厚度 12 − 内缩 2
+	EXPECT_NEAR(absBase.y, 2.0f, kEps);     // v1.6：上内缩 2
 	EXPECT_NEAR(absShifted.x, absBase.x, kEps);
 	EXPECT_NEAR(absShifted.y, absBase.y, kEps);
 }
@@ -574,6 +574,43 @@ void TestScrollBarThemeAndOverride(){
 	EXPECT_EQ(bar.Style().thumbColor.value, custom);
 	EXPECT_EQ(bar.Style().thickness.value, 20);
 	EXPECT_EQ(bar.Style().trackColor.value, defaults.trackColor.value);
+	EXPECT_NEAR(bar.Style().trackColor.value.a, 0.0f, kEps);   // ★ v1.6：轨道默认**透明**（容器背景直接透出）
+}
+
+// ── v1.6：条四边内缩（不压外层容器的边框环与圆角）─────────────
+
+/// @brief 条的**四边内缩**（v1.6）+ ★ 视口随之内收
+/// @details 动机：`ScrollView` 常被带装饰的外层容器包住（ModelProbe 模型列表 = Panel：1px 环 + 8px 圆角）
+/// ⇒ 条贴边 + 满高会压住那个环与圆角（与 scrollbar-placement-and-appearance v1.5 同一个症状）。
+/// ★ 关键：内缩段必须**一起**从视口扣掉（`厚度 + 内缩`），否则内容最后一列 / 行永远压在条底下。
+void TestScrollBarInsetAndViewport(){
+	TestableScrollView sv;
+	sv.SetSize(200, 100);
+	sv.SetContentExtent(400, 400);   // 双轴都溢出 ⇒ 两条都出现
+
+	ScrollBar* vBar = sv.GetVerticalScrollBar();
+	ScrollBar* hBar = sv.GetHorizontalScrollBar();
+	EXPECT_TRUE(vBar->IsVisible());
+	EXPECT_TRUE(hBar->IsVisible());
+
+	const int t = vBar->GetThickness();   // 12（样式默认）
+	const int s = 2;                      // v1.6 内缩常量
+
+	// ① 垂直条：右侧 / 上 / 下各内缩 s
+	EXPECT_NEAR(vBar->GetAbsolutePosition().x, static_cast<float>(200 - t - s), kEps);
+	EXPECT_NEAR(vBar->GetAbsolutePosition().y, static_cast<float>(s), kEps);
+	EXPECT_EQ(vBar->GetWidth(), t);
+	EXPECT_EQ(vBar->GetHeight(), 100 - s * 2);
+
+	// ② 水平条：底部 / 左 / 右各内缩 s
+	EXPECT_NEAR(hBar->GetAbsolutePosition().x, static_cast<float>(s), kEps);
+	EXPECT_NEAR(hBar->GetAbsolutePosition().y, static_cast<float>(100 - t - s), kEps);
+	EXPECT_EQ(hBar->GetWidth(), 200 - s * 2);
+	EXPECT_EQ(hBar->GetHeight(), t);
+
+	// ③ ★ 视口随内缩一起收：maxOffset = 内容 extent − 视口（视口 = 容器 − (厚度 + 内缩)）
+	EXPECT_EQ(sv.GetMaxOffsetX(), 400 - (200 - t - s));
+	EXPECT_EQ(sv.GetMaxOffsetY(), 400 - (100 - t - s));
 }
 
 } // anonymous namespace
@@ -594,6 +631,7 @@ void ECDI::Test::RegisterScrollViewTests()
 	GetTestRegistry().Add("ScrollBar.ThumbGeometry",                     &TestScrollBarThumbGeometry);
 	GetTestRegistry().Add("ScrollBar.DragInvertsOffset",                 &TestScrollBarDragInvertsOffset);
 	GetTestRegistry().Add("ScrollBar.ThemeAndOverride",                  &TestScrollBarThemeAndOverride);
+	GetTestRegistry().Add("ScrollBar.InsetAndViewport",                  &TestScrollBarInsetAndViewport);
 }
 
 }

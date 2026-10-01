@@ -13,7 +13,7 @@
 namespace ECDI{
 
 class TimerEvent;   // 前置声明（OnTimer override 引用参数）
-class ScrollBar;    // 前置声明（textbox-scrollbar：组合垂直条——头内只需指针，完整类型在 .cpp）
+class ScrollBar;    // 前置声明（scrollbar-placement-and-appearance：组合垂直条——头内只需指针，完整类型在 .cpp）
 
 /// @brief 单行文本框（5.5；第三个文本控件，继承 TextWidget）
 /// @details 职责：码点级文本编辑（光标/插入/删除/移动）+ 绘制（白底/文本/光标/焦点框）。
@@ -137,7 +137,7 @@ public:
 	/// @brief 水平滚动偏移（9.5 R1；只读查询，无副作用——测试/调试用，同 GetScrollOffsetY 先例）
 	float GetScrollOffsetX() const noexcept{ return m_scrollOffsetX; }
 
-	/// @brief 垂直滚动条（textbox-scrollbar v1.1 D9——★ **访问内部组成控件的只读观察入口**，
+	/// @brief 垂直滚动条（scrollbar-placement-and-appearance v1.1 D9——★ **访问内部组成控件的只读观察入口**，
 	/// 不是第二套滚动控制权：滚动权威始终是 m_scrollOffsetY，条自身 SetOffset 不回调）
 	/// @details 自动显隐（多行且内容溢出）+ 主题经条自身下发（C-4）⇒ 无公开显隐 / 样式开关（D8）。
 	/// 用途 = 状态观察 · 测试断言 · 用户自写验收（先例 ScrollView::GetVerticalScrollBar）。
@@ -319,14 +319,20 @@ private:
 	float m_scrollOffsetX = 0.0f;          ///< 水平滚动偏移（像素；跟手模式——光标边界推导，clamp ≥ 0，无上限）
 	float m_preferredColumn = 0.0f;        ///< 目标列（像素宽——Up/Down 跨行保持的 X；Left/Right/Home/End/点击/编辑后重置）
 
-	// ── 垂直滚动条（textbox-scrollbar v1.1；★ C-3 非拥有缓存指针 + ★ C-2 下发守卫）──
+	// ── 垂直滚动条（scrollbar-placement-and-appearance v1.1；★ C-3 非拥有缓存指针 + ★ C-2 下发守卫）──
 
 	/// @brief 组合垂直条（△2——两个构造共用；**最后 AddChild** ⇒ HitTest 逆序条优先命中）
 	void CreateVerticalScrollBar();
 
+	/// @brief 条摆位（△3；★ v1.5 起四边**内缩** = max(padding, 2)）——右 / 上 / 下留边，
+	/// 使 TextBox 的边框环与圆角不被压住，并与文本区的 padding 对称。
+	/// ★ **必须在「尺寸入口」与「样式入口」两处都调用**：内缩量取自 `padding`，
+	/// 而调用方常「先 SetSize 后 SetStyle」（ModelProbe 即是）——只在 SetSize 里算会漏掉样式变更。
+	void LayoutScrollBar();
+
 	/// @brief 同步条（可见性 + 范围 + 偏移）——在 OnPaint 起始被每帧调用（△6/D10），
 	/// ⇒ ★ **必须带「值变化才下发」守卫**：ScrollBar::SetRange 无同值守卫且无条件 Invalidate，
-	/// 无守卫 = 每帧请求重绘（自激励）。契约见 docs/textbox-scrollbar.md §7 C-2。
+	/// 无守卫 = 每帧请求重绘（自激励）。契约见 docs/scrollbar-placement-and-appearance.md §7 C-2。
 	void SyncScrollBar();
 
 	ScrollBar* m_vBar = nullptr;        ///< 垂直条（★ **非拥有**——子节点归 Widget 树；不 delete、不在析构解绑）

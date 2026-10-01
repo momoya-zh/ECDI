@@ -26,9 +26,17 @@ namespace{   // 匿名 namespace：TextBox 内部常量（不暴露）
 	/// @brief 滚轮单行滚动量（8.5.2；WHEEL_DELTA=120 滚一行——16px ≈ 一行行高）
 	constexpr float kScrollLinePx = 16.0f;
 
+	/// @brief 条的最小内缩（scrollbar-placement-and-appearance v1.5）——padding = 0 时也不贴边、不压 TextBox 的边框环
+	constexpr float kScrollBarMinInset = 2.0f;
+
+	/// @brief 条的内缩量 = max(padding, 最小内缩)——★ 摆位与「文本区让位」共用此处，防两处漂移
+	float ScrollBarInset(float padding) noexcept{
+		return (std::max)(padding, kScrollBarMinInset);
+	}
+
 }
 
-// ── 垂直滚动条（textbox-scrollbar △2；两个构造共用一段组合逻辑——避免 10 行重复）──
+// ── 垂直滚动条（scrollbar-placement-and-appearance △2；两个构造共用一段组合逻辑——避免 10 行重复）──
 
 void TextBox::CreateVerticalScrollBar(){
 
@@ -47,7 +55,7 @@ void TextBox::CreateVerticalScrollBar(){
 }
 
 TextBox::TextBox(): TextWidget(){
-	// textbox-scrollbar：**先**组合条，使紧随其后的 ApplyTheme 一次把主题下传到条（△7）
+	// scrollbar-placement-and-appearance：**先**组合条，使紧随其后的 ApplyTheme 一次把主题下传到条（△7）
 	CreateVerticalScrollBar();
 	// TextWidget 构造已注入 TextStyle；TextBox 再注入 TextBoxStyle
 	// （基类构造期虚函数静态派发——必须在此重新调用以覆盖 TextBox::ApplyTheme）
@@ -55,7 +63,7 @@ TextBox::TextBox(): TextWidget(){
 }
 
 TextBox::TextBox(const std::string& text): TextWidget(text){
-	// textbox-scrollbar：（同上）
+	// scrollbar-placement-and-appearance：（同上）
 	CreateVerticalScrollBar();
 	// TextWidget 构造已注入 TextStyle；TextBox 再注入 TextBoxStyle
 	ApplyTheme(GetDefaultTheme());
@@ -76,10 +84,11 @@ void TextBox::ApplyTheme(const Theme& theme){
 	m_style.cornerRadius.Apply(defaults.cornerRadius.value);
 	m_style.borderWidth.Apply(defaults.borderWidth.value);
 	m_style.borderColor.Apply(defaults.borderColor.value);
-	// textbox-scrollbar △7 / C-4：主题**下传条自身**（条有自己的 ApplyTheme / ScrollBarStyle）——
+	// scrollbar-placement-and-appearance △7 / C-4：主题**下传条自身**（条有自己的 ApplyTheme / ScrollBarStyle）——
 	// ★ 不在此复制 ScrollBarStyle 的各字段，否则 ScrollBarStyle 一演变就会长出平行的主题逻辑
 	if (m_vBar != nullptr){
 		m_vBar->ApplyTheme(theme);
+		LayoutScrollBar();   // v1.5：主题可能改了 padding ⇒ 条的内缩随之重算（内缩 = max(padding, 2)）
 	}
 	Invalidate();
 
@@ -96,6 +105,9 @@ void TextBox::SetStyle(TextBoxStyleOverride override){
 	if (override.cornerRadius)  m_style.cornerRadius.Set(*override.cornerRadius);
 	if (override.borderWidth)   m_style.borderWidth.Set(*override.borderWidth);
 	if (override.borderColor)   m_style.borderColor.Set(*override.borderColor);
+	// v1.5：padding 是**条内缩的输入** ⇒ 摆位必须重算。★ 调用方常用「先 SetSize 后 SetStyle」的次序
+	// （ModelProbe 即是）——只在 SetSize 里算摆位会漏掉这次样式变更，条会停在旧内缩上。
+	LayoutScrollBar();
 	Invalidate();
 
 }
@@ -187,11 +199,8 @@ void TextBox::SetSize(int w, int h){
 	// 9.5 R1 §4.8：基类改几何 → 重新保证光标可见（缩窗后光标越出可视区立即滚回，垂直/水平同时受益）
 	Widget::SetSize(w, h);
 	EnsureCaretVisible();
-	// textbox-scrollbar △3：条贴右、全高（照抄 ScrollView.cpp:251-254——视口空间，不受偏移）
-	if (m_vBar != nullptr){
-		m_vBar->SetSize(m_vBar->GetThickness(), GetHeight());
-		m_vBar->SetPosition(GetWidth() - m_vBar->GetThickness(), 0);
-	}
+	// scrollbar-placement-and-appearance △3：条摆位（视口空间，不受偏移）——★ v1.5 起四边**内缩**，见 LayoutScrollBar()
+	LayoutScrollBar();
 	SyncScrollBar();
 	Invalidate();
 
@@ -467,7 +476,7 @@ void TextBox::EnsureCaretVisible(){
 		m_scrollOffsetX = ClampScrollOffsetX(m_scrollOffsetX, prefixWidth, GetTextAreaWidth());
 	}
 
-	// textbox-scrollbar：光标跟随滚动改了 offset → 条即刻跟随（T7；守卫在 SyncScrollBar 内）
+	// scrollbar-placement-and-appearance：光标跟随滚动改了 offset → 条即刻跟随（T7；守卫在 SyncScrollBar 内）
 	SyncScrollBar();
 }
 
@@ -480,6 +489,23 @@ float TextBox::ClampScrollOffsetX(float current, float caretX, float viewWidth){
 	if (caretX > current + viewWidth)
 		return caretX - viewWidth;
 	return current;
+}
+
+// ── 垂直滚动条摆位（scrollbar-placement-and-appearance △3；★ v1.5 起四边内缩）──
+
+void TextBox::LayoutScrollBar(){
+
+	if (m_vBar == nullptr){
+		return;   // 防御：条未就位（构造期 / 异常路径）
+	}
+
+	// 内缩 = max(padding, 2px)：既与文本区的 padding **对称**，又保证 padding = 0 时也不贴边、
+	// 不压 TextBox 的 1px 边框环与圆角（v1.5 用户反馈：条贴右 + 满高会把右边和上下的框遮住）
+	const int inset = static_cast<int>(ScrollBarInset(m_style.padding.value));
+	const int barH  = (std::max)(0, GetHeight() - inset * 2);   // 退化保护：控件过矮时高度钳 0（0 高不参与命中）
+	m_vBar->SetSize(m_vBar->GetThickness(), barH);
+	m_vBar->SetPosition(GetWidth() - m_vBar->GetThickness() - inset, inset);
+
 }
 
 void TextBox::SyncScrollBar(){
@@ -530,7 +556,7 @@ void TextBox::OnMouseWheel(const MouseWheelEvent& event){
 	m_scrollOffsetY = (std::clamp)(m_scrollOffsetY, 0.0f, GetMaxScrollOffset());
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 债务兑现：候选窗位置与滚动联动
-	SyncScrollBar();        // textbox-scrollbar：滚轮改 offset → 条即刻跟随（T5）
+	SyncScrollBar();        // scrollbar-placement-and-appearance：滚轮改 offset → 条即刻跟随（T5）
 }
 
 // ── 光标几何（5.6 提取：与点击定位同源——CalculateTextPosition 单一入口）──
@@ -539,10 +565,12 @@ float TextBox::GetTextAreaWidth() const noexcept{
 	// 可视宽度 = 控件宽 − 内边距×2（提取为共享辅助：文本裁切/Selection 高亮/光标 三处共用，
 	// 改一处不漂移）——9.6 收尾方案 B：内边距常驻，不再随焦点变化
 	float width = static_cast<float>(GetWidth()) - m_style.padding.value * 2.0f;
-	// textbox-scrollbar △5：条**可见**时文本区让位（单点改动 ⇒ 绘制裁切 / 光标 / 点击 / 拖选自动跟随）。
+	// scrollbar-placement-and-appearance △5：条**可见**时文本区让位（单点改动 ⇒ 绘制裁切 / 光标 / 点击 / 拖选自动跟随）。
+	// ★ v1.5：让位量 = 条厚 **+ 条的内缩**——条不再贴边，内缩那一段也必须让出来，
+	//   否则文本会钻到条底下（末列/末行字符被条压住的原始症状会以新的形式回来）。
 	// ★ 不会反向影响内容高：GetMaxScrollOffset 只经 GetTextAreaHeight（高度）⇒ 无循环依赖（K9 / D4）
 	if (m_vBar != nullptr && m_vBar->IsVisible()){
-		width -= static_cast<float>(m_vBar->GetThickness());
+		width -= static_cast<float>(m_vBar->GetThickness()) + ScrollBarInset(m_style.padding.value);
 	}
 	return width;
 }
@@ -977,6 +1005,23 @@ void TextBox::OnTimer(const TimerEvent& event){
 void TextBox::OnMouseButtonDown(const MouseButtonDownEvent& event){
 	// 焦点获取由 Application 前置处理（5.4.2：CanFocus → SetFocusedWidget）
 	// 坐标系：事件 GetMouseX = 窗口客户区绝对；GetAbsolutePosition = 客户区绝对
+
+	// ★★ 手势隔离（scrollbar-placement-and-appearance 缺陷修复 v1.4）：本控件是**复合控件**（组合了滚动条子节点），
+	// 而 Application 的鼠标派发在 `HitTest` 命中后**沿父链冒泡**（`Application.cpp:294-302`）
+	// ⇒ 按在**条**上时本方法照样被调用。若不设防，这次按下会被当成"文本点击"（置 m_selectionAnchor
+	// 与 m_mouseDown）⇒ **拖条时文字被拖选**（蓝底白字）、**单击条时移动光标**（并可能连带光标跟随滚动）。
+	// 判据：沿 Parent 链回到**根**，用**根空间**（= 窗口客户区，与事件坐标同系）做一次 `HitTest`——
+	// 真正命中的不是自己 ⇒ 该手势属于子控件，本控件直接忽略（子控件自己会处理它）。
+	// ★ 无父 / 无窗口（无头测试）时 root == this，判据依然成立 ⇒ 可无头验证。
+	{
+		Widget* root = this;
+		while (root->GetParent() != nullptr){
+			root = root->GetParent();
+		}
+		if (root->HitTest(event.GetMouseX(), event.GetMouseY()) != this){
+			return;
+		}
+	}
 	const Point abs = GetAbsolutePosition();
 	// 8.5.2：双击（平台层系统判定——WM_LBUTTONDBLCLK）→ 选词（GetWordBounds）
 	if (event.IsDoubleClick()){
@@ -1008,6 +1053,8 @@ void TextBox::OnMouseButtonDown(const MouseButtonDownEvent& event){
 void TextBox::OnMouseMove(const MouseMoveEvent& event){
 	if (!m_mouseDown)
 		return;   // 非拖选中：普通移动忽略（避免误扩展选择）
+	// ★ 无需再判"手势是不是我的"：m_mouseDown 只由 OnMouseButtonDown 置位，
+	//   而那里已有手势隔离守卫（v1.4）⇒ 落在子控件上的按下不会开启拖选
 	// 拖选：同源定位（与 OnMouseButtonDown 同款——8.5.2 多行坐标）——active 端跟随鼠标
 	const Point abs = GetAbsolutePosition();
 	m_caret = CaretIndexFromPosition(
@@ -1132,7 +1179,7 @@ void TextBox::OnCharInput(const CharInputEvent& event){
 
 void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 
-	// textbox-scrollbar △6 / D10：**起始处惰性同步**条（先例 = 同函数内的 RecalculateLines 惰性重算）。
+	// scrollbar-placement-and-appearance △6 / D10：**起始处惰性同步**条（先例 = 同函数内的 RecalculateLines 惰性重算）。
 	// ★ 一处覆盖全部同步路径——尤其**字体路径**：GetLineHeight 实时读 m_style.font，而
 	// TextWidget::SetFont / SetStyle 非虚且只 Invalidate ⇒ TextBox 无从挂钩（R1）。守卫在 SyncScrollBar 内。
 	SyncScrollBar();
