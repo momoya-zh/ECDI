@@ -14,6 +14,7 @@
 #include "ECDI/EventSystem/Window/DropFilesEvent.h"   // Phase 14 A7：OnDropFiles override（Widget 级观测）
 #include "ECDI/Layout/HorizontalLayout.h"
 #include "ECDI/Layout/VerticalLayout.h"
+#include "ECDI/Layout/ListLayout.h"
 #include "ECDI/Platform/ExecutablePath.h"
 #include "ECDI/Platform/PlatformWindow.h"
 #include "ECDI/Widget/Button.h"
@@ -357,6 +358,8 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 
 	auto list = std::make_unique<ScrollView>();
 	list->SetScrollStep(static_cast<int>(kRowHeight));   // 28 = 原行高（D5：框架默认 32 不绑 Demo）
+	// Phase 25：行位置改由布局给出（可见序号 × 行高）——原手算 SetPosition 已删（C-VIS-1）
+	list->GetContentView().SetLayout(std::make_unique<ListLayout>(static_cast<int>(kRowHeight)));
 	list->SetStretch(1);                                 // 吃满 shell
 	m_scroll = list.get();
 
@@ -732,9 +735,8 @@ void ModelProbePage::RebuildRows(){
 			// 新建行：cb + idLabel + metaLabel（绝对定位；行高固定）
 			row.panel = new Panel();
 			row.panel->SetSize(600, static_cast<int>(kRowHeight));
-			// Phase 15：行只放**布局位置**（i × 行高，恒定）——视觉位移由 ScrollView 的内容偏移
-			// 统一提供（原手搓版在此处减 offset；现由接缝处理 ⇒ 布局位置永不随滚动变化——C1）
-			row.panel->SetPosition(0, static_cast<int>(static_cast<float>(i) * kRowHeight));
+			// Phase 25：行位置由 `ListLayout` 给出（可见序号 × 行高）——原手算 SetPosition 已删（C-VIS-1）。
+			// 视觉位移仍由 ScrollView 的内容偏移统一提供（布局位置永不随滚动变化——C1）。
 			auto cb = std::make_unique<CheckBox>();
 			cb->SetSize(28, static_cast<int>(kRowHeight));
 			cb->SetTextColor(kText());
@@ -761,10 +763,11 @@ void ModelProbePage::RebuildRows(){
 		const size_t idx = i;
 		row.cb->SetOnCheckedChanged([this, idx](bool){ UpdateStat(); });
 	}
-	// Phase 15 R4：extent **显式**给出（= 行数 × 行高），不走 UpdateContentExtent()——
-	// 行池里被隐藏的旧行仍留在内容树下且保留创建时的几何，按"子控件包围盒"推导会把它们算进范围
-	// （表现为能滚出空白区）。本式与原手搓版 total = rows.size() × rowHeight 逐位等价。
-	m_scroll->SetContentExtent(600, static_cast<int>(static_cast<float>(m_models.size()) * kRowHeight));
+	// Phase 25：两步更新（D4）——位置已归布局，extent 改由内容视图推导。
+	// ★ 原「显式 SetContentExtent + 其注释」整块删除：被隐藏的旧行由 `ListLayout` 停泊到自身 bbox
+	//   负区（C-VIS-4），对 UpdateContentExtent 贡献归零 ⇒ 原顾虑（隐藏行被算进范围）被结构性消除（B13）。
+	m_scroll->GetContentView().Arrange();
+	m_scroll->UpdateContentExtent();
 }
 
 void ModelProbePage::UpdateStat(){

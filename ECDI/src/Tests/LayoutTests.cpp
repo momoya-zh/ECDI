@@ -2,8 +2,11 @@
 #include "TestFramework.h"
 #include "ECDI/Widget/Panel.h"
 #include "ECDI/Widget/Widget.h"
+#include "ECDI/Widget/ScrollView.h"
 #include "ECDI/Layout/HorizontalLayout.h"
 #include "ECDI/Layout/VerticalLayout.h"
+#include "ECDI/Layout/ListLayout.h"
+#include "ECDI/Layout/GridLayout.h"
 #include <memory>
 #include <utility>
 
@@ -11,6 +14,7 @@ using namespace ECDI;
 
 namespace {
 
+constexpr float kEps = 0.001f;   // extent 断言容差（Size 为 float）
 void TestHorizontalLayout()
 {
     // ── Phase 6 原 #8：HorizontalLayout（迁移）──
@@ -852,6 +856,304 @@ void TestPaddingNegativeClamped()
 #endif
 }
 
+// ── Phase 25 · ListLayout（T25-1..8 / T25-12 的 List 部分）──────────────────
+
+// T25-1：可见子按序定位（x 恒 0；行距 = rowHeight + spacing）
+void TestListLayoutPositions()
+{
+    Panel panel;
+    panel.SetSize(200, 200);
+    panel.SetLayout(std::make_unique<ListLayout>(28));
+
+    auto a = std::make_unique<Widget>();
+    a->SetSize(100, 20);
+    auto b = std::make_unique<Widget>();
+    b->SetSize(120, 20);
+    auto c = std::make_unique<Widget>();
+    c->SetSize(80, 20);
+    auto* pa = a.get();
+    auto* pb = b.get();
+    auto* pc = c.get();
+
+    panel.AddChild(std::move(a));
+    panel.AddChild(std::move(b));
+    panel.AddChild(std::move(c));
+    panel.Arrange();
+
+    EXPECT_EQ(pa->GetX(), 0);
+    EXPECT_EQ(pa->GetY(), 0);
+    EXPECT_EQ(pb->GetX(), 0);
+    EXPECT_EQ(pb->GetY(), 28);
+    EXPECT_EQ(pc->GetX(), 0);
+    EXPECT_EQ(pc->GetY(), 56);
+
+    // 幂等（每帧 Arrange 的自然结果，B2）
+    panel.Arrange();
+    EXPECT_EQ(pb->GetY(), 28);
+    EXPECT_EQ(pc->GetY(), 56);
+}
+
+// T25-2：不可见子不占槽位 + 停泊到自身 bbox 负区（C-VIS-2/4 效果断言）
+void TestListLayoutHiddenParked()
+{
+    Panel panel;
+    panel.SetSize(700, 200);
+    panel.SetLayout(std::make_unique<ListLayout>(28));
+
+    auto a = std::make_unique<Widget>();
+    a->SetSize(100, 28);
+    auto h = std::make_unique<Widget>();
+    h->SetSize(600, 28);
+    auto b = std::make_unique<Widget>();
+    b->SetSize(100, 28);
+    auto* pa = a.get();
+    auto* ph = h.get();
+    auto* pb = b.get();
+
+    panel.AddChild(std::move(a));
+    panel.AddChild(std::move(h));
+    panel.AddChild(std::move(b));
+    ph->SetVisible(false);
+    panel.Arrange();
+
+    // H 不占槽位 ⇒ B 仍在第 2 槽
+    EXPECT_EQ(pa->GetY(), 0);
+    EXPECT_EQ(pb->GetY(), 28);
+
+    // 停泊效果（测行为、不测坐标技巧）：右下角 <= (0, 0)
+    EXPECT_TRUE(ph->GetX() + ph->GetWidth() <= 0);
+    EXPECT_TRUE(ph->GetY() + ph->GetHeight() <= 0);
+}
+
+// T25-3：隐藏 -> 恢复 的连续槽位往返幂等（C-VIS-1；
+//        ★ 原「不可命中」断言由 Widget::HitTest 入口门控恒成立、无区分度）
+void TestListLayoutHideRestoreIdempotent()
+{
+    Panel panel;
+    panel.SetSize(200, 200);
+    panel.SetLayout(std::make_unique<ListLayout>(28));
+
+    auto a = std::make_unique<Widget>();
+    a->SetSize(100, 28);
+    auto b = std::make_unique<Widget>();
+    b->SetSize(100, 28);
+    auto c = std::make_unique<Widget>();
+    c->SetSize(100, 28);
+    auto* pa = a.get();
+    auto* pb = b.get();
+    auto* pc = c.get();
+
+    panel.AddChild(std::move(a));
+    panel.AddChild(std::move(b));
+    panel.AddChild(std::move(c));
+    panel.Arrange();
+    EXPECT_EQ(pb->GetY(), 28);
+    EXPECT_EQ(pc->GetY(), 56);
+
+    // 隐藏 B ⇒ C 上移接替第 2 槽
+    pb->SetVisible(false);
+    panel.Arrange();
+    EXPECT_EQ(pa->GetY(), 0);
+    EXPECT_EQ(pc->GetY(), 28);
+
+    // 恢复 B ⇒ 槽位回到原位
+    pb->SetVisible(true);
+    panel.Arrange();
+    EXPECT_EQ(pb->GetY(), 28);
+    EXPECT_EQ(pc->GetY(), 56);
+}
+
+// T25-4：Arrange + UpdateContentExtent = 内容包围盒（两步模式，D4）
+void TestListLayoutContentExtent()
+{
+    ScrollView sv;
+    sv.SetSize(200, 100);
+    sv.GetContentView().SetLayout(std::make_unique<ListLayout>(28));
+
+    for (int i = 0; i < 3; ++i)
+    {
+        auto row = std::make_unique<Widget>();
+        row->SetSize(600, 28);
+        sv.GetContentView().AddChild(std::move(row));
+    }
+
+    sv.GetContentView().Arrange();
+    sv.UpdateContentExtent();
+
+    // max(x+w) = 600；max(y+h) = 56 + 28 = 84（3 槽，非 Sigma）
+    EXPECT_NEAR(sv.GetContentExtent().width, 600.0f, kEps);
+    EXPECT_NEAR(sv.GetContentExtent().height, 84.0f, kEps);
+}
+
+// T25-5：GridLayout 固定 cell 网格 + 末行左对齐（C8）
+void TestGridLayoutPositions()
+{
+    Panel panel;
+    panel.SetSize(300, 300);
+    panel.SetLayout(std::make_unique<GridLayout>(2, 100, 50));
+
+    Widget* cells[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+    for (int i = 0; i < 5; ++i)
+    {
+        auto cell = std::make_unique<Widget>();
+        cell->SetSize(80, 40);
+        cells[i] = cell.get();
+        panel.AddChild(std::move(cell));
+    }
+    panel.Arrange();
+
+    EXPECT_EQ(cells[0]->GetX(), 0);
+    EXPECT_EQ(cells[0]->GetY(), 0);
+    EXPECT_EQ(cells[1]->GetX(), 100);
+    EXPECT_EQ(cells[1]->GetY(), 0);
+    EXPECT_EQ(cells[2]->GetX(), 0);
+    EXPECT_EQ(cells[2]->GetY(), 50);
+    EXPECT_EQ(cells[3]->GetX(), 100);
+    EXPECT_EQ(cells[3]->GetY(), 50);
+    EXPECT_EQ(cells[4]->GetX(), 0);      // 末行左对齐（不足列不居中、不越界）
+    EXPECT_EQ(cells[4]->GetY(), 100);
+
+    // 幂等（每帧 Arrange 的自然结果，B2）
+    panel.Arrange();
+    EXPECT_EQ(cells[4]->GetX(), 0);
+    EXPECT_EQ(cells[4]->GetY(), 100);
+}
+
+// T25-6：Arrange 前后逐 child 尺寸逐位不变（C5 / D9；批二追加 Grid 分支）
+void TestArrangeKeepsChildSize()
+{
+    Panel panel;
+    panel.SetSize(200, 200);
+    panel.SetLayout(std::make_unique<ListLayout>(28));
+
+    auto a = std::make_unique<Widget>();
+    a->SetSize(100, 20);
+    auto b = std::make_unique<Widget>();
+    b->SetSize(150, 50);
+    auto* pa = a.get();
+    auto* pb = b.get();
+
+    panel.AddChild(std::move(a));
+    panel.AddChild(std::move(b));
+
+    const int aw = pa->GetWidth(), ah = pa->GetHeight();
+    const int bw = pb->GetWidth(), bh = pb->GetHeight();
+    panel.Arrange();
+
+    EXPECT_EQ(pa->GetWidth(), aw);
+    EXPECT_EQ(pa->GetHeight(), ah);
+    EXPECT_EQ(pb->GetWidth(), bw);
+    EXPECT_EQ(pb->GetHeight(), bh);
+
+    // ── Grid 分支（批二在同一测试内追加；★ 不新增测试编号）──
+    Panel grid;
+    grid.SetSize(300, 300);
+    grid.SetLayout(std::make_unique<GridLayout>(2, 100, 50));
+
+    auto c = std::make_unique<Widget>();
+    c->SetSize(80, 40);
+    auto* pc = c.get();
+    grid.AddChild(std::move(c));
+
+    const int cw = pc->GetWidth(), chh = pc->GetHeight();
+    grid.Arrange();
+
+    EXPECT_EQ(pc->GetWidth(), cw);
+    EXPECT_EQ(pc->GetHeight(), chh);
+}
+
+// T25-7：extent 负向钳 0（既有 ScrollView 行为回归，B9 negative 语义）
+void TestExtentNegativeClamp()
+{
+    ScrollView sv;
+    sv.SetSize(200, 100);
+    sv.GetContentView().SetLayout(std::make_unique<ListLayout>(28));
+
+    auto a = std::make_unique<Widget>();
+    a->SetSize(100, 28);
+    auto b = std::make_unique<Widget>();
+    b->SetSize(100, 28);
+    auto* pb = b.get();
+    sv.GetContentView().AddChild(std::move(a));
+    sv.GetContentView().AddChild(std::move(b));
+    sv.GetContentView().Arrange();
+
+    // 手动把第 2 行移入负区（绕开布局，模拟中间态）
+    pb->SetPosition(-10, -20);
+    sv.UpdateContentExtent();
+
+    // 仅 (0,0,100x28) 贡献；负位置不增加 extent，也不产生负 extent
+    EXPECT_NEAR(sv.GetContentExtent().width, 100.0f, kEps);
+    EXPECT_NEAR(sv.GetContentExtent().height, 28.0f, kEps);
+}
+
+// T25-8：0 子 / 全隐藏 ⇒ Arrange no-op + extent (0, 0)（C-VIS-2 推论）
+void TestListLayoutEmptyOrAllHidden()
+{
+    // 0 子：no-op（不崩）
+    Panel empty;
+    empty.SetSize(200, 200);
+    empty.SetLayout(std::make_unique<ListLayout>(28));
+    empty.Arrange();
+
+    // 全隐藏：停泊后贡献归零
+    ScrollView sv;
+    sv.SetSize(200, 100);
+    sv.GetContentView().SetLayout(std::make_unique<ListLayout>(28));
+
+    auto a = std::make_unique<Widget>();
+    a->SetSize(600, 28);
+    auto* pa = a.get();
+    sv.GetContentView().AddChild(std::move(a));
+    pa->SetVisible(false);
+
+    sv.GetContentView().Arrange();
+    sv.UpdateContentExtent();
+
+    EXPECT_TRUE(pa->GetX() + pa->GetWidth() <= 0);
+    EXPECT_TRUE(pa->GetY() + pa->GetHeight() <= 0);
+    EXPECT_NEAR(sv.GetContentExtent().width, 0.0f, kEps);
+    EXPECT_NEAR(sv.GetContentExtent().height, 0.0f, kEps);
+}
+
+// T25-12：非等尺寸 child —— 位置只由 slot 决定、extent 取真实包围盒
+//         （同时锁 C5 + B6 真实几何；★ 期望值 = (200, 84)，非 child2 的 78）
+void TestListLayoutNonUniformChildSizes()
+{
+    ScrollView sv;
+    sv.SetSize(400, 200);
+    sv.GetContentView().SetLayout(std::make_unique<ListLayout>(28));
+
+    const int w[3] = { 100, 200, 150 };
+    const int h[3] = { 20, 50, 28 };
+    Widget* rows[3] = { nullptr, nullptr, nullptr };
+    for (int i = 0; i < 3; ++i)
+    {
+        auto row = std::make_unique<Widget>();
+        row->SetSize(w[i], h[i]);
+        rows[i] = row.get();
+        sv.GetContentView().AddChild(std::move(row));
+    }
+
+    sv.GetContentView().Arrange();
+
+    // 位置只由 slot 决定 —— 与 child 高度无关
+    EXPECT_EQ(rows[0]->GetY(), 0);
+    EXPECT_EQ(rows[1]->GetY(), 28);
+    EXPECT_EQ(rows[2]->GetY(), 56);
+
+    // 尺寸逐位不变（D9）
+    EXPECT_EQ(rows[0]->GetHeight(), 20);
+    EXPECT_EQ(rows[1]->GetHeight(), 50);
+    EXPECT_EQ(rows[2]->GetHeight(), 28);
+
+    sv.UpdateContentExtent();
+
+    // 真实包围盒：max(x+w) = 200；max(y+h) = 56 + 28 = 84
+    EXPECT_NEAR(sv.GetContentExtent().width, 200.0f, kEps);
+    EXPECT_NEAR(sv.GetContentExtent().height, 84.0f, kEps);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterLayoutTests()
@@ -875,4 +1177,13 @@ void ECDI::Test::RegisterLayoutTests()
     GetTestRegistry().Add("Layout.PaddingNested", &TestPaddingNested);
     GetTestRegistry().Add("Layout.PaddingIdempotent", &TestPaddingIdempotent);
     GetTestRegistry().Add("Layout.PaddingNegativeClamped", &TestPaddingNegativeClamped);
+    GetTestRegistry().Add("Layout.ListPositions", &TestListLayoutPositions);
+    GetTestRegistry().Add("Layout.ListHiddenParked", &TestListLayoutHiddenParked);
+    GetTestRegistry().Add("Layout.ListHideRestoreIdempotent", &TestListLayoutHideRestoreIdempotent);
+    GetTestRegistry().Add("Layout.ListContentExtent", &TestListLayoutContentExtent);
+    GetTestRegistry().Add("Layout.GridPositions", &TestGridLayoutPositions);
+    GetTestRegistry().Add("Layout.ArrangeKeepsChildSize", &TestArrangeKeepsChildSize);
+    GetTestRegistry().Add("Layout.ExtentNegativeClamp", &TestExtentNegativeClamp);
+    GetTestRegistry().Add("Layout.ListEmptyOrAllHidden", &TestListLayoutEmptyOrAllHidden);
+    GetTestRegistry().Add("Layout.ListNonUniformChildSizes", &TestListLayoutNonUniformChildSizes);
 }

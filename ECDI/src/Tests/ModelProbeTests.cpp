@@ -4,6 +4,7 @@
 #include "../../examples/ModelProbe/ModelProbe.h"   // 2026-09-03：demo 移 examples/（原 ../Demo/ 废弃）；测试文件留框架侧
 
 #include "ECDI/Platform/ChildProcess.h"
+#include "ECDI/Widget/ScrollView.h"
 
 #include <memory>
 #include <string>
@@ -12,6 +13,8 @@
 using namespace ECDI;
 
 namespace{
+
+constexpr float kEps = 0.001f;   // extent 断言容差（Size 为 float）
 
 // ── P1：ModelProbePage 流程测试（注入 fake ChildProcess——RecordingBackend 式命令断言）──
 
@@ -219,6 +222,58 @@ void TestModelProbeFetchReplaces()
 	EXPECT_FALSE(page->IsBusy());
 }
 
+/// @brief 沿 Widget 树找 `ScrollView`（T25-10 用——`ModelProbePage::m_scroll` 是 private）
+ScrollView* FindScrollView(Widget* root){
+	if (auto* sv = dynamic_cast<ScrollView*>(root)) return sv;
+	for (size_t i = 0; i < root->GetChildCount(); ++i){
+		if (auto* hit = FindScrollView(root->GetChildAt(i))) return hit;
+	}
+	return nullptr;
+}
+
+// T25-10：迁移后行几何归 ListLayout（可见序号 × 行高）+ extent 由内容视图推导（两步模式，D4）
+void TestModelProbeRowLayout()
+{
+	FakeChildProcess* fake = nullptr;
+	auto page = MakePage(fake);
+	fake->SetResponses({
+		"OK\tFETCH\thttps://api.longcat.chat/openai/v1\t3\n"
+		"MODEL\tLongCat-2.0\towned by LongCat\n"
+		"MODEL\tdeepseek-chat\t\n"
+		"MODEL\tgpt-4\towned by openai\n"
+		"DONE\tFETCH\n",
+	});
+	page->OnQueryClick();
+	page->PollProbe();
+	EXPECT_EQ(page->GetModelCount(), 3);
+
+	ScrollView* sv = FindScrollView(page.get());
+	EXPECT_TRUE(sv != nullptr);
+	if (sv == nullptr) return;
+
+	Widget& content = sv->GetContentView();
+	EXPECT_EQ(static_cast<int>(content.GetChildCount()), 3);
+	for (size_t i = 0; i < content.GetChildCount(); ++i){
+		EXPECT_EQ(content.GetChildAt(i)->GetY(), static_cast<int>(i) * 28);   // 位置归布局（C-VIS-1）
+		EXPECT_EQ(content.GetChildAt(i)->GetHeight(), 28);                    // 尺寸归消费者（D9）
+	}
+	EXPECT_NEAR(sv->GetContentExtent().width, 600.0f, kEps);
+	EXPECT_NEAR(sv->GetContentExtent().height, 84.0f, kEps);   // 3 × 28
+
+	// 再次查询（3 → 2 模型）⇒ RebuildRows 的两步更新使 extent 随行数收缩（B13）
+	fake->SetResponses({
+		"OK\tFETCH\thttps://api.longcat.chat/openai/v1\t2\n"
+		"MODEL\tLongCat-2.0\towned by LongCat\n"
+		"MODEL\tgpt-4\towned by openai\n"
+		"DONE\tFETCH\n",
+	});
+	page->OnQueryClick();
+	page->PollProbe();
+	EXPECT_EQ(page->GetModelCount(), 2);
+	EXPECT_EQ(static_cast<int>(content.GetChildCount()), 3);   // 行池保留（复用不删行）
+	EXPECT_NEAR(sv->GetContentExtent().height, 56.0f, kEps);   // 2 × 28 —— extent 随两步更新
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterModelProbeTests()
@@ -230,6 +285,7 @@ void ECDI::Test::RegisterModelProbeTests()
 	GetTestRegistry().Add("ModelProbePage.TestFlow",              &TestModelProbeTestFlow);
 	GetTestRegistry().Add("ModelProbePage.BusyGuard",             &TestModelProbeBusyGuard);
 	GetTestRegistry().Add("ModelProbePage.Shutdown",              &TestModelProbeShutdown);
+	GetTestRegistry().Add("ModelProbePage.RowLayout",            &TestModelProbeRowLayout);
 	GetTestRegistry().Add("TsvParse.Basic",                       &TestTsvParse);
 	GetTestRegistry().Add("JsonEscape.Quotes",                    &TestJsonEscape);
 }
