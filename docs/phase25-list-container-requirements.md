@@ -1,6 +1,6 @@
 ﻿# Phase 25 · 列表 / 网格容器 —— 需求确认
 
-> **版本：v1.0**（2026-10-02）｜**状态：待评审**
+> **版本：v1.1**（2026-10-02）｜**状态：✅ 评审通过——可进入 Preliminary Design**（外部评审结论：「**原则上通过，小修后进入 Preliminary Design**」；★ 初设须钉死 5 件事，处置见 **§1.5**；★ D1「布局层」方向获明确支持）
 > **立项来源**（★ 三处登记 = 同一件事的三个视角，须同时对齐）：
 > `framework-defect-audit.md` §4 **D-5** · `roadmap-deferred.md` §7.9 **#42**（顺位 **⑤**）· `desktopnest-roadmap.md` §5 **G-7**
 > **前序**：Phase 24（`DrawLine` 线段抗锯齿）已全链收口 ⇒ 框架侧**待做区仅余本条**（记账区另有 #44–#48）。
@@ -48,6 +48,27 @@
 - **虚拟化** = 只创建"可见窗口内"的行控件（`Σ items` ≫ `Σ visible`）。
 - **本条** = 「给**已经存在**的子控件一个按序排列 + 尺寸推导的容器」。
 - ⇒ ★ **不做虚拟化**（#42 原文已钉死）：它需要"按需创建/回收 + 滚动位置 ↔ 数据索引映射"，属**另一条能力**，且**当前两个消费者都不需要**（ModelProbe 行数 = 模型数，量级 ~20；框内文件量级 ~10²）。
+
+### 1.5 ★ 外部评审处置（第一轮，2026-10-02）
+
+> 评审结论：**「Phase 25 Requirements v1.0：原则上通过，小修后进入 Preliminary Design」**。★ 评审对 **D1 选布局层明确支持**，并给出架构分层判词（保持为本 Phase 的界碑）：**「Layout 决定 Widget 怎么摆；数据控件决定数据怎么变成 Widget」**。★ 评审收官清单 = **初设须钉死的 5 件事**（见下表末行）。
+
+| 评审节 | 内容 | 处置 |
+|---|---|---|
+| §1–§2 | K1–K8 拆解使「List 控件 vs 布局能力」的区别清晰；**不做 ListView** 防止膨胀成 Model/Factory/Selection/Recycling | ✅ **采纳（未改动）** |
+| §2 | D1 = 布局层方向正确；本 Phase 输入是**已存在的 Widget 子树**，不是数据集合 | ✅ **采纳（未改动）** |
+| §3 | **D3 的 Grid 参数模型暂缓冻结**——cell **固定尺寸 vs 按父宽自适应列宽**是两种核心语义（desktopnest 文件网格更接近后者；候选形态含 `GridLayout(columnWidth, rowHeight, spacing)`）⇒ 需求阶段只定「两个类」，构造参数留初设的 B 消费者 spike | ✅ **采纳** → **D3** 增补（`GridLayout` 参数**不在本阶段拍死**） |
+| §4–§5 | **D4 = 最大的技术问题**：「Arrange 后自动提交 extent」若走扩 `Layout::Arrange` 签名的路，会让极简的 `Layout` 抽象知道 ScrollView/ContentExtent ⇒ **污染抽象**；倾向 = 候选 **①**（`Arrange` 摆好后消费者调一次 `UpdateContentExtent()`），职责仍分离（Layout 管摆、ScrollView 管 extent） | ✅ **采纳** → **D4** 定案倾向 ①，**不改 `Layout::Arrange()` 签名** |
+| §6 | **§3.1 措辞**：「内容尺寸自动推导」会被读成「Arrange 后 ScrollView 自动知道 extent」，与 D4 实际选择不符 | ✅ **采纳** → §3.1-2 措辞已改（见下） |
+| §7 | **A3 补负坐标语义**：正常排列下 min = 0；「负向钳 0」是 `ScrollView::UpdateContentExtent()` 的**既有职责**，**ListLayout 不承担钳位**；验收加特殊 child（`SetPosition(-10,-20)`）验证既有行为不变 | ✅ **采纳** → **A3** 增补 |
+| §8 | D5 边距归外层 `Panel::padding`（Phase 17 既有语汇）正确——避免 Panel/List/ScrollView 三层 padding 概念 | ✅ **采纳（未改动）** |
+| §9 | D8 保留 Row Panel 正确：行 = 自然坐标空间 / hover 单元；ListLayout 布局 Row，Row 内部自布局 | ✅ **采纳（未改动）** |
+| §10–§11 | ★★ **新增边界原则（v1.1 新增 D9）**：ListLayout/GridLayout **只操作直接子控件的 `SetPosition`，不改 child `Size`**（「每行拉伸到父宽」若成需求 = **显式可选策略**，不悄悄发生）；Grid 布局对象 = 直接子控件（Row Panel），**不深入其内部** | ✅ **采纳** → 新增 **D9** |
+| §12 | ListLayout vs VerticalLayout 的重叠——支持**新增类**，但初设必须正式写出理由：**VerticalLayout = 空间分配布局（按 stretch/fill/child size 动态分配）；ListLayout = 索引排列布局（index × 固定行几何）**——两者概念不同 | ✅ **采纳** → 列入初设必答 |
+| §13 | 不为 DRY 建 `IndexedLayout` 公共抽象——先两个简单类，重复自然出现再抽私有 helper | ✅ **采纳（未改动）** |
+| §14 | **A5 增加结构化自动验收**：迁移前后 `row[i].position.y == i × 28` · `height == 28` · `contentExtent == N × 28`（人工目视只补视觉/滚动/勾选）——「看起来差不多但末行多 1px」由自动测试先抓 | ✅ **采纳** → **A5** 增补 |
+| §15 | 影响面：公共头可能是 **+2**（ListLayout/GridLayout 各一头）而非 +1 ⇒ 不急着承诺单一数字 | ✅ **采纳** → §3.3 改「**+1 ~ +2**（取决 header grouping）」 |
+| ★★ 收官 | **初设须钉死的 5 件事**：① D4 = 消费者调 `UpdateContentExtent()`、不改 `Arrange()` 签名；② ListLayout **只改 Position 不改 Size**；③ Grid cell **固定 vs 自适应列宽**（desktopnest 真实需求 spike）；④ **ListLayout 不复用/增强 VerticalLayout 的理由**正式成文；⑤ **A3/A5 结构化自动测试** | → 全部落 §4/§5，初设逐条收口 |
 
 ---
 
@@ -97,7 +118,7 @@
 ### 3.1 做（倾向）
 
 1. **一个"按索引排列子控件"的容器能力**，覆盖**纵向列表**与**网格**两种排列。
-2. **内容尺寸自动推导**（补齐 G-b 的鸡生蛋：由容器在排列后直接给出 extent，消费者不必再手算）。
+2. **布局位置自动推导，并经既有 `UpdateContentExtent()` 从布局结果推导内容尺寸**（v1.1 措辞修正，评审 §6：原「内容尺寸自动推导」会被读成「Arrange 后 ScrollView 自动知道 extent」，与 D4 实际选择不符）——**消除消费者对排列坐标与内容尺寸数值的手工计算**（K2 的 `i × 行高` 与 K3 的 `n × 行高` 两处手算消失）。
 3. **与 `ScrollView` 的组合用法**（钢领式文档 + 示例），使消费者 A 的 K2/K3 两处手算消失。
 4. **`examples/ModelProbe` 迁移**为其第一个真实消费者（★ 与 Phase 15 迁 `ScrollView` 同款做法：先例即验收）。
 
@@ -117,7 +138,7 @@
 
 | 项 | 预估 |
 |---|---|
-| 公共头 | **92 → 93**（+1；★ 若最终落成 `Layout` 派生则 +1 头 / 0 新控件） |
+| 公共头 | **92 → +1 ~ +2**（v1.1 依评审 §15 修正：`ListLayout` / `GridLayout` 若各占一头 = **94**；合一头 = **93**——header grouping 留初设） |
 | 公共 API | 待 D1/D3 定；最小情形 = **+0**（只加一个 `Layout` 实现类） |
 | 用例 | 297 → **~310**（估 +12，待详设定） |
 | CMake | **0 改动**（`GLOB_RECURSE CONFIGURE_DEPENDS` 自动入库） |
@@ -147,14 +168,15 @@
 ### D3 **纵向与网格：两个类还是一个类**
 
 - ★ **倾向两个类**（同族 vs 策略）：`ListLayout(行高[, 间距])` 与 `GridLayout(列数, 单元宽, 单元高[, 间距])`——★ 判据 = 「一个概念一个词」+ 两者的**参数集不同**（行高 vs 列数×单元尺寸），合并会引入"某参数在某模式下无效"。
-- ⚠️ 待评审确认：B 消费者的网格是**等宽列**还是**自适应列宽**（影响 `GridLayout` 参数）。
+- ★★ **v1.1（评审 §3）：`GridLayout` 的参数模型暂缓冻结**——cell **固定尺寸** vs **按父宽自适应列宽**是两种核心语义（desktopnest 文件网格更接近后者 ⇒ 候选形态含 `GridLayout(columnWidth, rowHeight, spacing)`）⇒ 需求阶段只定「**两个类**」，构造参数由初设的 **B 消费者真实布局 spike** 定（评审 §3）。
+- ⚠️ 待评审确认：B 消费者的网格是**等宽列**还是**自适应列宽**（影响 `GridLayout` 参数）。⇒ 已升格为初设必答（§1.5 收官清单 ③）。
 
 ### D4 **内容尺寸推导：谁算、何时算**
 
 - 现状：`UpdateContentExtent()` 从**已摆好的**子控件推导（`ScrollView.h:65-70`）⇒ 消费者必须**先摆再算**（K2→K3 的顺序正是如此）。
 - ★ **倾向**：新 `Layout` 的 `Arrange` **同时完成摆放与 extent 计算**，并通过既有 `SetContentExtent` 提交给 `ScrollView`。
 - ⚠️ **待决**：`Layout::Arrange(Widget& parent)` 的签名**只给 parent**（`Layout/Layout.h:13`）⇒ 布局无法直接知道"我在 `ScrollView` 里"（`parent` 是 `ScrollContent`）。三条路：① 布局只摆放，extent 仍由 `ScrollView::UpdateContentExtent()` 推导（**零签名改动** ✓）；② 扩 `Layout` 接口（★ 动公共头，慎）；③ 消费者显式两步。
-  ⇒ ★ **倾向 ①**：`Arrange` 摆好子控件后，消费者调一次 `UpdateContentExtent()` 即可——**比现状省掉 K2 的手算**，且**零接口改动**。
+- ★ **倾向 ① 定案（v1.1，评审 §4–§5）**：`Arrange` 摆好子控件后，消费者调一次 `UpdateContentExtent()` 即可——**比现状省掉 K2 的手算**，且**零接口改动**。★★ **评审明确支持不为 extent 扩 `Layout` 接口**：那会让极简的 `Layout` 抽象开始知道 ScrollView/ContentExtent ⇒ **污染抽象**；候选 ① 的职责分离保持干净（Layout 管摆、ScrollView 管 extent）。
 
 ### D5 **间距 / 边距**
 
@@ -174,6 +196,12 @@
 
 - 现状每行是一个 `Panel`（K1）。★ **倾向不省**：行是子控件的**坐标容器 + 可能的点击/hover 单元**，省掉会让布局变成"扁平化子控件"，与既有"控件树"模型冲突（且 Phase 15 的 `ScrollContent` 已确立"坐标系下沉"的先例）。
 
+### D9 **排列的边界原则**（v1.1 新增，评审 §10–§11）
+
+- ★★ **ListLayout / GridLayout 只操作直接子控件的 `SetPosition`，不改 child `Size`**——`ListLayout = arrangement policy`，不是 `child sizing policy`；「每行拉伸到父宽」若成为真实需求，应作为**显式的可选布局策略**进入设计，不得悄悄发生。
+- ★ **Grid 布局的对象 = 直接子控件（Row Panel）**，不深入其内部（`GridLayout` 决定 Panel 的 cell，Panel 自己决定 Image/Label 怎么摆）——与 D8 同族：**布局只碰直接子控件；子控件内部尺寸与布局由其自身负责**。
+- 初设须把本原则写成契约并配盯防（对 `Layout` 既有语义的最小承诺面）。
+
 ---
 
 ## 5. 验收方向（A1–A7，待详设细化）
@@ -182,9 +210,9 @@
 |---|---|---|
 | **A1** | 纵向容器：N 个子控件按序排列，位置 = `i × 行高`（与手算逐位一致） | 自动化 |
 | **A2** | 网格容器：M 列 × ⌈N/M⌉ 行的位置正确，末行不足列时不越界 | 自动化 |
-| **A3** | 内容尺寸 = 二维包围盒右下角（与 `ScrollView` D6 定义**同式**，负向钳 0） | 自动化 |
+| **A3** | 内容尺寸 = 二维包围盒右下角（与 `ScrollView` D6 定义**同式**，负向钳 0）。★ **v1.1 增补（评审 §7）**：「负向钳 0」是 `ScrollView::UpdateContentExtent()` 的**既有职责**，**ListLayout 自身不承担钳位**（正常排列不产生负坐标，minX = minY = 0）；验收 = 正常排列的结构断言 + **特殊 child（`SetPosition(-10,-20)`）验证既有钳位行为不变** | 自动化 |
 | **A4** | **零回归**：既有两个 `Layout`（`Vertical` / `Horizontal`）行为逐位不变 | 自动化 |
-| **A5** | `examples/ModelProbe` 迁移后**观感与迁移前一致**（行高 / 位置 / 滚动范围 / 勾选） | 人工（目视） |
+| **A5** | `examples/ModelProbe` 迁移后**观感与迁移前一致**（行高 / 位置 / 滚动范围 / 勾选）。★ **v1.1 增补（评审 §14）：增加结构化自动验收**——迁移前后 `row[i].position.y == i × 28` · `row[i].height == 28` · `contentExtent.height == N × 28`（人工目视只补视觉 / 滚动 / 勾选；「看起来差不多但末行多 1px」由自动测试先抓） | 自动化 + 人工（目视） |
 | **A6** | 与 `ScrollView` 组合可用：`Panel` + 容器 + `ScrollView` 三层各司其职（装饰 / 排列 / 视口） | 结构性 |
 | **A7** | 公共头 / 用例 / CMake 计数与预算一致，且在四链下全绿 | 结构性 |
 
@@ -192,6 +220,13 @@
 
 ## 6. 下一步
 
-1. ★ **本稿评审**（外部评审 → v1.1）——重点是 **D1（形态）** 与 **D4（extent 归属）** 两项。
+1. ✅ ~~本稿评审~~（**v1.1 已通过**——外部评审「原则上通过，小修后进初设」；处置见 §1.5，**初设须钉死 5 件事**：① D4 = 消费者调 `UpdateContentExtent()`、不改 `Arrange()` 签名；② ListLayout 只改 Position 不改 Size；③ Grid cell 固定 vs 自适应列宽（desktopnest spike）；④ ListLayout 不复用 VerticalLayout 的理由成文；⑤ A3/A5 结构化自动测试）。
 2. 评审通过后进**初步设计**（代码基线 B1–Bn 带行号 + 契约 C1–Cn + 探针）。
 3. ★ **不在本 Phase 做**的事一律**不写进代码**，需要时记进 `roadmap-deferred.md`（条 95②）。
+
+---
+
+## 7. 修订记录
+
+- **v1.1**（2026-10-02）**评审第一轮处置 —— ✅ 原则上通过，可进入 Preliminary Design**。① **评审结论**：「原则上通过，小修后进入 Preliminary Design」；**D1 选布局层获明确支持**，架构分层判词 = 「Layout 决定 Widget 怎么摆；数据控件决定数据怎么变成 Widget」；逐条处置见 **§1.5**。② ★ **实质修订 4 处**：**§3.1-2 措辞**（「内容尺寸自动推导」→「布局位置自动推导 + 经既有 `UpdateContentExtent()` 推导——消除数值手算」）· **D3**（`GridLayout` 参数模型**暂缓冻结**——固定 vs 自适应列宽留初设 spike）· **D4 定案倾向 ①**（消费者调 `UpdateContentExtent()`，**不改 `Layout::Arrange()` 签名**）· **§3.3 影响面改「公共头 +1 ~ +2」**。③ ★★ **新增 D9（排列边界原则）**：只操作直接子控件 `SetPosition`、不改 child Size；Grid 布局对象 = Row Panel、不深入内部。④ ★ **验收增补**：A3（负坐标语义归 `UpdateContentExtent()`、ListLayout 不钳位 + 特殊 child 断言）· A5（结构化自动验收：位置/行高/extent 逐项断言）。⑤ ★ **初设必答 5 件**（评审收官清单）落 §6。⑥ 头部 v1.0 → **v1.1**。
+- **v1.0**（2026-10-02）初稿。**输入**：审计 D-5 · `roadmap-deferred.md` #42（顺位 ⑤）· `desktopnest-roadmap.md` G-7 · 立项勘察（K1–K8 全部带行号）。**内容**：§1 背景（三处登记 / 两消费者 / 与 Phase 15 界线 / 虚拟化解耦）· §2 现状勘察与缺口清单（G-a/b/c）· §3 范围与非目标 · §4 待决点 D1–D8（倾向 = 布局层）· §5 验收 A1–A7 · §6 下一步。**待评审。**

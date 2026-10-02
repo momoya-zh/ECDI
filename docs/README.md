@@ -75,7 +75,7 @@
 
 ### 🔄 当前
 
-- ★★ **在研**：**Phase 25「列表 / 网格容器」**（**2026-10-02 立项**）——需求稿 **v1.0 待评审**（`docs/phase25-list-container-requirements.md`）；立项来源 = `roadmap-deferred.md` **§7.9 #42**（顺位 ⑤）= 审计 **D-5** = `desktopnest-roadmap.md` **G-7**（★ 三处同一件事）；★ 两个消费者 = **ModelProbe 模型列表**（已实现的手工版：`Panel`+`ScrollView`+**行池**，`ModelProbe.cpp:719-767`）+ **desktopnest M2 框内文件网格**（未实现）；★ 与 **#33 虚拟化解耦**（本 Phase 只做「容器」）。
+- ★★ **在研**：**Phase 25「列表 / 网格容器」**（**2026-10-02 立项**）——需求稿 **✅ v1.1 已通过**（2026-10-02 评审「原则上通过，小修后进初设」；K1–K8 · D1–D9 · A1–A7；★ **D1 = 布局层**获评审明确支持——「Layout 决定 Widget 怎么摆；数据控件决定数据怎么变成 Widget」；**D4 定案** = 消费者调 `UpdateContentExtent()`、不改 `Layout::Arrange()` 签名；**新增 D9 排列边界原则** = 只 SetPosition、不改 child Size）⇒ **初设进行中**（初设必答 5 件见需求稿 §1.5/§6）。★ 立项来源 = `roadmap-deferred.md` **§7.9 #42**（顺位 ⑤）= 审计 **D-5** = `desktopnest-roadmap.md` **G-7**（★ 三处同一件事）；★ 两个消费者 = **ModelProbe 模型列表**（已实现的手工版：`Panel`+`ScrollView`+**行池**，`ModelProbe.cpp:719-767`）+ **desktopnest M2 框内文件网格**（未实现）；★ 与 **#33 虚拟化解耦**（本 Phase 只做「容器」）。
 - ★ **上一阶段**：**Phase 24「DrawLine 线段抗锯齿」已于 2026-10-01 立项当日走完 需求 → 初设 → 详设 → 实施 → 收口**（需求 v1.1 · 初设 v1.2 · 详设 v1.3；**四链齐备**：MinGW ×3 · Clang · ClangCL 本机 297/297 全绿 + MSVC 用户侧编译通过；**T24-10 目视通过**——「斜线边缘已经平滑，拐点也无缺口了」；公共头 92 → 92 / API +0 · CMake 0 改动 · 用例 286 → 297）⇒ 已迁入上方「✅ 已完成」表。★ **修复队列基本走完**：待做区仅余 **⑤ `#42` 列表/网格容器**（「demo 之前不需要」项）；★ 下一排期决策点 = **#42 先行 vs 转向应用侧 DesktopNest**（其 §9 待决问题——右键原生菜单 vs 自绘（G-5 / G-6 走向）——需先拍板），由用户定；★ 记账区 `#44`–`#48` 不动（#48 = Phase 24 登记的 `DrawPolyline` 根治方案）。
 - ★ **再上一阶段**：**Phase 23 工作线程 → UI 线程投递**已于 **2026-09-29 实施收口**（需求 **v1.1** · 初设 **v1.2** · 详设 **v1.3**；**四链 275 / 275** 全绿 · 用例 264 → 275 · 8 文件（生产 5 + 测试 3，新建 1）· 公共头 92 → 92）⇒ 已迁入上方「✅ 已完成」表。
 ★ **已收口**：**Phase 16 / 17 / 18 / 19 / 20 / 20.1 / 21 / 22 / 23** 均已迁入上方「✅ 已完成」表（18.1 标 ⏸️ 已搁置）；★ **Phase 23 的实施验证** = **四链** **275 / 275** 全绿（`MSVC` / `Clang` / `MinGW` / `ClangCL`，断言启用）；★ **其余候选**见「🔲 未来」与 `roadmap-deferred.md` 的「**🔲 待做**」区（★ 当前待做区为 **⑤ `#42`**——⑥ 已立项 Phase 24）。
@@ -518,7 +518,7 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | [phase24-line-antialiasing-detailed-design.md](phase24-line-antialiasing-detailed-design.md) | **详细设计（实施规格）**：**基线 B1–B12**（全部带行号实测——★ B11 legacy 用 `std::lround` ⇒ 谓词禁 int 截断）· **△1–△7 逐文件规格**（新建 3：`LineCoverage.{h,cpp}` + `LineCoverageTests.cpp` · 改动 4：`CoverageRaster.{h,cpp}` + `GDIBackend.{h,cpp}` + `RunAllTests.cpp`；★ **`LineCoverageGrid` 带 `originX/originY`**——初设 §5.5「单点出参」的载体）· **DrawLine 三分支全文**（`!AA` → legacy；`a≥1 且轴对齐` → legacy；其余 → 覆盖度）+ `DrawLineCoverage` 全文（fail-safe 沿 `:452-458` 先例）· **`PatchSurface` 矩形化 diff**（两维只增不减 · stride=`width*4` · 角路径 `(R,R)` 等价改写）· **契约 C1–C12 → 落点 → 测试全映射** · **盯防 12 条**（全部可机检）· **用例正文 T24-1..T24-11**（★ **口径勘误：自动化 +11 ⇒ 286 → 297**——初设 298 把人工 T24-10 误计入；**T24-8b 参照定案 = 数学期望上界**——两帧分别单画无法复现 over-blend）· **三批**（8 / 1 / 2+人工）· **O1–O4 全收口**（GetSamples 单一旋钮 · 面积 one-shot 告警 2M 像素 · bbox+预过滤 · #48 随收口登记）· **§7 实施记录**（T24-2 容差实测值回填位）；★★ **v1.2（实施回写）**：**三批落地**——批一 `LineCoverage` 生成层（294）→ 批二 `RasterizeMask`（295）→ 批三 `GDIBackend` 接线 + `PatchSurface` 矩形化（**297**）；**§7.1 容差实测**（S=128 参照最大 1.594% ⇒ 冻结 2% · 解析最大 1.80% ⇒ 冻结 3%）· **§7.2 三处偏离均为测试侧缺陷**（多帧 L2 每帧 `InvalidateRect`——空更新区吞帧，探针 E 定性 · 8b 期望网格漏加偏移——墨迹图双图定性**生产渲染零缺陷** · SDK `min/max` 宏污染 ⇒ `(std::min)` 防御）；**三链 297 / 297 全绿**（MinGW ×3 · Clang · ClangCL）+ MSVC 用户侧待跑 + T24-10 目视待用户；★★ **v1.3（全链收口回写）**：**四链齐备**（本机三链 + **MSVC 用户侧编译通过**）+ **T24-10 目视通过**（「斜线边缘已经平滑，拐点也无缺口了」） | ✅ **v1.3 已实施并全链收口**（四链 + 目视） |
 
 
-## Phase 25 列表 / 网格容器（list / grid container）（🔄 **已立项**——需求稿 **v1.0 待评审**，2026-10-02）
+## Phase 25 列表 / 网格容器（list / grid container）（✅ 需求 **v1.1 已通过**（2026-10-02 评审「原则上通过」）· 🚧 初步设计进行中——2026-10-02 立项）
 
 **框架缺陷修复队列第 ⑤ 位**（= 待做区**最后一项**）——`roadmap-deferred.md` **§7.9 #42** · 审计 `docs/framework-defect-audit.md` **§4 D-5** · `desktopnest-roadmap.md` **§5 G-7**（★ 三处同一件事）。2026-10-02 用户拍板先做本条。
 
@@ -529,7 +529,7 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [phase25-list-container-requirements.md](phase25-list-container-requirements.md) | 需求确认（范围 = 「按索引排列子控件 + 内容尺寸推导」的**布局层**能力（纵向 + 网格），与 `ScrollView` 组合；**不做**虚拟化 / 框选 / `TreeView` / 排序 / 数据绑定；**D1 形态（布局层 vs 数据控件层）· D4 内容尺寸归属**为评审重点，倾向布局层） | 🚧 **v1.0 待评审** |
+| [phase25-list-container-requirements.md](phase25-list-container-requirements.md) | 需求确认（**K1–K8 现状勘察全部带行号** · **D1–D9**——★ **D1 = 布局层**获评审明确支持（「Layout 决定 Widget 怎么摆；数据控件决定数据怎么变成 Widget」）· **D4 定案** = 消费者调 `UpdateContentExtent()`、不改 `Layout::Arrange()` 签名（不为 extent 污染 Layout 抽象）· **v1.1 新增 D9 排列边界原则** = 只 SetPosition、不改 child Size、Grid 布局对象 = Row Panel 不深入内部 · **D3 的 GridLayout 参数暂缓冻结**（固定 vs 自适应列宽留初设 spike）· **A1–A7**（v1.1 增补 A3 负坐标语义归 `UpdateContentExtent()` + A5 结构化自动验收：迁移前后位置/行高/extent 逐项断言）· **§1.5 评审处置表** · 影响面（公共头 **+1~+2** · 用例 297 → ~310 · CMake 0） | ✅ **v1.1（评审通过 2026-10-02，可进入初设）** |
 
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
