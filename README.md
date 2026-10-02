@@ -1,6 +1,6 @@
 ﻿# ECDI
 
-**ECDI** is a from-scratch C++20 GUI framework for Windows, built directly on raw Win32 and GDI — no third-party UI, rendering, or utility libraries. Pure C++ and the platform SDK only.
+**ECDI** is a from-scratch C++20 GUI framework for Windows, built directly on raw Win32 and GDI — pure C++, plus the platform SDK and only those third-party libraries that clear the bar set out under *The goal*.
 
 > Currently under active development toward **v0.1.0** (first library release). Not yet stable — the API may change freely under SemVer `0.y.z`.
 
@@ -15,6 +15,7 @@ ECDI is a **teaching-first** framework: it exists so that anyone can learn how a
 - **The design trail is the textbook** — every phase ships requirements → preliminary design → detailed design *before* any code, so the reasoning is readable, not just the result.
 - **Runnable examples are the front door** — `examples/MinimalApp` is a complete app in about 20 lines, and `examples/ModelProbe` is a real tool built on the same public API.
 - **Adopting a new capability never breaks existing code** — new behaviour defaults to *bit-for-bit* what it did before; that has been a hard contract in every recent phase.
+- **No dependency without a bar** — a third-party library is admitted only when all three hold: it covers a domain that is *not* this project's own (the GUI framework itself); writing it by hand would leave its acceptance test dependent on the very thing being written; and the obligation to track its releases — security included — is accepted. A rendering pipeline or a platform abstraction fails the first two, so those stay hand-written.
 
 ## Why ECDI
 
@@ -22,7 +23,7 @@ Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a
 
 ## How this was built
 
-"From-scratch" describes the provenance of the code — no third-party libraries, no borrowed framework — not its authorship. Implementation and documentation drafting are done with heavy AI assistance.
+"From-scratch" describes the provenance of the code — no borrowed UI framework or engine — not its authorship. Implementation and documentation drafting are done with heavy AI assistance.
 
 What that assistance is *not* is unsupervised generation. Every phase runs the same loop, and each step leaves a written record:
 
@@ -43,7 +44,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 
 - **Four-layer rendering contract**: Widget, PaintContext, CommandBuffer and Renderer never see each other's internals — a `Widget` only emits commands, the backend only consumes them. Swapping GDI for another backend means implementing one interface.
 - **Platform abstraction**: `PlatformWindow`, `PlatformApplication`, `ChildProcess` interfaces isolate all `Windows.h` usage; the framework core is platform-independent C++20. Window-level capabilities (chrome, input, file drop) hang off `PlatformWindow`; application-level ones (tray icon) off `PlatformApplication` — two symmetric seams, neither of which grows its own platform object tree.
-- **Zero third-party dependencies**: no external libraries, no GDI+, no UI framework — only the Windows SDK (`user32`, `imm32`, `msimg32`, `windowscodecs`, `ole32`, `shlwapi`, `shell32`). Rendering is GDI + `msimg32` (AlphaBlend); image decoding uses the system WIC.
+- **Dependencies by exception**: no GDI+, no UI framework, no rendering library — the framework itself stands on the Windows SDK alone (`user32`, `imm32`, `msimg32`, `windowscodecs`, `ole32`, `shlwapi`, `shell32`). Rendering is GDI + `msimg32` (AlphaBlend); image decoding uses the system WIC. **FreeType** — text rasterisation and hinting for the GPU backend — is the first library admitted under the bar set out in *The goal*; it is vendored and tracked rather than linked dynamically.
 
 ## Features
 
