@@ -1,7 +1,7 @@
-﻿# Phase 25 · 列表 / 网格容器 —— 初步设计（v1.0）
+﻿# Phase 25 · 列表 / 网格容器 —— 初步设计（v1.2）
 
 > 来源：需求确认稿 `phase25-list-container-requirements.md` **v1.1 ✅ 已通过**（评审「原则上通过，小修后进初设」；初设必答 5 件见其 §1.5/§6）
-> 状态：**v1.1**（2026-10-02）——✅ **评审通过（修 C-VIS 后可进详设）**（外部评审结论：「原则上通过，但需要修正 C-VIS 停泊策略后再进入详细设计」；★ **C-VIS v2 = 结果契约与实现策略分离**——v1 的停泊位 `(0, −rowHeight)` 存在两处实质漏洞（child 高度可 ≠ rowHeight 违 D9；**x 方向从未归零**），修复 = 按 child **自身尺寸**停泊 `(−w, −h)` 使右下角恰落 (0,0)；处置见 **§1.1**）
+> 状态：**v1.2**（2026-10-02）——✅ **评审通过（修 C-VIS 后可进详设）** · ★ **v1.2 = B5 勘误**（`HitTest` 的可见性门控在**入口**、非「子节点递归无过滤」；连带 §3 推论 / C-VIS-3 依据 / T25-3 定稿 —— 详见 §9）（外部评审结论：「原则上通过，但需要修正 C-VIS 停泊策略后再进入详细设计」；★ **C-VIS v2 = 结果契约与实现策略分离**——v1 的停泊位 `(0, −rowHeight)` 存在两处实质漏洞（child 高度可 ≠ rowHeight 违 D9；**x 方向从未归零**），修复 = 按 child **自身尺寸**停泊 `(−w, −h)` 使右下角恰落 (0,0)；处置见 **§1.1**）
 > 定位：接口草案 + 组合契约 + 决策定案。本 Phase 无渲染谜题，**取证重心 = 接线机制**（Arrange 触发链 / 不可见子控件 / extent 推导的交互）。
 
 ---
@@ -51,7 +51,7 @@
 | **B2** | **Arrange 触发链 = 每帧**：`Window::OnPaint` → `m_rootWidget->Arrange()` → `ArrangeInternal()` 递归整树，**有 `m_layout` 的节点重排、无 Layout 的节点保持手摆**（渐进语义——9.7） | `src/Window/Window.cpp:478` · `src/Widget/Widget.cpp:188-208` |
 | **B3** | **`SetLayout` 在 `Widget` 基类**（public）：`void SetLayout(std::unique_ptr<Layout>)` ⇒ `ScrollContent : public Widget`（内部头）**自动成为布局宿主**——`GetContentView().SetLayout(...)` 无需任何改动 | `include/ECDI/Widget/Widget.h:260` · `src/Widget/ScrollContent.h:23` |
 | **B4** | **`VerticalLayout::Arrange` 不跳过不可见子控件**（全量 `for i < count` 按序分配） | `src/Layout/VerticalLayout.cpp:23-63` |
-| **B5** | **`HitTest` 无可见性过滤**（子节点递归命中不查 `IsVisible`）⇒ 隐藏子控件若停在可见区**会被命中** | `src/Widget/Widget.cpp:139-152` |
+| **B5** | ★ **v1.2 勘误**：**`HitTest` 的可见性门控在入口**（`if (!IsVisible()) return nullptr;`）⇒ **不可见节点及其整棵子树均不可命中**；子节点逆序循环仅做深度优先遍历、**不再额外过滤**（由每个 child 的入口自查）（原记「无可见性过滤」**有误**） | `src/Widget/Widget.cpp:114-121`（门控）· `:137-153`（循环） |
 | **B6** | **`UpdateContentExtent()` 遍历全部子控件**（无可见性过滤）：`extent = (max(x+w), max(y+h))`，负向钳 0 | `src/Widget/ScrollView.cpp:59-71` |
 | **B7** | **`SetContentExtent` 原子副作用链**（顺序冻结）：`ApplyLayout → ClampOffset → SyncBars → Invalidate` | `include/ECDI/Widget/ScrollView.h:72-78` |
 | **B8** | `Widget::Arrange()` 为 **public**（可显式触发局部重排） | `src/Widget/Widget.cpp:204` |
@@ -90,7 +90,7 @@
 
 - 布局若**全量排列**（含隐藏行）：隐藏行占用 index ⇒ 可见行错位（违背过滤语义）；
 - 布局若**跳过但原地不动**：隐藏行停留在旧位置，B6 的 extent 遍历**不查可见性** ⇒ 虚增滚动范围；
-- 隐藏行若停在可见区：**B5 无可见性过滤的 HitTest 会命中它** ⇒ 幽灵点击。
+- 隐藏行若停在可见区：**入口门控（B5，v1.2 勘误后）已保证不可命中** ⇒ **命中层无需处置**；但它**仍经 B6 计入 extent** ⇒ **停泊仍必要**（收口依据 = **extent**，不再是「幽灵点击」——该风险不存在）。
 
 **C-VIS v1 的停泊位 `(0, −rowHeight)` 存在两处实质漏洞（评审 §一，v1.1 修正）**：
 ① **D9 不改 child Size ⇒ child 高度可 ≠ rowHeight**（rowH=28、child h=40 ⇒ 停泊后 y+h = 12 > 0，仍贡献 extent——「y+h = 0」的断言与 D9 直接矛盾）；
@@ -102,7 +102,7 @@
 |---|---|
 | **C-VIS-1 排列语义** | ListLayout / GridLayout 只为 `IsVisible() == true` 的直接子控件分配**连续布局序号**（visible #0 → slot 0，#1 → slot 1……） |
 | **C-VIS-2 extent 结果** | 不可见 child 在 `UpdateContentExtent()` 下**不得增加** `contentExtent.width` / `.height` |
-| **C-VIS-3 hit-test 结果** | 不可见 child **不得在 ScrollView 当前内容坐标范围内形成可命中区域** |
+| **C-VIS-3 hit-test 结果** | 不可见 child **不得在 ScrollView 当前内容坐标范围内形成可命中区域**——★ **该保证由 `Widget::HitTest` 入口门控（B5）既有提供，本布局不额外承担命中语义**（v1.2 依据勘误） |
 | **C-VIS-4 实现策略（当前）** | 停泊到**自身几何范围的左上负区**：`SetPosition(−child.GetWidth(), −child.GetHeight())` ⇒ 右下角恰落 `(0, 0)`，`x+w ≤ 0 ∧ y+h ≤ 0` 由 `GetSize()` 自保证——**不依赖行几何与 child 尺寸的关系**（与 D9 自洽） |
 
 ★ 分层的价值：C-VIS-1..3 是**行为保证**（T25 测这个），C-VIS-4 是**实现策略**（可替换）——将来 `ScrollView` 若自带可见性过滤，换实现不推翻 ListLayout 语义。
@@ -194,7 +194,7 @@ private:
 |---|---|---|
 | **T25-1** | ListLayout：N 个可见子控件 → `position == (0, i × (rowH + spacing))`，与手算逐位一致（A1） | A1 |
 | **T25-2** | 不可见子控件：不占槽位（可见序号连续）+ **效果断言**（C-VIS-2：`x + width ≤ 0 ∧ y + height ≤ 0`——测行为不测坐标技巧，v1.1 修正） | A1 |
-| **T25-3** | 停泊子控件不可命中（**行为断言**，v1.1 修正）：可见区 `HitTest ≠ hiddenChild`、原可见位置无命中、隐藏 bbox 整体位于内容原点负区 | A6 |
+| **T25-3** | ★ **v1.2 定稿 = 「隐藏 ↔ 可见往返幂等」**：隐藏 B → `Arrange` → 恢复 B → `Arrange` ⇒ 槽位与几何回到原位（测 C-VIS-1 连续槽位）。★ 原「可见区 `HitTest ≠ hiddenChild`」**由 B5 入口门控恒成立 ⇒ 平凡断言**、无区分度（沿 GL spike 教训「**平凡断言比没有断言更危险**」） | A6 |
 | **T25-4** | 组合：ListLayout 摆好 → `UpdateContentExtent()` = `(maxX, N × rowH)`；含 spacing 时 = `N × rowH + (N−1) × spacing` | A3 |
 | **T25-5** | GridLayout：M 列 × ⌈N/M⌉ 行位置正确；**末行左对齐**（不足列不居中/不越界）（A2） | A2 |
 | **T25-6** | **D9 盯防**：Arrange 前后逐 child `GetSize()` 逐位不变（List + Grid 双测） | A6 |
@@ -227,6 +227,8 @@ private:
 | **L2** | 键盘导航 / 双击 / 当前项概念 = 需求 §2.1 明确无消费者，本 Phase 不设计 |
 
 ## 9. 修订记录
+
+- **v1.2**（2026-10-02）**勘误：B5 基线（连带 §3 推论 / C-VIS-3 依据 / T25-3 定稿）**。★ **来源**：Phase 25 详设 v1.1 的 B5 复核 —— 实测 `Widget::HitTest` 的**可见性门控在入口**（`Widget.cpp:114-121`：`if (!IsVisible()) return nullptr;`）⇒ **不可见节点及其整棵子树均不可命中**；子节点逆序循环（`:137-153`）只是不再额外过滤。① **B5 改为「门控在入口」**（原记「子节点递归无过滤」**有误**）；② **§3 推论随之修正**——隐藏行停在可见区**不会**被命中，**停泊的唯一收益是 extent**（B6 不过滤可见性），「幽灵点击」不再是依据；③ **C-VIS-3** 加依据注——该保证由**既有入口门控提供**，本布局不额外承担命中语义；④ **T25-3 定稿为「隐藏 ↔ 可见往返幂等」**（原断言由入口门控**恒成立 ⇒ 平凡**）。★ **核心方案（布局层 / C-VIS 停泊 / 两步模式 / D9 / 固定 cell）一字未改** —— 本版**只勘误取证与依据**。
 
 - **v1.1**（2026-10-02）**评审第一轮处置 —— ✅ 修 C-VIS 后可进入详细设计**。① **评审结论**：「原则上通过，但需要修正 C-VIS 停泊策略后再进入详细设计」；架构骨架（布局层 / 两步模式 / D9 / 固定 cell / ModelProbe 迁移 / 测试分层）全部获认可。② ★★ **C-VIS 修正（唯一实质修正，v1 核心契约有逻辑漏洞）**：**漏洞 ①** = D9 不改 child Size ⇒ child 高度可 ≠ rowHeight，停泊 `(0, −rowHeight)` 后 `y+h` 仍 > 0（与「y+h = 0」断言矛盾）；**漏洞 ②** = x 方向从未归零（`x=0 + width` 仍贡献 extent.width）——「三效合一」实际不成立。**修复** = 停泊位改 **`(−child.GetWidth(), −child.GetHeight())`**（右下角恰落 (0,0)，由 GetSize() 自保证、与 D9 自洽、不依赖行几何）。③ ★★ **C-VIS 重构为四层结果契约**：**C-VIS-1** 排列语义（只给可见子控件连续槽位）/ **C-VIS-2** extent 结果（不增宽高）/ **C-VIS-3** hit-test 结果（可见区不可命中）/ **C-VIS-4** 实现策略（当前 = 自身 bbox 负区停泊；可替换）——**测试测行为（1..3），不测坐标技巧（4）**。④ ★ **测试大纲修订**：T25-2 改效果断言（`x+w ≤ 0 ∧ y+h ≤ 0`）· T25-3 改行为断言 · **新增 T25-12**（非等尺寸 child——同时锁定 D9 与 extent 真实几何）· T25-8 确认新停泊下自动成立。⑤ ★ **增补**：§3-⑥ **调用责任**（几何/结构变更后由消费者执行两步）· **cell 参数 = 槽位间距非尺寸约束** · **只处理直接 children 不递归孙节点** · §3-① 删「零成本」措辞 · §8 新增 **O4**（用例数详设分解）。⑥ 头部 v1.0 → **v1.1**。
 - **v1.0**（2026-10-02）初稿。**取证重心 = 接线机制**（B1–B10 带行号）：**B2 Arrange 每帧触发链**（渐进语义——无 Layout 节点保持手摆）· **B3 SetLayout 在 Widget 基类**（ScrollContent 自动成为布局宿主，零改动）· ★★ **B4/B5/B6 三事实联合推出 C-VIS 停泊契约**（Vertical 不跳过不可见 / HitTest 无可见性过滤 / UpdateContentExtent 遍历全量 ⇒ 隐藏行必须「跳过 + 停泊 (0, −rowHeight)」三效合一）· **B9 negative 用例 = A3 既有行为回归锚**。**定案**：D4 两步模式（Arrange 显式 + UpdateContentExtent；不改签名）· ListLayout 不读 parent 尺寸（ScrollContent 尺寸=extent 的循环依赖规避——vs VerticalLayout 正式理由之一）· GridLayout 固定 cell v1 + 自适应列宽重启条件（评审 spike 建议的诚实处置：B 未实现无法取证）· D9 契约化。**接口**：两公共头草案 · 影响面（92 → 94 · API +2 类型 · 用例 297 → ~308 · CMake 0）· **T25-1..T25-11** · 三批 · O1–O3 · L1–L2。**待评审。**
