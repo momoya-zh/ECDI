@@ -579,7 +579,7 @@ void TestVerticalLayout()
 
 | 测试用例 | 验证 |
 |---------|------|
-| KeyModifier 位运算 | None | Shift | Ctrl | Alt 组合值正确 |
+| KeyModifier 位运算 | None / Shift / Ctrl / Alt 组合值正确 |
 | EventType 枚举值 | 各类型值非零且唯一 |
 | StaticType() 一致性 | GetType() == StaticType() |
 

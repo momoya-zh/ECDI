@@ -349,7 +349,7 @@ static_assert(!std::is_move_constructible_v<Window>, "Window 禁止移动");
 | R3 | 私有构造器影响未来派生 | 全库 `: public Window` **0 命中**（已核实）；若未来需要派生，届时一并设计（记录于本文档，不阻塞） |
 | R4 | `make_unique` 写法被"顺手改回" | §2.4 注释写明原因 + A4 静态检查（`make_unique<Window>` 必须 0 处） |
 | **回退** | 任一步失败 | 改动集中在 5 个生产文件、无 API 交互耦合 ⇒ 逐文件 `git checkout` 即可回退；**无数据/协议迁移** |
-| **附带发现（未改）** | `ECDI/ECDI开发规范.md:143` 写「…并丢失 `m_application` 指针」——B2 后 `m_application` 已是**引用**，措辞过期。**不在本次授权范围**（6 文件之外），待用户裁决 |
+| **附带发现（未改）** | `ECDI/ECDI开发规范.md:143` 写「…并丢失 `m_application` 指针」——B2 后 `m_application` 已是**引用**，措辞过期。 | **不在本次授权范围**（6 文件之外），待用户裁决 |
 
 ---
 

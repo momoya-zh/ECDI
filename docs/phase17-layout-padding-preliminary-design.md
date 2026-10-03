@@ -216,7 +216,7 @@ const int cross = (std::max)(0, parent.GetWidth() - 2 * m_padding);
 
 | # | 决策 | 倾向 | 说明 |
 |---|---|---|---|
-| **O1** | padding 的断言形态 | ✅ **已冻结（v1.1，采纳评审）**：`FRAMEWORK_ASSERT(padding >= 0)` + **Release 侧钳 0**（`m_padding = max(0, padding)`）。与 `spacing`（`VerticalLayout.cpp:13`）/ `SetStretch`（`Widget.cpp:219`）形成**一致的配置参数合法状态约束**——表达的是「合法状态是 `padding >= 0`」，而非「为测试而断言」。**代价：断言特征串 10 → 11**（A2 类核验需同步） |
+| **O1** | padding 的断言形态 | ✅ **已冻结（v1.1，采纳评审）** | `FRAMEWORK_ASSERT(padding >= 0)` + **Release 侧钳 0**（`m_padding = max(0, padding)`）。与 `spacing`（`VerticalLayout.cpp:13`）/ `SetStretch`（`Widget.cpp:219`）形成**一致的配置参数合法状态约束**——表达的是「合法状态是 `padding >= 0`」，而非「为测试而断言」。**代价：断言特征串 10 → 11**（A2 类核验需同步） |
 | **O2** | 是否提供 `GetPadding()` 访问器 | ❌ **不做** | 测试可直接观察**几何结果**（子坐标/尺寸），无需读回配置值；加 getter 会为「可测性」而无需求地扩 API（YAGNI） |
 | **O3** | ModelProbe 的 padding 取值 | 建议 **12 ~ 16 px** | 验收时目视定夺；不改 `main.cpp` 前不落地 |
 | **O4** | Root 的 padding 与 `CaptionBar`（Phase 13）的高度是否要联动 | ❌ **不联动** | 两者彼此独立（Phase 13 的 D7 已定「不联动」的同型先例） |

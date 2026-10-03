@@ -153,6 +153,8 @@ TextMeasurer& GetTextMeasurer() noexcept;
 ## 3. 修订记录
 
 - v1.0（2026-08-13）5.5.1.1 定稿：D1-D5。**DecodeUTF8 删除**（评审 YAGNI 修正——零消费者，5.6 IME 时再加）；**SequenceLength 参数改 unsigned char**（评审 符号修正——MSVC char 有符号）；**ByteOffsetToCodepointIndex @pre 明确**（非边界 UB，鼠标定位需调用方钳制）；断言字节布局修正（3 → 8，评审 数学确认）；命名 ECDI 顶层函数（与 UTF8ToWide 风格一致，确认）。
+- v1.1（2026-08-13）5.5.1.3 定稿：E1-E5。CaretDirection 枚举 + GetCodepointCount 辅助（评审 可读性/重复统计修正）；Invalidate 内嵌保留（职责契约论证，解耦归 Phase 7）；事件占位改实现（OnKeyDown/OnCharInput）。
+- v1.2（2026-08-13）5.5.1.4 定稿：F1-F5。**同源原则**（点击定位与绘制共享 CalculateTextPosition——评审 D2 真问题）；**空串高度兜底**（实测 GDIBackend::MeasureText("") 返回 {0,0}，评审 担忧属实）；CaretIndexFromX **private 成员**（评审 最终采纳——5.5.2 Selection 复用）；**删断言改人工验证**（评审建议 + private 可测性矛盾解）；性能注释（O(n²) MVP 取舍）。
 - v1.3（2026-09-11）实现落地状态同步（补记）：5.5.1 全部落地；同时将状态行版本由 v1.0 同步至 v1.3（此前滞后于修订记录 v1.2）。
 
 ## 4. 5.5.1.3 详细设计（编辑逻辑）
@@ -280,8 +282,6 @@ void TextBox::OnCharInput(const CharInputEvent& event){
 - **解耦时机 = Phase 7 API 审查**：出现批量编辑（PasteText/ReplaceSelection/SetText 大文本）时改两层结构（`XxxInternal` 无重绘 + 对外 API 负责刷新）——与编辑操作可见性审查同一批
 - 当前全是单步操作，YAGNI
 
-- v1.1（2026-08-13）5.5.1.3 定稿：E1-E5。CaretDirection 枚举 + GetCodepointCount 辅助（评审 可读性/重复统计修正）；Invalidate 内嵌保留（职责契约论证，解耦归 Phase 7）；事件占位改实现（OnKeyDown/OnCharInput）。
-
 ## 5. 5.5.1.4 详细设计（Paint 完整版 + 鼠标点击定位）
 
 ### F1 OnPaint 完整版（文本 + 光标同源）
@@ -388,5 +388,3 @@ size_t TextBox::CaretIndexFromX(TextMeasurer& measurer, float innerX) const{
 
 - OnMouseButtonDown 的 FRAMEWORK_ASSERT(false) → F2 真实实现（点击不再弹断言——遗留问题自然解决）
 - include 新增：MouseButtonDownEvent.h（TextBox.cpp）
-
-- v1.2（2026-08-13）5.5.1.4 定稿：F1-F5。**同源原则**（点击定位与绘制共享 CalculateTextPosition——评审 D2 真问题）；**空串高度兜底**（实测 GDIBackend::MeasureText("") 返回 {0,0}，评审 担忧属实）；CaretIndexFromX **private 成员**（评审 最终采纳——5.5.2 Selection 复用）；**删断言改人工验证**（评审建议 + private 可测性矛盾解）；性能注释（O(n²) MVP 取舍）。

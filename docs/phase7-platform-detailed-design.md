@@ -358,7 +358,7 @@ Application::Application():m_windowClass("ECDI FrameWork", Win32PlatformWindow::
 | # | 验收项 | 判据 |
 |---|---|---|
 | V1 | 编译 | VS Debug x64 零错误零新警告；三工具链惯例 |
-| V2 | **Window.h 零 Win32（评审 验收）** | `grep -E "HWND|HDC|UINT|WPARAM|LPARAM|LRESULT|RECT|Imm|Caret"` Window.h 无命中 |
+| V2 | **Window.h 零 Win32（评审 验收）** | `grep -E` 对 `HWND` / `HDC` / `UINT` / `WPARAM` / `LPARAM` / `LRESULT` / `RECT` / `Imm` / `Caret` 查 `Window.h`，无命中 |
 | V3 | 回归-事件 | 鼠标/键盘/字符/IME 消息翻译与派发行为不变（demo 全交互） |
 | V4 | 回归-渲染/焦点 | 绘制无回归（PaintFrame 经 OnPaint 回调链）；Tab 焦点导航正常 |
 | V5 | 回归-IME | 中文候选窗跟随光标；移动窗口 EXITSIZEMOVE 归位（经 OnExitSizeMove 链） |
