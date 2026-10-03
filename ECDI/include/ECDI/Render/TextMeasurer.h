@@ -7,6 +7,8 @@
 
 namespace ECDI {
 
+class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——零 include 依赖，Phase 26）
+
 	/// @brief 文本测量能力接口（独立于 RenderingBackend，路线 X 定案）
 	/// @details
 	/// 只知道 Font + text → 尺寸/行高；不接触 Widget/PaintContext/RenderCommand；
@@ -14,6 +16,14 @@ namespace ECDI {
 	class TextMeasurer {
 	public:
 		virtual ~TextMeasurer() = default;
+
+		/// @brief 平台上下文注入（Phase 26：与 RenderingBackend::Initialize **结构对称**）
+		/// @details ⚠️ **结构对称 ≠ 职责相同**：本方法**可选**（默认空实现即合法——无需平台
+		///          上下文的实现者保持零改动）；`RenderingBackend::Initialize` 是**必须**的
+		///          （10 个纯虚的实现依赖平台句柄）。**不要**因两处调用相邻就推断生命周期语义等价。
+		///          GDITextMeasurer / FreeTypeTextMeasurer 覆盖它：取窗口 DPI ⇒ 测量基准 = 窗口 DPI
+		///          （闭合审计 D-8：测量链与渲染链同基准）。
+		virtual void Initialize(const PlatformRenderContext& context) {}
 
 		/// @brief 测量文本尺寸（控件对齐偏移计算依赖此，D5 职责确认）
 		/// @return 文本尺寸——★ **单位恒为 DIP**（Phase 20 Q2；与 `Font::size` 同源）。

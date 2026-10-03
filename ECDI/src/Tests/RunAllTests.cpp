@@ -35,6 +35,8 @@ int ECDI::Test::RunAllTests()
     RegisterPreshowGeometryTests();   // Phase 22：Create 的 DIP 尺寸契约（T22-1..T22-3）
     RegisterApplicationDispatchTests();   // Phase 23：工作线程 → UI 线程投递（T23-1..T23-11）
     RegisterLineCoverageTests();   // Phase 24：DrawLine 线段抗锯齿（T24-1..T24-11）
+    RegisterTextMeasurerTests();   // Phase 26：文本测量链（T26-10 / T26-12）
+    RegisterFontEngineTests();   // Phase 26：FontEngine（T26-1..T26-6）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

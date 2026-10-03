@@ -1,5 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.20)
-project(ECDI VERSION 0.1.0 LANGUAGES CXX)
+# ★ Phase 26：加入 **C** 语言——vendor 的 FreeType 是 C 源码（独立静态库目标 freetype）
+project(ECDI VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,13 +28,53 @@ endif()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2026-09-03 拆库（demo 独立 examples/ModelProbe/）/ 2026-09-05 库化实施（Phase 10 详设 v1.1）：
-#   ECDI        = 框架静态库（include/ECDI = 80 Public 头；9 个 Internal 实现头已下沉
+#   ECDI        = 框架静态库（include/ECDI = 94 Public 头；9 个 Internal 实现头已下沉
 #                 ECDI/src 与同名 cpp 同目录——include/ 内零 Windows.h / 零下沉头引用）
 #   modelprobe  = 应用（add_subdirectory(examples/ModelProbe)——链接 ECDI）
 #   ecdi_public_header_test = Public Header 自包含测试（每头一 TU，EXCLUDE_FROM_ALL——
-#                 --target ecdi_public_header_test 按需验证 92 头独立可编译）
+#                 --target ecdi_public_header_test 按需验证 94 头独立可编译）
 # 依赖方向单向律：src → include/ECDI 允许；include/ECDI → src / Windows.h 禁止
 # ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 26：FreeType（vendor 进仓库的第三方——独立静态库目标）
+#   ★ 只 vendor 需要的能力：字形栅格化 + hinting（判据见条 95⑧；
+#     快照事实见 third_party/freetype/README.ecdi.md）
+#   ★ PRIVATE 链接 ⇒ FreeType 头**不进公共 API**（include/ECDI/** 零 ft2build.h——详设盯防①）
+#   ★ src/tools/ 未 vendor（实测含 4 个自带 main() 的独立工具程序）
+#   ★ 源文件列表在 sources.ecdi.cmake（**显式 TU 列表**）——
+#     ★★ **不能用 GLOB**：FreeType 的 210 个 .c 里 **165 个是「被其他 .c include」**的
+#     （如 ftzopen.c 由 ftlzw.c include），**不是独立 TU**，GLOB 逐个编译必失败（已实测）。
+# ═══════════════════════════════════════════════════════════════════════════
+include("${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/sources.ecdi.cmake")
+
+# ★ OBJECT 库（不是 STATIC）——让 FreeType 的 obj **并入 ECDI.a**：
+#   STATIC 目标 + PRIVATE 链接会撞 `install(EXPORT)` 的「依赖不在 export set」检查
+#   （静态库的 PRIVATE 依赖仍是 link 接口）；obj 合并后消费者只看到 ECDI.a，无外部依赖。
+add_library(freetype OBJECT ${FREETYPE_SOURCES})
+# ★ PRIVATE 即可：OBJECT 库**不向消费者传播** include 目录（`$<TARGET_OBJECTS>` 只合并 obj）
+#   ⇒ ECDI 需要 FreeType 头时**自己显式加**（见下方 ECDI 的 PRIVATE include）——这正好也
+#      保证了「FreeType 不进公共 API」：ECDI 是 PRIVATE，消费者拿不到。
+target_include_directories(freetype PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/include"
+)
+target_compile_definitions(freetype PRIVATE FT2_BUILD_LIBRARY)
+
+# ★ MSVC 系（cl.exe / clang-cl / clang 的 `SIMULATE_ID=MSVC` 前端变体——三条链实测）
+#   都走 **MSVC UCRT 头** ⇒ FreeType 的 ft_getenv / ft_strcpy / ft_strncpy / ft_strcat
+#   会展开为 getenv / strcpy / strncpy / strcat 并触发 `_CRT_INSECURE_DEPRECATE`
+#   （C4996 族；实测 ftinit.c / ftrfork.c / sfdriver.c 共 6 处告警）。
+#   ★ 上游零改动（跟版义务最轻）⇒ 在**构建层**关掉——这正是告警文本自身推荐的做法。
+#   （GNU 系 MinGW 不走 MSVC 头、不产生该告警，无需此宏。）
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_compile_definitions(freetype PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+if(MSVC)
+    # FreeType 源码含非 ASCII（实测 15 个文件）且无 BOM ⇒ MSVC 默认按 CP936 读会刷 C4819。
+    # 用 /utf-8 显式声明源编码（与 ECDI 目标既有做法同款）；★ 不给上游文件加 BOM——保持零改动。
+    target_compile_options(freetype PRIVATE /utf-8)
+endif()
 
 # 框架库源（CONFIGURE_DEPENDS：新增 .cpp 自动重新 configure）
 file(GLOB_RECURSE FRAMEWORK_SOURCES CONFIGURE_DEPENDS
@@ -41,7 +82,8 @@ file(GLOB_RECURSE FRAMEWORK_SOURCES CONFIGURE_DEPENDS
 )
 list(FILTER FRAMEWORK_SOURCES EXCLUDE REGEX "/Tests/")   # 测试不在库内（★ 原「/Demo/」随 2026-09-30 删除 Showcase 一并移除）
 
-add_library(ECDI STATIC ${FRAMEWORK_SOURCES})
+# Phase 26：`$<TARGET_OBJECTS:freetype>` = 把 FreeType 的 obj 并入 ECDI.a（见上文 OBJECT 库注释）
+add_library(ECDI STATIC ${FRAMEWORK_SOURCES} $<TARGET_OBJECTS:freetype>)
 
 target_include_directories(ECDI
     PUBLIC
@@ -50,6 +92,7 @@ target_include_directories(ECDI
         "$<INSTALL_INTERFACE:include>"                                  # 安装后相对 <prefix>/include
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src"                          # Internal 头（下沉后 src 内模块相对 include）
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/include"      # ★ Phase 26：FontEngine.cpp 用（PRIVATE ⇒ 公共头拿不到 FreeType）
 )
 
 target_compile_features(ECDI PUBLIC cxx_std_20)

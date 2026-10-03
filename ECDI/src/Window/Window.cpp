@@ -59,6 +59,9 @@ Window::Window(Application& app,const std::string& title, int width, int height,
 	// Window 不再接触 HWND；识别发生在平台实现内部 static_cast）
 	m_renderBackend->Initialize(m_platformWindow->GetRenderContext());
 
+	// ★ Phase 26：与后端**同源同序**（详设契约 C-3）——测量器亦取窗口 DPI（D-8 闭合）。
+	m_textMeasurer->Initialize(m_platformWindow->GetRenderContext());
+
 	// 创建 RootWidget（Widget 树的根节点，代表窗口客户区）
 	m_rootWidget = std::make_unique<Widget>();
 

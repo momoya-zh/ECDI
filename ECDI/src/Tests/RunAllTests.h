@@ -37,5 +37,7 @@ void RegisterIconDecodeTests();   ///< Phase 21：系统图标（内核 HICON→
 void RegisterPreshowGeometryTests();   ///< Phase 22：Create 的 DIP 尺寸契约（T22-1..T22-3）
 void RegisterApplicationDispatchTests();   ///< Phase 23：工作线程 → UI 线程投递（T23-1..T23-11）
 void RegisterLineCoverageTests();   ///< Phase 24：DrawLine 线段抗锯齿（T24-1..T24-11）
+void RegisterTextMeasurerTests();   ///< Phase 26：文本测量链（T26-10 D-8 闭合 / T26-12 GDI 测量缓存）
+void RegisterFontEngineTests();   ///< Phase 26：FreeType 共享底层（T26-1..T26-6——PixelSize / 两级缓存 / GlyphKey / FontSource）
 
 } // namespace ECDI::Test

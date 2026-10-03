@@ -1,6 +1,7 @@
 ﻿#include "Render/GDITextMeasurer.h"
 
 #include "ECDI/Core/String.h"
+#include "Platform/Win32/Win32RenderContext.h"   // ★ Phase 26：Initialize 取 HWND（同 GDIBackend 先例）
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +16,13 @@ GDITextMeasurer::~GDITextMeasurer()
 		DeleteObject(entry.second);
 	}
 	m_fontCache.clear();
+}
+
+void GDITextMeasurer::Initialize(const PlatformRenderContext& context)
+{
+	// ★ Phase 26（D-8 闭合）：与 GDIBackend::Initialize 同法——取窗口 HWND。
+	//   测量基准 DPI 由此变为**窗口 DPI**（此前 = 屏幕 DC 的 LOGPIXELSX）。
+	m_hwnd = static_cast<const Win32RenderContext&>(context).GetHandle();
 }
 
 HFONT GDITextMeasurer::GetOrCreateFont(const Font& font, int dpi)
@@ -62,6 +70,24 @@ HFONT GDITextMeasurer::GetOrCreateFont(const Font& font, int dpi)
 
 Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 {
+	// ★ Phase 26（△9a）：**测量基准 DPI = 窗口 DPI**（与 GDIBackend 同基准——D-8 闭合）。
+	//   ★ dpi 不再来自测量 DC ⇒ **命中缓存时可完全跳过 GetDC**。
+	int dpi = GetDpiForWindow(m_hwnd);
+	if (dpi <= 0)
+	{
+		dpi = 96;   // fail-safe（无窗口 / 失败——与 DpiConversion 一致）
+	}
+
+	// ★ Phase 26（△9b）：查测量结果缓存（★ 在 GetDC **之前**）。
+	//   键 = (text, size, family, **dpi**)——★ 含 DPI（跨屏自动失效）。
+	const auto cacheKey = std::make_tuple(text, font.size, font.family, dpi);
+	const auto cacheIt = m_measureCache.find(cacheKey);
+	if (cacheIt != m_measureCache.end())
+	{
+		return cacheIt->second;   // ★ 命中 ⇒ 零 GetDC / 零 SelectObject / 零 GetTextExtentPoint32W
+	}
+	++m_measureCacheMissCount;
+
 	// D2：帧无关测量——GetDC(NULL) 临时屏幕 DC（仅测量，不承担绘制职责）
 	Size result{};
 
@@ -70,10 +96,6 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 	{
 		return result;
 	}
-
-	// ★ Phase 20（△21）：**测量基准 DPI = 本测量 DC 的 `LOGPIXELSX`**
-	//   （契约 C7：`GetDeviceCaps` 在全库**仅此一处**，用途即"测量基准"）。
-	const int dpi = GetDeviceCaps(measureDC, LOGPIXELSX);
 
 	HFONT hfont = GetOrCreateFont(font, dpi);
 	if (hfont)
@@ -98,6 +120,13 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 	}
 
 	ReleaseDC(nullptr, measureDC);
+
+	// ★ Phase 26（△9b）：写缓存（★ 空文本也是合法测量结果——一并缓存）
+	if (m_measureCache.size() >= kMaxMeasureCache)
+	{
+		m_measureCache.clear();   // ★ 上限 ⇒ 清空（O(1)，防无界增长）
+	}
+	m_measureCache.emplace(cacheKey, result);
 	return result;
 }
 
@@ -112,8 +141,12 @@ float GDITextMeasurer::LineHeight(const Font& font)
 		return height;
 	}
 
-	// ★ Phase 20（△21）：与 MeasureText 同一基准（本测量 DC 的 LOGPIXELSX）
-	const int dpi = GetDeviceCaps(measureDC, LOGPIXELSX);
+	// ★ Phase 26（△9a）：与 MeasureText 同一基准——**窗口 DPI**（D-8 闭合）
+	int dpi = GetDpiForWindow(m_hwnd);
+	if (dpi <= 0)
+	{
+		dpi = 96;   // fail-safe
+	}
 
 	HFONT hfont = GetOrCreateFont(font, dpi);
 	if (hfont)
