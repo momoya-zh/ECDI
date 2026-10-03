@@ -1,7 +1,7 @@
-﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.3 · 实施规格）
+﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.4 · 实施规格）
 
 > 来源：初设稿 `phase26-freetype-gl-preliminary-design.md` **v1.2 ✅ 评审通过**（外部评审第二轮：「**Phase 26 Preliminary Design：通过，可以进入 Detailed Design**」，并定下**详设必答 D26-1..D26-5**）
-> 状态：**v1.3**（2026-10-03）——🚧 **实施中**（★ 评审已通过：外部评审第三轮「**通过（Implementation Ready）**」，处置见 §10；★ **批零 / 批一 / 批二 已落**，批三 / 批四 待做 —— 详见 §11 实施回填）
+> 状态：**v1.4**（2026-10-03）——🚧 **实施中**（★ 评审已通过：外部评审第三轮「**通过（Implementation Ready）**」，处置见 §10；★ **批零 / 批一 / 批二 / 批三 / 批四 全部已落**，并完成**首轮 `--gl` 目视缺陷修复**——详见 §11 实施回填；★ **D26-5 性能读数待用户实跑**）
 > 定位：**实施规格**。★ 评审要求「**详设不要再大改架构**」⇒ 本稿**只在初设骨架上把实现细节冻结**，不新增架构。★ 评审同时给了**硬约束：详设不得扩大 Phase 26**（范围锁见初设 §9；HarfBuzz / shaping / ligature / 字体 fallback / LRU atlas / SDF / 多线程栅格化 / Linux GL / Vulkan / viewport culling **一律不做**）。
 > 结构：**§1 = 评审给定的五个必答（本稿核心，放最前）** → §2 基线（带行号实测）→ §3 逐文件改动 → §4 契约映射 → §5 盯防（可机检）→ §6 用例正文 → §7 影响面 → §8 批次 → §9 开放项 → §10 外部评审处置 → **§11 实施回填** → §12 修订记录。
 
@@ -602,7 +602,7 @@ target_include_directories(ECDI PRIVATE
 
 ---
 
-## 5. 盯防清单（11 条，全部可机检）
+## 5. 盯防清单（12 条，全部可机检）
 
 | # | 盯防 | 机检 |
 |---|---|---|
@@ -617,12 +617,13 @@ target_include_directories(ECDI PRIVATE
 | ⑨ | ★ **GDI 测量缓存键含 DPI**（`(text, size, family, dpi)`，与 `m_fontCache` 同口径）+ **有容量上限** | 代码审查 + T26-12 |
 | ⑩ | ★ **第三方许可文件完整**：`LICENSE.TXT` 正文引用到的文件**逐一在库内**（`docs/FTL.TXT` / `docs/GPLv2.TXT`） | 逐个 `test -f`（见 §11.3） |
 | ⑪ | ★ **vendored FreeType 编译零告警**（MSVC 系尤须——CRT 弃用告警已由构建层宏关闭） | 构建日志 `grep -c warning` = **0** |
+| ⑫ | ★★ **测量链与渲染链的 FreeType load flags 必须同源**（`FT_LOAD_DEFAULT \| FT_LOAD_TARGET_NORMAL \| FT_LOAD_NO_BITMAP`）——异源 ⇒ **advance 不同** ⇒ 测宽 ≠ 渲宽（D-8 同族；★ SimSun 12–16px 有 MONO 内嵌点阵，此条从「可选」变**必需**，见 §11.6 ⑥） | `grep -c "FT_LOAD_NO_BITMAP" src/Render/FontEngine.cpp` = **2**（`MeasureText` + `GlyphByKey`） |
 
 ---
 
 ## 6. 用例正文（T26-1..T26-12）
 
-**口径**：自动化 **+11**（FontEngineTests **+6**：T26-1..T26-6 · TextMeasurerTests **+2**：T26-10 / **T26-12** · GLBackendTests **+2**：T26-7/T26-8 · ModelProbeTests **+1**：T26-11）· T26-9（GL 成功渲染）**人工**、不计入 ⇒ **307 → 318**（预估）。 ★ **实际进度（2026-10-03）**：批一 **+2** ⇒ **309**（四链全绿）· 批二 **+6** ⇒ **315**（本地验证）· 批三 **+2** ⇒ 317 · 批四 **+1** ⇒ **318**。
+**口径**：自动化 **+11**（FontEngineTests **+6**：T26-1..T26-6 · TextMeasurerTests **+2**：T26-10 / **T26-12** · GLBackendTests **+2**：T26-7/T26-8 · ModelProbeTests **+1**：T26-11）· T26-9（GL 成功渲染）**人工**、不计入 ⇒ **307 → 318**（★ **已达成**）。 ★ **实际进度（2026-10-03）**：批一 **+2** ⇒ **309**（**四链全绿** · 用户实测）· 批二 **+6** ⇒ **315**（本地验证）· 批三 **+2** ⇒ **317**（**四链全绿** · 用户实测）· 批四 **+1** ⇒ **318**（本机）。 ★ **首轮 `--gl` 目视抓到的 3 处 GL 侧缺陷修复不新增用例**（纯渲染观感 —— 靠无头 GL 探针 + 人工目视）；★ 但**「单行 TextBox 无纵向滚动」是控件层语义变更**，**尚无用例锚定** ⇒ 登记为 **§9 O10**（建议补 **T26-13**）。
 
 ★ **观测缝（T26-3/T26-5/T26-12 的前提）**：断言「缓存命中」有个矛盾——★ **命中与不命中的返回值相同**（这正是缓存的正确性）⇒ **无法凭返回值区分**。⇒ 用**只读计数**：`FontEngine` 的 `RasterizeCount` / `MeasureCacheMissCount`（**GL 侧** · T26-3/T26-5）与 **`GDITextMeasurer::MeasureCacheMissCount`（GDI 侧** · T26-12）；★ 均为**内部件的公开方法，非公共 API**。★ 同款计数即 **D26-5 基准指标**（glyph 栅格化次数 / atlas miss / 测量缓存命中）的来源——**一处实现、两处消费**（沿条 94 的「先用现有积木」）。
 
@@ -654,22 +655,23 @@ target_include_directories(ECDI PRIVATE
 | **新增测试** | `FontEngineTests.cpp` · `TextMeasurerTests.cpp` · `GLBackendTests.cpp` = **3 文件** |
 | **改公共头** | `TextMeasurer.h`（+`Initialize`）· `BackendFactory.h`（+`CreateGLRenderServices`）= **94 → 94**（零新增） |
 | **改实现** | `BackendFactory.cpp` · `GDITextMeasurer.{h,cpp}` · `Window.cpp`（+1 行）· `CMakeLists.txt` |
-| **改示例/测试** | `ModelProbe.cpp`（+`--gl`）· `ModelProbeTests.cpp` · `RunAllTests.{h,cpp}`（★ 注册 3 新文件；`DpiTests.cpp` **不再改**——T26-10 移入 `TextMeasurerTests.cpp`） |
+| **改示例/测试** | `ModelProbe.{h,cpp}`（+`--gl` 解析 + 工厂选择）· ★ **`examples/ModelProbe/main.cpp`**（★ **真实落点**——`wWinMain` 与 `application.Create(...)` 都在此文件，详设 △14 原写 `ModelProbe.cpp` 是错的，见 §11.5 #7）· `ModelProbeTests.cpp` · `RunAllTests.{h,cpp}`（★ 注册 3 新文件；`DpiTests.cpp` **不再改**——T26-10 移入 `TextMeasurerTests.cpp`） |
 | **零改动** | `RenderCommand.h` · `Renderer.{h,cpp}` · `PaintContext.{h,cpp}` · `CommandBuffer` · `Widget` 层 · `GDIBackend`（除既有）· `Window.h` |
-| **公共 API** | **+2**（`TextMeasurer::Initialize` · `CreateGLRenderServices`） |
+| **公共 API** | **+3**（`TextMeasurer::Initialize` · `CreateGLRenderServices` · ★ **`RenderingBackend::IsReady`**——批四为 D7「`--gl` 失败**不静默回退**」新增；**带默认实现 `true`** ⇒ 既有实现者零改动，见 §11.5 #6） |
 | **用例** | **307 → 318**（自动化 +11；口径见 §6） |
 
 ---
 
-## 8. 批次顺序（五批；批零为实施前置）
+## 8. 批次顺序（五批 + 缺陷修复轮；批零为实施前置）
 
 | 批 | 内容 | 出口判据 |
 |---|---|---|
 | **批零** | △12 vendor FreeType + △11 CMake（freetype 目标） | ✅ **已完成（2026-10-03）**：FreeType **2.14.3** vendor + CMake 接通；`freetype` 目标 **43 obj 编译通过**（`opengl32` 属批三，未加） |
 | **批一** | △6 `TextMeasurer::Initialize` + △9 `GDITextMeasurer`（**D-8 闭合 + 测量缓存**）+ △10 `Window.cpp` +1 行 + T26-10 / **T26-12** | ★ **D-8 立即闭合 + GDI 测量缓存立即生效**（**不需 FreeType / 不需 GL**）——**最小、独立、可先落**。★ ✅ **已完成**：**四链 309/309 全绿**（用户实测） |
 | **批二** | △1 `FontEngine` + △2 `FontSource` + △3 `FreeTypeTextMeasurer` + T26-1..T26-6 | ✅ **已完成**：**315/315**（clang + MinGW 本地验证）；★ 覆盖度积分与基线**逐位相同** = 零行为变化（条 103） |
-| **批三** | △4 `GLGlyphAtlas` + △5 `GLRenderer` + △7/△8 工厂 + T26-7/T26-8 | 全绿（无 GL 环境亦可，靠失败路径 + 纯逻辑） | ★ ⬜ **待做**
-| **批四** | △14 `ModelProbe --gl` + T26-9 人工目视 + **性能基准（D26-5）** + 台账收口 | 四链全绿 + 目视 + 性能读数 | ★ ⬜ **待做**
+| **批三** | △4 `GLGlyphAtlas` + △5 `GLRenderer` + △7/△8 工厂 + T26-7/T26-8 | 全绿（无 GL 环境亦可，靠失败路径 + 纯逻辑）。★ ✅ **已完成**：**四链 317/317 全绿**（用户实测） |
+| **批四** | △14 `ModelProbe --gl` + T26-9 人工目视 + **性能基准（D26-5）** + 台账收口 | 四链全绿 + 目视 + 性能读数。★ 🚧 **代码已完成**（`--gl` + `IsReady` + 计数打印）：**本机 318/318** · **T26-9 目视已进行**并**抓到 3 处 GL 侧缺陷**（已修，见 §11.6）；★ **D26-5 性能读数待用户实跑** ⇒ **台账收口待做** |
+| **批四·修** | ★ 首轮 `--gl` 目视的**缺陷修复轮**（GL 侧 3 处 + 同轮并行续修 4 项） | 探针复测 + 本机 `ecdi_tests` 全绿。★ ✅ **已完成**：本机 **318/318** · 构建 **0 告警** · 覆盖度积分与基线**逐位相同**（详见 **§11.6**） |
 
 ★ **批一独立先行**的理由：**D-8 的修复不需要 FreeType、不需要 GL** —— 它只是把测量基准从屏幕 DC 换成窗口 DPI（几行）。⇒ **立即可验、零风险**，且**先拿到一部分价值**。
 
@@ -688,8 +690,9 @@ target_include_directories(ECDI PRIVATE
 | **O7** | 「per-frame 自省 vs `OnTargetResized`」成本对比 | 初设 §3-⑧ 已定「保留不做 `OnTargetResized`」（N7）；本稿沿用，**成本对比数据待实施期补** |
 | **O8** | ✅ **已纳入**（用户 2026-10-03 拍板）：默认 GDI 路径的测量缓存 | 由 **§1.6 + △9b** 落地——`GDITextMeasurer` 加同款缓存（键含 DPI · **命中免 `GetDC`** · 上限清空）。★ 原为「待拍板」，**现转正**；批一即可生效（不依赖 GL） |
 | **O9** | 测量缓存**淘汰策略** | 本 Phase = **上限 + `clear()`**（O(1)，防无界增长）；**LRU 不做**——重启条件 = 命中率因频繁编辑（每次新 `text` 键）明显下降 |
+| **O10** | ★ **「单行 TextBox 无纵向滚动」是控件层语义变更，尚无用例锚定** | 首轮 `--gl` 目视暴露（行盒高于单行视口时，光标跟随把 `scrollOffsetY` 推 > 0 ⇒ 文字下偏）⇒ 单行恒置偏移 0 + 滚轮吞掉（**GDI / GL 同受影响**，见 §11.6 ⑦）。★ **建议补 T26-13**（单行 ⇒ `GetMaxScrollOffset` 不生效 / 滚轮被吞）；**本 Phase 未加**（本轮仅修观感，未扩用例集） |
 | **L1** | family→文件名解析 = **「family 视作文件名」直查** | 本 Phase **不做**完整 `EnumFontFamiliesExW` 解析（评审 §6 只要求下沉，未要求完整解析）；GDI 侧仍按 family 名 ⇒ **两侧语义不完全对等**（N1 不承诺视觉等价） |
-| **L2** | **无字体回退**（N6） | 默认 face 选**一个含 CJK 的系统字体**（如 `msyh.ttc`）以覆盖拉丁 + 中文；**不做 fallback 机制** |
+| **L2** | **无字体回退**（N6） | 默认 face 选**一个含 CJK 的系统字体**以覆盖拉丁 + 中文；**不做 fallback 机制**。★ **实施期订正**：默认解析顺序由 `msyh.ttc` 改为 **`simsun.ttc` 优先** —— GDI 空 family + `DEFAULT_CHARSET` 在中文系统**实际落到 SimSun**，而 MSYH 行盒大约 **30%** ⇒ 控件的框高/内缩按 GDI 观感调过，两侧不同源会让单行文字下偏被裁（见 §11.6 ⑤） |
 | **L3** | `TextWidget` 层「每帧调 `MeasureText`」不消 | 本 Phase 消掉的是「重复执行**昂贵度量**」；调用本身仍在（剩下一次 map 查找）——归 `#49` / 后续 |
 
 ---
@@ -716,7 +719,7 @@ target_include_directories(ECDI PRIVATE
 
 ★ **最终判断**：**通过（Implementation Ready）** —— **1 项必须改（D26-4 接口矛盾）+ 6 项建议改（全部采纳）+ 16 节确认**；路线与架构**零退回**。
 
-## 11. 实施回填（批零–批二，2026-10-03）
+## 11. 实施回填（批零–批四 + 首轮 `--gl` 目视缺陷修复，2026-10-03）
 
 > 本节记录**实现过程中与设计不符 / 设计未覆盖**的实测事实 —— 沿条 96（**文档会静默变假**）。
 > ★ 设计意图（§1–§9）**未变**，本节差异均为**实现期被迫的具体化**（非架构改动）。
@@ -728,8 +731,9 @@ target_include_directories(ECDI PRIVATE
 | **批零** | ✅ 完成 | vendor FreeType **2.14.3** + CMake 接通；`freetype` 目标 **43 obj 编译通过** |
 | **批一** | ✅ 完成 | D-8 闭合 + GDI 测量缓存；**四链 309/309 全绿**（用户实测） |
 | **批二** | ✅ 完成 | `FontEngine` / `FontSource` / `FreeTypeTextMeasurer` + **T26-1..T26-6**；**315/315**（clang + MinGW 本地验证，覆盖度积分与基线**逐位相同** = 零行为变化） |
-| **批三** | ⬜ 待做 | `GLGlyphAtlas` + `GLRenderer` + 工厂 + `opengl32` + T26-7/T26-8 |
-| **批四** | ⬜ 待做 | ModelProbe `--gl` + 目视（T26-9）+ 性能基准（D26-5）+ 台账 |
+| **批三** | ✅ 完成 | `GLGlyphAtlas` + `GLRenderer` + 工厂 + `opengl32` + **T26-7/T26-8**；**四链 317/317 全绿**（用户实测） |
+| **批四** | 🚧 代码完成 | `ModelProbe --gl` + `RenderingBackend::IsReady` + 计数打印 + **T26-11**；**本机 318/318**；★ **T26-9 目视已进行**（抓到 3 处 GL 侧缺陷）· **D26-5 性能读数待用户实跑** |
+| **批四·修** | ✅ 完成 | ★ 首轮 `--gl` 目视的**缺陷修复轮**（GL 侧 3 处 + 并行续修 4 项）—— 本机 **318/318** · 构建 **0 告警** · 覆盖度积分与基线**逐位相同**；**详见 §11.6** |
 
 ### 11.2 相对设计的偏离（全部实测被迫）
 
@@ -757,8 +761,41 @@ target_include_directories(ECDI PRIVATE
 - ★ **T26-2 订正**：设计写「DPI 变 ⇒ 结果**按比例变**」**是错的** —— `MeasureText` 返回 **DIP** ⇒ DPI 变化时结果**近似不变**（这正是 `TextMeasurer.h` 的既有契约）。已按「**近似不变**」实现与断言。
 - **编码细节**：`FT_New_Face` 的路径必须 **ANSI**（依据 `builds/windows/ftsystem.c:231` 用 `MultiByteToWideChar(CP_ACP, …)`）⇒ `FontSource::ResolveFile` 返回 ANSI，内部用宽 API 探测。
 
+### 11.5 批三–批四的实现偏离（8 条，全部实测被迫）
+
+| # | 设计（v1.3） | 实现（实测） | 原因 |
+|---|---|---|---|
+| 1 | `Glyph(font, cp, …)` 直接栅格化 | 拆出 **`GlyphByKey(const GlyphKey&, …)`**，`Glyph` 改为「建键 → 委派」 | 键**完全决定**要栅格化什么（face + glyphIndex + pixelSize + hinting）⇒ **渲染链不必知道 codepoint**（D26-3 ② 的直接兑现）；且键型缓存**单点**，避免两处实现漂移 |
+| 2 | `DecodeUtf8` 在 `FontEngine.cpp` 匿名 namespace 内 | 上提为内部头 **`Render/Utf8Decode.h`** | 测量链与渲染链**共用同一解码**——各自解码会在非法 / 截断字节处的码点切分上不一致 ⇒ **测宽 ≠ 渲宽** |
+| 3 | （设计未覆盖）图集成员形态 | `std::unique_ptr<GLGlyphAtlas>` | 把「**GPU texture 与 GL context 同生命周期**」**编码进成员顺序**（§3-⑧ 不变量的镜像：`Initialize` 内 context → atlas → ready；析构内 atlas → context → DC） |
+| 4 | （设计未覆盖）图集纹理参数 | **不设 `GL_CLAMP_TO_EDGE`**（用默认 `GL_REPEAT`） | MSVC SDK 的 `<GL/gl.h>` **只到 GL 1.1**，该枚举（GL 1.2）**未定义**；槽位之间的 **1px 间隙**已足以防串色（沿 spike 实测结论） |
+| 5 | （设计未覆盖）日志刷屏 | `FontEngine` 新增 **`familyCache`**（family 原串 → `FaceId`，**含失败结果**） | 解析失败的 family（如 `"Consolas"` 被当文件名找不到）会**每帧每标签**重复「探测文件 + 告警」⇒ 缓存失败结果以消除 |
+| 6 | 公共 API **+2** | **+3** ⇒ 新增 **`RenderingBackend::IsReady()`**（**带默认实现 `return true`**） | D7 要求 `--gl` 初始化失败**明确报错退出**，但 `Window` **不暴露**渲染后端、`GLRenderer` 是内部件 ⇒ 需要一条**公共**就绪查询。★ 默认 `true` ⇒ 既有实现者（含测试替身）**零改动** |
+| 7 | 改 `examples/ModelProbe/ModelProbe.cpp`（△14） | ★ **真实落点是 `examples/ModelProbe/main.cpp`** | `wWinMain` 与 `application.Create(kWindowTitle, 680, 780)` **都在 `main.cpp`**；换后端**必须**在 `Create` 前决定 services ⇒ 解析与工厂选择落在 `main.cpp`（`ModelProbe.cpp` 只放可测的纯函数） |
+| 8 | （设计未覆盖）`RenderServices` 的完整类型 | `examples/ModelProbe/ModelProbe.h` **同时 include `RenderingBackend.h`** | 暴露「按值返回 `RenderServices`」的函数后，**使用者**（`ModelProbeTests.cpp` 调 `renderer->IsReady()`）需要完整定义 —— `RenderServices.h` 只有**前置声明** ⇒ 否则 `incomplete type` / `<memory>` 的 `sizeof` 报错 |
+
+### 11.6 ★★ 首轮 `--gl` 目视缺陷修复（7 项，2026-10-03）
+
+> **来源**：`--gl` **首轮真实目视** —— `ecdi_tests` 全绿但**观感**不对（用户报告）。
+> ★★ **手段 = 无头 GL 探针**（**本轮新增的验证能力**）：屏幕外隐藏窗口（`WS_POPUP`）+ `GLRenderer` + **`glReadPixels` 读回真实像素**（★ 必须在 `SwapBuffers` **之前**）+ **同位置 GDI 对照**；★ 用**已构建的 `ECDI.lib` 直接 `clang++` 链接** ⇒ 免整库重建、秒级迭代。**`--gl` 无法自动目视时的唯一可靠路径**。
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| ① | ★★ **文字只显示下四分之一、整体上偏被裁切** | **框架 `pos.y` = 字符单元「顶边」**——`GDIBackend::DrawText` 用 `TextOutW`，其默认对齐 **`TA_LEFT \| TA_TOP`**（全库**从未** `SetTextAlign`）；GL 侧却把它**当基线**用（`pos.y - bitmap_top`）⇒ **整行上移一个 ascent**。★ 探针实测 **GL − GDI = −21 px**（20px 字号） | `FontEngine` 新增 **`Ascent(font)`**（`metrics.ascender / 64`，物理像素；与栅格化**同 face / 同 pixelSize** ⇒ D26-2 唯一路径不破）+ `GLRenderer::DrawText` 改 **`baseline = pos.y + Ascent`** ⇒ 探针复测 **Δ = +1 px** |
+| ② | **半透明圆角矩形中心变深** | GL 用「竖带（全高）+ 横带（全宽）」两块，**中心区域重叠** ⇒ 半透明色被**二次混合**（探针实测出现「回」字形） | 改 **GDI 同款三条互不重叠的带**（中带全宽 + 上带 + 下带）⇒ 探针复测**均匀** |
+| ③ | **圆角控件焦点框四角外凸** | GL 的 `DrawFocusRect` **忽略 `cornerRadius`** 画方框；GDI 侧沿「**4 直线 + 4 圆弧**」周界走 3/3 点划（`GDIBackend::DrawFocusRect`）⇒ 违反自订契约 **C-5**「同命令 ⇒ 同语义操作」 | 移植 GDI 的**周界算法**（直线 + 圆弧 + 弧长参数化）+ 新增 **`SolidSegment`**（任意朝向实心 quad，四顶点同 UV 取实心 texel）⇒ 探针复测**贴合圆角** |
+| ④ | **字形「污染」**（笔画错相 / 粗细不一） | GDI `TextOutW` **只收整数坐标**（`static_cast<LONG>` 截断）⇒ 字形恒在**整数像素网格**；GL 用**分数** pen/baseline 会让 **hinted 位图在分数相位下采样** | **整数吸附**：`pen` 与 `baseline` 一律 `std::floor`（此后 advance / bearingX / bearingY 本身即整数 ⇒ **整行逐字对齐像素网格**） |
+| ⑤ | ★ **GL 默认字体与 GDI 不同源** | GL 空 family → `msyh.ttc`；而 **GDI 空 family + `DEFAULT_CHARSET` 在中文系统实际落到 `simsun`（宋体）** —— MSYH 行盒大约 **30%**（实测 20px：MSYH `tmHeight=27`/ascent 22 vs **SimSun `tmHeight=20`/ascent 18**）⇒ 控件的框高 / 内缩都按 GDI 观感调过 ⇒ GL 单行文字**下偏并被裁** | `Win32FontSource::DefaultFontFile` 解析顺序改 **`simsun.ttc` 优先**（仍含 CJK，L2 意图保持） |
+| ⑥ | ★ **SimSun 12–16px 的内嵌 MONO 点阵被错读** | SimSun 在 12–16px 有**内嵌点阵**（`FT_PIXEL_MODE_MONO`，1bpp），而 `GlyphByKey` 的位图拷贝按 **8bpp 灰度**写死 ⇒ 错读 = 「字形污染」。★ 改默认字体后此问题**从可选变必需** | **测量链 + 渲染链同加 `FT_LOAD_NO_BITMAP`**（强制矢量渲染）—— ★ **必须两链同源**，否则 bitmap advance ≠ vector advance ⇒ 测宽 ≠ 渲宽（登记为**盯防 ⑫**） |
+| ⑦ | 单行 TextBox **文字下偏**、且**可被滚轮滚动** | 行盒高于单行视口时，**光标跟随**会把 `scrollOffsetY` 推 > 0 | 单行 ⇒ `EnsureCaretVisible` **恒置 `m_scrollOffsetY = 0`** + `OnMouseWheel` **单行直接吞掉**（★ **控件层语义变更，GDI / GL 同受影响**；无用例锚定 ⇒ 登记 **O10**） |
+
+★ **复核（本机 clang 临时构建，含全部改动）**：`ECDI.lib` + `ecdi_tests` **0 error / 0 warning** · **318 / 318** · `AntiAliasing` 覆盖度积分与基线**逐位相同**（零行为变化）· ★ **探针复测**（GDI 参照同步改 SimSun）：`Ascent=18` vs GDI `tmAscent=17` ⇒ **Δ = +1 px**（**两引擎 ascent 的系统性差，N1 明确允许**），**x 范围 20..38 与字高 16 与 GDI 完全一致**，字形干净无污染。
+
+★ **纪律沉淀**（本轮新增）：**「全绿」不等于「观感正确」** —— `ecdi_tests` 全绿时 GL 观感仍可整体错位（断言只覆盖数值契约，不覆盖「绘制原点语义」）。⇒ ★ **新增能力型后端必须补一条「与既有后端同位置对照」的像素级验证路径**（本轮的**无头 GL 探针**即其形态）。
+
 ## 12. 修订记录
 
+- **v1.4**（2026-10-03）**实施回填（批三–批四 + 首轮 `--gl` 目视缺陷修复）**（非评审驱动；详见 **§11**）。① ★★ 新增 **§11.6（7 项缺陷）** —— `--gl` **首轮真实目视**暴露（`ecdi_tests` 全绿但**观感**不对）：**① 文字基线**（框架 `pos.y` = **字符单元顶边**，GL 当基线用 ⇒ 整行上移一个 ascent，探针实测 **−21px**）· **② 半透明圆角矩形中心二次混合**（双带重叠 → 改 GDI 三条带）· **③ 焦点框忽略 `cornerRadius`**（→ 移植 GDI 的「4 直线 + 4 圆弧」周界 + 新增 `SolidSegment`）· **④ 文字整数吸附**（分数相位会让 hinted 位图错相）· **⑤ 默认字体同源**（GL 用 MSYH 而 GDI 实际落 SimSun，行盒差 ~30%）· **⑥ `FT_LOAD_NO_BITMAP`**（SimSun 12–16px 的 MONO 内嵌点阵被 8bpp 拷贝错读）· **⑦ 单行 TextBox 无纵向滚动**。② ★★ 新增 **§11.5（8 条实现偏离）**：`GlyphByKey` / `Utf8Decode` 上提 / 图集 `unique_ptr` / 无 `GL_CLAMP_TO_EDGE`（GL 1.1 头）/ `familyCache` / **公共 API +2 → +3**（`RenderingBackend::IsReady`）/ **△14 真实落点是 `main.cpp`** / `RenderServices` 完整类型。③ **§7 影响面订正**（API **+3** · 示例/测试补 `main.cpp`）· **§5 盯防 11 → 12 条**（新增 **⑫ 测量链与渲染链 load flags 同源**）。④ **§8 批次补状态**（批三 ✅ 四链 317 · 批四 🚧 代码完成本机 318 · **新增「批四·修」行**）· **§6 口径**改「**已达成 318**」并登记 **O10**（单行语义无用例锚定 ⇒ 建议 **T26-13**）。⑤ **§9 L2 订正**（默认 face `msyh.ttc` → **`simsun.ttc`**，对齐 GDI 解析）。⑥ 新增 **§11.1 交付进度**三行（批三 / 批四 / 批四·修）。⑦ ★★ **新增验证手段 = 无头 GL 探针**（屏幕外窗口 + `glReadPixels` + **同位置 GDI 对照**；用已构建 `ECDI.lib` 直接链接），并沉淀纪律「**全绿 ≠ 观感正确**」。
 - **v1.3**（2026-10-03）**实施回填（批零–批二）+ 许可缺口修复**（非评审驱动；详见 **§11**）。① ★★ **许可证缺口**：vendor 时排除了整个 `docs/` ⇒ `LICENSE.TXT` 正文引用的 **`docs/FTL.TXT` / `docs/GPLv2.TXT` 缺失**（引用断链、不合规）⇒ 已从官方归档补齐，并登记**盯防 ⑩**（判据 = 以正文引用逐一对账，不能只看入口文件）。② ★ **版本 pin 落地 2.14.3**（含安全理由）· **零本地 patch**（默认已关 PNG/BROTLI/BZIP2/HARFBUZZ）· **显式 TU 列表**（GLOB 必失败：165/210 非独立 TU）· **`OBJECT` + `$<TARGET_OBJECTS>`**（避 `install(EXPORT)` 冲突）· **`builds/windows/`**（`ftsystem.c` + `ftdebug.c`）· **`_CRT_SECURE_NO_WARNINGS`**（MSVC 系 CRT 弃用告警 6 处）—— 逐条见 **§11.2**。③ **△11 重写**为实际 CMake 实现；**△12** 更新版本 / 许可 / 最小配置 / 目录裁剪。④ **盯防 9 → 11 条**（⑥ 扩豁免名单至 `GDITextMeasurer` / `FreeTypeTextMeasurer`；新增 ⑩ 许可完整 · ⑪ FreeType 零告警）。⑤ ★ **§6 T26-2 订正**（`MeasureText` 返回 DIP ⇒ DPI 变结果**近似不变**，v1.0 的「按比例变」是错的）。⑥ **§8 批次补状态**（批零/批一/批二 ✅；批三/批四 ⬜）· **§6 口径补实际进度**（309 / 315）· **O5 标 ✅ 已解决**。⑦ 新增 **§11 实施回填**，原 §11 修订记录顺延 **§12**。
 - **v1.2**（2026-10-03）**吸收外部评审第三轮 ⇒ 通过（Implementation Ready）**。① ★★ **必须改**：修 **D26-4 的封装矛盾**——新增 **`FontEngine::GlyphIndex(font, cp)`**（△1），`GLRenderer` **不再直调 `FT_Get_Char_Index`**（§1.4 数据流改经它；§1.3 key 注释与 ② 行同步）⇒ **`FT_*` 仍只出现在 `FontEngine.cpp`**（C-4 兑现）。★ 评审亦指出此接口本身**不泄漏 FreeType**（返回 `uint32_t`）。② **6 项建议改全部采纳**：**△9b** 加「`font.size` 生成 key 前不得额外 rounding」· **△2 + C-10** 加「`family` 找不到 ⇒ 返回空串 + 默认 face + **告警**（不静默降级）」· **§1.4** 补 **Atlas 失败语义边界**（`valid=false` 只影响可见性、不影响 advance 排版）· **§1.5** GDI cold 措辞改「初始化 / 绘制成本」（两后端 cold 模型**不同构**）· **§4 C-3** 映射改为「**代码审查 / 结构性机检**」（原映射到 T26-1 是错的；**不新增测试**）· **△12 / O5** FreeType 版本**一次冻结到补丁号 + SHA256**。③ ★ **自查发现遗漏**：文件标题仍 **v1.0**（v1.1 升版时漏改）⇒ 订正 **v1.2**。④ 新增 **§10 外部评审处置（第三轮）**（含 **已覆盖度回扫**：16 节本稿已写对）+ 原 §10 修订记录顺延为 **§11**；导航行同步。⑤ ★ 评审明示「**不会建议重新开一轮设计**」⇒ **路线与架构零退回**；**可进入实施**（★ 评审亦建议**先落批一**——D-8 + GDI 测量缓存，不依赖 FreeType / GL）。
 - **v1.1**（2026-10-03）**纳入用户拍板的 GDI 测量缓存**。★ 用户 2026-10-03 拍板（回应本稿 v1.0 §9 O8）：把**默认 GDI 路径的测量缓存**纳入本 Phase。① ★★ 新增 **§1.6**（补充必答）——`GDITextMeasurer` 测量结果缓存：键 `(text, size, family, dpi)`（**含 DPI**）· 查缓存**在 `GetDC` 之前**（★ 命中免 `GetDC`/`ReleaseDC`）· 上限 4096 ⇒ `clear()`（防无界增长）· **`LineHeight` 不加**（最小面）· 观测缝 `MeasureCacheMissCount` · 与 GL 侧缓存**语义一致但互不共享**。② **△9 扩展为 9a（基准改窗口 DPI = D-8 闭合）+ 9b（测量结果缓存）**。③ **△13 / §7**：测试文件 **2 → 3**（新增 **`TextMeasurerTests.cpp`** 承载 T26-10 / T26-12——★ **不放 `DpiTests.cpp`**，后者自述定位为「不经窗口、纯函数」）。④ **C-7 泛化**（泛到「底层度量调用」，含 GDI `GetTextExtentPoint32W`；两条链各自缓存）。⑤ **盯防 8 → 9 条**（新增 ⑨：GDI 缓存键含 DPI + 容量上限）。⑥ **§6 加 T26-12**（GDI 测量缓存命中）；口径 自动化 **+10 → +11** ⇒ **307 → 317 → 318**；观测缝补 GDI 侧计数。⑦ **§8 批一**加 T26-12（★ 批一 **不需 FreeType、不需 GL** ⇒ D-8 与 GDI 测量缓存**同时立即生效**）。⑧ **§9 O8 转正**（待拍板 → ✅ 已纳入）+ 新增 **O9**（缓存淘汰）。⑨ ★ **T26-10 的诚实标注**：**本机单屏**（窗口 DPI == 屏幕 DPI == 120）⇒ **两链基准天然一致 ⇒ 本机无法区分修复前后**（★ **这正是 D-8 长期潜伏的原因**）⇒ 本机实为**零回归判据**，**真区分需双屏 / 双 DPI 环境**。
