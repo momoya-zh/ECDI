@@ -1,9 +1,9 @@
-﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.0 · 实施规格）
+﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.2 · 实施规格）
 
 > 来源：初设稿 `phase26-freetype-gl-preliminary-design.md` **v1.2 ✅ 评审通过**（外部评审第二轮：「**Phase 26 Preliminary Design：通过，可以进入 Detailed Design**」，并定下**详设必答 D26-1..D26-5**）
-> 状态：**v1.1**（2026-10-03）——**待评审**（★ v1.1 纳入用户拍板的 **GDI 测量缓存**：见 §1.6 · △9 · O8）
+> 状态：**v1.2**（2026-10-03）——✅ **评审通过（Implementation Ready）**（外部评审第三轮：「**Phase 26 Detailed Design：通过（Implementation Ready，修 1 个接口矛盾后实施）**」；★ 处置见 §10）
 > 定位：**实施规格**。★ 评审要求「**详设不要再大改架构**」⇒ 本稿**只在初设骨架上把实现细节冻结**，不新增架构。★ 评审同时给了**硬约束：详设不得扩大 Phase 26**（范围锁见初设 §9；HarfBuzz / shaping / ligature / 字体 fallback / LRU atlas / SDF / 多线程栅格化 / Linux GL / Vulkan / viewport culling **一律不做**）。
-> 结构：**§1 = 评审给定的五个必答（本稿核心，放最前）** → §2 基线（带行号实测）→ §3 逐文件改动 → §4 契约映射 → §5 盯防（可机检）→ §6 用例正文 → §7 影响面 → §8 批次 → §9 开放项 → §10 修订记录。
+> 结构：**§1 = 评审给定的五个必答（本稿核心，放最前）** → §2 基线（带行号实测）→ §3 逐文件改动 → §4 契约映射 → §5 盯防（可机检）→ §6 用例正文 → §7 影响面 → §8 批次 → §9 开放项 → §10 外部评审处置 → §11 修订记录。
 
 ---
 
@@ -67,7 +67,7 @@ int FontEngine::PixelSize(const Font& font) const;
 /// @brief 字形缓存键（★ 定稿 —— 每一维都落到具体值）
 struct GlyphKey {
     FaceId        faceId;      ///< 1.6：稳定 face 身份（**不是 FT_Face***）
-    std::uint32_t glyphIndex;  ///< 1.3：FT_Get_Char_Index 的**真实栅格化单位**（≠ codepoint）
+    std::uint32_t glyphIndex;  ///< 经 `FontEngine::GlyphIndex`（★ 内部即 FT_Get_Char_Index）——真实栅格化单位（≠ codepoint）
     int           pixelSize;   ///< 1.2：FontEngine::PixelSize —— ★ **DPI 经此入 key**
     std::uint8_t  hinting;     ///< rasterization policy（本 Phase 单一取值，见下）
     bool operator<(const GlyphKey&) const noexcept;   // 全字段字典序
@@ -79,7 +79,7 @@ struct GlyphKey {
 | # | 初设写法 | 定稿写法 | 理由 |
 |---|---|---|---|
 | ① | key 含 `size` **和** `dpi` | key 含 **`pixelSize`**（二者之合成） | `pixelSize = f(size, dpi)` 是**唯一决定 bitmap** 的量 ⇒ **DPI 自动隔离**（同 size 不同 dpi ⇒ 不同 px ⇒ 不同 key）。★ 这是「DPI 必须入 key」的**准确落法** |
-| ② | key 含 `codepoint` | key 含 **`glyphIndex`** | 多个 codepoint 可映射到**同一 glyph**（如拉丁 `A` 与某变体）⇒ 用 glyph index 才能真正复用；`FT_Get_Char_Index` 是栅格化入口 |
+| ② | key 含 `codepoint` | key 含 **`glyphIndex`** | 多个 codepoint 可映射到**同一 glyph**（如拉丁 `A` 与某变体）⇒ 用 glyph index 才能真正复用；`FT_Get_Char_Index` 是栅格化入口。★ **由 `FontEngine::GlyphIndex` 提供**（`GLRenderer` **不直调 FT**——C-4） |
 | ③ | 「rasterization policy」是概念词 | **落到具体调用**：`FT_Load_Glyph(face, gi, FT_LOAD_DEFAULT \| FT_LOAD_TARGET_NORMAL)` + `FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL)`（8-bit 灰度 AA） | 评审 §7：「policy 最好不要只是概念词」⇒ 给出**确切 load flags / render mode** |
 
 ★ **`hinting` 字段本 Phase 恒为 `HintingMode::Normal`（单值）** —— 保留字段是为**语义自文档 + 零痛扩维**（若评审认为单值时不应占位，可去掉该维，`operator<` 同步删；**登记为开放项 O2**）。
@@ -110,7 +110,7 @@ DrawText(pos, text, color, font)                    // pos = 物理像素（Rend
   faceId = m_fontEngine->FaceIdFor(font.family)     // ★ D26-1
   pen = pos.x
   for cp in Utf8Decode(text):
-      gi = FT_Get_Char_Index(face, cp)              // ★ D26-3：真实栅格化单位
+      gi = m_fontEngine->GlyphIndex(font, cp)       // ★ 修正（评审 §1）：经 FontEngine（C-4——FT_* 只在 FontEngine.cpp）
       key = GlyphKey{faceId, gi, px, HintingMode::Normal}
       slot = m_atlas->GetOrCreate(key, m_fontEngine)   // 命中 = 直接返回；miss = 栅格化 + Alloc + Upload + 缓存
       if slot.valid:
@@ -120,6 +120,8 @@ DrawText(pos, text, color, font)                    // pos = 物理像素（Rend
                         color)
       pen += slot.advance                           // 无论 valid 与否都推进（与 GDI 同构）
 ```
+
+★ **Atlas 分配失败的语义边界（评审 §13）**：`valid=false` **只影响 glyph bitmap 的可见性、不影响 glyph advance 的排版位置**——后续字形**不会错位**。★ 实现时**不得**写成 `if (!valid) continue;`（那会连 `pen += advance` 一起跳过 ⇒ 整行错位）。
 
 ★ **与 GDI 的 `DrawText` 同构性**（operation-level 语义契约 C-5 的兑现）：GDI = `TextOutW(hdc, pos.x, pos.y, text)`（pos = 基线左端起点，逐字形内部推进）；GL = 同一起点语义 + 逐字形 `pen += advance`。★ **字形位图 y 向上** ⇒ 绘制时用「基线减 bitmap_top」（spike 的 `TexturedQuadYUp` 已实证，`:657`）。
 
@@ -144,7 +146,7 @@ DrawText(pos, text, color, font)                    // pos = 物理像素（Rend
 
 | 组 | 状态 | 观测重点 |
 |---|---|---|
-| **GDI cold** | 首次显示大文本 | frame time（全部字形首栅格化） |
+| **GDI cold** | 首次显示大文本 | frame time（**首次显示大文本的初始化 / 绘制成本**）—— ★ 评审 §17：GDI 与 GL 的 cold 缓存模型**不同构**，勿写成「全部字形首栅格化」 |
 | **GDI warm** | 持续滚动 | ★ 每帧重新 `GetTextExtent` 的次数（= 测量缓存的靶子） |
 | **GL cold** | 首次显示大文本 | frame time / glyph 栅格化次数 / atlas 分配+上传次数 |
 | **GL warm** | 持续滚动 | ★ **每帧 glyph 栅格化 ≈ 0 · atlas miss ≈ 0**；frame time 稳定 |
@@ -219,6 +221,11 @@ public:
     int  PixelSize(const Font& font) const;     // ★ D26-2 唯一转换路径
 
     FaceId FaceIdFor(const std::string& family);            // ★ D26-1 稳定身份（不返回 FT_Face）
+
+    /// @brief codepoint → glyph index（★ 修正：GLRenderer 经此取，**不直调 `FT_Get_Char_Index`**——C-4）
+    /// @details 内部 = `FT_Get_Char_Index` ⇒ ★ **`FT_*` 仍只出现在 `FontEngine.cpp`**。
+    std::uint32_t GlyphIndex(const Font& font, char32_t cp);
+
     Size   MeasureText(const Font& font, const std::string& text);   // 带 metrics cache
     float  LineHeight(const Font& font);                    // 带 cache
 
@@ -274,6 +281,8 @@ public:
     ///          ★ 本 Phase 的解析 = 「family 视作文件名」直查（如 "consola.ttf"）；
     ///          空 family ⇒ 内置默认（含 CJK 的系统字体，见 L1）。
     ///          ★ 完整的 family↔文件名解析（EnumFontFamiliesExW）与多字体回退【不做】——见 §9 L1/L2。
+    ///          ★★ **找不到时返回空串**（**不静默降级**）——由 `FontEngine` 回退默认 face **并写告警日志**，
+    ///             避免用户以为指定字体已生效（评审 §11）。
     std::string ResolveFile(const std::string& family) const override;
 };
 ```
@@ -460,6 +469,7 @@ void GDITextMeasurer::Initialize(const PlatformRenderContext& context)
 ```cpp
 // ★ Phase 26（§1.6）：测量结果缓存——消掉「每帧 × 每行」的 GetDC + GetTextExtentPoint32W。
 //   键 = (text, size, family, dpi)——★ 含 DPI（跨屏自动失效），与 m_fontCache 同口径。
+//   ★ `font.size`（float）在**生成 key 前不得额外 rounding**（评审 §8）——同一 `Font` 重复测量必须逐位命中。
 std::map<std::tuple<std::string, float, std::string, int>, Size> m_measureCache;
 static constexpr std::size_t kMaxMeasureCache = 4096;   // 上限 ⇒ 达上限 clear()（防无界增长）
 
@@ -536,7 +546,7 @@ target_link_libraries(ECDI PUBLIC opengl32)
 |---|---|
 | **位置** | `third_party/freetype/`（顶层；B18 实测当前**不存在**） |
 | **来源** | 官方 `https://download.savannah.gnu.org/releases/freetype/`（或 GitHub 官方镜像） |
-| **版本 pin** | **2.13.x 系列**（取当时最新稳定补丁号，写入 `README.ecdi.md`；★ **具体版本在实施批零冻结**，开放项 O5） |
+| **版本 pin** | ★ **实施批零一次冻结到具体补丁号 + SHA256**（评审 §21：vendor 进仓后**不用范围描述**——「2.13.x」只作 README 概括；工程台账须精确到 `2.13.x.y` + 校验和）。写入 `README.ecdi.md`（开放项 O5） |
 | **许可** | **FTL**（可商用、非 copyleft）⇒ 保留 `third_party/freetype/LICENSE.TXT` |
 | **归属清单** | `third_party/freetype/README.ecdi.md`：上游版本 · 下载来源 + 校验和 · 本地改动（`ftoption.h`）· **同步义务** |
 | **最小配置** | `ftoption.h` 关 `FT_CONFIG_OPTION_USE_PNG` / `BROTLI` / `SVG` / `BZIP2` |
@@ -567,14 +577,14 @@ target_link_libraries(ECDI PUBLIC opengl32)
 |---|---|---|---|
 | **C-1** | 测量返回值**恒为 DIP**（不变；B2） | △3 | T26-2 |
 | **C-2** | **测量基准 DPI = 渲染基准 DPI = 窗口 DPI**（D-8 的正面表述） | △9（GDI）/ △1+△3+△5（GL，经共享 FontEngine） | **T26-10** |
-| **C-3** | `TextMeasurer::Initialize` 与 `RenderingBackend::Initialize` **同源同序**（Window 构造内相邻调用） | △10 | T26-1 |
+| **C-3** | `TextMeasurer::Initialize` 与 `RenderingBackend::Initialize` **同源同序**（Window 构造内相邻调用） | △10 | ★ **代码审查 / 结构性机检**（评审 §19：证「构造里两行相邻」**不值得写用例**——原映射到 T26-1 是错的，T26-1 测的是 `PixelSize`；**不新增测试**） |
 | **C-4** | 公共 API **零 Win32 类型**（`Initialize` 收 `PlatformRenderContext`，不含 HWND）；**公共头零 FreeType** | △6/△7/△1 | 盯防③⑥ |
 | **C-5** | **operation-level 语义契约**：同一 `RenderCommand` 在两后端产生**同语义操作**（不承诺像素一致） | △5 | T26-9 |
 | **C-6** | 默认路径（GDI）**逐位零回归**（GL 只在显式注入时生效） | △8/△14 | T26-11 |
 | **C-7** | **测量结果可缓存**（键含 DPI）——同一 `(text, font, dpi)` 重复测量**不触发底层度量调用**（FreeType 度量 / GDI `GetTextExtentPoint32W`）；DPI 变化 ⇒ 自动失效。★ **两条测量链各自独立缓存**（△1 GL 侧 · △9 GDI 侧） | △1 / △9 | T26-5 / **T26-12** |
 | **C-8** | ★ **DIP→像素的唯一路径 = `FontEngine::PixelSize`**——GL 侧两消费者**都不得自行 `lround`** | △1/△3/△5 | T26-1 |
 | **C-9** | `Initialize` **可选**（默认空实现即合法）；与 `RenderingBackend::Initialize` **结构对称、职责不同** | △6 | T26-1 |
-| **C-10** | ★ **字体源可替换**：`FontEngine` 不直接持有 Windows 字体目录（路径解析经 `FontSource`） | △2 | T26-6 |
+| **C-10** | ★ **字体源可替换**：`FontEngine` 不直接持有 Windows 字体目录（路径解析经 `FontSource`）；★ **找不到 ⇒ 默认 face + 告警日志**（**不静默降级**——评审 §11） | △2 | T26-6 |
 
 ---
 
@@ -657,7 +667,7 @@ target_link_libraries(ECDI PUBLIC opengl32)
 | **O2** | `GlyphKey.hinting` 单值时是否占位 | 本 Phase 恒 `HintingMode::Normal`；若评审认为单值不应占 key 维 ⇒ 去掉（`operator<` 同步删） |
 | **O3** | 图集**淘汰策略** | **保持不做**（评审 §17 认可）；重启条件 = 大字体 / 多字号场景图集常满 |
 | **O4** | `opengl32` 用 PUBLIC 还是 PRIVATE | 本稿沿 B17 用 PUBLIC；★ 公共头零 GL（盯防②）⇒ 收紧为 PRIVATE 亦安全 |
-| **O5** | FreeType **具体版本 pin** | vendor 时冻结（2.13.x）；记入 `README.ecdi.md` + CVE 同步基线 |
+| **O5** | FreeType **具体版本 pin** | ★ 评审 §21：批零**一次冻结到补丁号 + SHA256**（不用范围描述）；记入 `README.ecdi.md` + CVE 同步基线 |
 | **O6** | 资源上限**具体数值** | 32 MB / 512² / 1024² / max_steps 为**建议值**，**实施时验证**（初设 §5-2 已标「待详设验证」；本稿进一步标「待实施验证」） |
 | **O7** | 「per-frame 自省 vs `OnTargetResized`」成本对比 | 初设 §3-⑧ 已定「保留不做 `OnTargetResized`」（N7）；本稿沿用，**成本对比数据待实施期补** |
 | **O8** | ✅ **已纳入**（用户 2026-10-03 拍板）：默认 GDI 路径的测量缓存 | 由 **§1.6 + △9b** 落地——`GDITextMeasurer` 加同款缓存（键含 DPI · **命中免 `GetDC`** · 上限清空）。★ 原为「待拍板」，**现转正**；批一即可生效（不依赖 GL） |
@@ -668,7 +678,30 @@ target_link_libraries(ECDI PUBLIC opengl32)
 
 ---
 
-## 10. 修订记录
+## 10. 外部评审处置（第三轮，2026-10-03）
 
+> 评审结论：**「Phase 26 Detailed Design：通过（Implementation Ready，修 1 个接口矛盾后实施）」** —— ★ 原话：「**不是架构退回**，而是一个很具体的『详设代码路径目前无法按自己规定的封装边界实现』的问题」。★ 评审亦明确「**不会建议重新开一轮设计**」。
+
+**已覆盖度回扫（条 121）**：评审 23 节里 **16 节是本稿已写对的**（§4 `GlyphIndex` 选择 · §5 `pixelSize` 合并 · §6 `PixelSize` 一刀切 + GDI 单独修 · §7 GDI 测量缓存 · §9 `clear()` · §10 `FontSource` · §12 `GLGlyphAtlas` 职责 + `std::map` 够用 · §14 WGL 生命周期 · §15 失败 no-op · §16 benchmark · §18 测试矩阵 + T26-10 限制说明 · §22 批次顺序 · §23「可以不改」清单全部已是本稿设计）⇒ **无需改动，不重复劳动**。
+
+| 评审节 | 要点 | 处置 |
+|---|---|---|
+| §1 / §23① ★★ | **D26-4 自撞 C-4**：`GLRenderer::DrawText` 直接写 `FT_Get_Char_Index(face, cp)`，但 `GLRenderer` **拿不到、也不该拿 `FT_Face`** | ✅ **采纳（必须改）** → 新增 **`FontEngine::GlyphIndex(font, cp)`**（△1）；§1.4 数据流改经它；§1.3 key 注释与 ② 行同步 |
+| §2 / §3 | 修法建议：加 `GlyphIndex()`（最小）或 `ResolveGlyph()` 返回 `GlyphKey`（更彻底但**不强烈建议**） | ✅ **采纳最小方案**（`GlyphIndex`）——符合本稿「不新增架构」 |
+| §8 | `font.size`（float）作 key 可接受；★ 但**生成 key 前不得额外 rounding** | ✅ 采纳 → **△9b 注释** |
+| §11 | `family` 找不到 ⇒ **不能静默加载别的字体**（否则用户以为指定成功） | ✅ 采纳 → **△2（返回空串 + 默认 face + 告警日志）** + **C-10** |
+| §13 | `valid=false` 仍 `pen += advance` **正确**；建议明确「失败只影响可见性、不影响排版位置」 | ✅ 采纳 → **§1.4 补语义边界** |
+| §17 | GDI cold 写「全部字形首栅格化」**不准确**（两后端 cold 模型不同构） | ✅ 采纳 → **§1.5 措辞** |
+| §19 | `C-3 → T26-1` **映射不对**（T26-1 测的是 `PixelSize`） | ✅ 采纳 → **§4 改为「代码审查 / 结构性机检」**（不新增测试） |
+| §21 | FreeType 版本应**一次冻结到补丁号 + SHA256**（不用范围描述） | ✅ 采纳 → **△12 / O5** |
+| §20 | `opengl32` 可收紧 PRIVATE（评审明言不阻止实施） | ✅ 确认（保持 PUBLIC，登记 **O4** 不变） |
+| §4 / §5 / §6 / §9 / §10 / §12 / §14 / §15 / §16 / §18 / §22 / §23 其余 | 确认本稿设计正确 / 稳定 | ✅ **确认（未改动）** |
+| — | ★ 评审指出「**标题没改完全不影响**」 | ★ **自查发现真实遗漏**：文件标题仍是 **v1.0**（v1.1 升版时漏改）⇒ 本轮一并订正为 **v1.2** |
+
+★ **最终判断**：**通过（Implementation Ready）** —— **1 项必须改（D26-4 接口矛盾）+ 6 项建议改（全部采纳）+ 16 节确认**；路线与架构**零退回**。
+
+## 11. 修订记录
+
+- **v1.2**（2026-10-03）**吸收外部评审第三轮 ⇒ 通过（Implementation Ready）**。① ★★ **必须改**：修 **D26-4 的封装矛盾**——新增 **`FontEngine::GlyphIndex(font, cp)`**（△1），`GLRenderer` **不再直调 `FT_Get_Char_Index`**（§1.4 数据流改经它；§1.3 key 注释与 ② 行同步）⇒ **`FT_*` 仍只出现在 `FontEngine.cpp`**（C-4 兑现）。★ 评审亦指出此接口本身**不泄漏 FreeType**（返回 `uint32_t`）。② **6 项建议改全部采纳**：**△9b** 加「`font.size` 生成 key 前不得额外 rounding」· **△2 + C-10** 加「`family` 找不到 ⇒ 返回空串 + 默认 face + **告警**（不静默降级）」· **§1.4** 补 **Atlas 失败语义边界**（`valid=false` 只影响可见性、不影响 advance 排版）· **§1.5** GDI cold 措辞改「初始化 / 绘制成本」（两后端 cold 模型**不同构**）· **§4 C-3** 映射改为「**代码审查 / 结构性机检**」（原映射到 T26-1 是错的；**不新增测试**）· **△12 / O5** FreeType 版本**一次冻结到补丁号 + SHA256**。③ ★ **自查发现遗漏**：文件标题仍 **v1.0**（v1.1 升版时漏改）⇒ 订正 **v1.2**。④ 新增 **§10 外部评审处置（第三轮）**（含 **已覆盖度回扫**：16 节本稿已写对）+ 原 §10 修订记录顺延为 **§11**；导航行同步。⑤ ★ 评审明示「**不会建议重新开一轮设计**」⇒ **路线与架构零退回**；**可进入实施**（★ 评审亦建议**先落批一**——D-8 + GDI 测量缓存，不依赖 FreeType / GL）。
 - **v1.1**（2026-10-03）**纳入用户拍板的 GDI 测量缓存**。★ 用户 2026-10-03 拍板（回应本稿 v1.0 §9 O8）：把**默认 GDI 路径的测量缓存**纳入本 Phase。① ★★ 新增 **§1.6**（补充必答）——`GDITextMeasurer` 测量结果缓存：键 `(text, size, family, dpi)`（**含 DPI**）· 查缓存**在 `GetDC` 之前**（★ 命中免 `GetDC`/`ReleaseDC`）· 上限 4096 ⇒ `clear()`（防无界增长）· **`LineHeight` 不加**（最小面）· 观测缝 `MeasureCacheMissCount` · 与 GL 侧缓存**语义一致但互不共享**。② **△9 扩展为 9a（基准改窗口 DPI = D-8 闭合）+ 9b（测量结果缓存）**。③ **△13 / §7**：测试文件 **2 → 3**（新增 **`TextMeasurerTests.cpp`** 承载 T26-10 / T26-12——★ **不放 `DpiTests.cpp`**，后者自述定位为「不经窗口、纯函数」）。④ **C-7 泛化**（泛到「底层度量调用」，含 GDI `GetTextExtentPoint32W`；两条链各自缓存）。⑤ **盯防 8 → 9 条**（新增 ⑨：GDI 缓存键含 DPI + 容量上限）。⑥ **§6 加 T26-12**（GDI 测量缓存命中）；口径 自动化 **+10 → +11** ⇒ **307 → 317 → 318**；观测缝补 GDI 侧计数。⑦ **§8 批一**加 T26-12（★ 批一 **不需 FreeType、不需 GL** ⇒ D-8 与 GDI 测量缓存**同时立即生效**）。⑧ **§9 O8 转正**（待拍板 → ✅ 已纳入）+ 新增 **O9**（缓存淘汰）。⑨ ★ **T26-10 的诚实标注**：**本机单屏**（窗口 DPI == 屏幕 DPI == 120）⇒ **两链基准天然一致 ⇒ 本机无法区分修复前后**（★ **这正是 D-8 长期潜伏的原因**）⇒ 本机实为**零回归判据**，**真区分需双屏 / 双 DPI 环境**。
 - **v1.0**（2026-10-03）初稿（实施规格）。**§1 = 评审给定五必答**（D26-1 face identity 用 `FaceId`+family 键 · ★★ **D26-2 `FontEngine::PixelSize` 唯一 DIP→px 路径**（评审点名的详设重点）· **D26-3 key 定稿**（`pixelSize` 代 size+dpi、`glyphIndex` 代 codepoint、hinting 落到具体 load flags）· **D26-4 `GlyphSlot` + DrawText 完整数据流** · **D26-5 benchmark contract 固定参数表** · ★ **观测缝**（只读计数：`RasterizeCount` / `MeasureCacheMissCount` / `AtlasMissCount`——测试断言与基准指标共用））。**基线 B1–B18**（带行号实测；★ **B11 = D-8 根因**（两链同公式异基准）· **B13/B16 = 双重继承 + 零 `RecordingBackend.Initialize` 调用**（歧义不触发）· **B18 = 无 `third_party/` + 本机 DPI 120**）。**△1–△14**（新建 11 内部件 + 2 测试 + vendor；★ **△2 `FontSource` = 评审 §6 的落点**；★ **△9 = D-8 闭合**）。**契约 C1–C10 全映射** · **盯防 8 条**（含 ★ **`GetDeviceCaps` 归零** · **公共头零 FreeType/GL**）· **用例 T26-1..T26-11**（自动化 +10 ⇒ 307 → 317）· **五批**（★ **批一 = D-8 独立先行**）· **开放项 O1–O8 / 局限 L1–L3**（★ **O8 = 默认 GDI 路径的测量缓存待拍板**）。**待评审。**
