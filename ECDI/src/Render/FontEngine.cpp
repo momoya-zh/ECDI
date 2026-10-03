@@ -161,6 +161,11 @@ FaceId FontEngine::FaceIdFor(const std::string& family)
 	const auto cached = impl.faces.find(path);
 	if (cached != impl.faces.end())
 	{
+		// ★ ★ v1.5：**回退路径也会走到这里**——family 解析失败 ⇒ `path` 已是**默认**字体文件，
+		//   而默认 face 通常**早已加载**（空 family 的控件先于它建立）⇒ 在此**提前 return**。
+		//   若漏写 familyCache，该 family **永不入缓存** ⇒ 每个**新**的 `(text, size, family, dpi)`
+		//   都**重新探测文件 + 重新告警**（实机刷屏；T26-13 的回归锚点）。
+		impl.familyCache.emplace(family, cached->second.id);
 		return cached->second.id;
 	}
 
@@ -169,6 +174,7 @@ FaceId FontEngine::FaceIdFor(const std::string& family)
 	if (FT_New_Face(impl.library, path.c_str(), 0, &face) != 0 || face == nullptr)
 	{
 		Logger::Log(LogLevel::Warning, L"FontEngine: FT_New_Face failed for resolved font file");
+		impl.familyCache.emplace(family, 0);   // ★ v1.5：失败结果同样入缓存（否则每次重试）
 		return 0;
 	}
 

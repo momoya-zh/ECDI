@@ -468,7 +468,10 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 	auto preview = std::make_unique<TextBox>("勾选模型后点击「生成 JSON」，这里显示可用的 JSON 内容…");
 	preview->SetSize(600, 120);
 	preview->SetReadOnly(true);
-	preview->SetFont(Font{ .size = 13.0f, .family = "Consolas" });
+	// ★ Phase 26：`Font::family` 在本 Phase 的契约是**字体文件名**（详设 §9 L1——不做
+	//   family↔文件名解析）⇒ 必须写 `consola.ttf`。写族名 "Consolas" 会解析失败 ⇒ 回退
+	//   默认 face（SimSun，**比例字体**）⇒ 丢掉等宽对齐（JSON 缩进 / ID 列）。
+	preview->SetFont(Font{ .size = 13.0f, .family = "consola.ttf" });
 	preview->SetTextColor(kText());
 	preview->SetStyle(TextBoxStyleOverride{
 		.background = kInputBg(),
@@ -772,7 +775,8 @@ void ModelProbePage::RebuildRows(){
 			auto idLabel = std::make_unique<Label>(m_models[i].id);
 			idLabel->SetPosition(32, 0);
 			idLabel->SetSize(380, static_cast<int>(kRowHeight));
-			idLabel->SetFont(Font{ .family = "Consolas" });
+			// ★ Phase 26：等宽族名 ⇒ 必须写**文件名** `consola.ttf`（同 :471 的说明）
+			idLabel->SetFont(Font{ .family = "consola.ttf" });
 			idLabel->SetTextColor(kText());
 			row.idLabel = idLabel.get();
 			auto metaLabel = std::make_unique<Label>(m_models[i].meta);

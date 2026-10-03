@@ -29,6 +29,20 @@ std::unique_ptr<FontEngine> MakeEngine(int dpi)
 	return engine;
 }
 
+/// @brief 计数替身：空 family ⇒ 预置的**真实**字体文件；其余一律解析失败（空串）
+/// @details 供 T26-13 观测 `ResolveFile` 的调用次数——**缓存是否真命中**无法凭返回值判断，
+///          只能数「底层探测被调了几次」。
+class CountingFontSource final : public FontSource{
+public:
+	mutable int resolveCalls = 0;
+	std::string goodPath;
+
+	std::string ResolveFile(const std::string& family) const override{
+		++resolveCalls;
+		return family.empty() ? goodPath : std::string();
+	}
+};
+
 }   // namespace
 
 // ── T26-1：DIP → 物理像素的**唯一转换路径**（D26-2）────────────────────────────
@@ -174,6 +188,48 @@ void Test26FontSourceResolve()
 	}
 }
 
+// ── T26-13：解析不到的 family **只探测一次**（★ v1.5 缺陷的回归锚点）──────────
+// 背景：`FaceIdFor` 的 family 缓存原先在「回退到**已加载**的默认 face」这条路径上
+//       **提前 return 而漏写 `familyCache`** ⇒ 该 family 永不入缓存 ⇒ 每个**新**的
+//       `(text, size, family, dpi)` 都重新 `ResolveFile` + 重新告警（实机刷屏）。
+// 判据：用**计数替身**观测 `ResolveFile` 调用次数 ⇒ 第二次查询必须**零新增**。
+void Test26UnresolvedFamilyProbedOnce()
+{
+	// 真字体文件路径取自平台实现（前提同 T26-1..T26-6：本机需有可用系统字体）
+	const std::string good = Win32FontSource{}.ResolveFile(std::string());
+	if (good.empty())
+	{
+		return;   // 无系统字体 ⇒ 跳过（不制造假绿）
+	}
+
+	auto engine = std::make_unique<FontEngine>();
+	engine->SetDpi(96);
+
+	CountingFontSource* source = nullptr;
+	{
+		auto owned = std::make_unique<CountingFontSource>();
+		owned->goodPath = good;
+		source = owned.get();
+		engine->SetFontSource(std::move(owned));
+	}
+
+	// ① ★ 关键前置：**先**加载默认 face。否则下面的回退会走「新建 face」分支（③/④ 本来
+	//    就会写 familyCache），**掩盖**本缺陷。
+	const FaceId def = engine->FaceIdFor(std::string());
+	EXPECT_TRUE(def != 0);
+	const int afterDefault = source->resolveCalls;          // 空 family ⇒ 解析 1 次
+
+	// ② 首次查一个解析不到的 family ⇒ 探测 2 次（失败 + 回退默认），并回退到**默认 face**
+	const FaceId bad = engine->FaceIdFor("__ecdi_no_such_family__.ttf");
+	EXPECT_EQ(bad, def);                                    // ★ 回退到默认 face（且已告警，不静默换字体）
+	EXPECT_EQ(source->resolveCalls, afterDefault + 2);
+
+	// ③ ★★ 再查同一 family ⇒ **命中 familyCache** ⇒ **零新增探测**（修复前此处为 +4）
+	const FaceId again = engine->FaceIdFor("__ecdi_no_such_family__.ttf");
+	EXPECT_EQ(source->resolveCalls, afterDefault + 2);
+	EXPECT_EQ(again, def);
+}
+
 void ECDI::Test::RegisterFontEngineTests()
 {
 	GetTestRegistry().Add("FontEngine.PixelSize",          &Test26PixelSize);                      // T26-1
@@ -182,4 +238,5 @@ void ECDI::Test::RegisterFontEngineTests()
 	GetTestRegistry().Add("FontEngine.GlyphKeyOrdering",   &Test26GlyphKeyOrdering);               // T26-4
 	GetTestRegistry().Add("FontEngine.MeasureCacheAndDpi", &Test26MeasureCacheAndDpiInvalidation); // T26-5
 	GetTestRegistry().Add("FontEngine.FontSourceResolve",  &Test26FontSourceResolve);              // T26-6
+	GetTestRegistry().Add("FontEngine.UnresolvedFamilyProbedOnce", &Test26UnresolvedFamilyProbedOnce); // T26-13
 }
