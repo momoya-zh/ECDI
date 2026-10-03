@@ -1,7 +1,7 @@
 ﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 初步设计
 
 > 来源：需求确认稿 `phase26-freetype-gl-requirements.md` **v1.2**（外部评审第一轮：「**基本通过，但建议先修 4 个关键边界，再进入 Preliminary Design**」；四项边界处置见需求稿 §6/§7）
-> 状态：**v1.1**（2026-10-03）——**待评审**（★ v1.1 补**测量缓存**（性能方向 ②）+ 登记方向 ③ 顺延 Phase 27，见 §9）
+> 状态：**v1.2**（2026-10-03）——✅ **评审通过，可进入详细设计**（外部评审第二轮：「**Preliminary Design：通过，可以进入 Detailed Design**」；★ 评审定了 **详设必答 D26-1..D26-5**，见 §9；★ 处置表见 §10）
 > 定位：**接口草案 + 决策定案 + 生命周期契约**。★ 本 Phase 与 Phase 24 / 25 的关键区别 = **首次同时耦合「资源生命周期 + GPU context + 第三方库 + 公共 API 演进」** ⇒ 本稿**以边界与生命周期验证为重心**，不急着写完整类实现。
 
 ---
@@ -20,6 +20,7 @@
 | **R6** 性能基准 | §7 T26-9 + §8 O5（contract 细化留详设） |
 | **性能方向 ②**（逐帧文本测量） | ★ §3-③ **测量结果缓存**（metrics/size cache，key 含 `text`）+ §7 T26-11 |
 | **P1–P6** 初设必答 | §3-②/③/⑤/⑧ + §3-④/⑨ 逐条收敛（§1.1 对照） |
+| **详设必答 D26-1..D26-5** | §9（评审第二轮给定：face identity / DIP→px 唯一路径 / cache key / quad 结构 / benchmark contract） |
 
 ### 1.1 评审四项关键边界 → 本稿收敛
 
@@ -86,6 +87,8 @@ virtual void Initialize(const PlatformRenderContext& context) {}
 **收益**：① 调用点 **0 改动**；② 与平台解耦既有惯例同族（条 97）；③ 无新抽象、无 `std::function`；④ `Initialize` 是**非纯虚带默认实现** ⇒ 比加纯虚更安全（条 33 的风险面更小）。
 **代价（如实登记）**：`GDITextMeasurer` 从「纯测量零 hwnd」变为**持 HWND** —— 这是它的设计特性变更，须在头注释写明理由（D-8）。
 
+★ **`Initialize()` 的语义边界（评审 §14）**：它与 `RenderingBackend::Initialize` **只是结构对称、不是职责相同**——后者是「**必须**初始化」（10 个纯虚的实现依赖平台句柄），前者是「**可选**注入」（无需平台上下文的实现保持空实现即合法）。**不要**因为两处调用相邻就推断二者生命周期语义等价。
+
 ### 3-③ ★★ **D3 定案：三层拆分（`FontEngine` 边界）**
 
 ```text
@@ -146,6 +149,8 @@ spike S1 已证明可实现全部十个纯虚。★ 补 **operation-level semant
 
 ★ **N7 的收敛（评审 §13）**：**保留「不做 `OnTargetResized`」**，依据 = per-frame 自省（上表）；详设须给出「自省 vs 接缝」的成本对比（§8 O3）。
 
+★ **创建顺序不变量（评审 §9）**：`GLRenderer::Initialize` 内**必须**按序 —— ① WGL context 就绪（`wglMakeCurrent` 成功）→ ② `GLGlyphAtlas` 初始化（`glGenTextures` / `glTexImage2D` **必须在 current context 下**）→ ③ `m_ready = true`。**禁止**「构造期建 Atlas、`Initialize` 后补 context」的形态（后续微调构造顺序即炸）。
+
 ### 3-⑨ **P5 定案：`RenderCommand` 零改动**
 
 已实测（B2/B9/B6）：GL 后端只实现 `RenderingBackend` 操作级接口，**不接触 `RenderCommand`/variant**；`DrawTextCommand` 的四个字段（pos / text / color / font）经 `Renderer::ExecuteCommand` 展开为 `backend.DrawText(ScalePoint(pos,scale), text, color, font)`（B6）⇒ **GL 零改 `RenderCommand`**。`PaintContext` / `CommandBuffer` / `Renderer` 亦零改动。
@@ -164,6 +169,7 @@ spike S1 已证明可实现全部十个纯虚。★ 补 **operation-level semant
 ///          GDITextMeasurer / FreeTypeTextMeasurer 覆盖它：取窗口句柄 ⇒ 测量基准 = 窗口 DPI
 ///          （闭合审计 D-8：测量链与渲染链同基准）。
 virtual void Initialize(const PlatformRenderContext& context) {}
+/// ⚠️ 结构对称 ≠ 职责相同：本方法**可选**（默认空实现即合法）；`RenderingBackend::Initialize` 是**必须**的。
 ```
 
 **`include/ECDI/Render/BackendFactory.h`** —— 追加一个工厂（§3-①）：
@@ -204,6 +210,8 @@ target_link_libraries(ECDI PUBLIC opengl32)   # ★ 现在没有（B14）
 
 ★ FreeType **不在** `GLOB_RECURSE`（B14）的 `ECDI/src/**` 范围内（放 `third_party/`）⇒ 框架自动入库规则不受影响。
 
+★ **硬约束（评审 §15）**：**公共头（`include/ECDI/**`）绝不含 FreeType header**（`ft2build.h` 等）——一旦出现，`PRIVATE` 链接也救不了（使用者的 TU 会直接 include 到 FreeType）。当前设计把 FreeType 关在 `src/Render/FontEngine` 内部、公共 API 只有 `TextMeasurer` / `CreateGLRenderServices`，方向正确；★ 详设须把它列为**可机检的验收项**（`grep -r "ft2build" include/ECDI/` 必须 0 命中）。
+
 ### 5-2 许可与资源上限（评审 §7 / §14）
 
 | 项 | 定案 |
@@ -211,7 +219,7 @@ target_link_libraries(ECDI PUBLIC opengl32)   # ★ 现在没有（B14）
 | **许可** | **FTL**（FreeType License，可商用、非 copyleft）；保留 `third_party/freetype/LICENSE.TXT` |
 | **归属** | `third_party/freetype/README.ecdi.md` 记录：上游版本（pin）· 下载来源 + hash · 本地改动（`ftoption.h`）· 同步义务 |
 | **最小配置** | `ftoption.h` 关 `FT_CONFIG_OPTION_USE_PNG` / `BROTLI` / `SVG` / `BZIP2` |
-| **资源上限（初设建议值，详设冻结）** | 最大字体文件 **32 MB** · 最大单字形 bitmap **512×512** · 图集 **1024²** · **保留字节码步数上限**（FT 解释器 `max_steps`，如 100 万） |
+| **资源上限（初设建议值，详设验证）** | 最大字体文件 **32 MB** · 最大单字形 bitmap **512×512** · 图集 **1024²** · **保留字节码步数上限**（FT 解释器 `max_steps`，如 100 万）。★ **处置形态（评审 §16）**：每个上限都须落成 **`Limit → Reject/Fail → 明确错误码 + 日志`**（不是笼统的「超过即失败」）；★ **数值待详设验证**（字体文件大小与 glyph 复杂度非线性相关） |
 
 ### 5-3 契约（C1–C6）
 
@@ -264,14 +272,50 @@ target_link_libraries(ECDI PUBLIC opengl32)   # ★ 现在没有（B14）
 | # | 开放项 | 说明 |
 |---|---|---|
 | **O1** | FreeType **具体版本 pin** | vendor 时定（2.13.x / 2.14.x），并记录 CVE 同步基线 |
-| **O2** | 图集**淘汰策略** | v1 无淘汰（沿 spike）；重启条件 = 大字体/多字号场景图集常满 |
-| **O3** | 「per-frame 自省 vs `OnTargetResized`」**成本对比** | 评审 §13 要求；详设给出数据后**冻结 N7** |
+| **O2** | 图集**淘汰策略** | v1 无淘汰（沿 spike）；重启条件 = 大字体/多字号场景图集常满 | ★ **评审 §17：保持不做**（第一个 GL 后端不引入 LRU / 淘汰 / 碎片整理——那会把本 Phase 变成「字体 GPU 资源管理器」）。
+| **O3** | 「per-frame 自省 vs `OnTargetResized`」**成本对比** | 评审 §13 要求；详设给出数据后**冻结 N7** | ★ 评审：详设验证。
 | **O4** | `FontEngine` 的 **face 缓存粒度** | 按 family 缓存 face；LRU / 上限待定 |
-| **O5** | 性能 benchmark **contract 参数表** | R6/P6：行数/字数/字体/字号/DPI/窗口/滚动速度/#帧/CPU 口径/VSync 固定化 |
+| **O5** | 性能 benchmark **contract 参数表** | R6/P6：行数/字数/字体/字号/DPI/窗口/滚动速度/#帧/CPU 口径/VSync 固定化 | ★ **评审 §17：详设必须解决**（→ **D26-5**）。
 
 ---
 
-## 9. 修订记录
+## 9. 详设必答（D26-1..D26-5，外部评审第二轮给定）
 
+| # | 必答项 | 收敛目标 |
+|---|---|---|
+| **D26-1** | **字体实例 / face identity** | `Font → FontFaceId → FT_Face` 的映射；★ **不得用 `FT_Face*` 当稳定 key**（face 释放 / 重载后地址会变） |
+| **D26-2** | ★★ **DIP → pixel size 的唯一转换路径** | `Font::size`（DIP）→ 窗口 DPI → **physical px** → FreeType；★ **由 `FontEngine` 统一计算并下发**，**禁止** Measurer 与 Renderer 各自 round（否则重现 D-8 的「测宽 ≠ 渲宽」） |
+| **D26-3** | **Glyph cache key 定稿** | face identity · pixel size · DPI · hinting mode · glyph index · **rasterization policy（须落到具体值，不是概念词）** |
+| **D26-4** | **Atlas → draw quad 数据结构** | `GlyphSlot { atlas rect, UV, bearing, advance, pixel size }` → `DrawText` = glyph lookup → slot → quad → batch（`GLRenderer` 的实现核心） |
+| **D26-5** | **benchmark contract 固定参数表** | 窗口尺寸 · DPI（96 / 144）· 字体 · 字号（14 / 16 DIP）· 固定大文本 · 行数 · 可视行 · 滚动速度 · #帧 · **VSync off**；分 **GDI cold / GDI warm / GL cold / GL warm** 四组（R6 / P6 / O5） |
+
+★ **范围锁（评审 §18，硬约束）**：**详设不得扩大 Phase 26** —— 明确**不做**：HarfBuzz / shaping / ligature / 字体 fallback / LRU atlas / SDF(MSDF) / 多线程 glyph 栅格化 / Linux GL / Wayland / Vulkan / viewport culling（= **#49**，已顺延 Phase 27）。本 Phase 的最小闭环 = **Windows + WGL + FreeType + GL glyph atlas + 第二 Renderer**。
+
+## 10. 外部评审处置（第二轮，2026-10-03）
+
+> 评审结论：**「Phase 26 Preliminary Design：通过，可以进入 Detailed Design」**（原话：不是「勉强通过」）；★ 评审建议**详设不要再大改架构**，把实现细节冻结即可；★ 并**明确建议不要回头改需求稿**。
+
+| 评审节 | 要点 | 处置 |
+|---|---|---|
+| §1–§6 | 四大边界闭合（DPI / `FontEngine` / Atlas / WGL）· 测量缓存 · 「同源」定义解释清楚 | ✅ **确认（本稿已写对，零改动）** |
+| §7 | Atlas key 的 `face` 需稳定 ID，不能用 `FT_Face*` | ✅ 采纳 → **D26-1** |
+| §8 | ★ **DIP→px 转换路径必须唯一**（避免两次 round 重现 D-8）；建议 `FontEngine` 统一算 | ✅ **采纳 → D26-2**（★ 详设重点） |
+| §9 | GL context 与 `GLGlyphAtlas` 的**创建顺序**须成不变量 | ✅ 采纳 → **§3-⑧ 补不变量** + D26-4 前置 |
+| §10 | `shared_ptr<FontEngine>` 所有权**保持现状**（不建议复杂化） | ✅ **确认（不改）** |
+| §11 | 性能指标（frame time + rasterization + atlas miss）方向正确 | ✅ 确认（未改动） |
+| §12 | **cold / warm 定义须彻底冻结** | ✅ 采纳 → **D26-5** |
+| §13 | 性能方向 ③ 顺延 Phase 27 **非常正确** | ✅ 确认（未改动） |
+| §14 | `Initialize()` 语义须写清（**结构对称 ≠ 职责相同**） | ✅ **采纳 → §3-② + §4-1 草案注释** |
+| §15 | CMake：须确认**公共头绝不含 FreeType header** | ✅ **采纳 → §5-1 硬约束 + 机检项** |
+| §16 | 资源限制写成 `Limit → Reject/Fail → 错误码/日志` | ✅ **采纳 → §5-2** |
+| §17 | O1–O5 判断（O2 保持不做 / O5 必须详设解决） | ✅ 采纳 → **§8 标注** |
+| §18 | ★ 详设**不得再扩大 Phase 26** | ✅ **采纳 → §9 范围锁** |
+| — | 需求稿是否回头改 | ✅ **评审明示不必** —— 本轮**只改初设稿** |
+
+★ **最终判断**：**通过，可进入 Detailed Design**——**13 节确认 / 采纳，零否决**；本稿由此升 **v1.2**。
+
+## 11. 修订记录
+
+- **v1.2**（2026-10-03）**吸收外部评审第二轮 ⇒ 通过，可进入详设**。① ★ 状态行改「**评审通过，可进入详细设计**」；新增 **§9 详设必答（D26-1..D26-5）** + **范围锁** 与 **§10 外部评审处置**（13 节确认 / 采纳，零否决）；原 §9 修订记录顺延为 §11。② **§3-② / §4-1**：补 `Initialize()` **语义边界**（与 `RenderingBackend::Initialize` **结构对称、职责不同**——前者可选、后者必须）。③ **§3-⑧**：补 **GL context 与 Atlas 创建顺序不变量**（context ready → Atlas init → ready）。④ **§5-1**：补**硬约束** —— 公共头绝不含 FreeType header（+ 机检 `grep`）。⑤ **§5-2**：资源限制改写为 **`Limit → Reject/Fail → 错误码 + 日志`**，数值标注「待详设验证」。⑥ **§8**：O2 标「保持不做」· O3 标「详设验证」· O5 标「**详设必须解决**」。⑦ ★ 评审明示**不必回头改需求稿** ⇒ 本轮只改本稿。
 - **v1.1**（2026-10-03）**补测量缓存（性能方向 ②）+ 登记方向 ③**。① ★★ §3-③ 的 CPU 缓存**明确分两类**：metrics/size cache（key = `text + font + dpi`，测量链）+ glyph bitmap cache（key = face + size + dpi + hinting + glyph index，渲染链）——★ 依据 = 测试项目卡顿**三方向评估之 ②**（逐帧文本测量；调用次数 = 每帧 × 每行 ⇒ **按次数计收益可能大于栅格化缓存**）；★ 边界如实（消掉重复执行、不消掉每帧调用本身，后者属 `TextWidget` 层不在本 Phase）。② 新增 **契约 C-7**（测量结果可缓存、键含 DPI）· 测试 **T26-11**（缓存命中）。③ ★ **性能方向 ③**（命令构建层的视口裁剪）已登记 `roadmap-deferred.md` **#49 · 顺延至 Phase 27**（用户 2026-10-03 定），**不在本 Phase 范围**——本稿 §1.1 后加交叉引用。④ 无其他设计变动。
 - **v1.0**（2026-10-03）初稿：需求 v1.2 → 初设映射 · 代码基线 **B1–B15**（全部带行号实测）· **决策定案 D1–D8**（★ **D2/D4 定案 A″：`TextMeasurer::Initialize(context)` + 窗口 DPI**——对称于 `RenderingBackend::Initialize`，调用点零改动 · **D3 三层拆分** · **WGL 生命周期全定** · **Atlas CPU/GPU 分离**）· 接口草案（公共头 2 处变更 + 4 个内部件）· 契约 **C1–C6** · CMake 设计 + 许可/资源上限 · 影响面（**公共头 94 → 94** · API +2 · 用例 307 → ~315+）· 测试大纲 **T26-1..T26-10** · 开放项 **O1–O5**。待评审。
