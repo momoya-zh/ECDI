@@ -37,6 +37,7 @@ int ECDI::Test::RunAllTests()
     RegisterLineCoverageTests();   // Phase 24：DrawLine 线段抗锯齿（T24-1..T24-11）
     RegisterTextMeasurerTests();   // Phase 26：文本测量链（T26-10 / T26-12）
     RegisterFontEngineTests();   // Phase 26：FontEngine（T26-1..T26-6）
+    RegisterGLBackendTests();   // Phase 26：GL 后端（T26-7 / T26-8）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

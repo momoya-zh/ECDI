@@ -274,6 +274,34 @@ void TestModelProbeRowLayout()
 	EXPECT_NEAR(sv->GetContentExtent().height, 56.0f, kEps);   // 2 × 28 —— extent 随两步更新
 }
 
+// ── T26-11：`--gl` 参数解析与工厂选择（Phase 26 批四 · 详设 △14）─────────────────
+// ★ 判据：① **整词匹配**（不误命中 `--glow` / `--no-gl`）；② 工厂选择正确；
+//   ★ **不真建 GL** —— `CreateGLRenderServices` 只**装配对象**（WGL context 在 `Window` 构造内
+//   `Initialize` 时才创建）⇒ 本用例可无头运行。
+void Test26ModelProbeGlBackendFlag()
+{
+    // ① 解析真值表（★ 整词匹配）
+    EXPECT_TRUE(Demo::WantsGlBackend(L"--gl"));
+    EXPECT_TRUE(Demo::WantsGlBackend(L"--native --gl --stay"));
+    EXPECT_TRUE(Demo::WantsGlBackend(L"--layer desktop --gl"));
+    EXPECT_TRUE(!Demo::WantsGlBackend(L""));
+    EXPECT_TRUE(!Demo::WantsGlBackend(L"--native --stay"));
+    EXPECT_TRUE(!Demo::WantsGlBackend(L"--glow"));       // ★ 前缀不误命中
+    EXPECT_TRUE(!Demo::WantsGlBackend(L"--no-gl"));      // ★ 后缀不误命中
+
+    // ② 无 `--gl` ⇒ 默认 GDI 工厂（★ 与 `Create` 的**默认实参同一个工厂** ⇒ 零回归）
+    const RenderServices def = Demo::CreateRenderServicesForCommandLine(L"");
+    EXPECT_TRUE(def.renderer != nullptr);
+    EXPECT_TRUE(def.measurer != nullptr);
+    EXPECT_TRUE(def.renderer->IsReady());               // GDI：未 Initialize 亦视为可用（默认 true）
+
+    // ③ `--gl` ⇒ GL 工厂：两能力都装配好，但 **尚未 Initialize** ⇒ 未就绪
+    const RenderServices gl = Demo::CreateRenderServicesForCommandLine(L"--native --gl");
+    EXPECT_TRUE(gl.renderer != nullptr);
+    EXPECT_TRUE(gl.measurer != nullptr);
+    EXPECT_TRUE(!gl.renderer->IsReady());               // ★ GL：context 未建 ⇒ 尚未就绪
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterModelProbeTests()
@@ -288,4 +316,5 @@ void ECDI::Test::RegisterModelProbeTests()
 	GetTestRegistry().Add("ModelProbePage.RowLayout",            &TestModelProbeRowLayout);
 	GetTestRegistry().Add("TsvParse.Basic",                       &TestTsvParse);
 	GetTestRegistry().Add("JsonEscape.Quotes",                    &TestJsonEscape);
+	GetTestRegistry().Add("ModelProbe.GlFlagParsing",             &Test26ModelProbeGlBackendFlag);   // T26-11
 }

@@ -69,10 +69,13 @@ std::wstring FontsDirectoryWide()
 
 std::string Win32FontSource::DefaultFontFile()
 {
-	// ★ 优先级：含 CJK 的在前（空 family 要能画中文——详设 L2）
+	// ★ 优先级（v1.1 对齐 GDI 默认解析）：GDI 空 family + DEFAULT_CHARSET 在中文系统上
+	//   实际落到 **SimSun**（探针实测 tmAscent/tmHeight ≈ 0.86em）——控件的框高/内缩都是
+	//   按 GDI 观感调的，FontEngine 默认若解析到行盒大 30% 的 MSYH，单行输入的文字会
+	//   下偏并被裁剪（GL 实测）。SimSun 同样含 CJK（详设 L2 的意图保持）。
 	static const wchar_t* const kCandidates[] = {
-		L"msyh.ttc",      // 微软雅黑（拉丁 + CJK）
-		L"simsun.ttc",    // 宋体
+		L"simsun.ttc",    // 宋体（= GDI 空 family 的实际解析结果；拉丁 + CJK）
+		L"msyh.ttc",      // 微软雅黑（行盒更大——观感差异见上）
 		L"segoeui.ttf",   // Segoe UI（纯拉丁兜底）
 		L"arial.ttf",     // Arial
 	};

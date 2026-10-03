@@ -2,6 +2,10 @@
 
 #include "ECDI/Core/Color.h"   // Palette（窗口/页面底色的单一真相源——值类型，仅 Core）
 #include "ECDI/Platform/ChildProcess.h"
+#include "ECDI/Render/RenderServices.h"   // Phase 26 批四：命令行 → 渲染服务（`--gl`）
+// ★ 必须同时给出 `RenderingBackend` 的**完整定义**：`RenderServices` 持 `unique_ptr<RenderingBackend>`，
+//   使用者（含本头的任何 TU）在**析构 / 调用其方法**时需要完整类型（否则 `sizeof` 不完整类型报错）
+#include "ECDI/Render/RenderingBackend.h"
 #include "ECDI/Widget/Panel.h"
 
 #include <fstream>
@@ -50,6 +54,16 @@ std::string EscapeJson(const std::string& s);
 /// ② 不存在 / 半截 / 陈旧（大小不等）→ 从 RCDATA 资源（ModelProbe.rc IDR_PROBE_BIN）释放（tmp + rename 原子性）。
 /// @return 是否就位（false = 资源缺失/写入失败——调用方记日志）
 bool EnsureBackendExtracted();
+
+/// @brief 命令行是否请求 GL 后端（`--gl`）——★ 纯函数（demo 工具公开供测试——T26-11）
+/// @details **整词匹配**（`--gl` 前后须为串边界或空白）⇒ `--glow` / `--no-gl` **不误命中**。
+///          ★ 只解析、**不建 GL**（真建由入口决定）。分词语义与 `main.cpp` 的既有开关一致。
+bool WantsGlBackend(const std::wstring& commandLine);
+
+/// @brief 按命令行选择渲染服务（无 `--gl` ⇒ **默认 GDI 工厂**——逐位零回归）
+/// @details ★ **不建 GL context**：`CreateGLRenderServices` 只**装配对象**（WGL context 在
+///          `Window` 构造内 `Initialize` 时才创建）⇒ **可无头测试**（T26-11）。
+RenderServices CreateRenderServicesForCommandLine(const std::wstring& commandLine);
 
 /// @brief ModelProbe 页面（ModelProbe demo——examples/ModelProbe，不入框架）
 /// @details 状态型控件：输入 base/key → 查询 /models 列模型 → 勾选 → 生成 JSON → 测试所选。

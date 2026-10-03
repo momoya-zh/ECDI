@@ -116,6 +116,9 @@ if(WIN32)
     # Phase 14 tray-and-drop dependencies（Shell_NotifyIconW / DragAcceptFiles 族——
     # 唯一归属 shell32；PUBLIC 传播同上）
     target_link_libraries(ECDI PUBLIC shell32)
+    # Phase 26 批三 GL 后端依赖（GLRenderer / WGL——唯一归属 opengl32；
+    # PUBLIC 沿既有系统库惯例——公共头零 GL（盯防②），收紧为 PRIVATE 亦安全，登记开放项 O4）
+    target_link_libraries(ECDI PUBLIC opengl32)
 endif()
 
 # ── R5：version.h 生成（三宏——configure 注入 SemVer）──

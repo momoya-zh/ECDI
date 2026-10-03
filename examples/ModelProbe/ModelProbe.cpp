@@ -17,6 +17,7 @@
 #include "ECDI/Layout/ListLayout.h"
 #include "ECDI/Platform/ExecutablePath.h"
 #include "ECDI/Platform/PlatformWindow.h"
+#include "ECDI/Render/BackendFactory.h"   // Phase 26 批四：`--gl` ⇒ GL 工厂（默认仍 GDI）
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Widget/CheckBox.h"
 #include "ECDI/Widget/Label.h"
@@ -26,6 +27,7 @@
 #include "ECDI/Window/Window.h"
 
 #include <cctype>
+#include <cwctype>
 #include <utility>
 
 namespace ECDI{
@@ -82,6 +84,31 @@ std::string EscapeJson(const std::string& s){
 		else out += c;
 	}
 	return out;
+}
+
+// ── 命令行 → 渲染服务（Phase 26 批四：`--gl` 开关 · 详设 △14 / D7）──
+
+bool WantsGlBackend(const std::wstring& commandLine){
+	// ★ **整词匹配**：`--gl` 的前后须为串边界或空白 ⇒ `--glow` / `--no-gl` **不误命中**
+	const std::wstring token = L"--gl";
+	std::size_t pos = 0;
+	while ((pos = commandLine.find(token, pos)) != std::wstring::npos){
+		const std::size_t end = pos + token.size();
+		const bool leftOk  = (pos == 0) || std::iswspace(commandLine[pos - 1]) != 0;
+		const bool rightOk = (end >= commandLine.size()) || std::iswspace(commandLine[end]) != 0;
+		if (leftOk && rightOk)
+			return true;
+		pos = end;
+	}
+	return false;
+}
+
+RenderServices CreateRenderServicesForCommandLine(const std::wstring& commandLine){
+	// ★ 无 `--gl` ⇒ 与 `Application::Create` 的**默认实参同一个工厂**（`CreateDefaultRenderServices`）
+	//   ⇒ 默认路径**逐位零回归**（详设 D1）
+	return WantsGlBackend(commandLine)
+		? CreateGLRenderServices()
+		: CreateDefaultRenderServices();
 }
 
 // ── 后端释放（P2：RCDATA 资源嵌入 + 检测复用——release 单 exe 分发）──
@@ -293,6 +320,7 @@ ModelProbePage::ModelProbePage(std::unique_ptr<ChildProcess> process)
 		.borderWidth = 1.0f,
 		.borderColor = kInputBorder(),
 	});
+	searchBox->SetSingleLine(true);   // 单行输入（搜索语义——Enter 不换行；禁纵向滚动）
 	m_searchBox = searchBox.get();
 	searchBox->SetOnTextChanged([this](const std::string& keyword){
 		std::string kw = keyword;

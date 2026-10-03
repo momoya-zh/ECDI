@@ -1,15 +1,25 @@
 ﻿#include "Render/GDITextMeasurer.h"
 
+#include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
 #include "Platform/Win32/Win32RenderContext.h"   // ★ Phase 26：Initialize 取 HWND（同 GDIBackend 先例）
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 namespace ECDI{
 
 GDITextMeasurer::~GDITextMeasurer()
 {
+	// ★ 诊断（Phase 26 D26-5 基准的「计数打印」）：退出时一行汇总——供**人工性能对照**读数
+	//   （GDI warm 阶段的靶子 = 测量缓存未命中是否随滚动线性增长）。★ `Info` 级：无调试器
+	//   接收 `OutputDebugStringW` 时几乎零成本。
+	Logger::Log(LogLevel::Info,
+	            L"GDITextMeasurer: measureCacheMiss=" + std::to_wstring(m_measureCacheMissCount)
+	            + L" measureCacheSize=" + std::to_wstring(m_measureCache.size())
+	            + L" fontCacheSize=" + std::to_wstring(m_fontCache.size()));
+
 	// D1：字体缓存统一清理（GDI 对象 10,000 上限纪律）
 	for (auto& entry : m_fontCache)
 	{

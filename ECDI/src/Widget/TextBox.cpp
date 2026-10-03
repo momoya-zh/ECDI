@@ -451,17 +451,25 @@ void TextBox::EnsureCaretVisible(){
 	// 依赖 m_lineStarts；编辑操作置 m_needsLineRecalc 后首个消费点在此，须先重算否则 maxScroll=0）
 	if (m_needsLineRecalc)
 		RecalculateLines();
-	// 光标跟随滚动（上/下边界语义——8.5.2 基础设施，编辑/光标移动统一调用）
-	const float lineH = GetLineHeight();
-	const float caretTop = static_cast<float>(LineIndexFromCodepoint(m_caret)) * lineH;
-	const float caretBottom = caretTop + lineH;
-	const float viewportTop = m_scrollOffsetY;
-	const float viewportBottom = m_scrollOffsetY + GetTextAreaHeight();
-	if (caretTop < viewportTop)
-		m_scrollOffsetY = caretTop;   // 上边界：滚到光标顶
-	else if (caretBottom > viewportBottom)
-		m_scrollOffsetY = caretBottom - GetTextAreaHeight();   // 下边界：滚到光标底
-	m_scrollOffsetY = (std::clamp)(m_scrollOffsetY, 0.0f, GetMaxScrollOffset());
+	// ★★ 单行语义 = 无纵向滚动（同 OnMouseWheel 的单行闸——C-VIS 同族问题：GL 模式 MSYH 行盒
+	//    高于单行视口时，光标跟随会把 scrollOffsetY 推到 > 0 ⇒ 文字"莫名其妙下偏"）。
+	//    单行的光标恒在 line 0 ⇒ 纵向偏移恒 0；横向（宽文本）滚动语义保留。
+	if (m_singleLine){
+		m_scrollOffsetY = 0.0f;
+	}
+	else{
+		// 光标跟随滚动（上/下边界语义——8.5.2 基础设施，编辑/光标移动统一调用）
+		const float lineH = GetLineHeight();
+		const float caretTop = static_cast<float>(LineIndexFromCodepoint(m_caret)) * lineH;
+		const float caretBottom = caretTop + lineH;
+		const float viewportTop = m_scrollOffsetY;
+		const float viewportBottom = m_scrollOffsetY + GetTextAreaHeight();
+		if (caretTop < viewportTop)
+			m_scrollOffsetY = caretTop;   // 上边界：滚到光标顶
+		else if (caretBottom > viewportBottom)
+			m_scrollOffsetY = caretBottom - GetTextAreaHeight();   // 下边界：滚到光标底
+		m_scrollOffsetY = (std::clamp)(m_scrollOffsetY, 0.0f, GetMaxScrollOffset());
+	}
 
 	// 9.5 R1 横向（跟手模式——光标驱动，无上限；与垂直边界同构）
 	// caretX = 行内前缀宽（逻辑 x，相对文本起点——与 CalculateCaretPosition 同源测量）
@@ -548,6 +556,11 @@ void TextBox::SyncScrollBar(){
 }
 
 void TextBox::OnMouseWheel(const MouseWheelEvent& event){
+	// ★★ 单行语义 = **无纵向滚动**（Phase 26 用户实测：GL 模式下行盒高于视口时单行框可被滚轮
+	//    滚动——单行输入没有"第二行"可滚，纵向滚动语义不成立）⇒ 直接吞掉滚轮事件。
+	if (m_singleLine)
+		return;
+
 	// 惰性重算（GetMaxScrollOffset 依赖 m_lineStarts——首个消费点自保证缓存，同 EnsureCaretVisible 契约）
 	if (m_needsLineRecalc)
 		RecalculateLines();

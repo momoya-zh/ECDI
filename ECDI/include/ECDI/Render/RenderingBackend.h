@@ -35,6 +35,14 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		/// 非跨层 dynamic_cast；无需平台句柄的后端（如 RecordingBackend）继承默认空实现零改动）
 		virtual void Initialize(const PlatformRenderContext& context) {}
 
+		/// @brief 后端是否就绪（可正常工作）
+		/// @details ★ **默认 `true`**：绝大多数后端只要构造即可用（`GDIBackend`），无需覆盖。
+		///          ★ **只有「初始化可能失败」的后端才覆盖**——目前 = `GLRenderer`
+		///          （WGL context 创建失败 ⇒ `false`，此后全部绘制**静默 no-op**）。
+		///          真实消费者：`ModelProbe --gl` 据此**明确报错退出**，**不静默回退 GDI**
+		///          （Phase 26 详设 D7——否则性能对照可能实际跑的是 GDI 却看不出来）。
+		virtual bool IsReady() const { return true; }
+
 		/// @brief 帧开始（后端建立绘制目标：清屏/拿 HDC/建缓冲）
 		/// @param background 本帧客户区**底色**（Phase 18）——**决策层输入**：来源是 `Window`
 		///        （唯一默认值来源），能力层**不持有**该状态、也不感知窗口；形参**无默认实参**

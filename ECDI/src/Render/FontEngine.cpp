@@ -2,6 +2,7 @@
 
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"   // UTF8ToWide（告警消息用）
+#include "Render/Utf8Decode.h"  // ★ Phase 26 批三：与 GLRenderer **共用同一解码**
 
 // ★★ `FT_*` 出现在**本编译单元内**（pimpl —— 头文件与框架其余部分零 FreeType：详设盯防①）
 #include <ft2build.h>
@@ -25,49 +26,8 @@ constexpr std::size_t kMaxGlyphCache = 8192;
 constexpr std::size_t kMaxMeasureCache = 4096;
 constexpr std::size_t kMaxLineHeightCache = 256;
 
-/// @brief UTF-8 → codepoint 序列（**非法字节跳过**，不抛不崩）
-std::vector<char32_t> DecodeUtf8(const std::string& utf8)
-{
-	std::vector<char32_t> out;
-	out.reserve(utf8.size());
-
-	std::size_t i = 0;
-	while (i < utf8.size())
-	{
-		const unsigned char b0 = static_cast<unsigned char>(utf8[i]);
-		char32_t cp = 0;
-		int len = 0;
-		if (b0 < 0x80)             { cp = b0;        len = 1; }
-		else if ((b0 >> 5) == 0x6) { cp = b0 & 0x1F; len = 2; }
-		else if ((b0 >> 4) == 0xE) { cp = b0 & 0x0F; len = 3; }
-		else if ((b0 >> 3) == 0x1E){ cp = b0 & 0x07; len = 4; }
-		else { ++i; continue; }   // 非法首字节 ⇒ 跳过
-
-		if (i + static_cast<std::size_t>(len) > utf8.size())
-		{
-			break;                // 截断的序列 ⇒ 停止
-		}
-
-		bool ok = true;
-		for (int k = 1; k < len; ++k)
-		{
-			const unsigned char bk = static_cast<unsigned char>(utf8[i + static_cast<std::size_t>(k)]);
-			if ((bk >> 6) != 0x2) { ok = false; break; }
-			cp = (cp << 6) | (bk & 0x3F);
-		}
-
-		if (ok)
-		{
-			out.push_back(cp);
-			i += static_cast<std::size_t>(len);
-		}
-		else
-		{
-			++i;
-		}
-	}
-	return out;
-}
+// ★ UTF-8 解码已上提为 `Render/Utf8Decode.h`（Phase 26 批三：测量链与渲染链**共用**——
+//   两链若各自解码，非法/截断字节处的码点切分会不一致 ⇒ 测宽与渲宽失配）
 
 }   // namespace
 
@@ -88,11 +48,14 @@ struct FontEngine::Impl{
 	std::map<std::string, FaceEntry> faces;
 	std::map<FaceId, FT_Face> facesById;   ///< id → face（O(log n) 反查）
 	int nextFaceId = 1;                    ///< ★ 从 1 起（**0 恒为「无效」**）；单调递增、**永不复用**
+	std::map<std::string, FaceId> familyCache;   ///< family 原串 → FaceId（★ v1.1：含**失败结果**——
+	                                             ///< 未命中 family 每帧每标签重复「探测文件 + 告警」的刷屏与开销由此消除）
 
 	/// ── CPU 两级缓存（Phase 26 详设 §3-③）──
 	std::map<GlyphKey, GlyphBitmap> glyphCache;                                     ///< 渲染链：栅格化结果
 	std::map<std::tuple<std::string, float, std::string, int>, Size> measureCache;  ///< 测量链：metrics
 	std::map<std::tuple<float, std::string, int>, float> lineHeightCache;
+	std::map<std::pair<FaceId, int>, float> ascentCache;                            ///< (faceId, px) → ascent(px)
 
 	std::unique_ptr<FontSource> source;
 	int dpi = 96;
@@ -170,6 +133,14 @@ FaceId FontEngine::FaceIdFor(const std::string& family)
 		return 0;
 	}
 
+	// ★ v1.1：family 原串 → FaceId 缓存（**含失败结果**）——否则解析失败的 family
+	//   （如 "Consolas" 被当作文件名找不到）每帧每标签重复「探测文件 + 告警」刷屏
+	const auto famCached = impl.familyCache.find(family);
+	if (famCached != impl.familyCache.end())
+	{
+		return famCached->second;
+	}
+
 	// ① 解析文件路径（空 family ⇒ 默认字体）
 	std::string path = impl.source->ResolveFile(family);
 	if (path.empty() && !family.empty())
@@ -182,6 +153,7 @@ FaceId FontEngine::FaceIdFor(const std::string& family)
 	}
 	if (path.empty())
 	{
+		impl.familyCache.emplace(family, 0);   // 失败结果也缓存（防每帧重试）
 		return 0;
 	}
 
@@ -200,10 +172,11 @@ FaceId FontEngine::FaceIdFor(const std::string& family)
 		return 0;
 	}
 
-	// ④ 分配**新** FaceId（单调递增、永不复用）
+	// ④ 分配**新** FaceId（单调递增、永不复用）+ family 原串入缓存
 	const FaceId id = impl.nextFaceId++;
 	impl.faces.emplace(path, Impl::FaceEntry{ id, face });
 	impl.facesById.emplace(id, face);
+	impl.familyCache.emplace(family, id);
 	return id;
 }
 
@@ -254,7 +227,10 @@ Size FontEngine::MeasureText(const Font& font, const std::string& text)
 		long advancePx = 0;
 		for (const char32_t cp : codepoints)
 		{
-			if (FT_Load_Char(face, static_cast<FT_ULong>(cp), FT_LOAD_DEFAULT) != 0)
+			// ★ 与渲染链**同一 load flags**（含 FT_LOAD_NO_BITMAP，v1.1）——内嵌点阵的
+			//   advance 与矢量 advance 不同 ⇒ 测量/绘制异源会错位（选择/光标对不齐笔画）
+			if (FT_Load_Char(face, static_cast<FT_ULong>(cp),
+			                 FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_BITMAP) != 0)
 			{
 				continue;   // 缺字形 ⇒ 跳过（advance 不计）
 			}
@@ -305,26 +281,54 @@ float FontEngine::LineHeight(const Font& font)
 	return height;
 }
 
-bool FontEngine::Glyph(const Font& font, char32_t cp, GlyphBitmap& out)
+float FontEngine::Ascent(const Font& font)
 {
 	Impl& impl = *m_impl;
-	const FaceId faceId = FaceIdFor(font.family);
-	FT_Face face = impl.FaceOf(faceId);
+	const int px = PixelSize(font);
+
+	const auto cached = impl.ascentCache.find({ FaceIdFor(font.family), px });
+	if (cached != impl.ascentCache.end())
+	{
+		return cached->second;
+	}
+
+	float ascent = 0.0f;
+	FT_Face face = impl.FaceOf(FaceIdFor(font.family));
+	if (face != nullptr)
+	{
+		FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
+
+		// ★ 与栅格化**同一 face / 同一 pixelSize / 同一转换**（D26-2 唯一路径）——
+		//   26.6 定点 ⇒ /64 得物理像素（`metrics.ascender` 向上为正）
+		ascent = static_cast<float>(face->size->metrics.ascender) / 64.0f;
+	}
+
+	impl.ascentCache.emplace(std::make_pair(FaceIdFor(font.family), px), ascent);
+	return ascent;
+}
+
+bool FontEngine::Glyph(const Font& font, char32_t cp, GlyphBitmap& out)
+{
+	// ★ Phase 26 批三：本方法 = 「构建键 → 委派 `GlyphByKey`」（键型缓存单点，避免两处实现漂移）
+	const std::uint32_t glyphIndex = GlyphIndex(font, cp);
+	if (glyphIndex == 0)
+	{
+		return false;   // 该 face 无此字形（或 face 无效）
+	}
+
+	const GlyphKey key{ FaceIdFor(font.family), glyphIndex, PixelSize(font),
+	                    static_cast<std::uint8_t>(HintingMode::Normal) };
+	return GlyphByKey(key, out);
+}
+
+bool FontEngine::GlyphByKey(const GlyphKey& key, GlyphBitmap& out)
+{
+	Impl& impl = *m_impl;
+	FT_Face face = impl.FaceOf(key.faceId);
 	if (face == nullptr)
 	{
 		return false;
 	}
-
-	const int px = PixelSize(font);
-	const std::uint32_t glyphIndex =
-		static_cast<std::uint32_t>(FT_Get_Char_Index(face, static_cast<FT_ULong>(cp)));
-	if (glyphIndex == 0)
-	{
-		return false;   // 该 face 无此字形
-	}
-
-	const GlyphKey key{ faceId, glyphIndex, px,
-	                    static_cast<std::uint8_t>(HintingMode::Normal) };
 
 	const auto cached = impl.glyphCache.find(key);
 	if (cached != impl.glyphCache.end())
@@ -333,12 +337,16 @@ bool FontEngine::Glyph(const Font& font, char32_t cp, GlyphBitmap& out)
 		return true;
 	}
 
-	FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
+	FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(key.pixelSize));
 
 	// ★ rasterization policy 落到**具体调用**（详设 §1.3 ③）：
 	//   `FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL` + `FT_RENDER_MODE_NORMAL`（8-bit 灰度 AA）
-	if (FT_Load_Glyph(face, glyphIndex,
-	                  FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL) != 0)
+	//   ★ + `FT_LOAD_NO_BITMAP`（v1.1）：**强制矢量渲染**——① 本类的位图拷贝按 8bpp 灰度
+	//   写死（FT_PIXEL_MODE_MONO 的 1bpp 内嵌点阵会被错读 = 字形污染）；② 内嵌点阵是
+	//   GDI 观感的产物，GL 矢量渲染保持质量一致；③ SimSun 在 12~16px 有 MONO 点阵，
+	//   默认字体改 SimSun 后此 flag 从「可选」变「必需」。
+	if (FT_Load_Glyph(face, key.glyphIndex,
+	                  FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_BITMAP) != 0)
 	{
 		return false;
 	}

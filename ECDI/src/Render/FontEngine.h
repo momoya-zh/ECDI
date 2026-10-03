@@ -102,10 +102,25 @@ public:
 	/// @brief 字体行高——★ **单位恒为 DIP**
 	float LineHeight(const Font& font);
 
+	/// @brief **行顶 → 基线**的距离 = ascent（★ **物理像素**）
+	/// @details ★★ 为什么需要它：框架的 `DrawText` 契约里 **`pos.y` = 字符单元顶边**
+	///          （GDI `TextOutW` 默认 `TA_LEFT | TA_TOP`——`GDIBackend::DrawText` 未改对齐），
+	///          **不是基线**。任何非 GDI 后端都必须自己下移一个 ascent 才能复现同一语义；
+	///          缺了它就是**整行文字上移一个字高**（观感 = 被裁掉上 3/4）。
+	/// @note 与 `GlyphBitmap::bearingY` 同族单位（物理像素）；`pixelSize` 由 `PixelSize` 决定。
+	/// @return ascent（px，**>= 0**）；无 face ⇒ 0
+	float Ascent(const Font& font);
+
 	/// @brief 取字形位图（供 GL 侧栅格化）——★ 返回 **CPU** 位图，不碰 GL
 	/// @details miss ⇒ `FT_Set_Pixel_Sizes` + `FT_Load_Glyph` + `FT_Render_Glyph(NORMAL)`。
 	/// @return false = 无此字形 / 加载或栅格化失败（调用方仍应推进笔位——详设 §1.4）
 	bool Glyph(const Font& font, char32_t cp, GlyphBitmap& out);
+
+	/// @brief 按**缓存键**取字形位图（★ Phase 26 批三：`GLGlyphAtlas` 的 miss 路径入口）
+	/// @details 键**完全决定了**要栅格化什么（face + glyphIndex + pixelSize + hinting）
+	///          ⇒ 不需要 `Font`。★ `Glyph(font, cp, …)` 即「构建键后委派给本方法」。
+	///          ★ 渲染链因此**不必知道 codepoint**（图集只认键——详设 §1.3 ② 的直接兑现）。
+	bool GlyphByKey(const GlyphKey& key, GlyphBitmap& out);
 
 	/// @brief 累计栅格化次数（★ **观测缝**——命中与否的返回值相同，无法凭返回值区分）
 	std::size_t RasterizeCount() const noexcept;

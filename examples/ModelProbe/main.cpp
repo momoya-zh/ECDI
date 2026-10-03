@@ -201,11 +201,29 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	// 9.7 自适应：RootWidget 设 VLayout(fillCrossAxis) → page SetStretch(1) 铺满全窗（D4——Window 不替用户
 	// 决定 RootWidget 布局，显式设于 demo 入口）；窗口拉伸 → OnResized → Arrange → 页面整体跟随。
 	// 原 bg 垫底层（页面 640×710 外露白底补丁）已随铺满化废弃——page 自身 #0f1115 背景即覆盖全窗（D3 必要改造）。
-	ECDI::Window& win = application.Create(kWindowTitle, 680, 780);
+	// ── Phase 26 批四：`--gl` ⇒ GL 渲染后端（★ 默认仍是 GDI——零回归；详设 △14 / D7）──
+	// ★ 后端选择必须在 `Create` **之前**（services 是 `Create` 的形参；其默认实参 = GDI 工厂）
+	const std::wstring cmdLine(lpCmdLine ? lpCmdLine : L"");
+	const bool wantGl = ECDI::Demo::WantsGlBackend(cmdLine);
+	ECDI::RenderServices services = ECDI::Demo::CreateRenderServicesForCommandLine(cmdLine);
+	// 非拥有指针：`Create` 只把 unique_ptr 换了 owner（对象地址不变）⇒ 其后仍可查询就绪状态
+	ECDI::RenderingBackend* const requestedBackend = services.renderer.get();
+	ECDI::Window& win = application.Create(kWindowTitle, 680, 780, std::move(services));
+
+	// ★★ **显式 `--gl` 时初始化失败 ⇒ 明确报错退出，不静默回退 GDI**（详设 D7）——
+	//    否则「性能对照」可能实际跑的是 GDI，而读数看上去像是 GL。
+	if (wantGl && (requestedBackend == nullptr || !requestedBackend->IsReady())){
+		MessageBoxW(nullptr,
+		            L"OpenGL (WGL) backend initialization failed.\n"
+		            L"`--gl` was requested, so ModelProbe will not silently fall back to GDI.\n"
+		            L"Check that OpenGL is available, or run without --gl.",
+		            L"ModelProbe", MB_ICONERROR | MB_OK);
+		return 1;
+	}
 
 	// ── chrome 形态（默认自绘标题栏；配置期 API 只能在 Show 前生效——ChromeMode 一次确定，故经命令行选择）──
 	// 用法：modelprobe.exe [--native] [--borderless [caption inset]] [--layer bottom|desktop]
-	//                     [--no-tray] [--no-drop] [--stay] [--hide-on-close]
+	//                     [--no-tray] [--no-drop] [--stay] [--hide-on-close] [--gl]
 	//   （无参数）             自绘标题栏（Borderless + CaptionBar）+ 托盘图标 + 文件拖入
 	//   --native               系统标题栏（Normal——零回归对照）
 	//   --borderless 40 12     自绘 + 自定义标题栏高度与缩放热区
@@ -213,6 +231,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	//   --no-tray / --no-drop  Phase 14 A7 对照：不注册托盘 / 不开启文件拖入
 	//   --stay                 Phase 14 A4 模式 A：真关窗后进程存活（SetQuitOnLastWindowClosed(false)）
 	//   --hide-on-close        Phase 14 A4 模式 B：关闭按钮 = 隐藏到托盘（托盘「显示窗口」恢复）
+	//   --gl                   Phase 26：GL (WGL) + FreeType 第二后端（**默认仍是 GDI**；
+	//                          显式指定时若 GL 初始化失败 ⇒ **报错退出**，不静默回退 GDI —— 详设 D7）
 	bool borderless = true;    // 默认自绘标题栏（--native 回退系统标题栏）
 	bool trayIcon = true;      // Phase 14 A7：托盘图标（--no-tray 关闭）
 	bool fileDrop = true;      // Phase 14 A7：文件拖入（--no-drop 关闭）
@@ -223,7 +243,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	ECDI::WindowLayer layer = ECDI::WindowLayer::Normal;
 	{
 		// 轻量分词（参数集很小——不引 shell32/CommandLineToArgvW）
-		const std::wstring cmd(lpCmdLine ? lpCmdLine : L"");
+		const std::wstring& cmd = cmdLine;
 		size_t pos = 0;
 		auto nextToken = [&cmd, &pos]() -> std::wstring {
 			while (pos < cmd.size() && cmd[pos] == L' ') ++pos;
