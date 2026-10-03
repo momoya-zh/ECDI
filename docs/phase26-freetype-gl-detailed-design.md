@@ -1,9 +1,9 @@
-﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.2 · 实施规格）
+﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.3 · 实施规格）
 
 > 来源：初设稿 `phase26-freetype-gl-preliminary-design.md` **v1.2 ✅ 评审通过**（外部评审第二轮：「**Phase 26 Preliminary Design：通过，可以进入 Detailed Design**」，并定下**详设必答 D26-1..D26-5**）
-> 状态：**v1.2**（2026-10-03）——✅ **评审通过（Implementation Ready）**（外部评审第三轮：「**Phase 26 Detailed Design：通过（Implementation Ready，修 1 个接口矛盾后实施）**」；★ 处置见 §10）
+> 状态：**v1.3**（2026-10-03）——🚧 **实施中**（★ 评审已通过：外部评审第三轮「**通过（Implementation Ready）**」，处置见 §10；★ **批零 / 批一 / 批二 已落**，批三 / 批四 待做 —— 详见 §11 实施回填）
 > 定位：**实施规格**。★ 评审要求「**详设不要再大改架构**」⇒ 本稿**只在初设骨架上把实现细节冻结**，不新增架构。★ 评审同时给了**硬约束：详设不得扩大 Phase 26**（范围锁见初设 §9；HarfBuzz / shaping / ligature / 字体 fallback / LRU atlas / SDF / 多线程栅格化 / Linux GL / Vulkan / viewport culling **一律不做**）。
-> 结构：**§1 = 评审给定的五个必答（本稿核心，放最前）** → §2 基线（带行号实测）→ §3 逐文件改动 → §4 契约映射 → §5 盯防（可机检）→ §6 用例正文 → §7 影响面 → §8 批次 → §9 开放项 → §10 外部评审处置 → §11 修订记录。
+> 结构：**§1 = 评审给定的五个必答（本稿核心，放最前）** → §2 基线（带行号实测）→ §3 逐文件改动 → §4 契约映射 → §5 盯防（可机检）→ §6 用例正文 → §7 影响面 → §8 批次 → §9 开放项 → §10 外部评审处置 → **§11 实施回填** → §12 修订记录。
 
 ---
 
@@ -522,34 +522,48 @@ m_textMeasurer->Initialize(m_platformWindow->GetRenderContext());   // ★ Phase
 ★ **构造期回调安全论证（条 108）**：`GDITextMeasurer::Initialize` / `GLRenderer::Initialize` **只存句柄 / 建 context，不发任何消息**（无 `SetWindowPos` / `ShowWindow` 类调用）⇒ **不触发回调** ⇒ 不触碰「构造期回调读到未初始化成员」的 UB 路径。
 ★ ★ **顺序关键**：`m_renderBackend->Initialize` 在 `m_platformWindow` **构造之后**（构造函数体，非初始化列表）⇒ 此时 `GetRenderContext()` 已就绪 ✅。
 
-### △11 · 改 `CMakeLists.txt`（第三方 + 系统库）
+### △11 · 改 `CMakeLists.txt`（C 语言 + 第三方 + 系统库）—— ★ **实际实现（批零）**
+
+★ 相对 v1.0–v1.2 的设计，本节**有 4 处实测被迫的偏离**（逐条见 §11.2）：
 
 ```cmake
-# ── Phase 26：FreeType（vendor，独立静态库；PRIVATE 链接 ⇒ 不进公共 API）──
-file(GLOB_RECURSE FREETYPE_SOURCES CONFIGURE_DEPENDS
-     ${CMAKE_SOURCE_DIR}/third_party/freetype/src/*.c)
-add_library(freetype STATIC ${FREETYPE_SOURCES})
-target_include_directories(freetype PUBLIC ${CMAKE_SOURCE_DIR}/third_party/freetype/include)
-target_compile_definitions(freetype PRIVATE FT2_BUILD_LIBRARY)
-target_link_libraries(ECDI PRIVATE freetype)
+project(ECDI VERSION 0.1.0 LANGUAGES CXX C)                 # ★ +C（FreeType 是 C 源码）
 
-# GL 系统库（与既有系统库同组，PUBLIC——沿 B17 惯例）
-target_link_libraries(ECDI PUBLIC opengl32)
+include("third_party/freetype/sources.ecdi.cmake")          # ★ 显式 TU 列表（**不能 GLOB** —— §11.2 #3）
+add_library(freetype OBJECT ${FREETYPE_SOURCES})           # ★ OBJECT（不是 STATIC —— 见下）
+target_include_directories(freetype PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/include")   # ★ PRIVATE：OBJECT 库**不向消费者传播**
+target_compile_definitions(freetype PRIVATE FT2_BUILD_LIBRARY)
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")            # ★ MSVC 系（cl.exe / clang-cl / clang）
+    target_compile_definitions(freetype PRIVATE _CRT_SECURE_NO_WARNINGS)  # ★ 关 CRT 弃用告警（§11.2 #6）
+endif()
+if(MSVC)
+    target_compile_options(freetype PRIVATE /utf-8)        # 源码含非 ASCII（实测 15 文件）
+endif()
+
+add_library(ECDI STATIC ${FRAMEWORK_SOURCES} $<TARGET_OBJECTS:freetype>)   # ★ obj 并入 ECDI.a
+target_include_directories(ECDI PRIVATE
+    ...
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/include"    # ★ ECDI 自己加（OBJECT 不传播）
+)
 ```
 
+★ **为何 `OBJECT` 而非 `STATIC`**：`STATIC` 目标 + PRIVATE 链接会撞 `install(EXPORT)` 的「依赖不在 export set」（静态库的 PRIVATE 依赖仍是 link 接口）⇒ 用 `OBJECT` + `$<TARGET_OBJECTS>` 把 FreeType 的 obj **并入 `ECDI.a`** ⇒ 消费者只看到 `ECDI.a`、**无外部依赖**。
+★ **为何源列表不用 GLOB**：`src/**/*.c` 共 210 个，其中 **165 个是「被其他 `.c` include」**的（如 `ftzopen.c` 由 `ftlzw.c` include）⇒ GLOB 逐个编译**必失败** ⇒ 用显式 TU 列表（`sources.ecdi.cmake`）。
+★ **为何要 `_CRT_SECURE_NO_WARNINGS`**：MSVC 系走 MSVC UCRT 头 ⇒ FreeType 的 `ft_getenv` / `ft_strcpy` / `ft_strncpy` / `ft_strcat` 展开为被标记弃用的 CRT 函数 ⇒ 6 处 `_CRT_INSECURE_DEPRECATE` 告警。★ **上游零改动** ⇒ 构建层关闭（告警文本自身推荐）。
+★ **`opengl32` 尚未加**（属 **批三** GL 后端）—— 批零只接通 FreeType。
 ★ **FreeType 不在 `GLOB_RECURSE FRAMEWORK_SOURCES`（`ECDI/src/**`）范围内** ⇒ 框架自动入库规则不受影响（B17）。
-★ **`opengl32` 用 PUBLIC**：与既有 8 个系统库（B17）同形；★ 若评审要求收紧为 PRIVATE（因为公共头不含 `<GL/gl.h>`），**登记为开放项 O4**。
-
 ### △12 · 新建 `third_party/freetype/`（vendor，★ **实施前置**）
 
 | 项 | 定案 |
 |---|---|
 | **位置** | `third_party/freetype/`（顶层；B18 实测当前**不存在**） |
 | **来源** | 官方 `https://download.savannah.gnu.org/releases/freetype/`（或 GitHub 官方镜像） |
-| **版本 pin** | ★ **实施批零一次冻结到具体补丁号 + SHA256**（评审 §21：vendor 进仓后**不用范围描述**——「2.13.x」只作 README 概括；工程台账须精确到 `2.13.x.y` + 校验和）。写入 `README.ecdi.md`（开放项 O5） |
-| **许可** | **FTL**（可商用、非 copyleft）⇒ 保留 `third_party/freetype/LICENSE.TXT` |
-| **归属清单** | `third_party/freetype/README.ecdi.md`：上游版本 · 下载来源 + 校验和 · 本地改动（`ftoption.h`）· **同步义务** |
-| **最小配置** | `ftoption.h` 关 `FT_CONFIG_OPTION_USE_PNG` / `BROTLI` / `SVG` / `BZIP2` |
+| **目录裁剪** | 保留 `include/` · `src/`（★ **排除 `src/tools/`**——实测 4 个自带 `main()`）· ★ **`builds/windows/`**（`ftsystem.c` + `ftdebug.c`）· `LICENSE.TXT` · `README` · ★ **`docs/FTL.TXT` + `docs/GPLv2.TXT`**（许可全文）· `sources.ecdi.cmake` / `README.ecdi.md`（本仓库新增） |
+| **版本 pin** | ★ **批零冻结：`2.14.3`**（2026-03-22）· SHA256 `e61b31ab26358b946e767ed7eb7f4bb2e507da1cfefeb7a8861ace7fd5c899a1`（★ 与官方公布值**逐字符一致**，2026-10-03 核对）· 归档 **4,134,916** bytes。★ **选它的理由 = 安全**：官方 2.14.3 `CHANGES` 明写「A bunch of potential security problems have been found. **All users should update.**」（2.13.3 为 2024-08 旧线）⇒ 取**最新稳定维护版**。写入 `README.ecdi.md` |
+| **许可** | **FTL**（FreeType License，BSD 风格——可商用、非 copyleft）⇒ 保留 ★ **`LICENSE.TXT` + `docs/FTL.TXT` + `docs/GPLv2.TXT`**（★ **三个都要**：`LICENSE.TXT` 正文明确指向 `docs/` 下两份全文，缺则**引用断链** —— 见 §11.3） |
+| **归属清单** | `third_party/freetype/README.ecdi.md`：上游版本 + SHA256 · 下载来源 · ★ **零本地改动** · 目录裁剪 · **同步义务** |
+| **最小配置** | ★ **零 patch**（实测）：PNG / BROTLI / BZIP2 / HARFBUZZ **默认已关**；`TT_CONFIG_OPTION_MAX_RUNNABLE_OPCODES` 默认 **`1000000L`**（正是要的步数上限）；SVG 默认开但**不引入外部依赖**（关它要改 2 处，不划算）⇒ **不改 FreeType 任何文件** |
 | **资源上限** | 最大字体文件 **32 MB** · 最大单字形 bitmap **512×512** · 图集 **1024²** · 保留字节码步数上限（**数值待实施验证**，开放项 O6） |
 | **★ 处置形态** | 每个上限落成 **`Limit → Reject/Fail → 明确错误码 + 日志`**（沿初设 §5-2；**不是**笼统「超过即失败」） |
 
@@ -588,7 +602,7 @@ target_link_libraries(ECDI PUBLIC opengl32)
 
 ---
 
-## 5. 盯防清单（9 条，全部可机检）
+## 5. 盯防清单（11 条，全部可机检）
 
 | # | 盯防 | 机检 |
 |---|---|---|
@@ -597,23 +611,25 @@ target_link_libraries(ECDI PUBLIC opengl32)
 | ③ | **测量缓存键含 DPI**（非仅 text+font） | 代码审查 + T26-5 |
 | ④ | **`FontEngine` 无 GPU 资源**（无 `GLuint` / `glGen*`） | `grep -n "GLuint\|glGen\|glBindTexture" src/Render/FontEngine.*` = **0** |
 | ⑤ | ★★ **`RecordingBackend` 歧义核查**：其作用域内**无**非限定 `Initialize(...)` 调用（双重继承 ⇒ 两个 `Initialize` 同名） | `grep "RecordingBackend.*Initialize\|\.Initialize(" src/Tests/` 逐条判（B16 已实测 0） |
-| ⑥ | **`src/Render/` 无 `Windows.h` 直用**（除既有 `GDIBackend` / 新增 `GLRenderer` 两个平台后端实现头——**豁免**） | `grep -l "Windows.h" src/Render/*.h` |
+| ⑥ | **`src/Render/` 无 `Windows.h` 直用**（★ **豁免名单** = 后端实现头 `GDIBackend` / `GLRenderer` + **`GDITextMeasurer` / `FreeTypeTextMeasurer`**（Phase 26 起都经 `Win32RenderContext.h` 取 HWND —— D-8 / 平台接缝所致）） | `grep -l "Windows.h" src/Render/*.h` 逐条判豁免 |
 | ⑦ | **`GetDeviceCaps` 全库归零**（D-8 后无「屏幕基准」残留） | `grep -rn "GetDeviceCaps" src/` = **0** |
 | ⑧ | **`RenderCommand` / `Renderer` / `PaintContext` / `CommandBuffer` 零 diff**（P5 定案） | `git diff --stat` |
 | ⑨ | ★ **GDI 测量缓存键含 DPI**（`(text, size, family, dpi)`，与 `m_fontCache` 同口径）+ **有容量上限** | 代码审查 + T26-12 |
+| ⑩ | ★ **第三方许可文件完整**：`LICENSE.TXT` 正文引用到的文件**逐一在库内**（`docs/FTL.TXT` / `docs/GPLv2.TXT`） | 逐个 `test -f`（见 §11.3） |
+| ⑪ | ★ **vendored FreeType 编译零告警**（MSVC 系尤须——CRT 弃用告警已由构建层宏关闭） | 构建日志 `grep -c warning` = **0** |
 
 ---
 
 ## 6. 用例正文（T26-1..T26-12）
 
-**口径**：自动化 **+11**（FontEngineTests **+6**：T26-1..T26-6 · TextMeasurerTests **+2**：T26-10 / **T26-12** · GLBackendTests **+2**：T26-7/T26-8 · ModelProbeTests **+1**：T26-11）· T26-9（GL 成功渲染）**人工**、不计入 ⇒ **307 → 318**（预估）。
+**口径**：自动化 **+11**（FontEngineTests **+6**：T26-1..T26-6 · TextMeasurerTests **+2**：T26-10 / **T26-12** · GLBackendTests **+2**：T26-7/T26-8 · ModelProbeTests **+1**：T26-11）· T26-9（GL 成功渲染）**人工**、不计入 ⇒ **307 → 318**（预估）。 ★ **实际进度（2026-10-03）**：批一 **+2** ⇒ **309**（四链全绿）· 批二 **+6** ⇒ **315**（本地验证）· 批三 **+2** ⇒ 317 · 批四 **+1** ⇒ **318**。
 
 ★ **观测缝（T26-3/T26-5/T26-12 的前提）**：断言「缓存命中」有个矛盾——★ **命中与不命中的返回值相同**（这正是缓存的正确性）⇒ **无法凭返回值区分**。⇒ 用**只读计数**：`FontEngine` 的 `RasterizeCount` / `MeasureCacheMissCount`（**GL 侧** · T26-3/T26-5）与 **`GDITextMeasurer::MeasureCacheMissCount`（GDI 侧** · T26-12）；★ 均为**内部件的公开方法，非公共 API**。★ 同款计数即 **D26-5 基准指标**（glyph 栅格化次数 / atlas miss / 测量缓存命中）的来源——**一处实现、两处消费**（沿条 94 的「先用现有积木」）。
 
 | # | 文件 | 输入 | 期望 |
 |---|---|---|---|
 | **T26-1** | FontEngineTests | `SetDpi(96)` / `SetDpi(120)` / `SetDpi(144)`；`PixelSize(Font{14})` | `14 / 18 / 21`（`lround(14·dpi/96)`）；`SetDpi(0)` ⇒ 按 96 ⇒ `14`（fail-safe） |
-| **T26-2** | FontEngineTests | 同 face/size/dpi 下两次 `MeasureText`；DPI 变化后再测 | 同参 ⇒ 同结果（稳定）；DPI 变 ⇒ 结果按比例变 |
+| **T26-2** | FontEngineTests | 同 face/size/dpi 下两次 `MeasureText`；DPI 变化后再测 | 同参 ⇒ 同结果（稳定）；★ DPI 变 ⇒ 结果**近似不变**（`MeasureText` 返回值**恒为 DIP**、与 DPI 无关 —— ★ v1.0 原写「按比例变」**是错的**，见 §11.4） |
 | **T26-3** | FontEngineTests | ★ **glyph bitmap cache 命中**（**栅格化链**）：同 `GlyphKey` 二次 `Glyph` | 第二次**不重复栅格化**（`RasterizeCount` 不增）；换 `pixelSize` ⇒ 重新栅格化（计数 +1） |
 | **T26-4** | FontEngineTests | `GlyphKey` 唯一性：同字形不同 pixelSize / 不同 faceId / 不同 glyphIndex | **两两不等**；全同 ⇒ 相等（`operator<` 严格弱序自洽） |
 | **T26-5** | FontEngineTests | 同 `(text, font, dpi)` 二次 `MeasureText`（C-7 的**测量链**正式用例） | 命中缓存（`MeasureCacheMissCount` 不增）；★ 非 96 DPI（120）下验证「DPI 变 ⇒ 失效重算」 |
@@ -649,11 +665,11 @@ target_link_libraries(ECDI PUBLIC opengl32)
 
 | 批 | 内容 | 出口判据 |
 |---|---|---|
-| **批零** | △12 vendor FreeType + △11 CMake（freetype 目标 + opengl32） | **CMake 配置成功** + FreeType 静态库编译通过（尚不接通） |
-| **批一** | △6 `TextMeasurer::Initialize` + △9 `GDITextMeasurer`（**D-8 闭合 + 测量缓存**）+ △10 `Window.cpp` +1 行 + T26-10 / **T26-12** | ★ **D-8 立即闭合 + GDI 测量缓存立即生效**（**不需 FreeType / 不需 GL**）——**最小、独立、可先落** |
-| **批二** | △1 `FontEngine` + △2 `FontSource` + △3 `FreeTypeTextMeasurer` + T26-1..T26-6 | 全绿（纯 CPU 用例） |
-| **批三** | △4 `GLGlyphAtlas` + △5 `GLRenderer` + △7/△8 工厂 + T26-7/T26-8 | 全绿（无 GL 环境亦可，靠失败路径 + 纯逻辑） |
-| **批四** | △14 `ModelProbe --gl` + T26-9 人工目视 + **性能基准（D26-5）** + 台账收口 | 四链全绿 + 目视 + 性能读数 |
+| **批零** | △12 vendor FreeType + △11 CMake（freetype 目标） | ✅ **已完成（2026-10-03）**：FreeType **2.14.3** vendor + CMake 接通；`freetype` 目标 **43 obj 编译通过**（`opengl32` 属批三，未加） |
+| **批一** | △6 `TextMeasurer::Initialize` + △9 `GDITextMeasurer`（**D-8 闭合 + 测量缓存**）+ △10 `Window.cpp` +1 行 + T26-10 / **T26-12** | ★ **D-8 立即闭合 + GDI 测量缓存立即生效**（**不需 FreeType / 不需 GL**）——**最小、独立、可先落**。★ ✅ **已完成**：**四链 309/309 全绿**（用户实测） |
+| **批二** | △1 `FontEngine` + △2 `FontSource` + △3 `FreeTypeTextMeasurer` + T26-1..T26-6 | ✅ **已完成**：**315/315**（clang + MinGW 本地验证）；★ 覆盖度积分与基线**逐位相同** = 零行为变化（条 103） |
+| **批三** | △4 `GLGlyphAtlas` + △5 `GLRenderer` + △7/△8 工厂 + T26-7/T26-8 | 全绿（无 GL 环境亦可，靠失败路径 + 纯逻辑） | ★ ⬜ **待做**
+| **批四** | △14 `ModelProbe --gl` + T26-9 人工目视 + **性能基准（D26-5）** + 台账收口 | 四链全绿 + 目视 + 性能读数 | ★ ⬜ **待做**
 
 ★ **批一独立先行**的理由：**D-8 的修复不需要 FreeType、不需要 GL** —— 它只是把测量基准从屏幕 DC 换成窗口 DPI（几行）。⇒ **立即可验、零风险**，且**先拿到一部分价值**。
 
@@ -667,7 +683,7 @@ target_link_libraries(ECDI PUBLIC opengl32)
 | **O2** | `GlyphKey.hinting` 单值时是否占位 | 本 Phase 恒 `HintingMode::Normal`；若评审认为单值不应占 key 维 ⇒ 去掉（`operator<` 同步删） |
 | **O3** | 图集**淘汰策略** | **保持不做**（评审 §17 认可）；重启条件 = 大字体 / 多字号场景图集常满 |
 | **O4** | `opengl32` 用 PUBLIC 还是 PRIVATE | 本稿沿 B17 用 PUBLIC；★ 公共头零 GL（盯防②）⇒ 收紧为 PRIVATE 亦安全 |
-| **O5** | FreeType **具体版本 pin** | ★ 评审 §21：批零**一次冻结到补丁号 + SHA256**（不用范围描述）；记入 `README.ecdi.md` + CVE 同步基线 |
+| **O5** | ✅ **已解决**：FreeType 版本 pin | 批零冻结 **2.14.3**（2026-03-22）+ SHA256 `e61b31ab…`（与官方公布值逐字符一致）· 记入 `README.ecdi.md`（★ 含**安全理由**：官方 `CHANGES` 明写 2.14.3 为安全维护版「All users should update」）· CVE 同步基线 = 本版 |
 | **O6** | 资源上限**具体数值** | 32 MB / 512² / 1024² / max_steps 为**建议值**，**实施时验证**（初设 §5-2 已标「待详设验证」；本稿进一步标「待实施验证」） |
 | **O7** | 「per-frame 自省 vs `OnTargetResized`」成本对比 | 初设 §3-⑧ 已定「保留不做 `OnTargetResized`」（N7）；本稿沿用，**成本对比数据待实施期补** |
 | **O8** | ✅ **已纳入**（用户 2026-10-03 拍板）：默认 GDI 路径的测量缓存 | 由 **§1.6 + △9b** 落地——`GDITextMeasurer` 加同款缓存（键含 DPI · **命中免 `GetDC`** · 上限清空）。★ 原为「待拍板」，**现转正**；批一即可生效（不依赖 GL） |
@@ -700,8 +716,50 @@ target_link_libraries(ECDI PUBLIC opengl32)
 
 ★ **最终判断**：**通过（Implementation Ready）** —— **1 项必须改（D26-4 接口矛盾）+ 6 项建议改（全部采纳）+ 16 节确认**；路线与架构**零退回**。
 
-## 11. 修订记录
+## 11. 实施回填（批零–批二，2026-10-03）
 
+> 本节记录**实现过程中与设计不符 / 设计未覆盖**的实测事实 —— 沿条 96（**文档会静默变假**）。
+> ★ 设计意图（§1–§9）**未变**，本节差异均为**实现期被迫的具体化**（非架构改动）。
+
+### 11.1 交付进度
+
+| 批 | 状态 | 实测 |
+|---|---|---|
+| **批零** | ✅ 完成 | vendor FreeType **2.14.3** + CMake 接通；`freetype` 目标 **43 obj 编译通过** |
+| **批一** | ✅ 完成 | D-8 闭合 + GDI 测量缓存；**四链 309/309 全绿**（用户实测） |
+| **批二** | ✅ 完成 | `FontEngine` / `FontSource` / `FreeTypeTextMeasurer` + **T26-1..T26-6**；**315/315**（clang + MinGW 本地验证，覆盖度积分与基线**逐位相同** = 零行为变化） |
+| **批三** | ⬜ 待做 | `GLGlyphAtlas` + `GLRenderer` + 工厂 + `opengl32` + T26-7/T26-8 |
+| **批四** | ⬜ 待做 | ModelProbe `--gl` + 目视（T26-9）+ 性能基准（D26-5）+ 台账 |
+
+### 11.2 相对设计的偏离（全部实测被迫）
+
+| # | 设计（v1.0–v1.2） | 实现（实测） | 原因 |
+|---|---|---|---|
+| 1 | FreeType **2.13.x** | **2.14.3** | 官方 2.14.3 `CHANGES` 明写**安全修复**「All users should update」⇒ 取最新稳定维护版（2.13.3 为 2024-08 旧线） |
+| 2 | 改 `ftoption.h` 关 PNG / BROTLI / SVG / BZIP2 | **零本地 patch** | 实测前四者（含 HARFBUZZ）**默认已关**；`MAX_RUNNABLE_OPCODES` 默认 **`1000000L`**；SVG 默认开但**不引入外部依赖**（关它要改 2 处，不划算）⇒ **不改 FreeType 任何文件**（升级 = 整目录替换） |
+| 3 | `GLOB_RECURSE` 取源 | **显式 TU 列表** `sources.ecdi.cmake` | `src/**/*.c` 共 210 个，**165 个被其他 `.c` include**（非独立 TU）⇒ GLOB **必失败**（实测 `ftzopen.c` 报 `FT_LOCAL` 未定义） |
+| 4 | `add_library(freetype STATIC)` + `PRIVATE` 链接 | **`OBJECT` + `$<TARGET_OBJECTS>`** | `STATIC` + PRIVATE 撞 `install(EXPORT)`「依赖不在 export set」；obj 并入 `ECDI.a` ⇒ 消费者**零外部依赖** |
+| 5 | 只 vendor `include/` + `src/` | **+ `builds/windows/`** | Windows 平台接口 `ftsystem.c`（宽字符 API）+ `ftdebug.c`（否则**链接期** `FT_Trace_Disable/Enable` undefined —— **编译期看不出来**） |
+| 6 | （设计未覆盖）构建告警 | **`_CRT_SECURE_NO_WARNINGS`**（仅 MSVC 系） | FreeType 的 `ft_getenv`/`ft_strcpy`/`ft_strncpy`/`ft_strcat` 展开为被 MSVC UCRT 标弃用的 CRT 函数 ⇒ **6 处** `_CRT_INSECURE_DEPRECATE` 告警 ⇒ 构建层关闭（**上游零改动**） |
+| 7 | 源列表 = 40 项 `BASE_SRCS` | **+2**（`builds/windows/ftsystem.c` + `ftdebug.c`） | 见 #5 |
+| 8 | （设计未覆盖）`fthash.c` 等辅助许可 | 已随 `src/` 保留 | `LICENSE.TXT` 另引 `src/bdf/README` / `src/pcf/README` / `src/gzip/zlib.h` / `src/autofit/ft-hb-*` —— 实测**均在库内** ✓ |
+
+### 11.3 ★ 许可证缺口（本轮修复）
+
+- **现象**：`LICENSE.TXT` 正文明确指向 `docs/FTL.TXT` 与 `docs/GPLv2.TXT`，但 vendor 时**排除了整个 `docs/`** ⇒ **两个正式许可全文缺失**，`LICENSE.TXT` 的引用**断链**。
+- **性质**：FTL 要求「源码 / 二进制分发须保留版权声明、条件与免责声明」⇒ 缺全文 = **不合规**。
+- **修复**：补 vendor `third_party/freetype/docs/FTL.TXT`（**6,743** bytes）+ `docs/GPLv2.TXT`（**17,994** bytes）—— 取自**同一官方归档**（SHA256 复核一致）。
+- ★ **纪律**：第三方许可完整性判据 = **以其正文「引用到的文件」逐一核对**，**不能只看入口文件**（`LICENSE.TXT`）在不在（已登记为盯防 ⑩）。
+
+### 11.4 实现细节（设计已含，此处记录落地值）
+
+- `FontEngine` 的 face 缓存键用**解析后的路径**（非 family 原串）⇒ 空 family 与显式默认文件名**复用同一 face**。
+- ★ **T26-2 订正**：设计写「DPI 变 ⇒ 结果**按比例变**」**是错的** —— `MeasureText` 返回 **DIP** ⇒ DPI 变化时结果**近似不变**（这正是 `TextMeasurer.h` 的既有契约）。已按「**近似不变**」实现与断言。
+- **编码细节**：`FT_New_Face` 的路径必须 **ANSI**（依据 `builds/windows/ftsystem.c:231` 用 `MultiByteToWideChar(CP_ACP, …)`）⇒ `FontSource::ResolveFile` 返回 ANSI，内部用宽 API 探测。
+
+## 12. 修订记录
+
+- **v1.3**（2026-10-03）**实施回填（批零–批二）+ 许可缺口修复**（非评审驱动；详见 **§11**）。① ★★ **许可证缺口**：vendor 时排除了整个 `docs/` ⇒ `LICENSE.TXT` 正文引用的 **`docs/FTL.TXT` / `docs/GPLv2.TXT` 缺失**（引用断链、不合规）⇒ 已从官方归档补齐，并登记**盯防 ⑩**（判据 = 以正文引用逐一对账，不能只看入口文件）。② ★ **版本 pin 落地 2.14.3**（含安全理由）· **零本地 patch**（默认已关 PNG/BROTLI/BZIP2/HARFBUZZ）· **显式 TU 列表**（GLOB 必失败：165/210 非独立 TU）· **`OBJECT` + `$<TARGET_OBJECTS>`**（避 `install(EXPORT)` 冲突）· **`builds/windows/`**（`ftsystem.c` + `ftdebug.c`）· **`_CRT_SECURE_NO_WARNINGS`**（MSVC 系 CRT 弃用告警 6 处）—— 逐条见 **§11.2**。③ **△11 重写**为实际 CMake 实现；**△12** 更新版本 / 许可 / 最小配置 / 目录裁剪。④ **盯防 9 → 11 条**（⑥ 扩豁免名单至 `GDITextMeasurer` / `FreeTypeTextMeasurer`；新增 ⑩ 许可完整 · ⑪ FreeType 零告警）。⑤ ★ **§6 T26-2 订正**（`MeasureText` 返回 DIP ⇒ DPI 变结果**近似不变**，v1.0 的「按比例变」是错的）。⑥ **§8 批次补状态**（批零/批一/批二 ✅；批三/批四 ⬜）· **§6 口径补实际进度**（309 / 315）· **O5 标 ✅ 已解决**。⑦ 新增 **§11 实施回填**，原 §11 修订记录顺延 **§12**。
 - **v1.2**（2026-10-03）**吸收外部评审第三轮 ⇒ 通过（Implementation Ready）**。① ★★ **必须改**：修 **D26-4 的封装矛盾**——新增 **`FontEngine::GlyphIndex(font, cp)`**（△1），`GLRenderer` **不再直调 `FT_Get_Char_Index`**（§1.4 数据流改经它；§1.3 key 注释与 ② 行同步）⇒ **`FT_*` 仍只出现在 `FontEngine.cpp`**（C-4 兑现）。★ 评审亦指出此接口本身**不泄漏 FreeType**（返回 `uint32_t`）。② **6 项建议改全部采纳**：**△9b** 加「`font.size` 生成 key 前不得额外 rounding」· **△2 + C-10** 加「`family` 找不到 ⇒ 返回空串 + 默认 face + **告警**（不静默降级）」· **§1.4** 补 **Atlas 失败语义边界**（`valid=false` 只影响可见性、不影响 advance 排版）· **§1.5** GDI cold 措辞改「初始化 / 绘制成本」（两后端 cold 模型**不同构**）· **§4 C-3** 映射改为「**代码审查 / 结构性机检**」（原映射到 T26-1 是错的；**不新增测试**）· **△12 / O5** FreeType 版本**一次冻结到补丁号 + SHA256**。③ ★ **自查发现遗漏**：文件标题仍 **v1.0**（v1.1 升版时漏改）⇒ 订正 **v1.2**。④ 新增 **§10 外部评审处置（第三轮）**（含 **已覆盖度回扫**：16 节本稿已写对）+ 原 §10 修订记录顺延为 **§11**；导航行同步。⑤ ★ 评审明示「**不会建议重新开一轮设计**」⇒ **路线与架构零退回**；**可进入实施**（★ 评审亦建议**先落批一**——D-8 + GDI 测量缓存，不依赖 FreeType / GL）。
 - **v1.1**（2026-10-03）**纳入用户拍板的 GDI 测量缓存**。★ 用户 2026-10-03 拍板（回应本稿 v1.0 §9 O8）：把**默认 GDI 路径的测量缓存**纳入本 Phase。① ★★ 新增 **§1.6**（补充必答）——`GDITextMeasurer` 测量结果缓存：键 `(text, size, family, dpi)`（**含 DPI**）· 查缓存**在 `GetDC` 之前**（★ 命中免 `GetDC`/`ReleaseDC`）· 上限 4096 ⇒ `clear()`（防无界增长）· **`LineHeight` 不加**（最小面）· 观测缝 `MeasureCacheMissCount` · 与 GL 侧缓存**语义一致但互不共享**。② **△9 扩展为 9a（基准改窗口 DPI = D-8 闭合）+ 9b（测量结果缓存）**。③ **△13 / §7**：测试文件 **2 → 3**（新增 **`TextMeasurerTests.cpp`** 承载 T26-10 / T26-12——★ **不放 `DpiTests.cpp`**，后者自述定位为「不经窗口、纯函数」）。④ **C-7 泛化**（泛到「底层度量调用」，含 GDI `GetTextExtentPoint32W`；两条链各自缓存）。⑤ **盯防 8 → 9 条**（新增 ⑨：GDI 缓存键含 DPI + 容量上限）。⑥ **§6 加 T26-12**（GDI 测量缓存命中）；口径 自动化 **+10 → +11** ⇒ **307 → 317 → 318**；观测缝补 GDI 侧计数。⑦ **§8 批一**加 T26-12（★ 批一 **不需 FreeType、不需 GL** ⇒ D-8 与 GDI 测量缓存**同时立即生效**）。⑧ **§9 O8 转正**（待拍板 → ✅ 已纳入）+ 新增 **O9**（缓存淘汰）。⑨ ★ **T26-10 的诚实标注**：**本机单屏**（窗口 DPI == 屏幕 DPI == 120）⇒ **两链基准天然一致 ⇒ 本机无法区分修复前后**（★ **这正是 D-8 长期潜伏的原因**）⇒ 本机实为**零回归判据**，**真区分需双屏 / 双 DPI 环境**。
 - **v1.0**（2026-10-03）初稿（实施规格）。**§1 = 评审给定五必答**（D26-1 face identity 用 `FaceId`+family 键 · ★★ **D26-2 `FontEngine::PixelSize` 唯一 DIP→px 路径**（评审点名的详设重点）· **D26-3 key 定稿**（`pixelSize` 代 size+dpi、`glyphIndex` 代 codepoint、hinting 落到具体 load flags）· **D26-4 `GlyphSlot` + DrawText 完整数据流** · **D26-5 benchmark contract 固定参数表** · ★ **观测缝**（只读计数：`RasterizeCount` / `MeasureCacheMissCount` / `AtlasMissCount`——测试断言与基准指标共用））。**基线 B1–B18**（带行号实测；★ **B11 = D-8 根因**（两链同公式异基准）· **B13/B16 = 双重继承 + 零 `RecordingBackend.Initialize` 调用**（歧义不触发）· **B18 = 无 `third_party/` + 本机 DPI 120**）。**△1–△14**（新建 11 内部件 + 2 测试 + vendor；★ **△2 `FontSource` = 评审 §6 的落点**；★ **△9 = D-8 闭合**）。**契约 C1–C10 全映射** · **盯防 8 条**（含 ★ **`GetDeviceCaps` 归零** · **公共头零 FreeType/GL**）· **用例 T26-1..T26-11**（自动化 +10 ⇒ 307 → 317）· **五批**（★ **批一 = D-8 独立先行**）· **开放项 O1–O8 / 局限 L1–L3**（★ **O8 = 默认 GDI 路径的测量缓存待拍板**）。**待评审。**
