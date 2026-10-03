@@ -1,7 +1,7 @@
 ﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 初步设计
 
 > 来源：需求确认稿 `phase26-freetype-gl-requirements.md` **v1.2**（外部评审第一轮：「**基本通过，但建议先修 4 个关键边界，再进入 Preliminary Design**」；四项边界处置见需求稿 §6/§7）
-> 状态：**v1.0**（2026-10-03）——**待评审**
+> 状态：**v1.1**（2026-10-03）——**待评审**（★ v1.1 补**测量缓存**（性能方向 ②）+ 登记方向 ③ 顺延 Phase 27，见 §9）
 > 定位：**接口草案 + 决策定案 + 生命周期契约**。★ 本 Phase 与 Phase 24 / 25 的关键区别 = **首次同时耦合「资源生命周期 + GPU context + 第三方库 + 公共 API 演进」** ⇒ 本稿**以边界与生命周期验证为重心**，不急着写完整类实现。
 
 ---
@@ -18,6 +18,7 @@
 | **D7** `--gl` | §3-⑥ 命令行切换 + 失败不静默回退 |
 | **D8** vendor 集成 | §3-⑦ 源码编入；§5 CMake 设计 + 许可清单 |
 | **R6** 性能基准 | §7 T26-9 + §8 O5（contract 细化留详设） |
+| **性能方向 ②**（逐帧文本测量） | ★ §3-③ **测量结果缓存**（metrics/size cache，key 含 `text`）+ §7 T26-11 |
 | **P1–P6** 初设必答 | §3-②/③/⑤/⑧ + §3-④/⑨ 逐条收敛（§1.1 对照） |
 
 ### 1.1 评审四项关键边界 → 本稿收敛
@@ -30,6 +31,8 @@
 | **Atlas 生命周期** | 「初设必答 P3」 | ★ **CPU cache 与 GPU texture 分离**——见 §3-⑤ |
 
 ---
+
+★ **不在本 Phase 范围**（性能方向 ③ = 绘制命令构建层的视口裁剪）：`ScrollView` 偏移 → 整树 `Invalidate` + `Widget::Paint` 遍历全部 children ⇒ **视口外行照样构建命令**；**换后端不消失**（GL 只省执行端）⇒ 已登记 `roadmap-deferred.md` **#49**，**顺延至 Phase 27**（用户 2026-10-03 定）。
 
 ## 2. 代码基线（B1–B15，全部 2026-10-03 带行号实测）
 
@@ -104,10 +107,12 @@ virtual void Initialize(const PlatformRenderContext& context) {}
 | face 加载与缓存（按 family） | **排版语义**（shaping / kerning / 连字 / 复杂文种） |
 | glyph metrics（advance / bearing / line height） | Window / DPI 的**持有**（DPI 经 `SetDpi` 注入，见 §3-②） |
 | 栅格化（A8 coverage bitmap） | 任何 `Widget` / `RenderCommand` 知识 |
-| CPU glyph cache（key = face + size + **dpi** + hinting + glyph index） | |
+| ★ **CPU 缓存两类**：① **metrics/size cache**（key = **`text` + font + dpi** → `Size`，服务**测量链**）；② **glyph bitmap cache**（key = face + size + **dpi** + hinting + glyph index，服务**渲染链**） | |
 
 ★ **「同源」的准确含义**（评审 §16）：同源 = **同一 face / size / DPI / rasterization policy**；**不代表**共用 GPU atlas。本稿让 `FreeTypeTextMeasurer` 与 `GLRenderer` **共享同一个 `FontEngine` 实例**（见 §4 注入），但 **GPU texture 只在 `GLRenderer` 侧**。
 
+
+★★ **为什么「测量缓存」是本 Phase 的关键收益（性能方向 ②）**：`TextWidget::DrawTextContent` **每帧**调 `ctx.MeasureText`（`TextWidget.cpp:109`；`Label::OnPaint` 每帧经此），而 `GDITextMeasurer` 每帧执行 `GetDC` + `SelectObject` + `GetTextExtentPoint32`（**只有 HFONT 缓存、无测量结果缓存**）⇒ 大文本滚动 = **每帧 × 每一可视行**重复昂贵的 GDI 测量调用。`FontEngine` 的 **metrics/size cache**（key = `text + font + dpi`）把这笔账降到**一次测量 + 每帧一次 map 命中** ⇒ **按调用次数计，其收益可能大于栅格化缓存**（栅格化经图集缓存后已降为「每字形一次」）。★ **边界如实**：它消掉的是「每帧重复执行**昂贵测量调用**」，**不消掉**「每帧调用 `MeasureText`」本身（剩下的只是一次查找，可忽略）；后者属 `TextWidget` 层，**不在本 Phase**。
 ### 3-④ **D5 定案：保留 A（十个纯虚全实现）** + operation-level 语义契约
 
 spike S1 已证明可实现全部十个纯虚。★ 补 **operation-level semantic contract**（§5 C-5）：不要求像素一致，要求「**同一 `RenderCommand` ⇒ 同一语义操作**」——`DrawFocusRect` 须写清 GL 侧语义（框架已有「不依赖系统 `DrawFocusRect`」的定位，B9 的 `DrawFocusRectCommand` 是**自绘点线框**，GL 侧同样自绘 ⇒ 语义天然对齐）。
@@ -218,6 +223,7 @@ target_link_libraries(ECDI PUBLIC opengl32)   # ★ 现在没有（B14）
 | **C-4** | 公共 API **零 Win32 类型**（`Initialize` 收 `PlatformRenderContext`，不含 HWND） |
 | **C-5** | **operation-level 语义契约**：同一 `RenderCommand` 在两后端产生**同语义操作**（不承诺像素一致，§3-④） |
 | **C-6** | 默认路径（GDI）**逐位零回归**（GL 只在显式注入时生效） |
+| **C-7** | **测量结果可缓存**（key 含 DPI）——同一 `(text, font, dpi)` 重复测量**不触发 FreeType 度量**；**DPI 变化 ⇒ 自动失效**（跨屏安全）。`TextMeasurer` 契约不变（返回值恒 DIP） |
 
 ---
 
@@ -249,6 +255,7 @@ target_link_libraries(ECDI PUBLIC opengl32)   # ★ 现在没有（B14）
 | **T26-8** | `--gl` 失败不静默回退 | 初始化失败 ⇒ 明确错误（不落到 GDI 路径） |
 | **T26-9** | ★ 性能基准（R6 / P6） | GDI vs GL × cold/warm；指标 = frame time / **glyph 栅格化次数** / atlas miss（contract 细化留详设 O5） |
 | **T26-10** | 默认路径零回归（C-6） | 不注入 GL 时，GDI 路径逐位等价 |
+| **T26-11** | ★ **测量缓存命中**（性能方向 ②） | 同 `(text, font, dpi)` 二次测量 ⇒ **不触发 FT 度量**（观测计数或等价）；DPI 变化 ⇒ 缓存失效重算（**非 96 DPI** 下验证） |
 
 ---
 
@@ -266,4 +273,5 @@ target_link_libraries(ECDI PUBLIC opengl32)   # ★ 现在没有（B14）
 
 ## 9. 修订记录
 
+- **v1.1**（2026-10-03）**补测量缓存（性能方向 ②）+ 登记方向 ③**。① ★★ §3-③ 的 CPU 缓存**明确分两类**：metrics/size cache（key = `text + font + dpi`，测量链）+ glyph bitmap cache（key = face + size + dpi + hinting + glyph index，渲染链）——★ 依据 = 测试项目卡顿**三方向评估之 ②**（逐帧文本测量；调用次数 = 每帧 × 每行 ⇒ **按次数计收益可能大于栅格化缓存**）；★ 边界如实（消掉重复执行、不消掉每帧调用本身，后者属 `TextWidget` 层不在本 Phase）。② 新增 **契约 C-7**（测量结果可缓存、键含 DPI）· 测试 **T26-11**（缓存命中）。③ ★ **性能方向 ③**（命令构建层的视口裁剪）已登记 `roadmap-deferred.md` **#49 · 顺延至 Phase 27**（用户 2026-10-03 定），**不在本 Phase 范围**——本稿 §1.1 后加交叉引用。④ 无其他设计变动。
 - **v1.0**（2026-10-03）初稿：需求 v1.2 → 初设映射 · 代码基线 **B1–B15**（全部带行号实测）· **决策定案 D1–D8**（★ **D2/D4 定案 A″：`TextMeasurer::Initialize(context)` + 窗口 DPI**——对称于 `RenderingBackend::Initialize`，调用点零改动 · **D3 三层拆分** · **WGL 生命周期全定** · **Atlas CPU/GPU 分离**）· 接口草案（公共头 2 处变更 + 4 个内部件）· 契约 **C1–C6** · CMake 设计 + 许可/资源上限 · 影响面（**公共头 94 → 94** · API +2 · 用例 307 → ~315+）· 测试大纲 **T26-1..T26-10** · 开放项 **O1–O5**。待评审。
