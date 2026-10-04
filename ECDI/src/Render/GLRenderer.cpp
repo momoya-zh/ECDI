@@ -365,8 +365,12 @@ void GLRenderer::PushClip(const Rect& rect)
 		return;
 	}
 
-	RECT rc{ static_cast<LONG>(rect.x), static_cast<LONG>(rect.y),
-	         static_cast<LONG>(rect.x + rect.width), static_cast<LONG>(rect.y + rect.height) };
+	// 焦点框以 lround 后的像素索引定位；裁切区必须使用相同的量化规则。
+	// 否则缩放产生的 .5 坐标会使右/下边比 scissor 多出一个像素，进而被裁掉。
+	// 这也与 GDIBackend::PushClip 的 IntersectClipRect 参数保持一致。
+	RECT rc{ static_cast<LONG>(std::lround(rect.x)), static_cast<LONG>(std::lround(rect.y)),
+	         static_cast<LONG>(std::lround(rect.x + rect.width)),
+	         static_cast<LONG>(std::lround(rect.y + rect.height)) };
 	if (!m_clipStack.empty())
 	{
 		const RECT& top = m_clipStack.back();
