@@ -1,7 +1,7 @@
-﻿# Phase 27 · 绘制命令构建层的视口剔除 —— 详细设计（v1.0 · 实施规格）
+﻿# Phase 27 · 绘制命令构建层的视口剔除 —— 详细设计（v1.1 · 实施规格）
 
 > 来源：初设稿 `phase27-viewport-culling-preliminary-design.md` **v1.1 ✅ 评审 PASS**（外部评审 2026-10-04：「**PASS，可以进入 Detailed Design**」，13 项分项全过；并给定**详设盯防五件事**——初设 §1.1）
-> 状态：**v1.0**（2026-10-04）——待评审
+> 状态：**v1.1**（2026-10-04）——**✅ 评审 PASS → Implementation**（外部评审 2026-10-04：15 项分项全过、「可以直接开工」、总体风险 低～中可控；无硬伤，三条非阻塞建议已吸收——见 §9）
 > 定位：**实施规格**——把初设的几何/语义冻结落成逐文件改动与精确测试场景。★ 初设评审的五个盯防点在 **§1 逐题钉死**（本稿核心）；★ 范围锁不变（需求 §3.2：不做虚拟化 / 脏区 / 后端执行端 / OnPaint 纯绘制重构）。
 
 ---
@@ -14,8 +14,8 @@
 
 ```cpp
 private:
-    std::vector<Rect> m_cullStack;   ///< 构建侧累计裁剪（★ 镜像栈——C27-1）
-    std::size_t       m_cullBase = 0;///< 种子边界：`m_cullStack` 中属于 initial clip 的条目数，PopClip 不得弹出
+    std::vector<Rect> m_cullStack;   ///< 构建侧**累计裁剪交集**栈（★ 镜像栈——C27-1。★ 命名注记：名虽为 cull，实存的是「initial ∩ … ∩ rect」的累计交集——评审 §13；现阶段名字可接受，不改设计）
+    std::size_t       m_cullBase = 0;///< 种子边界：**仅守卫本镜像栈**——`m_cullStack` 中属于 initial clip 的条目数，构建侧 `pop_back` 不得弹出（≠ 命令 `PopClip` 发射的合法下限——评审 §12）
     bool              m_cullingEnabled = true; ///< 构造期定，**不可变**（D27-C）
 ```
 
@@ -38,7 +38,7 @@ PaintContext(CommandBuffer& commands, TextMeasurer& measurer,
 | 方法 | 行为 |
 |---|---|
 | `PushClip(rect)` | ① 构建侧：`next = 栈空 ? rect : Intersection(栈顶, rect)`；`m_cullStack.push_back(next)`。② 命令：照旧 `emplace_back(PushClipCommand{rect})`（**原 rect 原样进命令**，命令流零变化）。①② 同函数内固定先栈后命令 |
-| `PopClip()` | ① 构建侧：`if (m_cullStack.size() > m_cullBase) m_cullStack.pop_back()`（★ 守卫保证种子永不被弹出——即使上层 `PopClip` 多调用一次，镜像栈与命令栈也同步失衡而非崩溃，与既有「栈空跳过」防御同级）。② 命令：照旧发射 |
+| `PopClip()` | ① 构建侧：`if (m_cullStack.size() > m_cullBase) m_cullStack.pop_back()`（★ 守卫**仅作用于本镜像栈**：保证种子永不被弹出——即使上层 `PopClip` 多调用一次，镜像栈与命令栈也同步失衡而非崩溃，与既有「栈空跳过」防御同级）。② 命令：**照旧发射 `emplace_back(PopClipCommand{})`，不受 `m_cullBase` 门控**（★ 评审 §12 维护提醒：`m_cullBase` **不是**命令 `PopClip` 的合法下限——实现时注释必须写明「守卫只保护构建侧镜像栈」，防止后人把 `> m_cullBase` 比较连带套到命令发射上）。①② 顺序固定：先栈后命令 |
 | `IsRectVisible(rect) const` | `!m_cullingEnabled` ⇒ `true`；栈空（无种子且无 push——仅双参构造的首层前出现）⇒ `true`（无界）；否则 `Intersects(栈顶, rect)` |
 
 **`Intersection` 求交**：`PaintContext.cpp` 私有静态 helper（返回交集矩形，可为零面积）；公共面只有 `Intersects`（bool，初设 Q5 冻结的严格 >0 语义）——**不求交矩形不进公共 API**（无消费者，YAGNI）。
@@ -163,7 +163,7 @@ row4 [0, 20]  row5 [20, 40]                                  ← 保留（可见
 | ⑤ | 副作用白名单不膨胀 | 新 OnPaint override 含 `Set*/Invalidate*/…` 须复核 C27-7 |
 | ⑥ | 执行端量化不回退 | 两后端 `lround` 保持；**禁止 ±1 闭合修正**（初设 Q5 反例） |
 | ⑦ | `self` 单表达式 | `Widget.cpp` 中 `IsRectVisible(self)` 与 `PushClip(self)` 同一标识符（D27-B） |
-| ⑧ | ★ 新增：种子守卫 | `PaintContext.cpp` `PopClip` 含 `m_cullBase` 比较 |
+| ⑧ | ★ 种子守卫（评审 §12 收紧） | `PaintContext.cpp` `PopClip` 含 `m_cullBase` 比较**且仅门控 `pop_back`**——`PopClipCommand` 的 `emplace_back` 在守卫之外（命令发射与 Phase 26 逐位一致）；实现注释须写明守卫的作用域 |
 | ⑨ | ★ 新增：无公共开关 | `grep -c "SetCullingEnabled" include/ src/` = 0（D27-C 定案的防回退哨兵） |
 
 ---
@@ -208,7 +208,7 @@ row4 [0, 20]  row5 [20, 40]                                  ← 保留（可见
 | 批一 | △1 + △2 + △3（PaintContext 级全量）+ T27-3/4/11/12（PaintContext 级用例） | 全链编译 + 存量 319 全绿（零行为变化） |
 | 批二 | △4 + △5（Widget/Window 接入）+ T27-1/2/5/6/7/8/9 + **D27-E 对账复核** | 331 全绿（MinGW + Clang） |
 | 批三 | △7 + T27-10（A2 像素等价） | 探针逐字节一致 + 用户 MSVC |
-| 批四 | A4 性能基准（大文本构建耗时对比）+ 文档回填收口 | 读数入详设 §8.1 |
+| 批四 | A4 性能基准（大文本构建耗时对比；记录 O1 指标集六项、核心三项）+ 文档回填收口 | 读数入详设 §8.1 |
 
 ---
 
@@ -216,7 +216,7 @@ row4 [0, 20]  row5 [20, 40]                                  ← 保留（可见
 
 | # | 项 |
 |---|---|
-| O1 | A4 基准参数表（批四冻结，沿 D26-5 口径：固定树 / 固定行数 / 架构级指标 = 构建端命令数与遍历节点数） |
+| O1 | A4 基准参数表（批四冻结，沿 D26-5 口径：固定树 / 固定行数）。**指标集（评审 §14 建议冻结）**：① 树规模 · ② 可见节点数 · ③ 被剔除节点数 · ④ RenderCommand 数 · ⑤ Paint 遍历节点数 · ⑥ 构建耗时——**核心 = ⑥⑤④**（本 Phase 目标 = 减少构建侧工作量，**非** GPU 速度；总帧时间为次要参考，不作核心指标） |
 | O2 | ~~存量对账清单~~ → **✅ 已完成（D27-E，零改动 + 金丝雀升格）** |
 | O4 | 未来架构候选：OnPaint 纯绘制化（编号待用户拍板，本 Phase 不做） |
 
@@ -225,3 +225,4 @@ row4 [0, 20]  row5 [20, 40]                                  ← 保留（可见
 ## 9. 修订记录
 
 - **v1.0**（2026-10-04）初稿。**输入**：初设 v1.1（评审 PASS）+ 初设评审盯防五件事 + 子代理对账审计（8 文件 / ~25 条 paint 路径全量盘点）。**§1 五必答**：D27-A（栈结构 / 种子守卫 / 三方法行为表）· D27-B（`self` 单表达式冻结）· **D27-C（`SetCullingEnabled` 定案 = 方案 B 变体——开关收敛进构造期、不可变；公共 API +3 → +2；「将来加 setter 是纯增量，现在加是永久契约」）** · D27-D（T27-5/6/7 精确测试树含几何坐标与 row3 边界接触内嵌断言）· **D27-E（对账实测：存量零改动；`Clip.ChildOverflow` 升格金丝雀；两个 HitTest-only 越界树不受影响）**。逐文件 △1–△7 · 契约 C27-1..C27-8 · 盯防 9 条（+种子守卫 + 无公共开关哨兵）· 用例 T27-1..T27-12 · 四批 · O2 关闭。
+- **v1.1**（2026-10-04）评审吸收。**结论：「Phase 27 Detailed Design：PASS → Implementation，可以直接开工」**——15 项分项全过（几何 / clip stack / initial clip / ScrollView 坐标 / `self` 单源 / `SetCullingEnabled` 边界「较初设更好」/ OnPaint 副作用 / subtree pruning / HitTest 隔离 / 存量测试影响 / GL 像素等价 / 测试场景 / 文件范围 / 批次 / 风险 低～中可控；唯一 🟡 = O1 基准未冻结，不阻塞）。**三条非阻塞建议已吸收**：① §12——`m_cullBase` **仅守卫构建侧镜像栈**，不是命令 `PopClip` 发射的合法下限（D27-A 行为表 ② 与盯防 ⑧ 收紧：`> m_cullBase` 比较只门控 `pop_back`，命令 `emplace_back` 在守卫之外；实现注释必须写明作用域）；② §13——`m_cullStack` 实存**累计裁剪交集**（D27-A 成员声明加命名注记，现阶段名字可接受、不改设计）；③ §14——O1 冻结**指标集六项**（树规模 / 可见节点数 / 被剔除节点数 / RenderCommand 数 / Paint 遍历节点数 / 构建耗时），**核心 = 构建耗时 · 遍历节点数 · RenderCommand 数**（本 Phase 目标 = 减少构建侧工作量而非 GPU 速度），总帧时间降为次要参考。公共 API（+2 +1 重载）/ 用例（319→~331）/ 批次 / 文件范围 / CMake 全部不变。
