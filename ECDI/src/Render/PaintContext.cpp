@@ -2,11 +2,23 @@
 
 #include "ECDI/Render/PaintContext.h"
 
+#include <algorithm>   // (std::min)/(std::max)——括号防御 Windows min/max 宏
+
 namespace ECDI {
 
 	PaintContext::PaintContext(CommandBuffer& commands, TextMeasurer& measurer)
 		: m_commands(commands)
 		, m_measurer(measurer)
+	{
+	}
+
+	PaintContext::PaintContext(CommandBuffer& commands, TextMeasurer& measurer,
+	                           const Rect& initialClip, bool enableCulling)
+		: m_commands(commands)
+		, m_measurer(measurer)
+		, m_cullStack{ initialClip }   // 种子按值拷贝（PaintContext 为每帧栈对象——无悬垂面，D27-A）
+		, m_cullBase(1)                // 种子永不被 PopClip 弹出（守卫下限）
+		, m_cullingEnabled(enableCulling)
 	{
 	}
 
@@ -50,6 +62,9 @@ namespace ECDI {
 	void PaintContext::PushClip(const Rect& rect){
 
 		// 状态命令：缓冲中的位置 = 生效范围起点（与其后绘制命令求交）
+		// Phase 27：构建侧镜像栈先更新（栈空 = 无界 ⇒ next = rect 本身）——
+		// 命令仍收原 rect：构建层「累计裁剪」与执行层「逐条求交」职责分离（C27-1）
+		m_cullStack.push_back(m_cullStack.empty() ? rect : Intersection(rect));
 		m_commands.emplace_back(PushClipCommand{ rect });
 
 	}
@@ -57,8 +72,33 @@ namespace ECDI {
 	void PaintContext::PopClip(){
 
 		// 状态命令：缓冲中的位置 = 裁剪区恢复点
+		// Phase 27：构建侧镜像栈同步出栈——守卫仅作用于本镜像栈（种子永不弹出；
+		// 即使上层多调一次 PopClip，镜像栈与命令栈也同步失衡而非崩溃，与既有
+		// 「栈空跳过」防御同级）。★ m_cullBase 不是命令 Pop 的合法下限——
+		// 命令发射照旧、不受守卫门控（评审 §12）
+		if (m_cullStack.size() > m_cullBase)
+			m_cullStack.pop_back();
 		m_commands.emplace_back(PopClipCommand{});
 
+	}
+
+	bool PaintContext::IsRectVisible(const Rect& rect) const
+	{
+		if (!m_cullingEnabled)
+			return true;   // 开关关闭 = 剪枝决策关（镜像栈照常维护——C27-6）
+		if (m_cullStack.empty())
+			return true;   // 无种子且无 push（双参构造首层前）= 无界
+		return Intersects(m_cullStack.back(), rect);
+	}
+
+	Rect PaintContext::Intersection(const Rect& rect) const
+	{
+		const Rect& top = m_cullStack.back();
+		const float x0 = (std::max)(top.x, rect.x);
+		const float y0 = (std::max)(top.y, rect.y);
+		const float x1 = (std::min)(top.x + top.width, rect.x + rect.width);
+		const float y1 = (std::min)(top.y + top.height, rect.y + rect.height);
+		return Rect{ x0, y0, x1 - x0, y1 - y0 };
 	}
 
 	void PaintContext::DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color){

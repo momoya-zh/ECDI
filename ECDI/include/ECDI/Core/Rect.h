@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <algorithm>   // (std::min)/(std::max)——括号防御 Windows min/max 宏（Phase 24 教训）
+
 namespace ECDI
 {
 
@@ -13,5 +15,16 @@ struct Rect
 	float width = 0.0f;		///< 宽度
 	float height = 0.0f;	///< 高度
 };
+
+/// @brief 矩形相交判定（Phase 27 视口剔除判据——初设 Q5 冻结）
+/// @details float 同源（与推入 PushClip 的矩形同一量化规则，不引入第二量化）；
+/// 交集宽、高均严格 > 0——边界接触 = 不相交（= 剔除），无边距。
+inline bool Intersects(const Rect& a, const Rect& b) noexcept
+{
+	const float ix = (std::max)(a.x, b.x);
+	const float iy = (std::max)(a.y, b.y);
+	return (std::min)(a.x + a.width,  b.x + b.width)  - ix > 0.0f
+	    && (std::min)(a.y + a.height, b.y + b.height) - iy > 0.0f;
+}
 
 }

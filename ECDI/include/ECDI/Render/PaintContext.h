@@ -9,6 +9,8 @@
 #include "ECDI/Render/TextMeasurer.h"
 
 #include <string>
+#include <cstddef>
+#include <vector>
 
 namespace ECDI {
 
@@ -20,6 +22,13 @@ namespace ECDI {
 	class PaintContext {
 	public:
 		PaintContext(CommandBuffer& commands, TextMeasurer& measurer);   // 决策 42 + 路线 X
+
+		/// @brief 带初始裁剪的构造（Phase 27 视口剔除——Window::PaintFrame 每帧注入 client 矩形）
+		/// @param initialClip 初始累计裁剪（按值拷贝入构建侧交集栈；不发命令）
+		/// @param enableCulling 构造期开关（D27-C：构造后不可变；false = IsRectVisible 恒 true——
+		///        关闭的是「剪枝决策」而非 clip 机制本身，构建栈照常维护）
+		PaintContext(CommandBuffer& commands, TextMeasurer& measurer,
+		             const Rect& initialClip, bool enableCulling = true);
 
 		/// @brief 绘制填充矩形（最终坐标，零坐标逻辑：原样进命令，决策 37 emplace_back）
 		void DrawRect(const Rect& rect, const Color& color);
@@ -48,6 +57,12 @@ namespace ECDI {
 		/// @brief 裁剪出栈（Phase 8：状态命令，与 PushClip 成对使用）
 		void PopClip();
 
+		/// @brief 视口剔除判据（Phase 27：rect 与当前累计裁剪的交集宽、高均严格 > 0？）
+		/// @details 供 Widget::Paint 在 PushClip 之前判定——false = 整段跳过本子树
+		/// （PushClip/OnPaint/children/PopClip 均不发生，C27-2）。
+		/// 开关关闭或栈空（无种子且无 push = 无界）恒 true。
+		bool IsRectVisible(const Rect& rect) const;
+
 		/// @brief 绘制焦点框（Phase 8：指定颜色点线框，颜色由主题层赋值——Phase 9；9.5 R4 加圆角）
 		void DrawFocusRect(const Rect& rect, float cornerRadius, const Color& color);
 
@@ -60,6 +75,15 @@ namespace ECDI {
 	private:
 		CommandBuffer& m_commands;
 		TextMeasurer& m_measurer;
+
+		// Phase 27 视口剔除（构建侧镜像栈——C27-1：栈顶 ≡ 执行端有效裁剪）
+		std::vector<Rect> m_cullStack;   ///< 累计裁剪交集栈（名虽为 cull，实存「initial ∩ … ∩ rect」——评审 §13 命名注记）
+		std::size_t m_cullBase = 0;      ///< 种子边界：仅守卫本镜像栈（构建侧 pop_back 不得弹出 m_cullBase 以下条目；≠ 命令 Pop 的合法下限）
+		bool m_cullingEnabled = true;    ///< 构造期定、不可变（D27-C）
+
+		/// @brief 累计裁剪求交（私有——公共面只有 bool 判交，初设 Q5/YAGNI）
+		/// @return 交集矩形（可为零面积——不钳制，求交结果原样入栈）
+		Rect Intersection(const Rect& rect) const;
 	};
 
 }

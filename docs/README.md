@@ -19,7 +19,7 @@
 
 ## 开发进度（2026-10-03 更新）
 
-> **当前规模锚点（防止各处历史数字误读）**：测试 **319** 用例（`GetTestRegistry().Add` 求和，**31 个含用例的测试文件**——`src/Tests/*.cpp` 共 34 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **94**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **161** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 **159** 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
+> **当前规模锚点（防止各处历史数字误读）**：测试 **323** 用例（`GetTestRegistry().Add` 求和 = 319 + **Phase 27 批一新增 Culling×4**；**31 个含用例的测试文件**——`src/Tests/*.cpp` 共 34 个，其中 `RunAllTests.cpp` / `TestFramework.cpp` / `test_main.cpp` 为基础设施无用例）｜Public 头 **94**（`include/ECDI/**/*.h`，另 `Core/version.h` 为 CMake 生成头不计）｜设计文档 **161** 篇（`docs/**/*.md` 递归，含 `docs/model-probe/` 2 篇；顶层 **159** 篇）。下表各阶段状态栏内的数字为**该阶段实现时点值**，非当前值。
 
 ### ✅ 已完成
 

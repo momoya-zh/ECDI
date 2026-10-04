@@ -312,6 +312,141 @@ void TestClipResizeSafe()
     EXPECT_EQ(box.GetWidth(), 80);
 }
 
+// ── T27-3：边界接触 = 不相交（剔除）——x / y 向对称各一（初设 Q5 严格 >0）──
+
+void TestCullingBoundaryTouch()
+{
+    CommandBuffer commands;
+    RecordingBackend backend;
+    // 种子 = 视口 [150..250]×[0..100]
+    PaintContext ctx(commands, backend, Rect{ 150.0f, 0.0f, 100.0f, 100.0f });
+
+    // x 向接触：rect [100..150]×[0..100] 与视口交集宽 = 0 ⇒ 剔除
+    EXPECT_FALSE(ctx.IsRectVisible(Rect{ 100.0f, 0.0f, 50.0f, 100.0f }));
+    // y 向接触：视口 [0..100]×[150..250]，rect [0..100]×[100..150] 交集高 = 0 ⇒ 剔除
+    PaintContext ctxY(commands, backend, Rect{ 0.0f, 150.0f, 100.0f, 100.0f });
+    EXPECT_FALSE(ctxY.IsRectVisible(Rect{ 0.0f, 100.0f, 100.0f, 50.0f }));
+    // 对照：部分相交（交集 10×100 > 0）⇒ 可见
+    EXPECT_TRUE(ctx.IsRectVisible(Rect{ 100.0f, 0.0f, 60.0f, 100.0f }));
+    // 对照：完全在内 ⇒ 可见
+    EXPECT_TRUE(ctx.IsRectVisible(Rect{ 160.0f, 10.0f, 20.0f, 20.0f }));
+}
+
+// ── T27-4：部分相交 = 照常可见（ChildOverflow 几何 95×20——金丝雀锚点）──
+
+void TestCullingPartialIntersection()
+{
+    CommandBuffer commands;
+    RecordingBackend backend;
+    // 种子 = Clip.ChildOverflow 的父裁剪：Panel(10,20,100,50)
+    PaintContext ctx(commands, backend, Rect{ 10.0f, 20.0f, 100.0f, 50.0f });
+
+    // 子 = Button pos(5,5) size(200,20) → 绝对 (15,25,200,20)：交集 95×20 > 0 ⇒ 可见
+    EXPECT_TRUE(ctx.IsRectVisible(Rect{ 15.0f, 25.0f, 200.0f, 20.0f }));
+    // 对照：完全越界 ⇒ 剔除
+    EXPECT_FALSE(ctx.IsRectVisible(Rect{ 200.0f, 25.0f, 50.0f, 20.0f }));
+    // 对照：接触型越界（rect 左缘 = 裁剪右缘 110，交集宽 = 0）⇒ 剔除
+    EXPECT_FALSE(ctx.IsRectVisible(Rect{ 110.0f, 25.0f, 50.0f, 20.0f }));
+}
+
+/// @brief 两命令是否逐位一致（T27-11：kind + PushClip/DrawRect 几何 + DrawText 文本/位置/色）
+/// @details RenderCommand 的聚合成员无 operator==——逐字段比对；
+/// 未列 kinds（Line/RoundedRect/Image/FocusRect/PopClip）只比 kind——
+/// T27-11 的树（Panel/Button 路径）不产生它们。
+bool SameCommand(const RenderCommand& a, const RenderCommand& b)
+{
+    if (a.index() != b.index())
+        return false;
+    if (const auto* pa = std::get_if<PushClipCommand>(&a)){
+        const auto* pb = std::get_if<PushClipCommand>(&b);
+        return pa->rect.x == pb->rect.x && pa->rect.y == pb->rect.y
+            && pa->rect.width == pb->rect.width && pa->rect.height == pb->rect.height;
+    }
+    if (const auto* pa = std::get_if<DrawRectCommand>(&a)){
+        const auto* pb = std::get_if<DrawRectCommand>(&b);
+        return pa->rect.x == pb->rect.x && pa->rect.y == pb->rect.y
+            && pa->rect.width == pb->rect.width && pa->rect.height == pb->rect.height
+            && pa->color.r == pb->color.r && pa->color.g == pb->color.g
+            && pa->color.b == pb->color.b && pa->color.a == pb->color.a;
+    }
+    if (const auto* pa = std::get_if<DrawTextCommand>(&a)){
+        const auto* pb = std::get_if<DrawTextCommand>(&b);
+        return pa->text == pb->text && pa->pos.x == pb->pos.x && pa->pos.y == pb->pos.y
+            && pa->color.r == pb->color.r && pa->color.g == pb->color.g
+            && pa->color.b == pb->color.b && pa->color.a == pb->color.a;
+    }
+    return true;   // 其余 kinds：只比 kind（本用例的树不产生）
+}
+
+// ── T27-11：构造期开关关闭 ⇒ 命令流与既有基线逐位一致（C27-6）──
+
+void TestCullingDisabledStreamIdentical()
+{
+    // 同树双涂：双参（无界基线）vs 四参 enableCulling=false（client 种子）
+    auto PaintTree = [](PaintContext& ctx){
+        Panel root;
+        root.SetPosition(0, 0);
+        root.SetSize(200, 200);
+        auto panel = std::make_unique<Panel>();
+        panel->SetPosition(10, 10);
+        panel->SetSize(100, 50);
+        auto* panelRaw = panel.get();
+        auto button = std::make_unique<Button>("OK");
+        button->SetPosition(5, 5);
+        button->SetSize(40, 20);
+        panelRaw->AddChild(std::move(button));
+        root.AddChild(std::move(panel));
+        root.Paint(ctx, 0, 0);
+    };
+
+    RecordingBackend backend;
+    CommandBuffer baseCommands;
+    PaintContext baseCtx(baseCommands, backend);
+    PaintTree(baseCtx);
+
+    CommandBuffer offCommands;
+    PaintContext offCtx(offCommands, backend, Rect{ 0.0f, 0.0f, 200.0f, 200.0f }, false);
+    PaintTree(offCtx);
+
+    EXPECT_EQ(offCommands.size(), baseCommands.size());
+    for (size_t i = 0; i < baseCommands.size(); ++i)
+        EXPECT_TRUE(SameCommand(baseCommands[i], offCommands[i]));
+}
+
+// ── T27-12：双参（无界）vs 四参（client 种子）——超界根子树的判定分野（D27-A 镜像栈语义）──
+
+void TestCullingUnboundedVsSeeded()
+{
+    CommandBuffer commands;
+    RecordingBackend backend;
+
+    // 根子树超出 client 种子：Root(0,0,300,300) ⊃ client(0,0,200,200)
+    // 子 = local(250,250,40,40) → 绝对 (250,250)：种子内无交集
+    const Rect rootRect{ 0.0f, 0.0f, 300.0f, 300.0f };
+    const Rect childRect{ 250.0f, 250.0f, 40.0f, 40.0f };
+
+    // 双参（无界）：PushClip(Root) 后栈顶 = Root ⇒ 子与 Root 相交（50×50）⇒ 可见（不剔除）
+    PaintContext unbounded(commands, backend);
+    unbounded.PushClip(rootRect);
+    EXPECT_TRUE(unbounded.IsRectVisible(childRect));
+    unbounded.PopClip();
+    // 无界 ctx：Pop 后栈空 = 无界 ⇒ 任何 rect 可见（空栈分支）
+    EXPECT_TRUE(unbounded.IsRectVisible(childRect));
+
+    // 四参（client 种子）：PushClip(Root) 后栈顶 = 种子 ∩ Root = (0,0,200,200) ⇒ 子无交集 ⇒ 剔除
+    PaintContext seeded(commands, backend, Rect{ 0.0f, 0.0f, 200.0f, 200.0f });
+    seeded.PushClip(rootRect);
+    EXPECT_FALSE(seeded.IsRectVisible(childRect));
+    // 对照：种子内的子 ⇒ 可见
+    EXPECT_TRUE(seeded.IsRectVisible(Rect{ 100.0f, 100.0f, 40.0f, 40.0f }));
+    seeded.PopClip();
+    // Pop 后栈顶回到种子本身——子仍与种子无交集 ⇒ 依旧剔除
+    EXPECT_FALSE(seeded.IsRectVisible(childRect));
+    // 多调一次 Pop：守卫保证种子不被弹出 ⇒ 判定不受影响（镜像栈与命令栈同步失衡而非崩溃）
+    seeded.PopClip();
+    EXPECT_FALSE(seeded.IsRectVisible(childRect));
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterClipTests()
@@ -326,4 +461,8 @@ void ECDI::Test::RegisterClipTests()
     GetTestRegistry().Add("Clip.HScrollLeft", &TestClipHScrollLeft);
     GetTestRegistry().Add("Clip.CaretIndexCompat", &TestClipCaretIndexCompat);
     GetTestRegistry().Add("Clip.ResizeSafe", &TestClipResizeSafe);
+    GetTestRegistry().Add("Culling.BoundaryTouch", &TestCullingBoundaryTouch);
+    GetTestRegistry().Add("Culling.PartialIntersection", &TestCullingPartialIntersection);
+    GetTestRegistry().Add("Culling.DisabledStreamIdentical", &TestCullingDisabledStreamIdentical);
+    GetTestRegistry().Add("Culling.UnboundedVsSeeded", &TestCullingUnboundedVsSeeded);
 }
