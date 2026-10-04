@@ -1,7 +1,7 @@
-﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.5 · 实施规格）
+﻿# Phase 26 · FreeType 文本栈 + GL 渲染后端 —— 详细设计（v1.6 · 实施规格）
 
 > 来源：初设稿 `phase26-freetype-gl-preliminary-design.md` **v1.2 ✅ 评审通过**（外部评审第二轮：「**Phase 26 Preliminary Design：通过，可以进入 Detailed Design**」，并定下**详设必答 D26-1..D26-5**）
-> 状态：**v1.5**（2026-10-03）——🚧 **实施中**（★ 评审已通过：外部评审第三轮「**通过（Implementation Ready）**」，处置见 §10；★ **批零 – 批四 全部已落** + **首轮 `--gl` 目视缺陷修复** + **D26-5 性能读数已到手** —— 详见 §11 实施回填）
+> 状态：**v1.6**（2026-10-04）——🚧 **实施中**（★ 评审已通过：外部评审第三轮「**通过（Implementation Ready）**」，处置见 §10；★ **批零 – 批四 全部已落** + **两轮缺陷修复**（首轮目视 3 处 + `family` 缓存 1 处）+ ★★ **定时器饿死缺陷修复**（外部 harness 抓出）—— 详见 §11 实施回填）
 > 定位：**实施规格**。★ 评审要求「**详设不要再大改架构**」⇒ 本稿**只在初设骨架上把实现细节冻结**，不新增架构。★ 评审同时给了**硬约束：详设不得扩大 Phase 26**（范围锁见初设 §9；HarfBuzz / shaping / ligature / 字体 fallback / LRU atlas / SDF / 多线程栅格化 / Linux GL / Vulkan / viewport culling **一律不做**）。
 > 结构：**§1 = 评审给定的五个必答（本稿核心，放最前）** → §2 基线（带行号实测）→ §3 逐文件改动 → §4 契约映射 → §5 盯防（可机检）→ §6 用例正文 → §7 影响面 → §8 批次 → §9 开放项 → §10 外部评审处置 → **§11 实施回填** → §12 修订记录。
 
@@ -693,6 +693,7 @@ target_include_directories(ECDI PRIVATE
 | **O8** | ✅ **已纳入**（用户 2026-10-03 拍板）：默认 GDI 路径的测量缓存 | 由 **§1.6 + △9b** 落地——`GDITextMeasurer` 加同款缓存（键含 DPI · **命中免 `GetDC`** · 上限清空）。★ 原为「待拍板」，**现转正**；批一即可生效（不依赖 GL） |
 | **O9** | 测量缓存**淘汰策略** | 本 Phase = **上限 + `clear()`**（O(1)，防无界增长）；**LRU 不做**——重启条件 = 命中率因频繁编辑（每次新 `text` 键）明显下降 |
 | **O10** | ★ **「单行 TextBox 无纵向滚动」是控件层语义变更，尚无用例锚定** | 首轮 `--gl` 目视暴露（行盒高于单行视口时，光标跟随把 `scrollOffsetY` 推 > 0 ⇒ 文字下偏）⇒ 单行恒置偏移 0 + 滚轮吞掉（**GDI / GL 同受影响**，见 §11.6 ⑦）。★ **建议补 T26-14**（★ **T26-13 号已被 family 缓存用例占用**）（单行 ⇒ `GetMaxScrollOffset` 不生效 / 滚轮被吞）；**本 Phase 未加**（本轮仅修观感，未扩用例集） |
+| **O11** | ★ **定时器饿死缺陷已修，但无用例锚定** | `GLRenderer` 帧边界曾不验证更新区域 ⇒ **一切定时器饿死**（§11.8）——本机 **319/319 全绿**但**证明不了**（唯一会走 GL `BeginFrame` 的 **T26-8** 因 `!m_ready` 早退，到不了 `BeginPaint`）。★ **建议补 T26-14**：隐藏窗口 + GL 后端 + `SetTimer(500ms)` ⇒ 断言 **2 秒内至少 1 次 `WM_TIMER`**；★ **真正的验证 = harness 重跑** |
 | **L1** | family→文件名解析 = **「family 视作文件名」直查** | 本 Phase **不做**完整 `EnumFontFamiliesExW` 解析（评审 §6 只要求下沉，未要求完整解析）；GDI 侧仍按 family 名 ⇒ **两侧语义不完全对等**（N1 不承诺视觉等价） |
 | **L2** | **无字体回退**（N6） | 默认 face 选**一个含 CJK 的系统字体**以覆盖拉丁 + 中文；**不做 fallback 机制**。★ **实施期订正**：默认解析顺序由 `msyh.ttc` 改为 **`simsun.ttc` 优先** —— GDI 空 family + `DEFAULT_CHARSET` 在中文系统**实际落到 SimSun**，而 MSYH 行盒大约 **30%** ⇒ 控件的框高/内缩按 GDI 观感调过，两侧不同源会让单行文字下偏被裁（见 §11.6 ⑤） |
 | **L3** | `TextWidget` 层「每帧调 `MeasureText`」不消 | 本 Phase 消掉的是「重复执行**昂贵度量**」；调用本身仍在（剩下一次 map 查找）——归 `#49` / 后续 |
@@ -854,8 +855,66 @@ faces.find(simsun.ttc)           → ★ 命中（默认 face 早已加载）⇒
 **不是缺陷**；缺陷是上面的 ②（**缓存漏写**）。B 的改动只是让示例**在当前契约下写对**。
 
 
+### 11.8 ★★★ 定时器饿死（`GLRenderer` 帧边界不验证更新区域）——**唯一功能性致命缺陷**
+
+> **来源**：外部 harness（双后端对比工具）抓出，**2026-10-04**。
+> ★ **这是本 Phase 最严重的一处缺陷** —— 前七处都是**观感**问题，这一处让**一切定时器失效**。
+
+#### 症状（harness 实证链）
+
+| 观测 | 内容 |
+|---|---|
+| **同一二进制下 GDI 全绿** | demo 8 块 / 19 delta 正常 |
+| **GL 零活动** | `blocks = 0`、tick **0 次** |
+| 分发链排除 | trace 布点显示 `Create → Show → Run` 全部正常进入，但 **7 秒内 `OnTimer` 一次都没打印** ⇒ **不是**分发逻辑问题，是**定时器事件根本没到达** |
+| `--auto-close 3000` | 实测 **105 秒**才退（靠人关窗） |
+| 渲染与输入 | 窗口渲染始终正常、点击有效 ⇒ **只有定时器饿死** |
+
+#### 根因（代码核实）
+
+```text
+GDIBackend::BeginFrame  → m_windowDC = BeginPaint(m_hwnd, &m_ps)   // ★ 顺带验证更新区域
+GDIBackend::EndFrame    → EndPaint(m_hwnd, &m_ps)                   // ★ 收尾验证
+
+GLRenderer::BeginFrame  → GetClientRect / glViewport / glClear ...  // ★ 从不 BeginPaint
+GLRenderer::EndFrame    → SwapBuffers(m_dc) / glFlush               // ★ 从不 EndPaint
+```
+
+⇒ **更新区域永不清除** ⇒ 消息队列一空 `WM_PAINT` 就**重新生成** ⇒ **队列永不空闲**
+⇒ 而 `WM_TIMER` **只在队列空闲时才被投递** ⇒ **一切 `SetTimer` 定时器饿死**
+（回放 tick · `--auto-close` · 光标闪烁 · 动画 tick · ModelProbe 轮询）。
+
+★ **为什么初设没抓到**：详设 §3-⑧ 的 WGL 生命周期表把 `current` / `swap` / `resize` / `destroy` /
+`失败` 都定了，**唯独没提「更新区域验证」** —— 因为它是 **GDI 路径的隐含前提**（`BeginPaint`/`EndPaint`
+天然配对），而在 GL 路径下**没有任何东西替它做**。⇒ **这是一条「跨后端不变量的隐含前提在新后端上失效」的典型**。
+
+#### 修法（与 `GDIBackend` 决策 17 / 32 同构）
+
+| # | 改动 | 说明 |
+|---|---|---|
+| **1** | `GLRenderer::BeginFrame` 内 `BeginPaint(m_hwnd, &m_ps)` + `m_paintBegun = true` | ★ 渲染**仍走 `Initialize` 缓存的 `m_dc`**（WGL context 绑定其上，改 DC 会使 context 失效）；`BeginPaint` 的返回值**弃用** —— 它在此**只承担「验证更新区域」这一个职责** |
+| **2** | `GLRenderer::EndFrame` 内 `if (m_paintBegun) { m_paintBegun = false; EndPaint(m_hwnd, &m_ps); }` | ★ **无条件收尾**（不依赖 `m_ready`）——保证「Begin 了必 End」，与决策 32 的严格配对同构 |
+| **3** | `FRAMEWORK_ASSERT(!m_inFrame)` / `FRAMEWORK_ASSERT(m_inFrame)` | 决策 32 同构：把「配对」从约定变成**可断言的不变量**（+ 补 `ECDI/Core/ECDIAssert.h` include） |
+
+★ **不选 `ValidateRect(m_hwnd, nullptr)`**（虽更省事）：框架既有纪律是 **Begin/End 严格配对**，
+`ValidateRect` 只清区域、不建立配对语义 ⇒ 万一将来有人在 `BeginFrame` 后插别的验证会再次走偏。
+
+#### ⚠️ 验证状态：**本地全绿 ≠ 本缺陷已修**
+
+| 项 | 结果 |
+|---|---|
+| 编译 | **0 error / 0 warning**（clang，本机临时构建） |
+| `ecdi_tests` | **319 / 319**（覆盖度积分与基线**逐位相同**） |
+| ★ **但** | ★★ **无用例覆盖此缺陷** —— `ecdi_tests` **无法**证明「GL 后端下定时器能触发」：唯一会走 `BeginFrame` 的 GL 用例是 **T26-8**，而它因 `!m_ready` 早退，**根本到不了 `BeginPaint`** |
+
+⇒ ★ **真正的验证手段 = harness 重跑**（同一二进制下对比 GDI / GL 的 tick 计数与 `--auto-close 3000` 实测耗时）。
+⇒ ★ **建议补 T26-14**（登记为 **O11**）：建隐藏窗口 + GL 后端 + `SetTimer(500ms)` ⇒ 断言 **2 秒内至少收到 1 次 `WM_TIMER`**
+——这是**唯一**能在 `ecdi_tests` 内锚定该缺陷的形态（与 T26-10 需非 96 DPI 同理，属「环境相关但可构造」）。
+
+
 ## 12. 修订记录
 
+- **v1.6**（2026-10-04）**修复定时器饿死缺陷（外部 harness 抓出）+ 诚实标注验证缺口**（详见 **§11.8**）。① ★★★ 新增 **§11.8**：`GLRenderer` 的 `BeginFrame`/`EndFrame` **从不 `BeginPaint`/`EndPaint`** ⇒ **更新区域永不清除** ⇒ `WM_PAINT` 在队列一空即重新生成 ⇒ 队列永不空闲 ⇒ **`WM_TIMER` 只在队列空闲时投递** ⇒ **一切定时器饿死**（harness 实证：GL 下 `blocks=0` / tick 0 次 / `--auto-close 3000` 实测 105 秒才退；同一二进制 GDI 全绿）。② **修法与 `GDIBackend` 决策 17 / 32 同构**：`BeginFrame` 内 `BeginPaint`、`EndFrame` 内**无条件** `EndPaint`（渲染仍走缓存 `m_dc`，`BeginPaint` 的 DC **弃用**——只承担验证更新区域），并补 `FRAMEWORK_ASSERT` 配对断言。★ **不选 `ValidateRect`**——框架纪律是严格配对。③ ★★ **诚实标注验证缺口**：本地 **319/319 全绿**（0 告警）**不能**证明本缺陷已修——**唯一会走 GL `BeginFrame` 的用例 T26-8 因 `!m_ready` 早退，到不了 `BeginPaint`** ⇒ **真验证 = harness 重跑**；建议补 **T26-14**（登记 **O11**：隐藏窗口 + GL + `SetTimer(500ms)` ⇒ 2 秒内至少 1 次 `WM_TIMER`）。④ **教训登记**：**跨后端不变量的隐含前提**（更新区域验证）在 GDI 路径由 `BeginPaint`/`EndPaint` **天然**承担，换后端后**无人替它做** ⇒ 初设的 WGL 生命周期表漏了此项。
 - **v1.5**（2026-10-03）**D26-5 性能读数到手 + 由之追出 `family` 缓存缺陷并修复**（非评审驱动；详见 **§11.7**）。① ★★ **D26-5 达成**：`frames=781 atlasMiss=130 glyphRasterizations=130` ⇒ **warm 阶段重复字形零栅格化**（反证：若图集未生效该数应膨胀到 3 万+）——**架构级口径达成，不依赖 FPS / 硬件偶然性**。② ★★ **修复真实缺陷**：`FaceIdFor` 三条早退路径**漏写 `familyCache`** ⇒ 未解析 family **永不入缓存** ⇒ 每个新 `(text,size,family,dpi)` 键**重探文件 + 重刷告警**；修法 = 三路径都 `emplace` + ModelProbe 两处 `"Consolas"` → **`"consola.ttf"`**（当前契约下的正确写法，等宽意图真正生效）。③ ★ 新增 **T26-13**（计数替身 `FontSource` 锚定「未解析 family 只探测一次」）⇒ 自动化 **+11 → +12**、**307 → 318 → 319**；★★ **已做量具校准（反证）**：撤销修复 ⇒ T26-13 **失败**（318/319），恢复 ⇒ 319/319，文件**字节级还原一致**。④ **§5 盯防 12 → 13 条**（新增 **⑬ family 解析结果必入缓存**）· **§8 批四**行改「D26-5 读数已到手」· **§11.1 新增「批四·修 ②」行**。⑤ ★ **编号冲突处置**：本轮实现的 family 缓存用例取号 **T26-13**，故 **§9 O10**（单行 TextBox 无纵向滚动）的建议编号由 **T26-13 改为 T26-14**（★ 编号按落盘顺序分配、**不按语义预留**——预留会导致实现时改号）。
 - **v1.4**（2026-10-03）**实施回填（批三–批四 + 首轮 `--gl` 目视缺陷修复）**（非评审驱动；详见 **§11**）。① ★★ 新增 **§11.6（7 项缺陷）** —— `--gl` **首轮真实目视**暴露（`ecdi_tests` 全绿但**观感**不对）：**① 文字基线**（框架 `pos.y` = **字符单元顶边**，GL 当基线用 ⇒ 整行上移一个 ascent，探针实测 **−21px**）· **② 半透明圆角矩形中心二次混合**（双带重叠 → 改 GDI 三条带）· **③ 焦点框忽略 `cornerRadius`**（→ 移植 GDI 的「4 直线 + 4 圆弧」周界 + 新增 `SolidSegment`）· **④ 文字整数吸附**（分数相位会让 hinted 位图错相）· **⑤ 默认字体同源**（GL 用 MSYH 而 GDI 实际落 SimSun，行盒差 ~30%）· **⑥ `FT_LOAD_NO_BITMAP`**（SimSun 12–16px 的 MONO 内嵌点阵被 8bpp 拷贝错读）· **⑦ 单行 TextBox 无纵向滚动**。② ★★ 新增 **§11.5（8 条实现偏离）**：`GlyphByKey` / `Utf8Decode` 上提 / 图集 `unique_ptr` / 无 `GL_CLAMP_TO_EDGE`（GL 1.1 头）/ `familyCache` / **公共 API +2 → +3**（`RenderingBackend::IsReady`）/ **△14 真实落点是 `main.cpp`** / `RenderServices` 完整类型。③ **§7 影响面订正**（API **+3** · 示例/测试补 `main.cpp`）· **§5 盯防 11 → 12 条**（新增 **⑫ 测量链与渲染链 load flags 同源**）。④ **§8 批次补状态**（批三 ✅ 四链 317 · 批四 🚧 代码完成本机 318 · **新增「批四·修」行**）· **§6 口径**改「**已达成 318**」并登记 **O10**（单行语义无用例锚定 ⇒ 建议 **T26-13**）。⑤ **§9 L2 订正**（默认 face `msyh.ttc` → **`simsun.ttc`**，对齐 GDI 解析）。⑥ 新增 **§11.1 交付进度**三行（批三 / 批四 / 批四·修）。⑦ ★★ **新增验证手段 = 无头 GL 探针**（屏幕外窗口 + `glReadPixels` + **同位置 GDI 对照**；用已构建 `ECDI.lib` 直接链接），并沉淀纪律「**全绿 ≠ 观感正确**」。
 - **v1.3**（2026-10-03）**实施回填（批零–批二）+ 许可缺口修复**（非评审驱动；详见 **§11**）。① ★★ **许可证缺口**：vendor 时排除了整个 `docs/` ⇒ `LICENSE.TXT` 正文引用的 **`docs/FTL.TXT` / `docs/GPLv2.TXT` 缺失**（引用断链、不合规）⇒ 已从官方归档补齐，并登记**盯防 ⑩**（判据 = 以正文引用逐一对账，不能只看入口文件）。② ★ **版本 pin 落地 2.14.3**（含安全理由）· **零本地 patch**（默认已关 PNG/BROTLI/BZIP2/HARFBUZZ）· **显式 TU 列表**（GLOB 必失败：165/210 非独立 TU）· **`OBJECT` + `$<TARGET_OBJECTS>`**（避 `install(EXPORT)` 冲突）· **`builds/windows/`**（`ftsystem.c` + `ftdebug.c`）· **`_CRT_SECURE_NO_WARNINGS`**（MSVC 系 CRT 弃用告警 6 处）—— 逐条见 **§11.2**。③ **△11 重写**为实际 CMake 实现；**△12** 更新版本 / 许可 / 最小配置 / 目录裁剪。④ **盯防 9 → 11 条**（⑥ 扩豁免名单至 `GDITextMeasurer` / `FreeTypeTextMeasurer`；新增 ⑩ 许可完整 · ⑪ FreeType 零告警）。⑤ ★ **§6 T26-2 订正**（`MeasureText` 返回 DIP ⇒ DPI 变结果**近似不变**，v1.0 的「按比例变」是错的）。⑥ **§8 批次补状态**（批零/批一/批二 ✅；批三/批四 ⬜）· **§6 口径补实际进度**（309 / 315）· **O5 标 ✅ 已解决**。⑦ 新增 **§11 实施回填**，原 §11 修订记录顺延 **§12**。
