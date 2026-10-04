@@ -253,10 +253,18 @@ void Widget::Paint(PaintContext& ctx,int offsetX,int offsetY){
 	int x = offsetX + static_cast<int>(m_geometry.x);
 	int y = offsetY + static_cast<int>(m_geometry.y);
 
+	// Phase 27：视口剔除——`self` 为判据与下方 PushClip 消费的同一份几何
+	// （D27-B 单表达式，盯防⑦：出现第二个构造表达式即违规）。
+	// 交集宽、高严格 > 0（Rect::Intersects）；false = 整段跳过：
+	// PushClip/OnPaint/children/PopClip 均不发生（C27-2），HitTest 不受影响（初设 D27-8）
+	const Rect self{ static_cast<float>(x), static_cast<float>(y),
+	                   m_geometry.width, m_geometry.height };
+	if (!ctx.IsRectVisible(self))
+		return;
+
 	// 9.5 R1：自身边界入栈（绝对坐标 = Window 客户区；与 OnPaint 的 x/y 同源——不变量 I3）
 	// 嵌套交集：子控件被"父边界 ∩ 自身边界"自动裁剪（后端 IntersectClipRect 天然语义）
-	ctx.PushClip(Rect{ static_cast<float>(x), static_cast<float>(y),
-	                   m_geometry.width, m_geometry.height });
+	ctx.PushClip(self);
 
 	OnPaint(ctx,x,y);
 

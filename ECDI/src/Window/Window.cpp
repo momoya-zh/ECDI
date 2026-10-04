@@ -133,7 +133,11 @@ void Window::PaintFrame()
 
 	// 决策 10/13/33：完整编排，严格配对
 	m_commands.clear();                              // 决策 4：复用缓冲
-	PaintContext ctx(m_commands, *m_textMeasurer);   // 7.1.4：测量独立指针（GDITextMeasurer）
+	// Phase 27：初始裁剪 = client 矩形（每帧经 GetClientSize 取——resize 天然跟随；
+	// 只进构建侧交集栈、不发命令——C27-5；D4 恒开，无运行期开关——D27-C）
+	const Size clientSize = m_platformWindow->GetClientSize();
+	PaintContext ctx(m_commands, *m_textMeasurer,
+	                 Rect{ 0.0f, 0.0f, static_cast<float>(clientSize.width), static_cast<float>(clientSize.height) });   // 7.1.4：测量独立指针（GDITextMeasurer）
 	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
 	m_renderer.BeginFrame(m_backgroundColor);         // 决策 13：转发（Phase 18：携带本帧背景色）
 	m_renderer.Execute(m_commands, GetDpiScale());   // Phase 20.1：每帧取窗口 DPI 缩放（不缓存 ⇒ 跨屏下一帧自动跟随）
