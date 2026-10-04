@@ -104,6 +104,10 @@ private:
 	HWND  m_hwnd = nullptr;
 	HDC   m_dc = nullptr;
 	HGLRC m_gl = nullptr;
+	/// ★★ 更新区域验证的配对态（`BeginPaint` 返回的 DC 弃用——渲染走 Initialize 缓存的 `m_dc`）
+	PAINTSTRUCT m_ps{};                        ///< `BeginPaint`/`EndPaint` 严格配对的结构体
+	bool  m_inFrame = false;                   ///< 决策 32 同构：Begin/End 严格配对
+	bool  m_paintBegun = false;                ///< 本帧是否已 BeginPaint（⇒ 必须 EndPaint）
 	bool  m_ready = false;
 	bool  m_doubleBuffered = false;
 	int   m_w = 0, m_h = 0;

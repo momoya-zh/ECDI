@@ -1,5 +1,6 @@
 ﻿#include "Render/GLRenderer.h"
 
+#include "ECDI/Core/ECDIAssert.h"             // FRAMEWORK_ASSERT（决策 32 同构：Begin/End 严格配对）
 #include "ECDI/Core/Logger.h"
 #include "Platform/Win32/Win32RenderContext.h"   // ★ 取 HWND（同 GDIBackend / GDITextMeasurer 先例）
 #include "Render/FontEngine.h"                   // 诊断用（RasterizeCount）
@@ -136,6 +137,20 @@ void GLRenderer::BeginFrame(const Color& background)
 	{
 		return;
 	}
+
+	// 决策 32 同构：Begin/End 严格配对
+	FRAMEWORK_ASSERT(!m_inFrame);
+	m_inFrame = true;
+
+	// ★★★ **更新区域验证**（与 `GDIBackend` 决策 17 同构）——**这不是可选的礼节，是正确性前提**：
+	//   不验证更新区域 ⇒ `WM_PAINT` 在消息队列一空就被**重新生成** ⇒ 队列**永不空闲**
+	//   ⇒ 而 `WM_TIMER` 只在队列空闲时才被投递 ⇒ **一切定时器饿死**
+	//   （回放 tick / auto-close / 光标闪烁 / 动画 tick / ModelProbe 轮询全失效）。
+	//   诊断：同一二进制下 GDI 后端定时器正常，GL 后端 7 秒内 `OnTimer` 一次未进。
+	//   ★ 渲染仍走 `Initialize` 缓存的 `m_dc`（WGL context 绑定其上，改 DC 会使 context 失效）；
+	//     `BeginPaint` 的返回值**弃用**——它在此**只承担「验证更新区域」这一个职责**。
+	BeginPaint(m_hwnd, &m_ps);
+	m_paintBegun = true;
 
 	// ★ resize = **per-frame 自省**（详设 §3-⑧ / N7：不实现 OnTargetResized 接缝）
 	++m_frames;
@@ -533,6 +548,11 @@ void GLRenderer::EndFrame()
 	{
 		return;
 	}
+
+	// 决策 32 同构：Begin/End 严格配对
+	FRAMEWORK_ASSERT(m_inFrame);
+	m_inFrame = false;
+
 	if (m_doubleBuffered)
 	{
 		SwapBuffers(m_dc);
@@ -540,6 +560,15 @@ void GLRenderer::EndFrame()
 	else
 	{
 		glFlush();
+	}
+
+	// ★★★ **更新区域验证的收尾**（见 `BeginFrame` 的说明）——必须**无条件**执行：
+	//   漏掉 ⇒ 定时器饿死。★ 与 `m_ready` 无关：即便渲染中途失败，帧边界仍须闭合
+	//   （故 `BeginFrame` 里 `!m_ready` 的早退不会与此处产生「Begin 了但没 End」的不配对）。
+	if (m_paintBegun)
+	{
+		m_paintBegun = false;
+		EndPaint(m_hwnd, &m_ps);
 	}
 }
 
