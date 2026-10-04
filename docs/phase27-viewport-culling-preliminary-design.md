@@ -1,7 +1,8 @@
 ﻿# Phase 27 · 绘制命令构建层的视口剔除（viewport culling）—— 初步设计（v1.0）
 
 > 来源：需求稿 `phase27-viewport-culling-requirements.md` **v1.1 ✅ 评审通过**（外部评审 2026-10-04：「**可以进入 Preliminary Design**」，并给定**初设必答六问**——需求稿 §4.1）
-> 状态：**v1.0**（2026-10-04）——待评审
+> 状态：**v1.1**（2026-10-04）——✅ **评审通过（可进入详设）**
+> ★ 外部评审结论（初设轮）：「**Phase 27 Preliminary Design：PASS，可以进入 Detailed Design**」——13 项分项全部通过（坐标系 / ContentOffset / Initial Clip / **OnPaint 副作用 = 本稿最大进展** / Intersects 几何 / float-lround 契约 / Paint 接缝 / subtree skip 语义 / C-VIS 共存 / 像素等价 / 测试覆盖 / 批次 / 公共 API「有一个需详设讨论的小问题」）；**无任何需要推翻架构的回退点**。★ 评审给定**详设盯防五件事**（见 §1.1）。
 > 定位：**冻结几何与语义、回答必答六问**。★ 评审要求 D3（OnPaint 副作用）为第一优先级 ⇒ 本稿 **§1-Q4 给出全库盘点实测表与判定**；★ 范围锁沿需求 §3.2（不做虚拟化 / 脏区 / 后端执行端 / OnPaint 纯绘制重构）。
 
 ---
@@ -83,6 +84,16 @@ inline bool Intersects(const Rect& a, const Rect& b) noexcept {
 ### Q6 ★ A2 像素等价测试如何固定非确定因素
 
 **答案：测试契约四条（写进 T27-10 场景定义）**：① **静态场景**——全部控件样式 / 文本 / 几何在对照两帧间零变更；② **无焦点控件**——不设 `SetFocusedWidget`（TextBox 不获焦 ⇒ 无 caret blink timer 路径，`OnTimer` 不启动）；③ **固定 DPI**——单窗口单 DPI（120），不跨屏；④ **无动画 / 无定时器**——场景不含 Button 动画值（`m_displayedBackground` 静态）且对照帧间不推进任何 Timer。对照方法 = 沿 Phase 26 无头 GL 探针先例（屏幕外窗口 + `glReadPixels`）：同一棵树、同一布局，`SetCullingEnabled(false)` / `(true)` 各渲染一帧，framebuffer 逐字节比对。**任何字节差 = culling 实现缺陷**（场景已确定性化，不存在「场景自己变了」的歧义）。
+
+---
+
+### 1.1 ★ 详设盯防五件事（评审给定，v1.1 吸收）
+
+1. **冻结 `PaintContext` clip stack 的精确数据结构与 initial clip 生命周期**。
+2. **冻结 `Widget::Paint` 中 `self` 的构造方式**——确保 culling rect 与 PushClip **永远同源**（评审：「先拿同一个 `self` 判断，再把同一个 `self` Push 进去」的设计值得保留）。
+3. **`SetCullingEnabled(false)` 的 API 可见性最终定下来**（★ 评审认为**最值得讨论**的点——「测试能关 culling」与「用户能在自己的 OnPaint 里关 culling」是两件事；方案 A 公共 API vs 方案 B 测试/内部缝的比较落详设，见 O3 升级）。
+4. **把 T27-5/T27-6/T27-7 的 subtree + ScrollView 坐标场景画成精确测试树**（核心行为 = **subtree pruning 而非单 Widget draw pruning**——Parent 部分相交保留 ⇒ Child A 视口外连同其子树整段跳过、Child B 相交保留其子树）。
+5. **列出所有现存命令流测试的对账清单**（O2 兑现）。
 
 ---
 
@@ -211,7 +222,7 @@ void Widget::Paint(PaintContext& ctx, int offsetX, int offsetY){
 | T27-2 | 全视口外子树：`PushClip`/`Draw*`/`PopClip` **整段 = 0**（构造侧 CommandBuffer 直接断言） | A1 |
 | T27-3 | 边界接触（`child.right == clip.left`，含 y 向）：剔除 | C27-3 / Q5 |
 | T27-4 | 部分相交：整段照常构建（部分可见 ≠ 全跳） | A6 |
-| T27-5 | 嵌套：父部分相交保留、视口外孙整段剔除、相交孙保留 | C27-1 |
+| T27-5 | 嵌套：父部分相交保留、视口外孙整段剔除、相交孙保留（★ 评审 v1.1：详设须画**精确测试树**——Parent 部分进入 viewport，Child A 完全在外 ⇒ 其 Grandchild A **即使自身位置奇怪也一起跳过**、Child B 相交 ⇒ Grandchild B 保留；验证的是 **subtree pruning 而非单 Widget pruning**） | C27-1 |
 | T27-6 | `ScrollView` 行滚出视口：该行整段 0；可见行不变（ContentOffset 路径） | Q1/Q2 |
 | T27-7 | 滚出多屏再滚回：首帧渲染正确（含 TextBox 滚动条惰性同步补执行） | A3 |
 | T27-8 | C-VIS 正交：隐藏子停泊负区照旧剔除（行为与 Phase 25 逐位同）；可见视口外子被新判据剔除 | D27-4 |
@@ -228,12 +239,12 @@ void Widget::Paint(PaintContext& ctx, int offsetX, int offsetY){
 
 | 项 | 预算 |
 |---|---|
-| 公共头 | **94 → 94** |
-| 公共 API | **+3**（`Intersects` / `IsRectVisible` / `SetCullingEnabled`）+ 1 构造重载 |
+| 公共头文件数量 | **94 → 94**（无新增 header；★ 评审建议明确区分「头文件数量」与「API 数量」两个口径，v1.1 采纳） |
+| 公共 API | **+3**（`Intersects` / `IsRectVisible` / `SetCullingEnabled`——★ 第三项的可见性 = O3 详设必答，可能收敛为 +2）+ 1 构造重载 |
 | 用例 | **319 → ~331**（+12；需求上修 ~+10 的兑现） |
 | CMake | **0 改动**（无新文件；`Intersects` header-only） |
 | 改动文件 | `Rect.h` · `PaintContext.h/.cpp` · `Widget.cpp` · `Window.cpp`（+ 测试） |
-| 风险 | ★ 低（D3 已盘点放行）；**存量命令流测试对账**（ClipTests 等若断言「视口外子树仍发命令」的旧语义，其意图是执行端裁剪——改断言场景为部分相交即可保意图；实施批二逐一对账，详设列清单） |
+| 风险 | **低～中（可控性高）**（★ 评审 v1.1 修正：算法危险已由 D3 盘点 + 安全性证明消除，但本条属于**改变 `Widget::Paint` traversal 语义的基础设施修改**——触及所有 Widget / ScrollView / 嵌套 clip / 存量 Paint 测试 / 两后端裁剪语义 / OnPaint 副作用，风险点已拆细故可控） |
 
 ---
 
@@ -254,11 +265,12 @@ void Widget::Paint(PaintContext& ctx, int offsetX, int offsetY){
 |---|---|---|
 | O1 | A4 基准参数表 | 沿 D26-5 先例（固定参数 / 架构级口径），详设冻结 |
 | O2 | 存量测试对账清单 | 批二实施时盘点全部断言命令流的用例（ClipTests / TextBoxTests / ScrollViewTests…），详设列对账表 |
-| O3 | `IsRectVisible` 命名 | 备选 `CullCandidate`——初设定名，详设不再动 |
+| O3 | ★★ **`SetCullingEnabled` 的 API 边界（评审 v1.1 升级：原「命名问题」→ 详设必答题）**——「`IsRectVisible` 属正常 PaintContext 能力，`SetCullingEnabled` 更像测试/debug seam，两者性质不同」。方案 A = 维持公共 API（简单 / A2 方便 / 有逃生门；代价 = 背兼容性契约、用户可随意关）；方案 B = 测试 / 内部缝（构造参数或测试专用路径，生产 API 恒开；实现稍脏）。★ 评审不否掉现方案，详设比较后定 |
 | O4 | **未来架构候选**：OnPaint 纯绘制化（TextBox `SyncScrollBar` / CaptionBar `SetGlyph` 迁往 Update 相位） | 本 Phase 不做；随 D3 盘点产出登记 deferred（编号待用户拍板） |
 
 ---
 
 ## 11. 修订记录
 
+- **v1.1**（2026-10-04）**外部评审吸收（✅ PASS，可进入详设）**。① ★ **结论**：13 项分项全部通过（OnPaint 副作用盘点 = 本稿最大进展），**无任何需要推翻架构的回退点**；评审特别认可：Q1/Q2 的「PaintContext 不变成 ScrollView 上下文」、`self` 同源构造（「先拿同一个 `self` 判断，再 Push 同一个 `self`」）、严格 `>0` 避免 ±1 危险补丁、Q3 的「有 initial clip = 有限绘制世界 / 无 = 无限绘制世界」抽象、T27-12 对无头测试语义的保护、「没有把事情做大」的范围克制。② ★★ **新增 §1.1 详设盯防五件事**（评审给定）：clip stack 数据结构 + initial clip 生命周期 · `self` 同源冻结 · **`SetCullingEnabled` API 边界（评审最想踩刹车的点）** · T27-5/6/7 精确测试树 · 存量命令流测试对账清单。③ **O3 升级**：命名问题 → **API 边界必答题**（方案 A 公共 API vs 方案 B 测试/内部缝；「测试能关」≠「用户能关」）。④ **影响面口径拆分**（评审建议）：公共头文件数量 94 → 94 与公共 API +3 分列（+3 中的 `SetCullingEnabled` 随 O3 可能收敛为 +2）。⑤ **风险修正**：低 → **低～中（可控性高）**——属「改变 Paint traversal 语义的基础设施修改」，触及面广但已拆细。⑥ T27-5 补测试树要求（subtree pruning ≠ 单 Widget pruning）。
 - **v1.0**（2026-10-04）初稿。**输入**：需求稿 v1.1（评审通过 + §4.1 必答六问）· 本次实测勘察（B1–B10 带行号 · **OnPaint 全库盘点 12 处 → 副作用仅 2 处且均为幂等同步型、全库无 `Invalidate` 类 Paint 循环 ⇒ D3 放行 / D4 恒开冻结** · 执行端两后端 lround 半开语义实测 ⇒ 剔除安全性证明成立）。**内容**：§1 六问逐答（坐标系单一性 / ContentOffset 零新代码 / 初始 clip 构造注入 / 盘点表 / float 同源 + 严格 >0 + 安全性证明 / A2 确定性契约）· 决策 D27-1..D27-8 · 接口草案（公共 API +3 · 头 94 → 94）· 契约 C27-1..C27-7 · 盯防 7 条 · 用例 T27-1..T27-12（319 → ~331）· 四批 · 开放项 O1–O4。
