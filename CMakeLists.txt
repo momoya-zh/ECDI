@@ -167,6 +167,14 @@ target_compile_definitions(ecdi_tests PRIVATE UNICODE _UNICODE)
 if(MSVC)
     target_compile_options(ecdi_tests PRIVATE /utf-8)
 endif()
+if(MINGW)
+    # ★ 与 examples 三目标同款（modelprobe/visualtest/MinimalApp）——静态链接 MinGW 运行时。
+    #   不加的话 ecdi_tests.exe 动态依赖 libstdc++-6.dll / libgcc_s_seh-1.dll，而 Windows
+    #   DLL 搜索序可能命中 PATH 里**别的** mingw64（实测：Git Bash 的 /mingw64/bin 在
+    #   GCC 16.1 工具链之前 ⇒ GCC 13 系 libstdc++ 被加载 ⇒ 启动即 segfault——非代码缺陷）。
+    #   本仓库其余 exe 早已静态化，唯 ecdi_tests 漏配；CLion 直接 Run 亦受益（零环境配置）。
+    target_link_options(ecdi_tests PRIVATE -static)
+endif()
 
 # ── R4：install/export（外部消费唯一正规入口）──
 install(TARGETS ECDI EXPORT ECDITargets ARCHIVE DESTINATION lib)
