@@ -1,7 +1,7 @@
 ﻿# Phase 28 · 长文本的测量与绘制成本 —— 详细设计（v1.1）
 
 > 来源：初设 `phase28-long-text-cost-preliminary-design.md` **v1.1（评审 PASS → 详设，13 项全 PASS）**——评审给定**详设必答六冻结点**（初设 §3.5）逐题钉死（本稿 §1）。
-> 状态：**v1.1**（2026-10-05）——**✅ 评审通过（PASS → Implementation，「可以开工了」）**（外部评审 2026-10-05：设计成熟度高 / 实现风险低～中低 / **不需要再开设计迭代**；六冻结点全部认可为 C28-1..7 契约；**两条非阻塞建议已吸收**：① T28-1 强化 = 增加 **advance memo 真命中**断言（`AdvanceMemoMissCount` 观测缝，沿既有 `MeasureTextCacheMissCount` 先例——观测缝落内部件 ⇒ **API +0**，v1.2 勘误）；② **`GetTextExtentExPointW` 失败 ⇒ 回退原路径整串 `TextOutW`**（不是 return——「测量失败 ≠ 文本不可见」）；一条顺手项（`pos.x ≥ clip.right` 早退——实现时可做、非设计要求）；一条平台注记（`long` 宽度——保持现状不扩范围）；吸收明细见 §9 v1.1）
+> 状态：**v1.3**（2026-10-05）——**✅ 评审通过（PASS → Implementation，「可以开工了」）**（外部评审 2026-10-05：设计成熟度高 / 实现风险低～中低 / **不需要再开设计迭代**；六冻结点全部认可为 C28-1..7 契约；**两条非阻塞建议已吸收**：① T28-1 强化 = 增加 **advance memo 真命中**断言（`AdvanceMemoMissCount` 观测缝，沿既有 `MeasureTextCacheMissCount` 先例——观测缝落内部件 ⇒ **API +0**，v1.2 勘误）；② **`GetTextExtentExPointW` 失败 ⇒ 回退原路径整串 `TextOutW`**（不是 return——「测量失败 ≠ 文本不可见」）；一条顺手项（`pos.x ≥ clip.right` 早退——实现时可做、非设计要求）；一条平台注记（`long` 宽度——保持现状不扩范围）；吸收明细见 §9 v1.1）
 > 定位：**实施规格**——方案已在初设冻结（PD28-1/2/3 + PD28-4 可选），本稿落成**逐文件 △、契约 C28、盯防、用例落位与精确批次**。
 
 ---
@@ -25,7 +25,7 @@
 - **font 进键 = 值比较**：`SetFont`/`SetStyle`/`ApplyTheme` 改字体**无需 bump**——键含 font 值，样式变更天然 miss（family 为短串，比较开销可忽略）。
 - **dpi** = `lround(GetWindow()->GetDpiScale() * 96.0f)`（`GetDpiScale` 为 const——`const Window*` 直接可调，**无需 const_cast**）；跨屏变化 ⇒ 键失配 ⇒ 重测（DPI 失效语义与两链测量缓存含 DPI 口径一致）。
 - **无窗口 ⇒ 不短路**（初设冻结、评审认可）：`GetWindow() == nullptr` 时退回现行为 `DoMeasureText(*measurer)`——无头测试体系（Phase 7.2 / FakeTextMeasurer 接缝）零污染。
-- **命中行为**：**零 `MeasureText` 调用、零键构造拷贝**（C28-5；T28-3 用 `MeasureCacheMissCount` 差值验证）。
+- **命中行为**：**零 `MeasureText` 调用、零键构造拷贝**（C28-5；T28-3 用注入计数测量器的调用计数差值验证）。★ **v1.3 实施勘误**：原文「`SetText` 双重载是唯一文本入口」**不成立**——`TextBox` 编辑（`InsertCodepoint`/`InsertText`/`DeleteBackward`/`DeleteForward`/组合 Update/Commit/`RestoreSnapshot`）共 **13 处**直接改 `m_text`；修法 = `TextWidget` 增 protected `MarkTextChanged()`，`SetText` 双载与 TextBox 13 处统一调用（`m_needsLineRecalc` 站点同址——两标记同生共死）。
 - 绘制期 `DrawTextContent` 的每帧 `MeasureText` **不在本 Phase 范围**——既有整串缓存命中 ~0.5µs 已近免费（Spike 0 数据），不加第二层缓存。
 
 ### D28-C ★ GDIBackend::DrawText 三分支 + guard 边界语义（冻结点 3+4）
@@ -83,8 +83,8 @@
 |---|---|---|
 | △1 | `FontEngine.h` | **零改动**（advanceCache 在 Impl——.cpp pimpl；键复用 GlyphKey） |
 | △2 | `FontEngine.cpp` | ① 匿名 namespace +`kMaxAdvanceCache = 8192` + `kMissingAdvance`；② Impl +`std::map<GlyphKey, long> advanceCache`；③ `MeasureText` 循环改 memo 路径：`gid = FT_Get_Char_Index(face, cp)` → 查 `(FaceId, px, gid, hinting)` → miss 则 `FT_Load_Char`（现行旗标）并回填（失败回填哨兵）；求和顺序不变（C28-4） |
-| △3 | `TextWidget.h` | private +`mutable std::size_t m_textRevision = 0` + `mutable bool m_prefValid = false` + `mutable Size m_prefCache{}` + `mutable std::size_t m_prefRevision = 0` + `mutable Font m_prefFont{}` + `mutable int m_prefDpi = 0`（**零公共 API**） |
-| △4 | `TextWidget.cpp` | ① `SetText` 双重载各 +`++m_textRevision`；② `GetPreferredSize` 按 D28-B 改（无窗口不短路分支保留现行为） |
+| △3 | `TextWidget.h` | protected +`MarkTextChanged()`（bump revision——★ **批二实施勘误**：`SetText` 并非唯一文本入口，TextBox 有 **13 处** `m_needsLineRecalc` 文本变更点直接改 `m_text`）；private +五个指纹成员（revision/prefValid/prefCache/prefRevision/prefFont/prefDpi——**零公共 API**）；（**零公共 API**） |
+| △4 | `TextWidget.cpp` | ① `SetText` 双重载各 +`MarkTextChanged()`；② `GetPreferredSize` 按 D28-B 改（指纹命中直接返回缓存；无窗口不短路分支保留现行为）；③ **`TextBox.cpp` +13 处 `MarkTextChanged()`**（编辑/组合/Undo 路径——批二实施勘误补入） |
 | △5 | `GDIBackend.cpp` | 匿名 namespace +`kTextPrefixMinWchars = 256`；`DrawText` 按 D28-C 三分支改造（GetClipBox / GetTextExtentExPointW / 前缀 TextOutW）；`GDIBackend.h` 零改动 |
 | △6 | Tests | `FontEngineTests.cpp` +T28-1/2 · `WidgetTests.cpp` +T28-3a/b（真窗口先例区）· `RendererTests.cpp` +T28-6（命令流快照区）· 探针 `.workbuddy/spike/textcost/gdi_prefix_probe.cpp`（库外） |
 
@@ -129,7 +129,7 @@
 | 批 | 内容 | 验收 |
 |---|---|---|
 | 批一 | △2 FontEngine memo + T28-1/2 | 三链全绿 + 存量命令流逐位零回归 |
-| 批二 | △3/△4 TextWidget 指纹 + T28-3a/b | 三链全绿 + miss 计数断言 |
+| 批二 | △3/△4 TextWidget 指纹 + T28-3a/b | ✅ 已完成（2026-10-05）——**三链 334/334**（MinGW / Clang / ClangCL；T28-3a 命中零调用 + T28-3b 失效重测）；实施勘误 = TextBox 13 处补 `MarkTextChanged`（详设 v1.3） |
 | 批三 | △5 GDI 前缀 + 探针（T28-4/5）+ T28-6 | 三链全绿 + **T28-4 硬门槛通过** |
 | 批四 | harness 侧复跑对照（A3 读数）+ 五处台账回填收口 | A3-1..3 全过 + A3-4 记录制 |
 
@@ -159,6 +159,7 @@
 
 ## 9. 修订记录
 
+- **v1.3**（2026-10-05）批二实施落地 + **文本入口勘误**。① ★★ **实施勘误（重要）**：D28-B 原文假设「`SetText` 双重载是唯一文本入口」——实测 **TextBox 有 13 处文本变更点直接改 `m_text`**（`InsertCodepoint`/`InsertText`/`DeleteBackward`/`DeleteForward`/`UpdateComposition`/`CommitComposition`/`CancelComposition`/`Cut`/`RestoreSnapshot` 等编辑/IME/Undo 路径）⇒ 只挂 `SetText` 会让**单行 TextBox 的 preferred 返回陈旧尺寸**（其 `GetPreferredSize` 单行分支确实消费 TextWidget 测量）。**修法** = `TextWidget` 增 protected `MarkTextChanged()`（bump revision），`SetText` 双载 + TextBox 13 处 `m_needsLineRecalc` 站点统一调用。② ★ **批二落地**：△3/△4（指纹四字段 + 无窗口不短路 + `std::lround(GetDpiScale()*96)`）+ T28-3a（真窗口命中：二次 `GetPreferredSize` 零 MeasureText 调用）/ T28-3b（失效矩阵：SetText +1 / SetFont +1 / 无变化不增）落 WidgetTests.cpp（真窗口装置沿 WindowBackgroundTests 先例；计数测量器**拥有**内层——首版引用悬垂导致 segfault，当场修正）。③ ★ **三链 334/334**（MinGW / Clang / ClangCL——存量 330 + T28-1/2 + T28-3a/b 零回归）。④ 注册表 332 → 334。
 - **v1.2**（2026-10-05）批一实施落地 + API 会计勘误。① ★ **API 影响面勘误**：`AdvanceMemoMissCount()` 落**内部件** `src/Render/FontEngine.h`（不入 `include/ECDI/**` 公共头计数）⇒ **公共 API +0**（v1.1 误记 +1 观测缝——评审建议的落点不变，会计口径修正）。② ★ **批一落地**：△2 advance memo（复用 GlyphKey + `kMissingAdvance` 哨兵 + 8192 满清 + **gid = 0 永不入 memo** 的 C28-1 安全语义——防「缺字形」与「charmap 命中 .notdef」病态混淆）+ T28-1（真命中双断言：结果逐位一致 + 热引擎共享字形文本零新增 FT load）/ T28-2（>8192 满清后语义不变）落 FontEngineTests.cpp；**三链 332/332**（MinGW / Clang / ClangCL——存量 330 零回归 +2）。③ 注册表 330 → 332（收口核对时按 +5 全量校正）。
 - **v1.1**（2026-10-05）评审吸收。**结论：「Phase 28 Detailed Design v1.0：PASS → Implementation，可以开工了」**——设计成熟度**高**、实现风险**低～中低**、**不需要再开设计迭代**；六冻结点全部认可并已成 C28-1..7 契约；评审特别认可：复用 GlyphKey（不造第二套键体系）、`kMissingAdvance` 把失败结果也 memo（且保持求和语义）、PrefKey 三依赖各管各的（文本→revision / 字体→值比较 / DPI→值比较——「干净的 cache invalidation」）、无窗口不短路保护无头测试体系、**阈值闸 256 保住短文本 fast path**（「否则优化长文本反而让普通 GUI 变慢」）、fit+1 的 overhang 论证 + 无 shaping/kerning 前提显式声明、T28-3 用调用计数而非耗时（防噪声）、库外 probe 分界（「不为测试总数漂亮硬塞像素测试进 headless registry」）、四批顺序（GDI 像素级行为最后碰）；Phase 28 三优化 = 测量内部成本 → 测量调用次数 → 绘制提交长度，**不重复优化同一层**。**吸收两条非阻塞建议**：① **T28-1 强化** = 增加 advance memo **真命中**断言——新增 `FontEngine::AdvanceMemoMissCount()` 观测缝（沿既有 `MeasureTextCacheMissCount()` / `GDITextMeasurer::MeasureCacheMissCount` 同族先例；**影响面修正：API +0 → +1 观测缝**），T28-1 升级为「结果一致 + 零新增 FT load」双断言；② **D28-C 失败语义补全** = `GetTextExtentExPointW` 失败 ⇒ **回退原路径整串 `TextOutW`**（不是 return——「测量失败 ≠ 文本不可见」），分支表升 7 条。**顺手项与注记**（非设计要求）：`pos.x ≥ clip.right` 早退（实现时可做）；`long` 平台宽度注记（保持现状不扩范围）。评审同时划红线：实现阶段**严格执行 T28-4**（不因理论成立跳过）；Phase 28 不临时引入通用测量缓存 / shaping / line layout / batching / LRU / 新公共 API（观测缝除外）/ GL 改动。未采纳：无。
 - **v1.0**（2026-10-05）初稿。**输入**：初设 v1.1（评审 PASS，13 项全 PASS）+ §3.5 六冻结点逐题钉死 + 代码核验（FaceId 永不复用为**既有不变量** FontEngine.cpp:48 · GlyphKey 复用 · GDIBackend clip 为 SaveDC 栈 ⇒ `GetClipBox` 方案 · SetText 双重载原文 · FontEngineTests 无头先例 / WindowBackgroundTests 真窗口先例 / WidgetTests FakeTextMeasurer 接缝）。**D28-A..E**：advanceCache 复用 GlyphKey（值 = 现行旗标 advance>>6，缺字形哨兵）· PrefKey 四字段直比（无窗口不短路）· DrawText 阈值闸 256 wchar + GetClipBox + GetTextExtentExPointW fit+1 守卫三分支 · T28-4 硬门槛 + 边界样本矩阵 · 注册表 +5（330 → **335**，T28-4/5 库外沿 T27-10 先例——初设 ~336 按此校正）。△1–△6 · 契约 C28-1..7 · 盯防 6 条 · 用例 T28-1..6 落位 · 四批 · 94→94 / API +0 / CMake 0 / 风险 低。

@@ -6,6 +6,7 @@
 #include "ECDI/Theme/DefaultTheme.h"
 #include "ECDI/Window/Window.h"
 
+#include <cmath>     // std::lround（Phase 28 批二：DPI 指纹）
 #include <utility>
 
 namespace ECDI{
@@ -29,11 +30,15 @@ void TextWidget::SetText(const std::string& text){
 
 	m_text = text;
 
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5）
+
 }
 
 void TextWidget::SetText(std::string&& text){
 
 	m_text = std::move(text);
+
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5）
 
 }
 
@@ -118,9 +123,40 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 Size TextWidget::GetPreferredSize() const{
 
 	// 9.8：有测量器（正常运行 Window / 测试注入）→ 内容测量；无 → 运行时 fallback 当前尺寸
-	if (TextMeasurer* measurer = ResolveMeasurer())
-		return DoMeasureText(*measurer);
-	return Widget::GetPreferredSize();
+	TextMeasurer* measurer = ResolveMeasurer();
+	if (measurer == nullptr)
+	{
+		return Widget::GetPreferredSize();
+	}
+
+	// ★ Phase 28 批二（D28-B/C28-5）：指纹短路——(revision, font, dpi) 任一变化 ⇒ miss。
+	//   ★ 无窗口（无头测试 / FakeTextMeasurer 接缝）**不短路**：dpi 无来源且指纹语义不完整，
+	//   退回现行为（Phase 7.2 无头测试体系零污染——契约 C28-5）。
+	int dpi = 0;
+	if (const Window* window = GetWindow())
+	{
+		dpi = static_cast<int>(std::lround(static_cast<double>(window->GetDpiScale()) * 96.0));
+	}
+
+	if (m_prefValid && dpi != 0 && m_prefRevision == m_textRevision
+	    && m_prefDpi == dpi
+	    && m_prefFont.size == m_style.font.value.size
+	    && m_prefFont.family == m_style.font.value.family)
+	{
+		return m_prefCache;   // 命中 ⇒ 零 measurer 调用、零键构造（C28-5）
+	}
+
+	const Size measured = DoMeasureText(*measurer);
+
+	if (dpi != 0)
+	{
+		m_prefCache = measured;
+		m_prefRevision = m_textRevision;
+		m_prefFont = m_style.font.value;
+		m_prefDpi = dpi;
+		m_prefValid = true;
+	}
+	return measured;
 
 }
 

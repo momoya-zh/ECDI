@@ -121,6 +121,7 @@ void TextBox::SetText(const std::string& text){
 	TextWidget::SetText(text);
 
 	m_needsLineRecalc = true;   // 新文本可能含 \n → 旧行缓存作废
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 
 	Invalidate();
 
@@ -131,6 +132,7 @@ void TextBox::SetText(std::string&& text){
 	TextWidget::SetText(std::move(text));
 
 	m_needsLineRecalc = true;
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 
 	Invalidate();
 
@@ -245,6 +247,7 @@ void TextBox::InsertCodepoint(char32_t codepoint){
 	++m_caret;
 	ClearSelection();   // 5.5.2：插入后同步 anchor——否则产生幽灵选择（anchor=插入前caret, caret=+1）
 	m_needsLineRecalc = true;   // 8.5.2：文本变化 → 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -266,6 +269,7 @@ void TextBox::InsertText(const std::string& text){
 	m_caret = ReplaceTextRange(insertAt, insertAt, text);   // 纯模型操作（无副作用）
 	ClearSelection();
 	m_needsLineRecalc = true;   // 8.5.2：文本变化（可能含 \n——粘贴多行）→ 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();
 	SyncTextInputCaret();
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -295,6 +299,7 @@ void TextBox::DeleteBackward(){
 	if (HasSelection()){
 		m_caret = DeleteSelection();
 		m_needsLineRecalc = true;   // 8.5.2：文本变化 → 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 		Invalidate();
 		SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
 		EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -307,6 +312,7 @@ void TextBox::DeleteBackward(){
 	--m_caret;
 	ClearSelection();   // 5.5.2：删除后同步 anchor（防之前残留幽灵选择）
 	m_needsLineRecalc = true;   // 8.5.2：文本变化（可能删 \n——行合并）→ 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -324,6 +330,7 @@ void TextBox::DeleteForward(){
 	if (HasSelection()){
 		m_caret = DeleteSelection();
 		m_needsLineRecalc = true;   // 8.5.2：文本变化 → 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 		Invalidate();
 		SyncTextInputCaret();   // 5.6 v1.0.3：光标位置变化 → 更新插入点
 		EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -335,6 +342,7 @@ void TextBox::DeleteForward(){
 	m_text.erase(cur, next - cur);
 	ClearSelection();   // 5.5.2：DeleteForward 光标不动但同步 anchor（防之前残留）
 	m_needsLineRecalc = true;   // 8.5.2：文本变化（可能删 \n——行合并）→ 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();
 	SyncTextInputCaret();   // 5.6 v1.0.3：文本变化（光标可能越界）→ 更新插入点
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -823,6 +831,7 @@ void TextBox::UpdateComposition(const std::string& compositionText){
 	m_compositionCaret = m_compositionLength;   // C9：8.5.1 固定组合末尾
 	ClearSelection();
 	m_needsLineRecalc = true;   // 8.5.2：组合串替换 m_text（可能含 \n）→ 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();              // 视觉更新（临时编辑也需重绘）
 	SyncTextInputCaret();
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -844,6 +853,7 @@ void TextBox::CommitComposition(const std::string& resultText){
 	m_compositionCaret = 0;
 	ClearSelection();
 	m_needsLineRecalc = true;   // 8.5.2：组合结果可能含 \n → 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();
 	SyncTextInputCaret();
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -878,6 +888,7 @@ void TextBox::CancelComposition(){
 	m_compositionCaret = 0;
 	ClearSelection();
 	m_needsLineRecalc = true;   // 8.5.2：组合占位擦除 → 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();
 	SyncTextInputCaret();
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -907,6 +918,7 @@ void TextBox::CutSelectionToClipboard(){
 	m_caret = DeleteSelection();
 	ClearSelection();
 	m_needsLineRecalc = true;   // 8.5.2：剪切可能含 \n → 行缓存失效
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	Invalidate();
 	SyncTextInputCaret();
 	EnsureCaretVisible();   // 8.5.2：光标跟随滚动
@@ -991,6 +1003,7 @@ void TextBox::RestoreSnapshot(const UndoSnapshot& snapshot){
 	}
 	m_scrollOffsetY = snapshot.scrollOffsetY;
 	m_needsLineRecalc = true;      // 文本恢复 → 行缓存失效（EnsureCaretVisible 内部惰性重算）
+	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
 	// 顺序（GPT 第 7 点）：恢复文本 → 修正滚动 → 更新视觉 → 更新 IME caret → 通知外部
 	EnsureCaretVisible();          // 文本高度变化后的 scroll clamp（依赖新行结构）
 	Invalidate();

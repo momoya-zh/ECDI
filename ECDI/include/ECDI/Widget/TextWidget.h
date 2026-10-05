@@ -72,6 +72,12 @@ protected:
 	/// @brief 绘制文本（空文本跳过 → MeasureText 宽高 → CalculateTextPosition → DrawText）
 	void DrawTextContent(PaintContext& ctx, int x, int y);
 
+	/// @brief 文本内容变更标记（Phase 28 批二：preferred 指纹的失效唯一入口）
+	/// @details `SetText` 双载调用；★ **子类直接改 `m_text` 的路径必须同样调用**
+	///          （TextBox 的编辑/组合/Undo 六处 —— 见其 `m_needsLineRecalc` 站点）。
+	///          递增 revision ⇒ 下一次 `GetPreferredSize` 指纹失配 ⇒ 重测（C28-5）。
+	void MarkTextChanged() noexcept{ ++m_textRevision; }
+
 	std::string m_text;
 
 	/// @brief 文本样式（foreground + font）——所有文本控件的文字视觉唯一来源（Phase 9）
@@ -82,6 +88,14 @@ private:
 	/// @brief preferred 内容测量实现（9.8——private：TextWidget 语义组成部分，非 cpp 匿名辅助）
 	/// @details Label/Button 0 inset（§3.2 冻结）：{文本测量宽, 行高}——空文本 MeasureText 返回 {0,0} → 宽 0 诚实
 	[[nodiscard]] Size DoMeasureText(TextMeasurer& measurer) const;
+
+	/// ── Phase 28 批二：preferred 结果指纹短路（D28-B——TextWidget 层闭环，不做 Widget 通用缓存）──
+	std::size_t m_textRevision = 0;      ///< 文本内容版本（`MarkTextChanged` 递增——唯一失效源之一）
+	mutable bool m_prefValid = false;    ///< 指纹是否已建立（首次 GetPreferredSize 恒 miss）
+	mutable Size m_prefCache{};          ///< 上次测量结果（有效时返回——零 measurer 调用）
+	mutable std::size_t m_prefRevision = 0;   ///< 建立缓存时的文本版本
+	mutable Font m_prefFont{};           ///< 建立缓存时的字体（值比较——SetFont/SetStyle/ApplyTheme 无需 bump）
+	mutable int m_prefDpi = 0;           ///< 建立缓存时的 DPI（`lround(GetDpiScale()*96)`——跨屏失效）
 
 };
 

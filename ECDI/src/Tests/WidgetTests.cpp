@@ -1,12 +1,22 @@
 ﻿#include "RunAllTests.h"
 #include "TestFramework.h"
+
+#include <Windows.h>
+#ifdef DrawText
+#undef DrawText   // 防御性 undef（规范 10）：RenderingBackend.h 拉入 Windows.h（Phase 28 批二 T28-3）
+#endif
+
+#include "ECDI/Application/Application.h"
 #include "ECDI/Render/PaintContext.h"
 #include "Render/RecordingBackend.h"
+#include "Render/GDITextMeasurer.h"   // Phase 28 批二：真测量器（T28-3 计数包装）
+#include "Render/GDIBackend.h"
 #include "ECDI/Render/TextMeasurer.h"
 #include "ECDI/Widget/Panel.h"
 #include "ECDI/Widget/Label.h"
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Widget/Widget.h"
+#include "ECDI/Window/Window.h"
 #include "ECDI/Theme/DefaultTheme.h"
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"
@@ -496,6 +506,91 @@ void TestAutoSizeLastCallWins()
 	EXPECT_EQ(label.GetHeight(), 50);
 }
 
+// ── Phase 28 批二：TextWidget preferred 指纹短路（T28-3a/b——真窗口装置）──────
+// ★ 装置 = WindowBackgroundTests.cpp 的 probe 形态（Application + RenderServices 注入）；
+//   观察面 = 注入的计数测量器（调用计数差值——非耗时，防噪声污染）。
+
+/// @brief 计数测量器：**拥有**内层真测量器 + 记录调用次数（观察 preferred 是否真的短路）
+class CountingMeasurer final : public TextMeasurer
+{
+public:
+	explicit CountingMeasurer(std::unique_ptr<TextMeasurer> inner) : m_inner(std::move(inner)) {}
+	Size MeasureText(const Font& font, const std::string& text) override
+	{
+		++m_measureCalls;
+		return m_inner->MeasureText(font, text);
+	}
+	float LineHeight(const Font& font) override { return m_inner->LineHeight(font); }
+	std::size_t MeasureCalls() const { return m_measureCalls; }
+private:
+	std::unique_ptr<TextMeasurer> m_inner;
+	std::size_t m_measureCalls = 0;
+};
+
+/// @brief 指纹探针：真窗口 + 计数测量器 + 根下 Label（走真 ResolveMeasurer 链）
+struct FingerprintProbe
+{
+	Application app;
+	CountingMeasurer* counter = nullptr;   ///< 非拥有（所有权在 services → Window）
+	Window* window = nullptr;              ///< 非拥有（所有权归 Application）
+	Label* label = nullptr;                ///< 非拥有（所有权归根子树）
+
+	explicit FingerprintProbe(const char* title)
+	{
+		auto counterOwned = std::make_unique<CountingMeasurer>(std::make_unique<GDITextMeasurer>());
+		counter = counterOwned.get();
+		RenderServices services{
+			std::make_unique<GDIBackend>(),      // 真后端（本组不驱动帧）
+			std::move(counterOwned)
+		};
+		window = &app.Create(title, 400, 300, std::move(services));
+
+		auto owned = std::make_unique<Label>(std::string("phase28 fingerprint probe text"));
+		label = owned.get();
+		window->GetRootWidget().AddChild(std::move(owned));
+	}
+
+	~FingerprintProbe() { window->Release(); }
+};
+
+void Test28PrefFingerprintHit()
+{
+	FingerprintProbe probe("ECDI_T28_3a");
+
+	// ① 首测：建立指纹（真实测量 ≥ 1 次）
+	const Size first = probe.label->GetPreferredSize();
+	const std::size_t afterFirst = probe.counter->MeasureCalls();
+	EXPECT_TRUE(afterFirst >= 1);
+
+	// ② 再测：文本/字体/DPI 均未变 ⇒ 指纹命中 ⇒ **零 MeasureText 调用**（C28-5 机制判据）
+	const Size second = probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.counter->MeasureCalls(), afterFirst);
+	EXPECT_EQ(first.width, second.width);
+	EXPECT_EQ(first.height, second.height);
+}
+
+void Test28PrefFingerprintInvalidation()
+{
+	FingerprintProbe probe("ECDI_T28_3b");
+
+	(void)probe.label->GetPreferredSize();
+	const std::size_t base = probe.counter->MeasureCalls();
+
+	// ① SetText 换文本 ⇒ revision 失配 ⇒ 重测（+1）
+	probe.label->SetText(std::string("a different text"));
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.counter->MeasureCalls(), base + 1);
+
+	// ② 换字号（Font 值变化）⇒ 失配 ⇒ 重测（+1）——无需 bump revision（键含字体值）
+	probe.label->SetFont(Font{ 22.0f, "" });
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.counter->MeasureCalls(), base + 2);
+
+	// ③ 再测无变化 ⇒ 命中（计数不增——证明失效后指纹重新建立）
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.counter->MeasureCalls(), base + 2);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterWidgetTests()
@@ -518,4 +613,6 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("AutoSize.SameSizeNoOp", &TestAutoSizeSameSizeNoOp);         // 9.8
     GetTestRegistry().Add("AutoSize.PureGeometry", &TestAutoSizePureGeometry);         // 9.8
     GetTestRegistry().Add("AutoSize.LastCallWins", &TestAutoSizeLastCallWins);         // 9.8
+    GetTestRegistry().Add("TextWidget.PrefFingerprintHit",      &Test28PrefFingerprintHit);         // T28-3a
+    GetTestRegistry().Add("TextWidget.PrefFingerprintInvalidate", &Test28PrefFingerprintInvalidation); // T28-3b
 }
