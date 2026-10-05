@@ -1,7 +1,7 @@
-﻿# Phase 28 · 长文本的测量与绘制成本 —— 初步设计（v1.0）
+﻿# Phase 28 · 长文本的测量与绘制成本 —— 初步设计（v1.1）
 
 > 来源：需求稿 `phase28-long-text-cost-requirements.md` **v1.1（评审 PASS → 初设）**——评审三条红线 + 初设执行顺序（K8 Spike 0 → D2 → D1 → D3 → D4 → D5）逐项兑现。
-> 状态：**v1.0**（2026-10-05）待评审
+> 状态：**v1.1**（2026-10-05）——**✅ 评审通过（PASS → Detailed Design）**（外部评审 2026-10-05：**13 项分项全 PASS**——K8 根因定位 / FT per-glyph memo / Phase 26 旗标一致性 / TextWidget 指纹 / Widget 通用缓存边界 / DPI 失效 / GDI prefix clipping（**待 T28-4 最终证明**）/ RenderCommand 兼容 / TextBox 边界 / 测试设计 / 批次 / API·公共头影响 / 风险控制）；**T28-4 = 唯一硬门槛**；详设必答六冻结点见 §3.5；吸收明细见 §7 v1.1
 > 定位：**方案冻结稿**——★ **K8 Spike 0 已完成**（§1，探针实测；红线 1 兑现），D2 四步裁决逐题作答（§1.4），D1/D3/D4 落成逐文件方案（§3）。
 
 ---
@@ -82,10 +82,21 @@ GDI 链 miss 已近原生底线（64ns/字符）⇒ **测量成本问题本质�
 - **像素等价论证**：① TextOut 内字形定位 = 累积 advance，前缀与整串的前缀部分**逐位同位**（框架无 shaping/kerning——冻结边界）；② 第 fit+1 个守卫字符覆盖跨界字形，其余越界部分仍被**活动裁剪区**裁掉 ⇒ 可见像素逐位等价（T28-4 memory-DC 探针逐位验证，含跨界字形边界样本）。
 - **命令流零改动**：widget 层与命令层完全不动 ⇒ 全部既有 `RecordingBackend` 用例天然回归；GL 后端零改动（图集路径 5.1ms 已达标）；TextBox 零改动（B9）。
 - **#10 处置**：本项 = 其「PushClip/clipRect 替代字符串截断」在后端执行侧的兑现；收口时对账剩余范围（TextBox TODO 部分经 B9 确认已不存在）。
+- **执行分支顺序（评审 §12，v1.1 写死、详设钉死）**：① clip 与文字 baseline/line bounds **完全无交集** ⇒ 整条 `return`（垂直完全不可见不做任何字符串工作——不只省 `TextOutW` 渲染，连 extent 计算都省）；② 水平 extent ≤ 可视跨度 ⇒ 原 `TextOutW`（快路径，常见 case 零新增开销）；③ 水平部分可见 ⇒ `GetTextExtentExPointW` + 守卫 + `TextOutW` 前缀。
+- ★ **T28-4 = 硬门槛**（评审 §11，v1.1 升格）：「+1 守卫足够」**不是数学天然成立**（glyph overhang / advance 取整 / 字体差异 / clip 像素取整方式都可能破坏）——memory-DC 逐位比较**不过即走预设 fallback**（守卫 +2 或该分支整串回退），不为性能硬保留此优化。
 
 ### PD28-4（可选批内项，默认不做）advance-only memo-miss 首载
 
 - D2-B 已证等价（0/475 × 2 face）；memo miss 首载可换 `ADVANCE_ONLY|NO_BITMAP`（+20-30%）。**默认不启用**（收益小、多一条一致性假设面）；仅当批一实测 memo 命中收益不足时启用，启用须带等价回归用例（D2-C 届时补量化边界）。
+
+### 3.5 ★ 详设必答（评审给定的六个冻结点——「详设只需把接口、数据结构、测试契约钉死」）
+
+1. `advanceCache` 精确类型 + **FaceId 生命周期契约**（评审 §17：FaceId 必须**永不复用**或生命周期严格绑定 `FontEngine`——防 face 重载后旧 advance 被错误复用；与 Phase 26 `GlyphKey` 设计一脉相承）；
+2. `TextWidget::PrefKey` 的精确比较/失效契约（revision/font/dpi 三字段的比较语义与失效时序）；
+3. `GDIBackend::DrawText` 三分支执行顺序（PD28-3 v1.1 已写死意向，详设落成伪码级契约）；
+4. `GetTextExtentExPointW + guard` 的边界语义（fit 判定 + 守卫字符 + fallback 预案）；
+5. T28-4 的**字体/字符边界样本清单**（跨界字形 / overhang 最大字形 / 贴边 / 多字体）；
+6. 批一/二/三的逐文件修改清单。
 
 ---
 
@@ -125,4 +136,5 @@ GDI 链 miss 已近原生底线（64ns/字符）⇒ **测量成本问题本质�
 
 ## 7. 修订记录
 
+- **v1.1**（2026-10-05）评审吸收。**结论：「Phase 28 Preliminary Design：PASS → Detailed Design」且「没有必要再做一次大的方案摇摆」**——13 项分项全 PASS（K8 根因定位 / FT per-glyph memo / Phase 26 旗标一致性 / TextWidget 指纹 / Widget 通用缓存边界 / DPI 失效 / GDI prefix clipping **待 T28-4 最终证明** / RenderCommand 兼容 / TextBox 边界 / 测试设计 / 批次 / API·公共头影响 / 风险控制）。评审特别认可：**K8 Spike 先行**（不拍脑袋优化——「这份初设最有价值的内容」）；memo 缓存**现行旗标** advance 比换 advance-only 更稳（同旗标同值同序论证成立）；收益来源干净（**消灭重复 glyph load 而非减少测量本身**——与 FontEngine 职责契合）；5-10× 有数据支撑但是**预期非保证**（命中率受 cache 容量/face 多样性/文本分布影响）；拒绝 Widget 通用缓存 = 正确边界控制；**无窗口不短路**保护了 Phase 7.2 无头测试体系；**命令流零改动**让其他 backend 完全不知道 Phase 28 存在；**整串可见 fast path** 防止短文本反而变慢；批次顺序正确（批一直打最大热点 FT miss）；Phase 26→27→28-1/2/3 = 树遍历/字形测量/重复测量/实际绘制**四层互补不重复**。**吸收三条**：① PD28-3 **执行分支顺序三分支写死**（垂直完全不可见 return → 水平完全可见原路径 → 水平部分可见 extent+guard+前缀）；② **T28-4 升格硬门槛**（「+1 足够」非数学天然成立——glyph overhang/取整/字体差异都可能破坏；逐位比较不过即走 fallback，不为性能硬保留）；③ 新增 **§3.5 详设必答六冻结点**（advanceCache 类型 + **FaceId 生命周期契约（永不复用/绑定 FontEngine）** / PrefKey 契约 / 三分支顺序 / guard 边界语义 / T28-4 边界样本清单 / 逐文件修改清单）。未采纳：无。
 - **v1.0**（2026-10-05）初稿。**输入**：需求稿 v1.1（评审 PASS）+ **K8 Spike 0 实测**（`.workbuddy/spike/textcost/measure_spike.cpp`，Debug + Release 双跑，语料 = realistic 夹具重建的 452 唯一版本 / 459KB）+ 代码勘察 B1–B10。**K8 两问作答**：124ms 峰值 = 冷启动/一次性事件不作为设计对象；3× 差距 = FT miss 逐码点全量 load 且无 per-glyph memo（374 vs 64 ns/字符 = 5.8×；7KB 文本 ~2000 码点仅 ~475 唯一）。**D2 四步裁决**：D2-B 等价 0 mismatch（475 码点 × SimSun/MSYH @px18）；主修法 = **per-glyph advance memo**（存现行旗标 advance）而非 advance-only（后者仅 +20-30%，降级为可选 PD28-4）。**方案**：PD28-1 memo（FT miss 5-10×）· PD28-2 TextWidget 指纹短路（DPI 走 `GetDpiScale` 零新 API）· PD28-3 GDI clip 前缀（后端执行侧、命令流零改动、+1 守卫字符像素等价）· PD28-4 可选。用例 T28-1..6（330 → ~336）；四批；影响面 94→94 / API +0 / CMake 0；**A3-4 re-scope：≥10× 只承诺 FT 链**（GDI 已近地板——红线 2 落实）。
