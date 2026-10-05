@@ -3,6 +3,7 @@
 
 #include "Platform/Win32/Win32FontSource.h"   // 字体源（平台实现——测试可直接 include 内部件）
 #include "Render/FontEngine.h"                // 内部件（Phase 26 批二）
+#include "ECDI/Core/String.h"                 // WideToUTF8（T28-1/2 语料构造）
 
 #include <cstdint>
 #include <memory>
@@ -230,6 +231,82 @@ void Test26UnresolvedFamilyProbedOnce()
 	EXPECT_EQ(again, def);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 28 批一：per-glyph advance memo —— T28-1 / T28-2
+// ══════════════════════════════════════════════════════════════════════
+
+/// 构造共享字形全集的两条长文本（同字母表、不同排列 ⇒ T2 的每个字形都在 T1 中出现过）
+void MakeSharedGlyphPair(std::string& outT1, std::string& outT2)
+{
+	const std::wstring alphabet = L"Phase28视口剔除测量缓存绘制长文本成本abcdefg0123456789";
+	std::wstring w1;
+	std::wstring w2;
+	// 步长与字母表长度互质 ⇒ 遍历全部字形（39 与 7/11 均互质）
+	for (std::size_t i = 0; i < 1200; ++i)
+	{
+		w1 += alphabet[(i * 7 + i / alphabet.size()) % alphabet.size()];
+	}
+	for (std::size_t i = 0; i < 900; ++i)
+	{
+		w2 += alphabet[(i * 11 + 5) % alphabet.size()];
+	}
+	outT1 = WideToUTF8(w1);
+	outT2 = WideToUTF8(w2);
+}
+
+// T28-1：advance memo——结果逐位一致 + **真命中**（热引擎零新增 FT load）
+void Test28AdvanceMemoHitAndConsistency()
+{
+	const Font font{};   // 14 DIP 默认字体（空 family ⇒ SimSun——Phase 26 对齐）
+	std::string t1;
+	std::string t2;
+	MakeSharedGlyphPair(t1, t2);
+
+	auto hot = MakeEngine(120);
+	const std::size_t n0 = hot->AdvanceMemoMissCount();
+	const Size hotT1 = hot->MeasureText(font, t1);
+	const std::size_t n1 = hot->AdvanceMemoMissCount();
+	EXPECT_TRUE(n1 > n0);   // T1 首测 ⇒ 真实 FT load（memo 必然 miss）
+
+	const Size hotT2 = hot->MeasureText(font, t2);
+	const std::size_t n2 = hot->AdvanceMemoMissCount();
+	EXPECT_TRUE(n2 == n1);   // ★ T2 字形全集 ⊆ T1 ⇒ 零新增 FT load（memo 真命中——观测缝）
+
+	auto cold = MakeEngine(120);
+	const Size coldT2 = cold->MeasureText(font, t2);
+	EXPECT_TRUE(cold->AdvanceMemoMissCount() > 0);   // 冷引擎 T2 必然真实 load
+	EXPECT_EQ(hotT2.width, coldT2.width);            // 结果逐位一致（float 精确同值）
+	EXPECT_EQ(hotT2.height, coldT2.height);
+
+	const Size coldT1 = cold->MeasureText(font, t1);
+	EXPECT_EQ(hotT1.width, coldT1.width);
+	EXPECT_EQ(hotT1.height, coldT1.height);
+}
+
+// T28-2：advance memo 上界满清——清空后语义不变（C28-3）
+void Test28AdvanceMemoOverflowClear()
+{
+	const Font font{};
+	// 9000 个连续 CJK 码点（U+4E00..U+717F，SimSun/MSYH 全覆盖）> 8192 ⇒ 满清至少一次
+	std::wstring wide;
+	for (std::uint32_t i = 0; i < 9000; ++i)
+	{
+		wide += static_cast<wchar_t>(0x4E00 + i);
+	}
+	const std::string giant = WideToUTF8(wide);
+
+	auto a = MakeEngine(120);
+	(void)a->MeasureText(font, giant);   // 触发上界满清
+	const std::string probe = WideToUTF8(L"渲染缓存 Hello 123");
+	const Size ra = a->MeasureText(font, probe);
+
+	auto b = MakeEngine(120);
+	const Size rb = b->MeasureText(font, probe);
+
+	EXPECT_EQ(ra.width, rb.width);     // 满清后测量仍正确（缓存淘汰不改变语义）
+	EXPECT_EQ(ra.height, rb.height);
+}
+
 void ECDI::Test::RegisterFontEngineTests()
 {
 	GetTestRegistry().Add("FontEngine.PixelSize",          &Test26PixelSize);                      // T26-1
@@ -239,4 +316,6 @@ void ECDI::Test::RegisterFontEngineTests()
 	GetTestRegistry().Add("FontEngine.MeasureCacheAndDpi", &Test26MeasureCacheAndDpiInvalidation); // T26-5
 	GetTestRegistry().Add("FontEngine.FontSourceResolve",  &Test26FontSourceResolve);              // T26-6
 	GetTestRegistry().Add("FontEngine.UnresolvedFamilyProbedOnce", &Test26UnresolvedFamilyProbedOnce); // T26-13
+	GetTestRegistry().Add("FontEngine.AdvanceMemoHit",      &Test28AdvanceMemoHitAndConsistency);      // T28-1
+	GetTestRegistry().Add("FontEngine.AdvanceMemoOverflow", &Test28AdvanceMemoOverflowClear);          // T28-2
 }

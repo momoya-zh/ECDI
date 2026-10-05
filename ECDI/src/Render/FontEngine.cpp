@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <string>
 #include <tuple>
@@ -25,6 +26,9 @@ namespace{
 constexpr std::size_t kMaxGlyphCache = 8192;
 constexpr std::size_t kMaxMeasureCache = 4096;
 constexpr std::size_t kMaxLineHeightCache = 256;
+constexpr std::size_t kMaxAdvanceCache = 8192;   ///< Phase 28 批一：advance memo 上界（与 glyphCache 同策略）
+/// advance memo 缺字形哨兵（成功 advance = `advance.x >> 6`，量级远小于此 ⇒ 不会混淆）
+constexpr long kMissingAdvance = (std::numeric_limits<long>::min)();
 
 // ★ UTF-8 解码已上提为 `Render/Utf8Decode.h`（Phase 26 批三：测量链与渲染链**共用**——
 //   两链若各自解码，非法/截断字节处的码点切分会不一致 ⇒ 测宽与渲宽失配）
@@ -56,6 +60,8 @@ struct FontEngine::Impl{
 	std::map<std::tuple<std::string, float, std::string, int>, Size> measureCache;  ///< 测量链：metrics
 	std::map<std::tuple<float, std::string, int>, float> lineHeightCache;
 	std::map<std::pair<FaceId, int>, float> ascentCache;                            ///< (faceId, px) → ascent(px)
+	std::map<GlyphKey, long> advanceCache;                                          ///< Phase 28 批一：per-glyph advance memo（复用 GlyphKey——C28-2）
+	std::size_t advanceMemoMissCount = 0;                                           ///< 观测缝（T28-1 真命中断言）
 
 	std::unique_ptr<FontSource> source;
 	int dpi = 96;
@@ -203,6 +209,11 @@ std::size_t FontEngine::MeasureTextCacheMissCount() const noexcept
 	return m_impl->measureMissCount;
 }
 
+std::size_t FontEngine::AdvanceMemoMissCount() const noexcept
+{
+	return m_impl->advanceMemoMissCount;
+}
+
 std::size_t FontEngine::RasterizeCount() const noexcept
 {
 	return m_impl->rasterizeCount;
@@ -224,7 +235,8 @@ Size FontEngine::MeasureText(const Font& font, const std::string& text)
 	++impl.measureMissCount;
 
 	Size result{};
-	FT_Face face = impl.FaceOf(FaceIdFor(font.family));
+	const FaceId faceId = FaceIdFor(font.family);
+	FT_Face face = impl.FaceOf(faceId);
 	if (face != nullptr)
 	{
 		FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
@@ -233,14 +245,65 @@ Size FontEngine::MeasureText(const Font& font, const std::string& text)
 		long advancePx = 0;
 		for (const char32_t cp : codepoints)
 		{
-			// ★ 与渲染链**同一 load flags**（含 FT_LOAD_NO_BITMAP，v1.1）——内嵌点阵的
-			//   advance 与矢量 advance 不同 ⇒ 测量/绘制异源会错位（选择/光标对不齐笔画）
-			if (FT_Load_Char(face, static_cast<FT_ULong>(cp),
-			                 FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_BITMAP) != 0)
+			// ★ Phase 28 批一（C28-1/2/4）：per-glyph advance memo——键复用渲染链 GlyphKey
+			//   {FaceId, glyphIndex, px, hinting}（FaceId 永不复用 = 既有不变量升格契约）；
+			//   值 = **现行旗标**下 `advance.x >> 6`（同旗标同值、求和顺序不变 ⇒ 测量逐位一致）。
+			//   ★ gid = 0（未映射）**永不入 memo**：未映射字符保持现行 `FT_Load_Char` 原路径
+			//   （防把「缺字形」与「charmap 命中 .notdef」的病态 face 混淆——C28-1）。
+			const FT_UInt glyphIndex = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
+			const GlyphKey advanceKey{ faceId, static_cast<std::uint32_t>(glyphIndex), px,
+			                           static_cast<std::uint8_t>(HintingMode::Normal) };
+			long advance = 0;
+			bool skip = false;
+			bool haveMemo = false;
+			if (glyphIndex != 0)
 			{
-				continue;   // 缺字形 ⇒ 跳过（advance 不计）
+				const auto cached = impl.advanceCache.find(advanceKey);
+				if (cached != impl.advanceCache.end())
+				{
+					haveMemo = true;   // memo 命中 ⇒ 零 FT load（哨兵同样命中——重复缺字形零 load）
+					if (cached->second == kMissingAdvance)
+					{
+						skip = true;   // 已知缺字形 ⇒ 与既有 continue 行为一致
+					}
+					else
+					{
+						advance = cached->second;
+					}
+				}
 			}
-			advancePx += static_cast<long>(face->glyph->advance.x >> 6);
+			if (!haveMemo)
+			{
+				// ★ 与渲染链**同一 load flags**（含 FT_LOAD_NO_BITMAP，v1.1）——内嵌点阵的
+				//   advance 与矢量 advance 不同 ⇒ 测量/绘制异源会错位（选择/光标对不齐笔画）
+				const bool loaded =
+					FT_Load_Char(face, static_cast<FT_ULong>(cp),
+					             FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_BITMAP) == 0;
+				if (glyphIndex != 0)
+				{
+					++impl.advanceMemoMissCount;   // 观测缝（T28-1 真命中断言——成败均计）
+					if (impl.advanceCache.size() >= kMaxAdvanceCache)
+					{
+						impl.advanceCache.clear();   // ★ 上限 ⇒ 清空（O(1)，防无界增长——O9 口径）
+					}
+					impl.advanceCache.emplace(advanceKey,
+					                          loaded ? static_cast<long>(face->glyph->advance.x >> 6)
+					                                 : kMissingAdvance);
+				}
+				if (!loaded)
+				{
+					skip = true;   // 缺字形 ⇒ 跳过（advance 不计）——与既有行为逐位一致
+				}
+				else
+				{
+					advance = static_cast<long>(face->glyph->advance.x >> 6);
+				}
+			}
+			if (skip)
+			{
+				continue;
+			}
+			advancePx += advance;   // 求和顺序不变（C28-4）
 		}
 
 		// ★ 物理像素 → **DIP**（`TextMeasurer` 契约；float 口径——与 GDI 测量链同族）

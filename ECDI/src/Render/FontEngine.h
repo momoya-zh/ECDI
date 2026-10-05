@@ -97,6 +97,12 @@ public:
 	///          消掉「每帧 × 每行」的重复度量（性能方向②）。
 	std::size_t MeasureTextCacheMissCount() const noexcept;
 
+	/// @brief advance memo miss 计数（Phase 28 批一观测缝——T28-1「真命中」断言）
+	/// @details 仅统计「gid ≠ 0 且 advanceCache miss ⇒ 实际 `FT_Load_Char`」的次数（成败均计）；
+	///          gid = 0（未映射）恒走现行 `FT_Load_Char` 原路径、不计入（C28-1：未映射行为
+	///          与 memo 化前逐位一致）。
+	std::size_t AdvanceMemoMissCount() const noexcept;
+
 	Size MeasureText(const Font& font, const std::string& text);
 
 	/// @brief 字体行高——★ **单位恒为 DIP**
