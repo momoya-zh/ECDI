@@ -49,6 +49,35 @@ void TestRendererForwarding()
     EXPECT_NEAR(backend.draws[1].color.g, 0.5f, kEpsilon);
 }
 
+// ── Phase 28 批三：T28-6 长文本命令流回归锚（C28-6——前缀截断不得改命令流）──────
+// ★ 判据：阈值闸两侧（< 256 / > 256 wchar）的 DrawText 命令几何与文本**逐字节一致**——
+//   前缀截断只在 GDIBackend 执行侧发生，RecordingBackend（及任何后端）看到的命令不变。
+void TestRendererLongTextCommandStream()
+{
+    RecordingBackend backend;
+    Renderer renderer(backend);
+
+    // 短串（阈值下）+ 长串（>256 wchar——超阈值但 RecordingBackend 仍须收到完整文本）
+    const std::string shortText = "short anchor";
+    std::string longText;
+    for (int i = 0; i < 40; ++i)
+    {
+        longText += "phase28-gdi-prefix-anchor-";   // 26 × 40 = 1040 字节
+    }
+
+    CommandBuffer commands;
+    commands.emplace_back(DrawTextCommand{ Point{ 5.0f, 6.0f }, shortText, Color::Black(), Font{} });
+    commands.emplace_back(DrawTextCommand{ Point{ 7.0f, 8.0f }, longText, Color::Black(), Font{} });
+    renderer.Execute(commands);
+
+    EXPECT_EQ(backend.textDraws.size(), 2);
+    EXPECT_NEAR(backend.textDraws[0].pos.x, 5.0f, kEpsilon);
+    EXPECT_NEAR(backend.textDraws[1].pos.x, 7.0f, kEpsilon);
+    EXPECT_TRUE(backend.textDraws[0].text == shortText);   // 短串原样
+    EXPECT_TRUE(backend.textDraws[1].text == longText);    // ★ 长串**完整**到达后端（未截断）
+    EXPECT_EQ(backend.textDraws[1].text.size(), longText.size());
+}
+
 void TestUTF8Utility()
 {
     // ── 5.5.1.1 原 #6：UTF-8 工具自测 ──
@@ -486,6 +515,7 @@ void TestRendererScaleLeavesBufferIntact()
 void ECDI::Test::RegisterRendererTests()
 {
     GetTestRegistry().Add("Renderer.Forwarding", &TestRendererForwarding);
+    GetTestRegistry().Add("Renderer.LongTextCommandStream", &TestRendererLongTextCommandStream);   // T28-6
     GetTestRegistry().Add("Renderer.UTF8Utility", &TestUTF8Utility);
     GetTestRegistry().Add("Renderer.NewCommands", &TestRendererNewCommands);
     GetTestRegistry().Add("Renderer.PaintContextNewCommands", &TestPaintContextNewCommands);

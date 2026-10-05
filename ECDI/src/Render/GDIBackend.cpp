@@ -17,6 +17,11 @@ namespace ECDI {
 
 namespace{
 
+// ── Phase 28 批三（D28-C）：长文本 clip 前缀截断阈值 ──
+// ≤ 此长度的文本走精确原路径（零新增 GetClipBox/extent 开销）；> 才进三分支。
+// 性能调参（盯防⑥）：任何改动必须复跑 T28-4/5 探针。
+constexpr std::size_t kTextPrefixMinWchars = 256;
+
 // ── 9.5 Alpha Primitive 补强：半透明实心合成（约束 1：预乘 BGRA + AC_SRC_ALPHA）──
 // 复用 Phase 8 DrawImage §8.3 已验证链路（32bpp 顶降 DIB + AlphaBlend）。
 // Phase 8.6：圆角分支接入覆盖度抗锯齿（第 8.6 阶段**修订 9.5「约束 2」**——alpha 合成与
@@ -393,9 +398,67 @@ void GDIBackend::DrawText(const Point& pos, const std::string& text,
 	SetTextColor(m_memoryDC, ToColorRef(color));  // P8：前景色
 
 	// D6 细节：坐标截断（决策 25 统一）；TextOutW 长度是 wchar 数（非字节）
+	const LONG drawX = static_cast<LONG>(pos.x);
+	const LONG drawY = static_cast<LONG>(pos.y);
+
+	// ── Phase 28 批三（D28-C）：长文本 clip 前缀截断——三分支 + 阈值闸 ──
+	// 命令流零改动（widget/命令/GL 全不动——C28-6）；短串走精确原路径（零新增开销）。
+	// 分支序 = 详设 v1.1 钉死顺序：阈值闸 → 完全不可见 → extent（失败回退整串）
+	// → 垂直无交集 → 水平完全可见 → fit+1 守卫前缀。
+	if (wideText.size() > kTextPrefixMinWchars)
+	{
+		RECT clip{};
+		const int clipResult = GetClipBox(m_memoryDC, &clip);
+		if (clipResult == NULLREGION || clipResult == ERROR)
+		{
+			return;   // 完全不可见 / 无 DC——分支 1（冗余保险：常规情形已被 Phase 27 拦截）
+		}
+
+		// 分支 2/3：一次 GetTextExtentExPointW 同时拿 fit 数与整串高度（含 cy）
+		const LONG maxSpan = clip.right - (drawX > clip.left ? drawX : clip.left);
+		SIZE extent{};
+		INT fit = 0;
+		const BOOL extentOk = GetTextExtentExPointW(m_memoryDC, wideText.c_str(),
+		                                            static_cast<int>(wideText.size()),
+		                                            static_cast<LONG>((std::max)(0L, maxSpan)),
+		                                            &fit, nullptr, &extent);
+		if (!extentOk)
+		{
+			// v1.1 评审建议②：测量失败 ⇒ 回退原路径整串（测量失败 ≠ 文本不可见）
+			TextOutW(m_memoryDC, drawX, drawY, wideText.c_str(),
+			         static_cast<int>(wideText.size()));
+			return;
+		}
+
+		// 分支 4：垂直完全无交集 ⇒ return（连 TextOut 都省）
+		if (drawY >= clip.bottom || drawY + extent.cy <= clip.top)
+		{
+			return;
+		}
+
+		// 分支 5：水平完全可见（含 maxSpan ≥ 串宽 ⇒ fit == len）⇒ 整串原路径
+		if (fit >= static_cast<INT>(wideText.size()))
+		{
+			TextOutW(m_memoryDC, drawX, drawY, wideText.c_str(),
+			         static_cast<int>(wideText.size()));
+			return;
+		}
+
+		// 分支 6：水平部分可见 ⇒ 只发射可见前缀 + 1 守卫字符（跨界字形交给活动裁剪区裁掉）；
+		// 前缀内字形定位 = 累积 advance，与整串发射逐位同位（无 shaping/kerning——冻结边界）。
+		// T28-4 = 硬门槛：探针逐位比较不过 ⇒ 走详设预设 fallback（守卫 +2 → 整串回退）。
+		INT prefix = fit + 1;
+		if (prefix > static_cast<INT>(wideText.size()))
+		{
+			prefix = static_cast<INT>(wideText.size());
+		}
+		TextOutW(m_memoryDC, drawX, drawY, wideText.c_str(), prefix);
+		return;
+	}
+
 	TextOutW(m_memoryDC,
-	         static_cast<LONG>(pos.x),
-	         static_cast<LONG>(pos.y),
+	         drawX,
+	         drawY,
 	         wideText.c_str(),
 	         static_cast<int>(wideText.size()));
 }
