@@ -2,6 +2,7 @@
 
 #include "ECDI/Core/Font.h"
 #include "ECDI/Core/Size.h"
+#include "ECDI/Render/TextMeasurer.h"   // ★ Phase 29 △3：TextFit（契约类型同源于公共头）
 #include "Render/FontSource.h"
 
 #include <cstddef>
@@ -104,6 +105,19 @@ public:
 	std::size_t AdvanceMemoMissCount() const noexcept;
 
 	Size MeasureText(const Font& font, const std::string& text);
+
+	/// @brief 断行适配（★ Phase 29 △3/D29-Ⅵ：**advance memo 累积**——生产路径）
+	/// @details 与 `MeasureText` **共用同一 per-glyph advance 求值路径**（同 GlyphKey / 同 load
+	///          flags / 同 memo 哨兵语义）⇒ ★ 同一 `[startCp, startCp+fitCp)` 区间的宽度
+	///          **与 `MeasureText` 逐位一致**（C29-1 的宽度口径前提；T29-FIT-3 锚点）。
+	///          本方法**不理解**空格 / CJK / 禁则（「断在哪」属布局引擎——盯防①）。
+	/// @param startCp 起始**码点**索引（绝对；`>= 码点数` ⇒ 返回 `{0, 0}`）
+	/// @param maxWidth 可用宽（DIP，< 0 视作 0；**连一个码点也放不下 ⇒ `{0, 0}`**）
+	/// @return `TextFit`：`fitCp` = **相对**可消费码点数；`width` = 消费段宽（DIP）
+	/// @note ★ **O(n) 契约仅限本 FT/memo 路径**（C29-9）——每码点至多一次 memo 查询，
+	///       **不逐行重扫**（盯防⑧：构建布局时不得对同一区间二次调用本方法）。
+	TextFit FitText(const Font& font, const std::string& text,
+	                std::size_t startCp, float maxWidth);
 
 	/// @brief 字体行高——★ **单位恒为 DIP**
 	float LineHeight(const Font& font);

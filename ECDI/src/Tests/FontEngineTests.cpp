@@ -4,6 +4,7 @@
 #include "Platform/Win32/Win32FontSource.h"   // 字体源（平台实现——测试可直接 include 内部件）
 #include "Render/FontEngine.h"                // 内部件（Phase 26 批二）
 #include "ECDI/Core/String.h"                 // WideToUTF8（T28-1/2 语料构造）
+#include "ECDI/Core/UTF8.h"                   // CodepointIndexToByteOffset（T29-FIT-3 切片换算）
 
 #include <cstdint>
 #include <memory>
@@ -307,6 +308,82 @@ void Test28AdvanceMemoOverflowClear()
 	EXPECT_EQ(ra.height, rb.height);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 29 批一：FontEngine::FitText（FT 生产路径）—— T29-FIT-3 / T29-FIT-4
+// ══════════════════════════════════════════════════════════════════════
+// ★ 核心判据 = **与 `MeasureText` 逐位一致**：批一实施时把 `MeasureText` 的 memo 循环体
+//   提取为 `Impl::AdvanceOf`（`FitText` 共用）——若两方法漂移（flags / 哨兵 / 求和顺序），
+//   「断行算出的宽」与「测出的宽」会失配（表现 = 断行位置与绘制错位）。以下断言即该前提的守卫。
+
+// T29-FIT-3：FT FitText 与 MeasureText 逐位一致（含逐前缀切片）
+void Test29FontEngineFitTextMatchesMeasure()
+{
+	const Font font{ 16.0f, "" };
+	auto engine = MakeEngine(120);
+	// ASCII + CJK + CJK 标点混排（多字节长度不齐 ⇒ 切片换算才有意义）。★ 码点数**实测导出**
+	//   而非硬写——本组断言的是「两法一致」，不是「恰好 N 个」（硬写会随语料漂移成假失败）。
+	const std::string text = WideToUTF8(L"Hello 世界。这是一个测试");
+	const std::size_t totalCp = ByteOffsetToCodepointIndex(text, text.size());
+	EXPECT_EQ(totalCp, static_cast<std::size_t>(15));   // 语料本身：6 ASCII + 2 CJK + 1 标点 + 6 CJK = 15
+
+	// ① 放得下全部 ⇒ fitCp = 剩余码点数，width == MeasureText 全串宽（**逐位**）
+	const Size full = engine->MeasureText(font, text);
+	const TextFit all = engine->FitText(font, text, 0, 1e9f);
+	EXPECT_EQ(all.fitCp, totalCp);
+	EXPECT_EQ(all.width, full.width);
+
+	// ② ★ **逐前缀**：对每个 startCp，切出 FitText 消费的那段，其宽 == MeasureText(该段)
+	for (std::size_t start = 0; start < totalCp; ++start)
+	{
+		const TextFit fit = engine->FitText(font, text, start, 1e9f);
+		const std::size_t byteStart = CodepointIndexToByteOffset(text, start);
+		const std::size_t byteEnd = CodepointIndexToByteOffset(text, start + fit.fitCp);
+		const Size slice = engine->MeasureText(font, text.substr(byteStart, byteEnd - byteStart));
+		EXPECT_EQ(fit.width, slice.width);   // ★ 逐位相等
+		EXPECT_EQ(fit.fitCp, totalCp - start);
+	}
+}
+
+// T29-FIT-4：边界语义（越界 / 零宽 / 负宽 / 单调 / 恰好等于 / memo 零新增 load）
+void Test29FontEngineFitTextBoundaries()
+{
+	const Font font{ 16.0f, "" };
+	auto engine = MakeEngine(120);
+	const std::string text = WideToUTF8(L"ABCDEFG");   // 7 个 ASCII 码点
+
+	// ① startCp 越过串尾 ⇒ {0, 0}
+	const TextFit past = engine->FitText(font, text, 99, 1000.0f);
+	EXPECT_EQ(past.fitCp, static_cast<std::size_t>(0));
+	EXPECT_EQ(past.width, 0.0f);
+
+	// ② 零宽 / ③ 负宽（按 0 处理）⇒ 一个码点也放不下
+	EXPECT_EQ(engine->FitText(font, text, 0, 0.0f).fitCp, static_cast<std::size_t>(0));
+	EXPECT_EQ(engine->FitText(font, text, 0, -50.0f).fitCp, static_cast<std::size_t>(0));
+
+	// ④ ★ 单调性 + 不超宽 + 至少 k 个（等宽 ASCII 前缀 ⇒ 恰 k 宽必放得下 k 个）
+	const float oneChar = engine->MeasureText(font, std::string("A")).width;
+	EXPECT_TRUE(oneChar > 0.0f);
+	std::size_t previous = 0;
+	for (std::size_t k = 1; k <= 7; ++k)
+	{
+		const float limit = oneChar * static_cast<float>(k);
+		const TextFit fit = engine->FitText(font, text, 0, limit);
+		EXPECT_TRUE(fit.fitCp >= previous);            // 单调不减
+		EXPECT_TRUE(fit.width <= limit + 0.001f);      // 恒不超宽
+		EXPECT_TRUE(fit.fitCp >= k);                    // 恰 k 宽 ⇒ 至少 k 个
+		previous = fit.fitCp;
+	}
+	EXPECT_EQ(previous, static_cast<std::size_t>(7));
+
+	// ⑤ 恰好一个字符宽 ⇒ 恰好放得下 1 个（严格 > 才断的边界）
+	EXPECT_EQ(engine->FitText(font, text, 0, oneChar).fitCp, static_cast<std::size_t>(1));
+
+	// ⑥ ★ memo 复用：热引擎重复 FitText **零新增 FT load**（O(n) 路径不重载字形——C29-9）
+	const std::size_t missesBefore = engine->AdvanceMemoMissCount();
+	(void)engine->FitText(font, text, 0, 1e9f);
+	EXPECT_EQ(engine->AdvanceMemoMissCount(), missesBefore);
+}
+
 void ECDI::Test::RegisterFontEngineTests()
 {
 	GetTestRegistry().Add("FontEngine.PixelSize",          &Test26PixelSize);                      // T26-1
@@ -318,4 +395,6 @@ void ECDI::Test::RegisterFontEngineTests()
 	GetTestRegistry().Add("FontEngine.UnresolvedFamilyProbedOnce", &Test26UnresolvedFamilyProbedOnce); // T26-13
 	GetTestRegistry().Add("FontEngine.AdvanceMemoHit",      &Test28AdvanceMemoHitAndConsistency);      // T28-1
 	GetTestRegistry().Add("FontEngine.AdvanceMemoOverflow", &Test28AdvanceMemoOverflowClear);          // T28-2
+	GetTestRegistry().Add("FontEngine.FitTextMatchesMeasure", &Test29FontEngineFitTextMatchesMeasure);   // T29-FIT-3
+	GetTestRegistry().Add("FontEngine.FitTextBoundaries",     &Test29FontEngineFitTextBoundaries);       // T29-FIT-4
 }

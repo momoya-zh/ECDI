@@ -2,6 +2,7 @@
 
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"   // UTF8ToWide（告警消息用）
+#include "ECDI/Core/UTF8.h"     // ★ Phase 29 △3：CodepointIndexToByteOffset（码点数上界/切片换算）
 #include "Render/Utf8Decode.h"  // ★ Phase 26 批三：与 GLRenderer **共用同一解码**
 
 // ★★ `FT_*` 出现在**本编译单元内**（pimpl —— 头文件与框架其余部分零 FreeType：详设盯防①）
@@ -72,6 +73,61 @@ struct FontEngine::Impl{
 	FT_Face FaceOf(FaceId id) const{
 		const auto it = facesById.find(id);
 		return (it != facesById.end()) ? it->second : nullptr;
+	}
+
+	/// @brief 单码点 advance 求值（★ Phase 29 △3 提取：`MeasureText` 与 `FitText` **共用同一路径**）
+	/// @details ★ 共享是**逐位一致**的前提：两方法若各自实现 memo/哨兵逻辑，一旦某侧漂移
+	///          （load flags、skip 语义、求和顺序），「测出来的宽」与「断行算出的宽」会失配
+	///          ——表现 = 断行位置与绘制错位。批次一的 memo 语义（C28-1/2/4）**原样保留**。
+	/// @param face 已 `FT_Set_Pixel_Sizes(px)` 的 face（★ 依赖调用方设置——advance 随 pixelSize 变）
+	/// @param faceId memo 键的 face 维（★ FaceId 永不复用＝既有不变量升格契约 C28-2）
+	/// @param px     memo 键的 pixelSize 维（★ DPI 经此入 key）
+	/// @param cp   码点
+	/// @param out  该码点 advance（**物理像素**，`advance.x >> 6`）
+	/// @return false = 缺字形 / 加载失败 ⇒ `out` 不变（调用方跳过该码点——同 `continue` 语义）
+	bool AdvanceOf(FT_Face face, FaceId faceId, int px, char32_t cp, long& out)
+	{
+		// ★ 与渲染链**同一 load flags**（含 FT_LOAD_NO_BITMAP）——内嵌点阵的 advance 与
+		//   矢量 advance 不同 ⇒ 测量/绘制异源会错位（选择/光标对不齐笔画）
+		const FT_UInt glyphIndex = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
+		// ★ gid = 0（未映射）**永不入 memo**：未映射字符保持 `FT_Load_Char` 原路径
+		//   （防把「缺字形」与「charmap 命中 .notdef」的病态 face 混淆——C28-1）
+		const GlyphKey key{ faceId, static_cast<std::uint32_t>(glyphIndex), px,
+		                    static_cast<std::uint8_t>(HintingMode::Normal) };
+
+		if (glyphIndex != 0)
+		{
+			const auto cached = advanceCache.find(key);
+			if (cached != advanceCache.end())
+			{
+				if (cached->second == kMissingAdvance)
+				{
+					return false;   // 已知缺字形 ⇒ 跳过（与原 `continue` 行为一致）
+				}
+				out = cached->second;
+				return true;
+			}
+		}
+
+		const bool loaded =
+			FT_Load_Char(face, static_cast<FT_ULong>(cp),
+			             FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_BITMAP) == 0;
+		if (glyphIndex != 0)
+		{
+			++advanceMemoMissCount;   // 观测缝（T28-1 真命中断言——成败均计）
+			if (advanceCache.size() >= kMaxAdvanceCache)
+			{
+				advanceCache.clear();   // ★ 上限 ⇒ 清空（O(1)，防无界增长——O9 口径）
+			}
+			advanceCache.emplace(key, loaded ? static_cast<long>(face->glyph->advance.x >> 6)
+			                                 : kMissingAdvance);
+		}
+		if (!loaded)
+		{
+			return false;   // 缺字形 ⇒ 跳过（advance 不计）——与既有行为逐位一致
+		}
+		out = static_cast<long>(face->glyph->advance.x >> 6);
+		return true;
 	}
 };
 
@@ -245,63 +301,15 @@ Size FontEngine::MeasureText(const Font& font, const std::string& text)
 		long advancePx = 0;
 		for (const char32_t cp : codepoints)
 		{
-			// ★ Phase 28 批一（C28-1/2/4）：per-glyph advance memo——键复用渲染链 GlyphKey
-			//   {FaceId, glyphIndex, px, hinting}（FaceId 永不复用 = 既有不变量升格契约）；
-			//   值 = **现行旗标**下 `advance.x >> 6`（同旗标同值、求和顺序不变 ⇒ 测量逐位一致）。
-			//   ★ gid = 0（未映射）**永不入 memo**：未映射字符保持现行 `FT_Load_Char` 原路径
-			//   （防把「缺字形」与「charmap 命中 .notdef」的病态 face 混淆——C28-1）。
-			const FT_UInt glyphIndex = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
-			const GlyphKey advanceKey{ faceId, static_cast<std::uint32_t>(glyphIndex), px,
-			                           static_cast<std::uint8_t>(HintingMode::Normal) };
+			// ★ Phase 28 批一（C28-1/2/4）：per-glyph advance memo——★ v1.1 实施勘误：
+			//   循环体已**提取为 `Impl::AdvanceOf`**（Phase 29 △3）——`FitText` 与本方法必须走
+			//   **同一路径**（同 GlyphKey / 同 load flags / 同哨兵语义 / 同求和顺序），
+			//   否则「测量宽」与「断行宽」失配。批一语义**逐条保留**（memo 命中零 FT load、
+			//   gid=0 永不入 memo、上限清空、缺字形跳过）。
 			long advance = 0;
-			bool skip = false;
-			bool haveMemo = false;
-			if (glyphIndex != 0)
+			if (!impl.AdvanceOf(face, faceId, px, cp, advance))
 			{
-				const auto cached = impl.advanceCache.find(advanceKey);
-				if (cached != impl.advanceCache.end())
-				{
-					haveMemo = true;   // memo 命中 ⇒ 零 FT load（哨兵同样命中——重复缺字形零 load）
-					if (cached->second == kMissingAdvance)
-					{
-						skip = true;   // 已知缺字形 ⇒ 与既有 continue 行为一致
-					}
-					else
-					{
-						advance = cached->second;
-					}
-				}
-			}
-			if (!haveMemo)
-			{
-				// ★ 与渲染链**同一 load flags**（含 FT_LOAD_NO_BITMAP，v1.1）——内嵌点阵的
-				//   advance 与矢量 advance 不同 ⇒ 测量/绘制异源会错位（选择/光标对不齐笔画）
-				const bool loaded =
-					FT_Load_Char(face, static_cast<FT_ULong>(cp),
-					             FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_BITMAP) == 0;
-				if (glyphIndex != 0)
-				{
-					++impl.advanceMemoMissCount;   // 观测缝（T28-1 真命中断言——成败均计）
-					if (impl.advanceCache.size() >= kMaxAdvanceCache)
-					{
-						impl.advanceCache.clear();   // ★ 上限 ⇒ 清空（O(1)，防无界增长——O9 口径）
-					}
-					impl.advanceCache.emplace(advanceKey,
-					                          loaded ? static_cast<long>(face->glyph->advance.x >> 6)
-					                                 : kMissingAdvance);
-				}
-				if (!loaded)
-				{
-					skip = true;   // 缺字形 ⇒ 跳过（advance 不计）——与既有行为逐位一致
-				}
-				else
-				{
-					advance = static_cast<long>(face->glyph->advance.x >> 6);
-				}
-			}
-			if (skip)
-			{
-				continue;
+				continue;   // 缺字形 ⇒ 跳过（advance 不计）——与既有行为逐位一致
 			}
 			advancePx += advance;   // 求和顺序不变（C28-4）
 		}
@@ -320,8 +328,60 @@ Size FontEngine::MeasureText(const Font& font, const std::string& text)
 	return result;
 }
 
-float FontEngine::LineHeight(const Font& font)
+TextFit FontEngine::FitText(const Font& font, const std::string& text,
+                           std::size_t startCp, float maxWidth)
 {
+	Impl& impl = *m_impl;
+	const std::size_t totalCp = ByteOffsetToCodepointIndex(text, text.size());
+	if (startCp >= totalCp)
+	{
+		return TextFit{ 0, 0.0f };   // 窗口在串尾之后（含空串）
+	}
+
+	const int dpi = (impl.dpi > 0) ? impl.dpi : 96;
+	const int px = PixelSize(font);
+	const FaceId faceId = FaceIdFor(font.family);
+	FT_Face face = impl.FaceOf(faceId);
+	if (face == nullptr)
+	{
+		// ★ 无 face ⇒ 全部码点「装得下」（不排版 ⇒ 消费全串）——与 `MeasureText` 返
+		//   `{0,0}` 后由布局引擎自行收敛同族；★ **不得**返回 0（否则无字体环境完全不能断行）。
+		return TextFit{ totalCp - startCp, 0.0f };
+	}
+	FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
+
+	// ★ O(n) 单趟扫描（★ 非二分：memo 命中下每码点 O(log n)，二分反而多跑 log n 趟
+	//   且**无法**保证「第一次超宽就停」——线性扫描天然「只扫到断点」）。
+	const std::vector<char32_t> codepoints = DecodeUtf8(text);
+	const float limit = (std::max)(0.0f, maxWidth);
+	const float toDip = 96.0f / static_cast<float>(dpi);
+	long advancePx = 0;
+	std::size_t fitCp = 0;
+	for (std::size_t i = startCp; i < codepoints.size(); ++i)
+	{
+		long advance = 0;
+		if (!impl.AdvanceOf(face, faceId, px, codepoints[i], advance))
+		{
+			// ★ 缺字形 ⇒ advance 不计但**码点仍被消费**（与 `MeasureText` 求和逐位一致的必要条件：
+			//   若此处 return，缺字形文本会在断行时「少消费一个字」⇒ 与测宽口径分裂）。
+			++fitCp;
+			continue;
+		}
+		const long nextPx = advancePx + advance;
+		if (static_cast<float>(nextPx) * toDip > limit)
+		{
+			break;   // ★ 超宽 ⇒ 停在**本码点之前**（严格 >：恰好等于 maxWidth 仍算放得下）
+		}
+		advancePx = nextPx;
+		++fitCp;
+	}
+
+	// ★ 恒至少消费 0 个；「首个码点就超宽」⇒ fitCp = 0（调用方据此按字硬断——D29-Ⅶ 退化语义）。
+	//   width = **实际消费段**宽（缺字形码点贡献 0——与 `MeasureText` 同口径）。
+	return TextFit{ fitCp, static_cast<float>(advancePx) * toDip };
+}
+
+float FontEngine::LineHeight(const Font& font){
 	Impl& impl = *m_impl;
 	const int dpi = (impl.dpi > 0) ? impl.dpi : 96;
 	const int px = PixelSize(font);

@@ -24,6 +24,12 @@ public:
 
 	Size MeasureText(const Font& font, const std::string& text) override;
 
+	/// @brief 断行适配（★ Phase 29 △4：**转发** `FontEngine::FitText`——advance memo 生产路径）
+	/// @details ★ 不走 `TextMeasurer.h` 的默认二分体（兼容 fallback）——本类与 `GDITextMeasurer`
+	///          同为**生产链**，各自原生实现（FT = memo 累积 / GDI = `GetTextExtentExPointW`）。
+	TextFit FitText(const Font& font, const std::string& text,
+	                std::size_t startCp, float maxWidth) override;
+
 	float LineHeight(const Font& font) override;
 
 private:

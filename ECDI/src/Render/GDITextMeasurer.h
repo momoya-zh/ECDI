@@ -35,6 +35,15 @@ public:
 
 	Size MeasureText(const Font& font, const std::string& text) override;
 
+	/// @brief 断行适配（GDI **原生**覆写——★ Phase 29 △2/D29-Ⅳ）
+	/// @details ★ **不走默认体**（`TextMeasurer.h` 的二分 fallback）：本覆写复用 `MeasureText`
+	///          的脚手架（`GetDpiForWindow` / `GetDC` / `GetOrCreateFont` / `SelectObject`），
+	///          一次 `GetTextExtentExPointW` 同时取得「**宽度**」与「**放得下几个 wchar**」——
+	///          然后按 **D29-Ⅳ 三步换算**把 wchar 口径折回**码点**口径。
+	///          ★ **surrogate pair 不可拆分**（C29-2）——wchar fit 绝不停在代理对中间。
+	TextFit FitText(const Font& font, const std::string& text,
+	                std::size_t startCp, float maxWidth) override;
+
 	float LineHeight(const Font& font) override;
 
 	/// @brief 测量缓存未命中计数（★ **观测缝**——命中与否的**返回值相同**，无法凭返回值区分）

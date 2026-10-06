@@ -2,10 +2,12 @@
 
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
+#include "ECDI/Core/UTF8.h"   // ★ Phase 29 △2：CodepointIndexToByteOffset（startCp → 字节偏移）
 #include "Platform/Win32/Win32RenderContext.h"   // ★ Phase 26：Initialize 取 HWND（同 GDIBackend 先例）
 
 #include <algorithm>
 #include <cmath>
+#include <limits>   // ★ Phase 29 △2：numeric_limits（码点数上界探测）
 #include <string>
 
 namespace ECDI{
@@ -137,6 +139,115 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 		m_measureCache.clear();   // ★ 上限 ⇒ 清空（O(1)，防无界增长）
 	}
 	m_measureCache.emplace(cacheKey, result);
+	return result;
+}
+
+TextFit GDITextMeasurer::FitText(const Font& font, const std::string& text,
+                                std::size_t startCp, float maxWidth)
+{
+	// ★ Phase 29 △2/D29-Ⅳ：**原生**实现——一次 `GetTextExtentExPointW` 同时拿宽度与 wchar fit，
+	//   再按三步换算折回码点口径。★ 不走 `TextMeasurer.h` 的默认二分体（那是兼容 fallback）。
+	const std::size_t totalCp = ByteOffsetToCodepointIndex(text, text.size());
+	if (startCp >= totalCp)
+	{
+		return TextFit{ 0, 0.0f };   // 窗口在串尾之后（含空串）
+	}
+
+	// ★ 与 MeasureText 同基准：`GetDpiForWindow`（★ 不读 m_measureCache——fit 的键含 startCp，
+	//   另建缓存条目会与测量缓存语义混淆；缓存化留给批二/三按需再加）。
+	int dpi = GetDpiForWindow(m_hwnd);
+	if (dpi <= 0)
+	{
+		dpi = 96;   // fail-safe（与 MeasureText 同口径）
+	}
+
+	// ★ 三步换算（UTF-8 字节 → 码点偏移 → UTF-16 wchar 窗口）：
+	//   ① startCp 码点 → 字节偏移（切片起点）
+	//   ② 切片 → `UTF8ToWide`（**唯一一次**转换——本方法内不重复转换，C29-9 记为已知债务 O4）
+	const std::size_t byteStart = CodepointIndexToByteOffset(text, startCp);
+	const std::wstring wide = UTF8ToWide(text.substr(byteStart));
+	if (wide.empty())
+	{
+		return TextFit{ 0, 0.0f };
+	}
+
+	// ★ 物理像素口径的宽度上限（DIP → px），与 MeasureText 的 toDip 同公式反向。
+	const float limit = (std::max)(0.0f, maxWidth);
+	const LONG maxPx = static_cast<LONG>(std::ceil(limit * static_cast<float>(dpi) / 96.0));
+
+	HDC measureDC = GetDC(nullptr);
+	if (!measureDC)
+	{
+		return TextFit{ totalCp - startCp, 0.0f };   // ★ 无 DC ⇒ 放行全串（同 FontEngine 无 face 口径）
+	}
+
+	TextFit result{ totalCp - startCp, 0.0f };   // 兜底 = 放行全串
+	HFONT hfont = GetOrCreateFont(font, dpi);
+	if (hfont)
+	{
+		HGDIOBJ oldFont = SelectObject(measureDC, hfont);
+
+		SIZE extent{};
+		INT fitW = 0;
+		// ★ `GetTextExtentExPointW` 的 maxExtent **接受 LONG 像素**；fitW = 放得下的 wchar 数。
+		//   ★ **不设 `DT_` 之类旗标**（本函数无旗标参数）；`lpdz` 传 nullptr ⇒ 不做逐字符定位。
+		if (GetTextExtentExPointW(measureDC, wide.c_str(), static_cast<int>(wide.size()),
+		                          maxPx, &fitW, nullptr, &extent))
+		{
+			// ── D29-Ⅳ 三步换算：wchar fit → 码点数 ──
+			//  ① ★ 末位是**高代理**（0xD800–0xDBFF）⇒ 停在代理对中间 ⇒ −−fitW
+			//    （代理对不可拆分——C29-2；宁少一个码点，不可产出半个代理对）。
+			INT fit = fitW;
+			if (fit > 0)
+			{
+				const wchar_t last = wide[static_cast<std::size_t>(fit) - 1];
+				if (last >= 0xD800 && last <= 0xDBFF)
+				{
+					--fit;
+				}
+			}
+			//  ② 线性计数 [0, fit) 内的**低代理**（0xDC00–0xDFFF）——每代理对 2 wchar = 1 码点
+			//     ⇒ cpFit = fitW − 低代理数。
+			std::size_t lowSurrogates = 0;
+			for (INT k = 0; k < fit; ++k)
+			{
+				const wchar_t c = wide[static_cast<std::size_t>(k)];
+				if (c >= 0xDC00 && c <= 0xDFFF)
+				{
+					++lowSurrogates;
+				}
+			}
+			const std::size_t cpFit = static_cast<std::size_t>(fit) - lowSurrogates;
+
+			//  ③ 码点口径 + **消费段宽**。★ 宽度用 `extent`（= 整个串的 extent，非 fit 前缀）——
+			//     不可用：extent 是全串宽。⇒ 宽度取 **消费前缀**的 `GetTextExtentPoint32W`
+			//     （仅在 fit < 全长时；否则 extent 本身即答案——省一次原生调用）。
+			float width = 0.0f;
+			if (fit >= static_cast<INT>(wide.size()))
+			{
+				width = static_cast<float>(extent.cx) * (96.0f / static_cast<float>(dpi));
+			}
+			else
+			{
+				SIZE prefixExtent{};
+				if (GetTextExtentPoint32W(measureDC, wide.c_str(), fit, &prefixExtent))
+				{
+					width = static_cast<float>(prefixExtent.cx) * (96.0f / static_cast<float>(dpi));
+				}
+			}
+			result = TextFit{ cpFit, width };
+		}
+
+		SelectObject(measureDC, oldFont);
+	}
+
+	ReleaseDC(nullptr, measureDC);
+
+	// ★ 防御：cpFit 不得越过串尾（fitW 上界为 wide.size() ⇒ 天然成立，此处仅防 fitW 异常）
+	if (result.fitCp > totalCp - startCp)
+	{
+		result.fitCp = totalCp - startCp;
+	}
 	return result;
 }
 
