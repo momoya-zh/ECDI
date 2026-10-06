@@ -1,7 +1,7 @@
 ﻿# Phase 28 · 长文本的测量与绘制成本 —— 详细设计（v1.1）
 
 > 来源：初设 `phase28-long-text-cost-preliminary-design.md` **v1.1（评审 PASS → 详设，13 项全 PASS）**——评审给定**详设必答六冻结点**（初设 §3.5）逐题钉死（本稿 §1）。
-> 状态：**v1.4**（2026-10-05）——**✅ 评审通过（PASS → Implementation，「可以开工了」）**（外部评审 2026-10-05：设计成熟度高 / 实现风险低～中低 / **不需要再开设计迭代**；六冻结点全部认可为 C28-1..7 契约；**两条非阻塞建议已吸收**：① T28-1 强化 = 增加 **advance memo 真命中**断言（`AdvanceMemoMissCount` 观测缝，沿既有 `MeasureTextCacheMissCount` 先例——观测缝落内部件 ⇒ **API +0**，v1.2 勘误）；② **`GetTextExtentExPointW` 失败 ⇒ 回退原路径整串 `TextOutW`**（不是 return——「测量失败 ≠ 文本不可见」）；一条顺手项（`pos.x ≥ clip.right` 早退——实现时可做、非设计要求）；一条平台注记（`long` 宽度——保持现状不扩范围）；吸收明细见 §9 v1.1）
+> 状态：**v1.5**（2026-10-06 · **✅ 全链收口**）——**✅ 评审通过（PASS → Implementation，「可以开工了」）**（外部评审 2026-10-05：设计成熟度高 / 实现风险低～中低 / **不需要再开设计迭代**；六冻结点全部认可为 C28-1..7 契约；**两条非阻塞建议已吸收**：① T28-1 强化 = 增加 **advance memo 真命中**断言（`AdvanceMemoMissCount` 观测缝，沿既有 `MeasureTextCacheMissCount` 先例——观测缝落内部件 ⇒ **API +0**，v1.2 勘误）；② **`GetTextExtentExPointW` 失败 ⇒ 回退原路径整串 `TextOutW`**（不是 return——「测量失败 ≠ 文本不可见」）；一条顺手项（`pos.x ≥ clip.right` 早退——实现时可做、非设计要求）；一条平台注记（`long` 宽度——保持现状不扩范围）；吸收明细见 §9 v1.1）
 > 定位：**实施规格**——方案已在初设冻结（PD28-1/2/3 + PD28-4 可选），本稿落成**逐文件 △、契约 C28、盯防、用例落位与精确批次**。
 
 ---
@@ -157,8 +157,53 @@
 
 ---
 
+## 10. 实施回填（收口——2026-10-06）
+
+### 10.1 批次执行表
+
+| 批 | 内容 | 提交 | 验收实绩 |
+|---|---|---|---|
+| 批一 | △2 advance memo（复用 GlyphKey + kMissingAdvance 哨兵 + 8192 满清）+ AdvanceMemoMissCount 观测缝 + T28-1/2 | `52f5737` | 三链 332/332；实施期加固 = **gid = 0 永不入 memo**（防「缺字形」与「charmap 命中 .notdef」病态混淆——C28-1 加固） |
+| 批二 | △3/△4 TextWidget preferred 指纹（revision/font/DPI）+ MarkTextChanged + T28-3a/b | `dbda55b` | 三链 334/334；**实施勘误**：`SetText` 非唯一文本入口——TextBox **13 处**直改 `m_text`（编辑/IME/Undo）⇒ protected `MarkTextChanged()` 统一挂失效（单行 TextBox 否则返回陈旧尺寸） |
+| 批三 | △5 GDIBackend::DrawText 三分支 + 阈值闸 256 + T28-4/5 探针 + T28-6 | `b1336b1` | 三链 335/335；**T28-4 硬门槛通过**（探针 11/11 逐位一致，Debug+Release 双链） |
+| 构建修复 | ecdi_tests MinGW `-static`（与 examples 三目标对齐） | `382bc10` | 根治 Release segfault（Git Bash PATH 的 libstdc++ 版本错配——**环境缺陷非代码缺陷**）；CLion 零配置可跑 |
+| 批四 | Release 静态库交付 harness + A3 读数回 | （本节） | MSVC 第五链（cl.exe 14.51）335/335；Release 库装入 harness 前缀；§10.2/10.3 读数 |
+
+### 10.2 A3 判定表（§5 验收——机制三条 + 目标值两条）
+
+| 项 | 判据 | 结果 |
+|---|---|---|
+| A3-1（机制） | 未变化 AutoSize 零测量调用 | ✅ T28-3a（指纹命中 ⇒ 零 MeasureText）+ T28-3b（失效矩阵） |
+| A3-2（机制） | 命中路径不复制整串 | ✅ 指纹命中直接返回缓存（T28-3a 调用计数验证） |
+| A3-3（机制） | 不可见部分不进 TextOutW | ✅ 批三前缀截断（T28-4 逐位等价 11/11）+ T28-6 命令流不变 |
+| A3-4（目标值·记录制） | 测量 ≥10× / GDI 尖峰 <33ms | ✅ **98×**（GL autosize 测量 1.53s → 15.6ms）/ **32.0ms < 33ms**（GDI list 尖峰 80.1 → 32.0 = 2.5×） |
+| A1/A2/A5/A6 | 存量全绿 / 像素等价 / harness 端到端 / 台账 | ✅ 335/335 五链 · T28-4 逐位等价 + harness 视觉抽查「截断对渲染完全透明」 · 本节 + 五处台账 |
+
+### 10.3 A3 读数与归因（harness `p28-*.json` vs Phase 27 `checkup-*.json`——同夹具同探针）
+
+| 指标 | Phase 27 Debug | Phase 28 Release | 倍率 | 归因 |
+|---|---|---|---|---|
+| GL autosize 测量总耗时 | 1.53s | 15.6ms | **98×** | 批一 memo（单串 ~2.76ms → ~50µs）+ 批二指纹 + **Debug→Release 配置变化（~2.5-4×）混合**——剔除配置因素仍远超 ≥10× |
+| GL 单次测量峰值 | 67ms | 0.97ms | **69×** | 同上 |
+| GDI list 帧尖峰（7KB 长串） | 80.1ms | 32.0ms | **2.5×** | **批三前缀截断**（native TextOutW 成本与构建配置基本无关 ⇒ 归因干净）；32.0 < 33ms tick |
+| GL sweep 执行 avg | 959µs | 378µs | 2.5× | **Debug→Release 配置变化主导**（批一/二/三未触碰 GL 执行端）——不计入收益 |
+| GDI autosize 执行 max | 35.0ms | 23.7ms | 1.5× | 同上（场景总耗时） |
+
+- **读数口径注记**：基线 = Debug 库（旧 vendor）、复跑 = Release 库 ⇒ before/after 混入配置变化；严格同配置对照可在 pre-批一 commit（`98c11ff`）重建 Release 基线（harness 侧备选，未执行）。
+- **回归项全绿**：剔除全滚动范围持平（sweep 333/340 命令/帧，GDI/GL 逐位一致——绝对值高于 Phase 27 的 157 系 hi-fi 夹具改版正常代价）；每帧命令 330±10 持平 ⇒ 批一/二/三未扰动命令流（T28-6 现场验证）。
+- **观察（不阻塞、不立项）**：GDI 测量链未吃红利（536 → 591ms 持平——批一/二在 FT 侧，GDI 走原生 extent 近地板 64ns/字符，A3-4 re-scope 已排除）；单样本 **166ms 冷测离群** = K8 判定的冷启动事件复现（维持不设计）。若未来 GDI 测量优化批次立项，realistic-autosize 夹具为现成验收场（harness 原话）。
+
+### 10.4 收口核对
+
+- 公共头 **94 → 94**；公共 API **+0**（批一勘误：观测缝落内部件）；用例 **330 → 335**（T28-1/2/3a/3b/6）；CMake 追加一条 **ecdi_tests MinGW `-static`**（构建修复 `382bc10`——环境缺陷非设计变更，范围锁未破：无虚拟化/脏区/命令流语义变更——前缀截断是执行侧实现细节）。
+- **交付物流水**：Release 静态库（MSVC cl.exe 14.51，HEAD `382bc10`）经 `cmake --install` 装入 harness 消费前缀 `third_party/ecdi`；harness 侧 Release 重建 + 复跑（§10.3 读数）；视觉抽查「截断对渲染完全透明（文字完整无伪影）」。
+- **遗留**：无阻塞项。GDI 测量链优化 = 观察项（§10.3）；**#51 快修小轮排期待用户拍板**（harness 验证夹具现成）。
+
+---
+
 ## 9. 修订记录
 
+- **v1.5**（2026-10-06）**批四收口（§10 实施回填）——全链收口**。① ★★ **harness A3 读数回**（`p28-*.json` vs Phase 27 `checkup-*.json`）：GL autosize 测量 **1.53s → 15.6ms（98×）** · 单次峰值 67ms → 0.97ms（69×）· GDI list 尖峰 **80.1 → 32.0ms（2.5×，<33ms tick）**——批一/二/三与读数一一对应；**A3 判定 = 机制三条全过 + 目标值两条全过**（§10.2）。② ★ **归因拆分（数字卫生）**：GL 测量 98× 混入 Debug→Release 配置变化（剔除仍远超目标）；GDI 尖峰 2.5× 归因干净（native 调用配置无关）；GL sweep / GDI autosize max 的 2.5×/1.5× = **配置变化主导不计入收益**。③ ★ **观察项**：GDI 测量链持平（536→591ms，近地板）+ 166ms 冷测离群（K8 复现，维持不设计）——不立项，验收场现成。④ ★ **回归全绿**：剔除 sweep 持平 + 命令流 330±10 零扰动（T28-6 现场验证）+ 视觉抽查透明。⑤ **五链 335/335**（MinGW/Clang/ClangCL Debug + MinGW Release + MSVC Release）。⑥ ★ 环境坑记档：Release segfault = Git Bash PATH 的 libstdc++ 版本错配（382bc10 根治）。
 - **v1.4**（2026-10-05）批三实施落地（**T28-4 硬门槛通过**）。① ★★ **△5 落地**：`GDIBackend::DrawText` 三分支 + 阈值闸（`kTextPrefixMinWchars = 256` 匿名 namespace）——分支序 = 详设 v1.1 钉死：阈值闸 → `GetClipBox` NULLREGION/ERROR return → `GetTextExtentExPointW`（一次拿 fit+cy；**失败回退整串**——评审建议②）→ 垂直无交集 return → fit≥len 整串 → **fit+1 守卫前缀**；命令流零改动（C28-6）。② ★★ **T28-4/T28-5 探针 = 硬门槛通过（C28-7）**：库外 `.workbuddy/spike/textcost/gdi_prefix_probe.cpp`（单窗口三帧同相位法——首版跨窗口 1px 位移致 ClearType 相位差伪影，修正后全过）；**11/11 场景逐位一致**（样本矩阵全跑：SimSun/MSYH/Consolas/22px × clip 落字形中部/贴合/差1px × 阈值闸 208/260 × 悬垂字形 j/g/, × 全角标点 + T28-5 完全不可见/完全可见）；Debug + Release 双链复跑。③ ★ **T28-6 落地**：`Renderer.LongTextCommandStream`（阈值闸两侧 DrawText 命令几何 + 文本**完整到达后端**——前缀截断只在执行侧）。④ ★ **验证**：三链 Debug **335/335**（MinGW / Clang / ClangCL）+ **Release MinGW 335/335**；★ 环境坑记档：Release 首跑 segfault 经 gdb 定位为 **Git Bash PATH 把 Git 自带 `libstdc++-6.dll` 排在 GCC 16.1 工具链前**（DLL 版本错配，非代码缺陷）——复跑须 `PATH="/d/Environment/CPP/mingw64/bin:$PATH"`。⑤ 注册表 334 → **335**（T28-4/5 库外不计入——收口核对基准）。
 - **v1.3**（2026-10-05）批二实施落地 + **文本入口勘误**。① ★★ **实施勘误（重要）**：D28-B 原文假设「`SetText` 双重载是唯一文本入口」——实测 **TextBox 有 13 处文本变更点直接改 `m_text`**（`InsertCodepoint`/`InsertText`/`DeleteBackward`/`DeleteForward`/`UpdateComposition`/`CommitComposition`/`CancelComposition`/`Cut`/`RestoreSnapshot` 等编辑/IME/Undo 路径）⇒ 只挂 `SetText` 会让**单行 TextBox 的 preferred 返回陈旧尺寸**（其 `GetPreferredSize` 单行分支确实消费 TextWidget 测量）。**修法** = `TextWidget` 增 protected `MarkTextChanged()`（bump revision），`SetText` 双载 + TextBox 13 处 `m_needsLineRecalc` 站点统一调用。② ★ **批二落地**：△3/△4（指纹四字段 + 无窗口不短路 + `std::lround(GetDpiScale()*96)`）+ T28-3a（真窗口命中：二次 `GetPreferredSize` 零 MeasureText 调用）/ T28-3b（失效矩阵：SetText +1 / SetFont +1 / 无变化不增）落 WidgetTests.cpp（真窗口装置沿 WindowBackgroundTests 先例；计数测量器**拥有**内层——首版引用悬垂导致 segfault，当场修正）。③ ★ **三链 334/334**（MinGW / Clang / ClangCL——存量 330 + T28-1/2 + T28-3a/b 零回归）。④ 注册表 332 → 334。
 - **v1.2**（2026-10-05）批一实施落地 + API 会计勘误。① ★ **API 影响面勘误**：`AdvanceMemoMissCount()` 落**内部件** `src/Render/FontEngine.h`（不入 `include/ECDI/**` 公共头计数）⇒ **公共 API +0**（v1.1 误记 +1 观测缝——评审建议的落点不变，会计口径修正）。② ★ **批一落地**：△2 advance memo（复用 GlyphKey + `kMissingAdvance` 哨兵 + 8192 满清 + **gid = 0 永不入 memo** 的 C28-1 安全语义——防「缺字形」与「charmap 命中 .notdef」病态混淆）+ T28-1（真命中双断言：结果逐位一致 + 热引擎共享字形文本零新增 FT load）/ T28-2（>8192 满清后语义不变）落 FontEngineTests.cpp；**三链 332/332**（MinGW / Clang / ClangCL——存量 330 零回归 +2）。③ 注册表 330 → 332（收口核对时按 +5 全量校正）。
