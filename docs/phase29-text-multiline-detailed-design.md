@@ -1,7 +1,7 @@
-﻿# Phase 29 · 文本多行能力 —— 详细设计（v1.2）
+﻿# Phase 29 · 文本多行能力 —— 详细设计（v1.3）
 
 > 来源：初设 `phase29-text-multiline-preliminary-design.md` **v1.1（评审 PASS → 详设）**——初设评审给的**详设必答 ①–⑦** 逐题钉死（本稿 §1）。
-> 状态：**v1.2**（2026-10-06）——**批一已实施**（FitText 三链落地，五链 339/339 全绿；三条实施勘误见 §10）｜v1.1：**✅ 评审通过（Conditional PASS → 两项文档级必修当场修毕 ⇒ PASS → Implementation）**（外部评审 2026-10-06：架构方向全部认可、15 项边界表全 ✅；**两项必修**=① D29-Ⅰ 状态变量歧义（scan/lineStart/lineEnd 三变量化）② 行宽来源统一（FT 禁 per-line MeasureText、GDI 回退后补测归 O5）；**强烈建议吸收**=③ GDI O4 明确为已知性能债务非 O(n) 契约 ④ TextLayout 指纹显式列键 ⑤ T29-2 措辞受 maxWidth 约束；吸收明细见 §9 v1.1）
+> 状态：**v1.3**（2026-10-06）——**批一 + 批二已实施**（FitText 三链 + wrap 路径落地，五链 345/345 全绿；批二四条实施勘误见 §11.2）｜v1.2：**批一已实施**（三条勘误见 §10）｜v1.1：**✅ 评审通过（Conditional PASS → 两项文档级必修当场修毕 ⇒ PASS → Implementation）**（外部评审 2026-10-06：架构方向全部认可、15 项边界表全 ✅；**两项必修**=① D29-Ⅰ 状态变量歧义（scan/lineStart/lineEnd 三变量化）② 行宽来源统一（FT 禁 per-line MeasureText、GDI 回退后补测归 O5）；**强烈建议吸收**=③ GDI O4 明确为已知性能债务非 O(n) 契约 ④ TextLayout 指纹显式列键 ⑤ T29-2 措辞受 maxWidth 约束；吸收明细见 §9 v1.1）
 > 定位：**实施规格**——断行状态机正式化、FitText 精确契约、共享 TextLayout 生命周期、逐文件 △、契约 C29、用例 T29、三批。
 
 ---
@@ -152,7 +152,7 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 | T29-FIT-2 | `TextMeasurer.GdiFitTextSurrogate` | TextMeasurerTests | `A😀B`——GDI 换算不拆代理对 |
 | T29-WRAP-1 | `TextWidget.WrapEmptyLines` | WidgetTests | `A\n\nB` = 3 行（空行占高零命令） |
 | T29-WRAP-2 | `TextWidget.WrapKinsukuOverflow` | WidgetTests | 禁则微超 = 单标点悬挂、不吞普通字符 |
-| T29-WRAP-3 | `TextWidget.WrapSameWidthNoRebuild` | WidgetTests | 同宽 SetSize ⇒ 布局命中零重建 |
+| T29-WRAP-3 | `TextWidget.WrapSameWidthNoRebuild` | WidgetTests | 同宽 SetSize ⇒ 布局命中零重建；★ **批二另加** `TextWidget.WrapDefaultOffZeroFit`（A2 结构判据——默认关零 FitText 调用 + 单条 DrawText） |
 
 - 落位：WidgetTests ×8（真窗口 probe 沿用 T28-3 装置）· TextMeasurerTests ×2（MeasurerWindow RAII）· FontEngineTests ×2（批一随 FitText 落地）。
 - ★ **批一实施校正**：FontEngine 两条**已独立注册**（`FontEngine.FitTextMatchesMeasure` / `FontEngine.FitTextBoundaries`），TextMeasurer 侧另加一条默认体用例（`TextMeasurer.DefaultFitTextCpBoundary`）⇒ **批一实际注册 +3**（`TextMeasurer.GdiFitTextSurrogate` 为 T29-FIT-2）。原稿「注册 +10」的批次分配作废，改为按批实际登记（收口时在 §10 给出终值）。
@@ -164,7 +164,7 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 | 批 | 内容 | 验收 |
 |---|---|---|
 | 批一 | △1 FitText 默认体 + △2 GDI 覆写 + △3 FontEngine::FitText + △4 FT 转发 + T29-FIT-1/2 | ✅ **已完成**（五链 339/339；+T29-FIT-3/4——见 §10；三条实施勘误见 §10.2） |
-| 批二 | △5/△6 wrap 路径 + T29-1/2/3 + T29-WRAP-1/3 | 五链全绿 + A2 结构判据（默认关零调用） |
+| 批二 | △5/△6 wrap 路径 + T29-1/2/3 + T29-WRAP-1/3 | ✅ **已完成**（五链 345/345；+A2 结构判据用例；四条实施勘误见 §11.2） |
 | 批三 | T29-4/5/6 + harness 气泡端到端（A5）+ 收口 | 五链全绿 + A1–A5 全判 + 五处台账 |
 
 ---
@@ -174,7 +174,7 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 | 项 | 预算 |
 |---|---|
 | 公共头文件数量 | **94 → 94**（TextMeasurer.h/TextWidget.h 扩员不加文件） |
-| 公共 API | **+3**（`FitText` 虚方法 + `SetWordWrap`/`IsWordWrap` 对——★ **需求稿「+1 倾向」只计了测量原语，wrap 开关对漏计，详设如实修正**）｜★ 批一实绩 = **+1**（`TextFit` + `FitText`，均落 `TextMeasurer.h`）；`SetWordWrap`/`IsWordWrap` 批二落地 |
+| 公共 API | **+4**（详设原计 +3：`FitText` 虚方法 + `SetWordWrap`/`IsWordWrap` 对——★ **需求稿「+1 倾向」只计了测量原语，wrap 开关对漏计，详设如实修正**）｜★ 实测：批一 **+1**（`TextFit` + `FitText`）· 批二 **+3**（`SetWordWrap`/`IsWordWrap` 对 **+2**、`PaintContext::GetTextMeasurer()` **+1**——★ **详设漏计，见 §11.2 E6**）⇒ **合计 +4，超原预算 1** |
 | 用例 | **335 → 346**（+11） |
 | CMake | **0 改动**（GLOB_RECURSE CONFIGURE_DEPENDS——新 .cpp 自动入库） |
 | 风险 | **中**（断行禁则语义 + FitText 双链度量差异[跨链断行不承诺一致——C29-8] + 指纹键演进；缓释 = 默认关结构红线 + A2 + memo 复用） |
@@ -189,7 +189,7 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 | O2 | TextBox 编辑器内 wrap（独立挂账——需求 §3.2） |
 | O3 | 禁则字面集扩充（按消费者反馈增补） |
 | O4 | GDI FitText 的 UTF8ToWide 每调用 O(n)（k 行 ⇒ O(n·k) memcpy——量级可接受；实测瓶颈则缓存宽串）。★ **批一实测**：`FitText` 内**只转换一次**（`text.substr(byteStart)` ⇒ 尾段），未按行重复；债务成立但常数极小 |
-| O5 | wrap 行宽二次测量（软断行每行 +1 MeasureText——FT 侧可省[布局即知]、GDI 侧必要）。★ **批一实测**：GDI `FitText` 在 `fit < 全长` 时**必补一次** `GetTextExtentPoint32W`（取消费前缀宽——`GetTextExtentExPointW` 的 `extent` 是**全串**宽不可用）⇒ 该成本已落在**每个 FitText 调用**上，不止软断行回退路径（批二/三复评） |
+| O5 | wrap 行宽二次测量（软断行每行 +1 MeasureText——FT 侧可省[布局即知]、GDI 侧必要）。★ **批一实测**：GDI `FitText` 在 `fit < 全长` 时**必补一次** `GetTextExtentPoint32W`（取消费前缀宽——`GetTextExtentExPointW` 的 `extent` 是**全串**宽不可用）⇒ 该成本已落在**每个 FitText 调用**上，不止软断行回退路径。★ **批二实测**：wrap 布局已按 v1.1 必修②实现——`emitLine` 仅当 **`end != fitEnd`**（回退/尾部空白裁剪改变了终止位置）时才补测一次；无回退（整段放得下）直接采用 `fit.width` ⇒ **零二次测量**（T29-1 的 6 行全走 fast path） |
 
 ---
 
@@ -236,8 +236,56 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 
 ---
 
+## 11. 实施回填（批二——2026-10-06）
+
+### 11.1 批次执行表（批二）
+
+| 项 | 内容 | 文件 | 实绩 |
+|---|---|---|---|
+| △5 | `SetWordWrap`/`IsWordWrap` + `TextLine`/`TextLayout` 嵌套 + 布局缓存五元组 + `BuildTextLayout`/`GetTextLayout` 私有面 | `include/ECDI/Widget/TextWidget.h` | ✅ 断行开关默认 **false**（红线①）；**API +2** |
+| △6① | `SetWordWrap`：**双缓存失效**（preferred 指纹 + 布局指纹同置无效）+ `Invalidate()`；同值调用零失效 | `src/Widget/TextWidget.cpp` | ✅ 正交两缓存各自置无效（盯防③） |
+| △6② | `GetPreferredSize` wrap 分支：布局驱动 `{GetWidth(), totalHeight}`；宽 ≤ 0 / 无窗口 ⇒ **退化单行**（走 Phase 28 原路径） | 同上 | ✅ `IsWrapLayoutActive()` 三条件闸 |
+| △6③ | `DrawTextContent` wrap 分支：区块按 `totalHeight` 垂直居中 + 逐行 `DrawText`（空行跳过）+ UTF-8 切片**仅绘制时** | 同上 | ✅ 命令流逐行可断言（T29-1/2/WRAP-1） |
+| 断行引擎 | D29-Ⅰ 状态机（三状态变量互斥）+ 软断点三类 + 禁则两集（字面常量表）+ 空白终化 + 尾部空白裁剪 | 同上（匿名 namespace 内 `IsLineStartForbidden`/`IsLineEndForbidden`/`IsCjkBody`/`IsSoftBreakBefore`/`FindLastSoftBreak`） | ✅ 确定性（无 locale/NLS——C29-7） |
+| 测试 | T29-1 拉丁按词 / T29-2 CJK 禁则四段式 / T29-3 宽度动态 / T29-WRAP-1 空行 / T29-WRAP-3 同宽零重建 / A2 默认关零调用 | `WidgetTests.cpp` | ✅ **注册 +6**（345 = 339 + 6） |
+
+- **五链验收**：MinGW / Clang / ClangCL Debug + MinGW Release + MSVC Release（cl.exe 14.51）——**345/345 全绿**。
+- **A2 结构判据前半成立**：`wrap == false`（默认）⇒ `FitText` **零调用**、preferred = 单行原语义、Paint = **单条** `DrawText` 整串、宽度不足也**不换行**（横向溢出交 Clip）——T29-4 的完整像素/命令流等价留批三。
+
+### 11.2 实施勘误（四条——**详设与代码的偏差，如实登记**）
+
+| # | 勘误 | 原稿 | 实施 | 影响 |
+|---|---|---|---|---|
+| E4 | **禁则两侧调用的命名**（实施期自查发现并修正） | ④ 行尾禁则、⑤ 行首禁则 | ④ 用 `IsLineEndForbidden`（**开括号集**）判 `cps[b−1]`；⑤ 用 `IsLineStartForbidden`（**闭标点集**）判 `cps[b]` | ★ 我首版把两个函数名**对调**（④ 调 `IsLineStartForbidden(cps[b-1])`）——「行尾禁开括号」被写成「行尾禁闭标点」。语义靠测试锚定后发现（T29-2 段落 C 断言 `ab` / `（cd`）⇒ 当场修正。**教训：函数名要照着「禁则作用的**位置**」读，不是照着字符集名字读** |
+| E5 | **行首禁则的回提上界** | D29-Ⅰ ⑤ 写「有界：b ≤ hardEnd」 | 上界取 **`segEnd`** | ★ 若上界取 `hardEnd`：`b` 提到 `hardEnd` 时 `cps[b]` 已越硬边界，闭标点**提不上来** ⇒ 规则形同虚设（硬边界永远赢）。取 `segEnd` 才让「闭标点悬挂进前行」真正发生；超宽部分 = 悬挂链 advance = D29-Ⅱ 的**微超**，结构性有界（链遇非禁则成员即停）。★ 与 D29-Ⅱ「普通字符不得吸收」不冲突——吸收的**只有**连续禁则成员 |
+| E6 | **`PaintContext::GetTextMeasurer()` 新增**（★ **API 超预算**） | △5/△6 未列此改动；总预算 **+3** | `PaintContext`（**公共头**）+1 访问器 | ★ **详设漏计**：wrap 绘制路径需要一个 `FitText` 可达的测量器，而 `PaintContext` 只转发 `MeasureText`/`LineHeight`（不转发 `FitText`——它是绘制门面，不是测量门面）。两条路：① 转发 `FitText`（形态更窄但要为未来所有测量原语都加转发）；② 交出测量器引用（**本选择**——一个访问器一次解决，且**同源可证**：与 `MeasureText`/`LineHeight` 是同一对象）。★ 代价如实记账：**公共 API +3 → +4**（超原预算 1） |
+| E7 | **空段/推进守卫**（原稿未覆盖） | — | ① 空段直接 emit 空行（不复用主循环）；② `b == lineStart` ⇒ 强制 `++b`（按字硬断**一字**）；③ `nextScan <= scan` ⇒ 强制 `scan + 1` | ★ 堵的是**死循环**：若行宽 < 一个码点（如宽度 1 DIP），`FitText` 返 `fitCp = 0` ⇒ 原稿会 emit 空行且 `scan` 不推进 ⇒ **Paint 挂死**（比断行错位严重得多）。三处守卫把「绝不零推进」变成结构性保证（T29-5 超长词用例的锚点，批三补） |
+
+### 11.3 批二实测读数（用例断言 = 可复核的确定性模型）
+
+| 观测 | 读数 | 判据 |
+|---|---|---|
+| 拉丁按词（6 词 / 宽 40 / 每码点 8 DIP） | 6 行、逐行 `aaaa`…、y 步进 16、首行 y=52 | 软断点 = 空格后 + 分隔空格被消费（不进任何一行） |
+| CJK 禁则（`你好）世界` / 宽 16 ⇒ 2 码点/行） | 行 = `你好）` / `世界` | ★ 闭标点**悬挂进前行**（行宽 24 > 16 = 微超 8 = 一个标点 advance）；**非** `你好` / `）世界` |
+| 行尾禁则（`ab（cd` / 宽 24） | 行 = `ab` / `（cd` | ★ 开括号**不独占行尾**（被挪到下行） |
+| 宽度动态（宽 32 → 16 → 128） | 行数 6 → 12 → 2 | 指纹宽度维驱动重排 |
+| 同宽 `SetSize`（仅改高） | `FitText` **零调用** | C29-10 指纹键**不含高** |
+| 连续换行 `A\n\nB` | 3 行、**2 条** DrawText、B 的 y 步进 = 2×行高 | ★ 空行占行高、零命令（D29-Ⅴ / C29-4） |
+| 空串 | 1 行（高 = 行高）、零 DrawText | 「0 行」会让 preferred 高度归零 ⇒ 用 1 空行 |
+| **默认关（A2 判据）** | `FitText` **零调用** / **1 条** DrawText 整串 / 宽度不足也不换行 | 红线①：wrap=false = 100% Phase 28 原路径 |
+
+### 11.4 收口核对（批二）
+
+- 公共头 **94 → 94**（`TextWidget.h`/`PaintContext.h` 扩员不加文件）；公共 API **+3**（批二）⇒ **累计 +4**（超详设预算 +3 一项，见 E6）；**CMake 0**；用例 **339 → 345**（+6）。
+- **零回归**：345 中 339 条既有用例全绿；`wrap == false` 结构路径未被触碰（A2 判据实证）。
+- ★ **环境教训（如实记档）**：批二中途 MSVC Release 出现**确定性 segfault**（反汇编形态 = 虚调用打在失效 `this` 上：`mov (%rcx),%rax` + 栈上 `std::string` 临时作 arg2）。**根因不在代码**——该目录的 exe 是**增量链接的陈旧产物**（`TextWidget.h` 新增成员 ⇒ 与旧 `ECDI.lib` 的对象布局不一致 ⇒ 虚表/成员偏移读到垃圾）。**干净全量重建后 345/345 全绿**（VS 生成器 + 全新 Ninja/cl 目录各一次）。★ **纪律：改公共头布局后必须全量重建**；增量链接的 exe 不可信。
+- **遗留**：T29-4/5/6（默认关命令流逐字节等价 / 退化边界 / harness 气泡端到端）→ 批三。
+
+---
+
 ## 9. 修订记录
 
+- **v1.3**（2026-10-06）**批二实施回填**（wrap 路径落地——五链 345/345 全绿）。★ **四条实施勘误**（§11.2）：**E4 禁则命名对调**（首版 ④ 调 `IsLineStartForbidden(cps[b-1])` ⇒「行尾禁开括号」被写成「行尾禁闭标点」；靠 T29-2 段落 C 断言发现并修正——**函数名按「禁则作用的位置」读**）· **E5 行首禁则回提上界 = `segEnd`**（取 `hardEnd` 会让硬边界永远赢、规则形同虚设；超宽 = 悬挂链 advance = D29-Ⅱ 微超）· **E6 `PaintContext::GetTextMeasurer()` 新增 ⇒ API 超预算**（wrap 绘制需要 `FitText` 可达的测量器；选「交出引用」而非「转发 FitText」——**公共 API 合计 +4，超详设 +3 一项，如实记账**）· **E7 空段/推进守卫**（`b == lineStart` ⇒ 强制一字、`nextScan <= scan` ⇒ 强制 +1——堵**行宽 < 一码点时的 Paint 死循环**）。★ 批二实测（§11.3）：拉丁 6 行按词 + 空格消费 · CJK 闭标点**悬挂进前行**（`你好）` / `世界`，微超 = 一个标点 advance）· 开括号不独占行尾 · `A\n\nB` = 3 行 2 命令（空行占高零命令）· 同宽 SetSize 零 `FitText` 调用 · **默认关零调用 + 单条 DrawText**（A2 判据前半）。★ **环境教训**：MSVC Release 出现确定性 segfault（虚调用打在失效 `this`——`mov (%rcx),%rax` + 栈上 `std::string` 临时），**根因 = 增量链接的陈旧 exe**（公共头加成员 ⇒ 与旧 `ECDI.lib` 布局不一致）；干净全量重建后全绿 ⇒ **改公共头布局后必须全量重建**。
 - **v1.2**（2026-10-06）**批一实施回填**（FitText 三链落地——五链 339/339 全绿）。★ **三条实施勘误**（§10.2）：**E1 `FitText` 非 const**（原稿 `const` 编译不通过：默认体须调非 const 的 `MeasureText`，`const` 版只能 `const_cast` ⇒ 对写缓存的 `GDITextMeasurer` 是 UB；改非 const 零调用代价）· **E2 `MeasureText` 循环体提取为 `Impl::AdvanceOf`**（两方法共用是**逐位一致**的前提——T29-FIT-3 锚定 192.0000==192.0000）· **E3 码点总数取法**（`CodepointIndexToByteOffset(…,SIZE_MAX)` 返回**字节数**而非码点数——超界钳制语义；改用既有 `ByteOffsetToCodepointIndex(text, text.size())`，**零新增 API**）。★ 批一实测（§10.3）：FT fitCp 单调 + width 与 MeasureText 逐位一致；GDI `A😀B` ⇒ 3/2/1 逐档代理对不拆；GDI 原生 vs `MeasureText` oracle 逐档同。★ 批一验收 = 六个既有 `TextMeasurer` 派生类**零改动编译通过**（盯防⑦）。API 批一 **+1**（总预算 +3）。
 - **v1.1**（2026-10-06）评审吸收（**Conditional PASS → 两修当场修毕 ⇒ PASS → Implementation**）。**架构方向全部认可**（15 项边界表全 ✅；上轮六 🟡 全闭环）；评审定位 =「进入详设只需把算法边界、FitText 精确语义、缓存失效和测试样例继续钉死」并预警 **Phase 29 是 ECDI 第一次真正给 TextWidget 增加文本布局能力**（边界影响将来富文本/shaping/Bidi）。评审强 PASS 项：TextLayout 用 startCp+cpCount 而非 string（布局零 substr/零拷贝——「preferred=5 行实绘=6 行」恶疾被架构消灭 = **强 PASS**）；默认关 = 结构级零回归（T29-4 调用计数判据）；FitText 语义未降级成 glyph service。**两项必修（当场修毕）**：① **D29-Ⅰ 状态变量三分化**（`lineStart`/`lineEnd`/`scan` 语义互斥——原稿「scan」双含义是 off-by-one/跳空格错误根源）；② **行宽来源统一**（D29-Ⅰ ⑦ 的 `MeasureText(切片)` **删除**：FT = 扫描期 advance 累积/`FitText.width` 直接采用、回退后逐码点 memo 求和；GDI = 无回退用 `fit.width`、回退后补测一次归 O5——**禁止对每行再调 MeasureText**）。**强烈建议吸收（三条）**：③ **O(n) 契约范围明确**（**仅限 FT/advance-memo 路径**；GDI `UTF8ToWide` 重复转换 = 已知性能债务 O4 非正确性契约——概念冲突消解，C29-9）；④ **TextLayout 指纹显式列键**（五元组 + `GetTextLayout()` 入口每次判定——不依赖 setter 记得清，C29-10）；⑤ **T29-2 措辞受 maxWidth 约束**（「理想同行」仅宽度允许时；必须换行时禁闭标点独占行首——四段式消歧）。**测试扩展采纳（评审 §22）**：+T29-FIT-1（UTF-8 码点边界）/ +T29-FIT-2（代理对——含 😀 / A😀 / 😀B 三边界样本增强）/ +T29-WRAP-1（连续换行空行）/ +T29-WRAP-2（禁则微超）/ +T29-WRAP-3（同宽不重建）——**用例预算 341 → 346**。**非阻塞采纳**：批一验收 = **所有既有 TextMeasurer 派生类编译级验证**（盯防⑦）；FT 路径避免每行二次 MeasureText（= 必修②同源，盯防⑧）。未采纳：无（O4 不扩大范围——评审 §5 同意）。**评审路线图**：28 文本成本 → 29 多行布局 → #51 行对齐 → TextBox wrap → shaping/bidi/富文本（健康演进不一锅端）。
 - **v1.0**（2026-10-06）初稿。**输入**：初设 v1.1（评审 PASS「比较明确的 PASS」，15 项全 ✅）+ 评审详设必答 ①–⑦ + 代码勘察（`TextStyle = {foreground, font}` 无 padding · `Core/UTF8.h` 公共换算 util · `CalculateTextPosition` 基类左对齐+垂直居中 · FRAMEWORK_SOURCES = GLOB_RECURSE ⇒ 零 CMake · GDI MeasureText 脚手架批三 fit 先例）。**七题钉死**：D29-Ⅰ 断行状态机（流水线序 = fit → 软断点回退 → 行尾禁则 → 行首禁则 → 空白终化；冲突优先级固定）· D29-Ⅱ 禁则微超 = 禁则链 advance（普通字符不得吸收）· D29-Ⅲ FitText 契约（相对码点数）· D29-Ⅳ GDI surrogate 三步换算 · D29-Ⅴ 连续 `\n` 空 TextLine · D29-Ⅵ FT O(n)（WrapEngine 持扫描状态）· D29-Ⅶ 默认体 = fallback。△1–△9（零新文件/零 CMake）· C29-1..8 · 盯防 6 · 用例 11 条（335 → **346**）· 三批 · **API +3**（FitText + SetWordWrap/IsWordWrap 对——★ 需求稿「+1 倾向」只计测量原语，wrap 开关对漏计，如实修正）· 94→94 / CMake 0 / 风险 中。

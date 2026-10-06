@@ -8,6 +8,7 @@
 #include "ECDI/Widget/Widget.h"
 
 #include <string>
+#include <vector>   // ★ Phase 29 批二（D29-C）：TextLayout::lines（布局零 substr——行 = 码点区间）
 
 namespace ECDI{
 
@@ -54,7 +55,19 @@ public:
 
 	/// @brief 内容测量 preferred（9.8 override——单行文本宽 + 行高；经 ResolveMeasurer 拿测量器）
 	/// @details 有测量器 → 内容测量；无（运行时 fallback——无窗口且未注入）→ Widget 默认当前尺寸
+	///          ★ Phase 29 批二：`wrap == true` 且有有限宽 ⇒ **布局驱动** `{GetWidth(), totalHeight}`
 	[[nodiscard]] Size GetPreferredSize() const override;
+
+	/// @brief 断行开关（★ Phase 29 批二 △5——公共 API +1 对的前半）
+	/// @param wrap true = 文本按控件宽度断行（D29-C 布局驱动 preferred + 逐行绘制）；
+	///              false = **100% Phase 28 原路径**（红线①：单条 DrawText，布局引擎零接触——C29-5）
+	/// @details ★ **双缓存失效**：本开关影响 preferred（Phase 28 指纹）**和** wrap 布局指纹
+	///          （C29-10 五元组）⇒ 两个缓存同时置无效 + `Invalidate()`（重绘）。
+	///          ★ 默认 **false**（零回归根基——A1/A2 验收前提）。
+	void SetWordWrap(bool wrap);
+
+	/// @brief 断行开关查询（★ Phase 29 批二 △5——公共 API +1 对的后半）
+	[[nodiscard]] bool IsWordWrap() const noexcept;
 
 protected:
 
@@ -85,17 +98,61 @@ protected:
 
 private:
 
+	/// @brief 断行后的单行（★ Phase 29 D29-C：**码点区间**而非 string——布局零 substr/零拷贝）
+	struct TextLine{
+		std::size_t startCp = 0;    ///< 行首码点索引（**绝对**——相对全串）
+		std::size_t cpCount = 0;    ///< 本行码点数（**已做尾部空白裁剪**——D29-Ⅰ ⑥）
+		float width = 0.0f;         ///< 本行宽（DIP——由扫描状态直接得到，**非** per-line MeasureText）
+	};
+
+	/// @brief 断行布局结果（★ D29-C 共享 TextLayout：`GetPreferredSize` 与 `DrawTextContent` 双消费端）
+	struct TextLayout{
+		std::vector<TextLine> lines;   ///< 逐行区间（空行 = cpCount 0——D29-Ⅴ；绘制跳过）
+		float totalHeight = 0.0f;      ///< `lines.size() × 行高`——含空行（占行高零命令）
+	};
+
 	/// @brief preferred 内容测量实现（9.8——private：TextWidget 语义组成部分，非 cpp 匿名辅助）
 	/// @details Label/Button 0 inset（§3.2 冻结）：{文本测量宽, 行高}——空文本 MeasureText 返回 {0,0} → 宽 0 诚实
 	[[nodiscard]] Size DoMeasureText(TextMeasurer& measurer) const;
 
-	/// ── Phase 28 批二：preferred 结果指纹短路（D28-B——TextWidget 层闭环，不做 Widget 通用缓存）──
+	/// @brief 断行布局（★ Phase 29 批二 △5——D29-Ⅰ 状态机正式化）
+	/// @param measurer  测量器（`FitText`/`LineHeight` 来源——与绘制**同源**）
+	/// @param maxWidth  可用宽（DIP = `GetWidth()`；**<= 0 不得传入**——调用方已退化单行）
+	/// @return 布局结果；空文本 ⇒ 1 个空行（`lines.size()` == 1——「零行」会让 preferred 高度归零）
+	[[nodiscard]] TextLayout BuildTextLayout(TextMeasurer& measurer, float maxWidth) const;
+
+	/// @brief 布局缓存入口（★ C29-10：**五元组指纹显式列键**，入口每次判定）
+	/// @details 键 = `(m_textRevision, font.size, font.family, dpi, GetWidth())`——任一变 ⇒ 重建。
+	///          ★ 与 Phase 28 的 preferred 指纹（`m_prefValid`…）**正交两套**（盯防③）：
+	///          wrap 分支不读不写 preferred 缓存，非 wrap 分支不读不写布局缓存。
+	[[nodiscard]] const TextLayout& GetTextLayout(TextMeasurer& measurer) const;
+
+	/// @brief wrap 路径可用性判定（本 cpp 的private helper——★ 三条件同时满足才走布局）
+	[[nodiscard]] bool IsWrapLayoutActive() const noexcept;
+
+	/// @brief 区块宽 = 最宽一行（供 `CalculateTextPosition` 的**水平**对齐用）
+	/// @details ★ 不是 `GetWidth()`：水平对齐语义 = 「把**段落**当整体居中」（段落宽 = 最宽行）。
+	///          ★ 每行自己的对齐（居中/右对齐）是 **O1 开放项**（#51③）——v1 每行左对齐，
+	///          这是把段落当整体的自然选择（短末行左对齐而非居中）。
+	[[nodiscard]] float BlockWidth(const TextLayout& layout) const noexcept;
+
+	// ── Phase 28 批二：preferred 结果指纹短路（D28-B——TextWidget 层闭环，不做 Widget 通用缓存）──
 	std::size_t m_textRevision = 0;      ///< 文本内容版本（`MarkTextChanged` 递增——唯一失效源之一）
 	mutable bool m_prefValid = false;    ///< 指纹是否已建立（首次 GetPreferredSize 恒 miss）
 	mutable Size m_prefCache{};          ///< 上次测量结果（有效时返回——零 measurer 调用）
 	mutable std::size_t m_prefRevision = 0;   ///< 建立缓存时的文本版本
 	mutable Font m_prefFont{};           ///< 建立缓存时的字体（值比较——SetFont/SetStyle/ApplyTheme 无需 bump）
 	mutable int m_prefDpi = 0;           ///< 建立缓存时的 DPI（`lround(GetDpiScale()*96)`——跨屏失效）
+
+	// ── Phase 29 批二：断行开关 + wrap 布局缓存（D29-C / C29-10）──
+	bool m_wordWrap = false;             ///< 断行开关（默认关 = 红线①）
+
+	mutable TextLayout m_wrapLayout;         ///< 布局缓存（`m_wrapValid` 为真时有效）
+	mutable bool m_wrapValid = false;        ///< 布局指纹是否已建立
+	mutable std::size_t m_wrapRevision = 0;  ///< 建立缓存时的文本版本（C29-10 键维 1）
+	mutable Font m_wrapFont{};               ///< 建立缓存时的字体（键维 2/3——size + family）
+	mutable int m_wrapDpi = 0;               ///< 建立缓存时的 DPI（键维 4）
+	mutable int m_wrapWidth = 0;             ///< 建立缓存时的 `GetWidth()`（键维 5——宽度驱动重排，T29-3）
 
 };
 

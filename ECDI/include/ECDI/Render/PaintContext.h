@@ -72,6 +72,14 @@ namespace ECDI {
 		/// @brief 获取字体行高（转发 m_measurer；垂直居中对齐用，5.1 P7 定案）
 		float LineHeight(const Font& font);
 
+		/// @brief 取本上下文持有的测量器引用（★ Phase 29 批二）
+		/// @details ★ **为什么需要**：断行原语 `FitText` **不**由本类转发——本类是绘制命令门面，
+		///          只转发「控件自己算对齐偏移」要用的那两样。断行布局引擎（`TextWidget` 的 wrap
+		///          路径）需要 `FitText`，且必须与 `MeasureText`/`LineHeight` **同一个测量器实例**
+		///          （同源契约——否则「测宽」与「断行宽」分家，表现 = 断行位置与绘制错位）。
+		/// @return 构造时注入的那个 `TextMeasurer&`（**非**拥有——生命周期归调用方）
+		TextMeasurer& GetTextMeasurer() const;
+
 	private:
 		CommandBuffer& m_commands;
 		TextMeasurer& m_measurer;

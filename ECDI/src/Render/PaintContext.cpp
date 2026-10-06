@@ -121,4 +121,11 @@ namespace ECDI {
 
 	}
 
+	TextMeasurer& PaintContext::GetTextMeasurer() const{
+
+		// ★ Phase 29 批二：m_measurer 即引用成员——与上面两个转发**同一对象**（同源契约）
+		return m_measurer;
+
+	}
+
 }

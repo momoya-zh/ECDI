@@ -591,6 +591,300 @@ void Test28PrefFingerprintInvalidation()
 	EXPECT_EQ(probe.counter->MeasureCalls(), base + 2);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 29 批二：断行（word-wrap）路径 —— T29-1/2/3 + T29-WRAP-1/3 + A2 结构判据
+// ══════════════════════════════════════════════════════════════════════
+// ★ 装置要点（批一装置沿用、批二扩展）：
+//   ① **每码点恒宽 8.0f / 行高 16.0f** 的确定性测量器——断行位置**精确可算**（宽度语义才可断言）；
+//      按**字节**计宽会把 CJK 3 字节搅成 24 宽，禁则/软断点的断言全部失真。
+//   ② **FitText 计数缝**——覆写 FitText 计数后**显式转发批一默认体**（`TextMeasurer::FitText`），
+//      计的是「入口次数」、算的仍是真实默认二分体（不是桩）⇒ 断行逻辑真跑、命中与否可判。
+//   ③ **真窗口**（`IsWrapLayoutActive` 要求 `GetWindow() != nullptr`——D29-Ⅰ 退化单行口径），
+//      但**不驱动帧**：直接把 label Paint 进调用方自己的 CommandBuffer ⇒ 命令流可逐条断言。
+//      窗口只提供 DPI 与父链（`GetWindow()` 沿 m_parent 上行到根的 m_window）。
+
+/// @brief 每码点恒宽 8、行高 16 的确定性测量器（★ Phase 29 批二：断行断言的前提）
+/// @details 派生自 `RecordingBackend`（双接口）⇒ 既是 `TextMeasurer`（PaintContext 要）又自带
+///          `textDraws` 记录；本组命令流断言走调用方自持的 CommandBuffer，不读它。
+class WrapMeasurer final : public RecordingBackend{
+public:
+	Size MeasureText(const Font&, const std::string& text) override{
+		return Size{ 8.0f * static_cast<float>(CountCodepoints(text)), 16.0f };
+	}
+	float LineHeight(const Font&) override{ return 16.0f; }
+
+	/// ★ 观测缝：只计入口次数，计算**转发批一默认体**（真实二分跑，不是桩——否则断行逻辑没被测）
+	TextFit FitText(const Font& font, const std::string& text,
+	                std::size_t startCp, float maxWidth) override{
+		++m_fitCalls;
+		return TextMeasurer::FitText(font, text, startCp, maxWidth);
+	}
+	[[nodiscard]] std::size_t FitCalls() const { return m_fitCalls; }
+
+private:
+	static std::size_t CountCodepoints(const std::string& s){
+		std::size_t n = 0;
+		for (std::size_t i = 0; i < s.size(); ++i){
+			if ((static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) { ++n; }
+		}
+		return n;
+	}
+	std::size_t m_fitCalls = 0;
+};
+
+/// @brief wrap 探针：真窗口 + label + 计数测量器；命令流落入调用方 buffer
+struct WrapProbe{
+	Application app;
+	WrapMeasurer* measurer = nullptr;   ///< 非拥有（所有权经 RenderServices 归 Window）
+	Window* window = nullptr;           ///< 非拥有（所有权归 Application）
+	Label* label = nullptr;             ///< 非拥有（所有权归根子树）
+
+	explicit WrapProbe(const char* title, int windowWidth, int windowHeight){
+		auto owned = std::make_unique<WrapMeasurer>();
+		measurer = owned.get();
+		RenderServices services{
+			std::make_unique<GDIBackend>(),   // 真后端（本组不驱动帧——直接调 Paint）
+			std::move(owned)
+		};
+		window = &app.Create(title, windowWidth, windowHeight, std::move(services));
+
+		auto labelOwned = std::make_unique<Label>(std::string(""));
+		label = labelOwned.get();
+		window->GetRootWidget().AddChild(std::move(labelOwned));
+	}
+	~WrapProbe(){ window->Release(); }
+
+	/// @brief 把 label 的整次 Paint 画进调用方 buffer（窗口在 ⇒ wrap 路径可达）
+	void PaintInto(CommandBuffer& commands){
+		PaintContext ctx(commands, window->GetTextMeasurer());
+		label->Paint(ctx, 0, 0);
+	}
+
+	/// @brief buffer 里的 DrawText 命令文本序列（顺序 = 绘制顺序）
+	[[nodiscard]] static std::vector<std::string> DrawnTexts(const CommandBuffer& commands){
+		std::vector<std::string> out;
+		for (const auto& cmd : commands){
+			if (const auto* text = std::get_if<DrawTextCommand>(&cmd)){
+				out.push_back(text->text);
+			}
+		}
+		return out;
+	}
+
+	/// @brief buffer 里的 DrawText 命令 y 坐标序列
+	[[nodiscard]] static std::vector<float> DrawnYs(const CommandBuffer& commands){
+		std::vector<float> out;
+		for (const auto& cmd : commands){
+			if (const auto* text = std::get_if<DrawTextCommand>(&cmd)){
+				out.push_back(text->pos.y);
+			}
+		}
+		return out;
+	}
+
+	/// @brief label 尺寸（宽 = wrap 宽度来源；高须容得下整块——否则 offsetY 为负）
+	void SetLabelSize(int width, int height){
+		label->SetSize(width, height);
+	}
+};
+
+// ── T29-1：拉丁按词切分——每行一条 DrawText + 内容正确 + preferred = {宽, 行数×行高}──
+void Test29WrapLatinBasic(){
+	// 6 词 × 4 字母 + 5 分隔空格 = 29 码点；宽 40 ⇒ 一行至多 5 码点（5×8=40 恰好）…
+	//   …但软断点取「空格后」⇒ 每行 4 字母（宽 32）、分隔空格被消费（不属于任何一行）。
+	WrapProbe probe("ECDI_T29_1", 200, 200);
+	probe.SetLabelSize(40, 200);
+	probe.label->SetText(std::string("aaaa bbbb cccc dddd eeee ffff"));
+	probe.label->SetWordWrap(true);
+
+	// ① preferred = {控件宽, 行数 × 行高}（D29-B：宽由控件给、高由行数定）
+	const Size preferred = probe.label->GetPreferredSize();
+	EXPECT_EQ(static_cast<int>(preferred.width), 40);
+	EXPECT_EQ(static_cast<int>(preferred.height), 6 * 16);   // 6 行
+
+	// ② 命令流：恰 6 条 DrawText、内容 = 各行、**空行零命令**（本用例无空行）
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+	const std::vector<std::string> texts = WrapProbe::DrawnTexts(commands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(6));
+	EXPECT_EQ(texts[0], std::string("aaaa"));
+	EXPECT_EQ(texts[3], std::string("dddd"));
+	EXPECT_EQ(texts[5], std::string("ffff"));
+
+	// ③ 逐行 y 步进 = 行高（16）；首行 y = 区块垂直居中的起点
+	const std::vector<float> ys = WrapProbe::DrawnYs(commands);
+	EXPECT_EQ(ys.size(), static_cast<std::size_t>(6));
+	for (std::size_t i = 1; i < ys.size(); ++i){
+		EXPECT_NEAR(ys[i] - ys[i - 1], 16.0f, kEpsilon);   // 行高步进
+	}
+	// 块高 96、控件高 200 ⇒ offsetY = (200−96)/2 = 52；首行 y = 0 + 52
+	EXPECT_NEAR(ys[0], 52.0f, kEpsilon);
+}
+
+// ── T29-2：CJK + 禁则（kinsoku）——四段式：输入 / 错误 / 允许 / 理想 ────────────
+// ★ 措辞受 maxWidth 约束（v1.1 评审建议⑤）：宽度允许时同行；必须换行时闭标点**不得独占行首**。
+void Test29WrapCjkKinsuku(){
+	WrapProbe probe("ECDI_T29_2", 200, 200);
+	probe.SetLabelSize(16, 200);   // 宽 16 ⇒ 一行至多 2 码点
+
+	// ── 段落 A：宽度允许 ⇒ 「你好）世界」整段同一行（不换行）──
+	probe.label->SetText(std::string("\xE4\xBD\xA0\xE5\xA5\xBD\xEF\xBC\x89\xE4\xB8\x96\xE7\x95\x8C"));  // 你好）世界
+	probe.label->SetWordWrap(true);
+	probe.SetLabelSize(64, 200);   // 5 码点 × 8 = 40 ≤ 64 ⇒ 全放得下
+	EXPECT_EQ(probe.label->GetPreferredSize().height, 16.0f);   // 1 行
+
+	// ── 段落 B：必须换行 ⇒ 闭标点「）」悬挂进**前行**（微超 = 该标点自身 advance）──
+	//   输入 = 你好）世界、宽 16（2 码点）
+	//   ✗ 错误 = ["你好", "）世界"]（闭标点独占行首——禁则违背）
+	//   △ 允许 = ["你好）世", "界"]
+	//   ✓ 理想 = ["你好）", "世界"]（）悬挂上行，行宽 24 > 16 = 微超 8 = 一个标点 advance）
+	probe.SetLabelSize(16, 200);
+	const Size narrow = probe.label->GetPreferredSize();
+	EXPECT_EQ(static_cast<int>(narrow.height), 2 * 16);   // 2 行
+
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+	const std::vector<std::string> texts = WrapProbe::DrawnTexts(commands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(2));
+	EXPECT_EQ(texts[0], std::string("\xE4\xBD\xA0\xE5\xA5\xBD\xEF\xBC\x89"));   // 你好）——含悬挂标点
+	EXPECT_EQ(texts[1], std::string("\xE4\xB8\x96\xE7\x95\x8C"));               // 世界
+
+	// ── 段落 C：行尾禁则——开括号不得独占行尾 ⇒ 挪到下行 ──
+	//   输入 = "ab（cd"、宽 24（3 码点）：自然断点落在 （ 之后 ⇒ ④ 把 （ 挪下去
+	probe.label->SetText(std::string("ab\xEF\xBC\x88" "cd"));   // ab（cd
+	probe.SetLabelSize(24, 200);
+	CommandBuffer commands2;
+	probe.PaintInto(commands2);
+	const std::vector<std::string> texts2 = WrapProbe::DrawnTexts(commands2);
+	EXPECT_EQ(texts2.size(), static_cast<std::size_t>(2));
+	EXPECT_EQ(texts2[0], std::string("ab"));                       // （ 被挪到下行
+	EXPECT_EQ(texts2[1], std::string("\xEF\xBC\x88" "cd"));      // （cd
+}
+
+// ── T29-3：宽度动态——宽度变 ⇒ 行数/preferred 同步变；不变 ⇒ 命中零调用 ─────────
+void Test29WrapWidthDynamics(){
+	WrapProbe probe("ECDI_T29_3", 200, 200);
+	probe.SetLabelSize(32, 200);
+	probe.label->SetText(std::string("aaaa bbbb cccc dddd eeee ffff"));
+	probe.label->SetWordWrap(true);
+
+	// ① 宽 32（4 码点/行）⇒ 6 行；宽 16（2 码点/行）⇒ 12 行；宽 128 ⇒ 2 行
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 6 * 16);
+	probe.SetLabelSize(16, 200);
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 12 * 16);
+	probe.SetLabelSize(128, 200);
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 2 * 16);
+
+	// ② 宽度不变（同值 SetSize 亦是「不变」）⇒ 指纹命中 ⇒ **零 FitText 调用**（C29-10 机制判据）
+	probe.SetLabelSize(128, 200);
+	const std::size_t afterBuild = probe.measurer->FitCalls();
+	EXPECT_TRUE(afterBuild > 0);                       // 前面确曾构建过（非空跑）
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.measurer->FitCalls(), afterBuild);   // ★ 零调用
+
+	// ③ 换宽度 ⇒ 重建（FitText 再被调）
+	probe.SetLabelSize(64, 200);
+	(void)probe.label->GetPreferredSize();
+	EXPECT_TRUE(probe.measurer->FitCalls() > afterBuild);
+
+	// ④ SetWordWrap(false) 切回单行 ⇒ preferred = {测量宽, 行高}（非 {控件宽, 总高}）
+	probe.label->SetWordWrap(false);
+	const Size single = probe.label->GetPreferredSize();
+	EXPECT_NEAR(single.height, 16.0f, kEpsilon);                     // 1 行
+	EXPECT_NEAR(single.width, static_cast<float>(29 * 8), kEpsilon); // 全串测量宽
+}
+
+// ── T29-WRAP-1：连续 `\n` ⇒ 空行——占行高但**零 DrawText 命令**（D29-Ⅴ）──────
+void Test29WrapEmptyLines(){
+	WrapProbe probe("ECDI_T29_WRAP1", 200, 200);
+	probe.SetLabelSize(40, 200);
+	probe.label->SetWordWrap(true);
+
+	// ① "A\n\nB" ⇒ 3 段（第 2 段空）⇒ 3 行（空行占行高、零命令）
+	probe.label->SetText(std::string("A\n\nB"));
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 3 * 16);
+
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+	const std::vector<std::string> texts = WrapProbe::DrawnTexts(commands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(2));   // ★ 空行零命令
+	EXPECT_EQ(texts[0], std::string("A"));
+	EXPECT_EQ(texts[1], std::string("B"));
+
+	// 空行仍占位置 ⇒ B 的 y = 块起点 + 2×行高（跳过空行那一行的高度）
+	const std::vector<float> ys = WrapProbe::DrawnYs(commands);
+	EXPECT_EQ(ys.size(), static_cast<std::size_t>(2));
+	EXPECT_NEAR(ys[1] - ys[0], 2 * 16.0f, kEpsilon);
+
+	// ② 首行可为空（"\nA" = 2 行）· 末行可为空（"A\n" = 2 行）——D29-Ⅴ 边界
+	probe.label->SetText(std::string("\nA"));
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 2 * 16);
+	probe.label->SetText(std::string("A\n"));
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 2 * 16);
+
+	// ③ 空串 ⇒ 1 个空行（不是 0 行——0 行会让 preferred 高度归零、控件整块消失）
+	probe.label->SetText(std::string(""));
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 1 * 16);
+	CommandBuffer emptyCommands;
+	probe.PaintInto(emptyCommands);
+	EXPECT_EQ(WrapProbe::DrawnTexts(emptyCommands).size(), static_cast<std::size_t>(0));
+}
+
+// ── T29-WRAP-3：同宽 SetSize ⇒ 布局命中零重建（C29-10 指纹宽度维）────────────
+void Test29WrapSameWidthNoRebuild(){
+	WrapProbe probe("ECDI_T29_WRAP3", 200, 200);
+	probe.SetLabelSize(40, 200);
+	probe.label->SetText(std::string("aaaa bbbb cccc dddd"));
+	probe.label->SetWordWrap(true);
+
+	(void)probe.label->GetPreferredSize();
+	const std::size_t afterBuild = probe.measurer->FitCalls();
+	EXPECT_TRUE(afterBuild > 0);
+
+	// ① 同宽 SetSize（不同高——高不进指纹键）⇒ 零重建
+	probe.SetLabelSize(40, 300);
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.measurer->FitCalls(), afterBuild);
+
+	// ② 再次同宽 GetPreferredSize ⇒ 零重建
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.measurer->FitCalls(), afterBuild);
+
+	// ③ 反证：换宽 ⇒ 重建（证明上面「零调用」是**缓存命中**而非「压根没建」）
+	probe.SetLabelSize(32, 300);
+	(void)probe.label->GetPreferredSize();
+	EXPECT_TRUE(probe.measurer->FitCalls() > afterBuild);
+}
+
+// ── A2 结构判据（批二验收前半）：`wrap == false` ⇒ FitText / 布局构建**零调用** ──
+// ★ 红线①「默认关 = 100% 原路径」的可判定形式（命令流逐字节比对在批三 T29-4）。
+void Test29WrapDefaultOffZeroFit(){
+	WrapProbe probe("ECDI_T29_DEFOFF", 200, 200);
+	probe.SetLabelSize(40, 200);
+	probe.label->SetText(std::string("aaaa bbbb cccc dddd eeee ffff"));
+	// ★ 不调 SetWordWrap（默认 false）
+
+	// ① preferred 走 Phase 28 单行路径 ⇒ 零 FitText 调用
+	const Size preferred = probe.label->GetPreferredSize();
+	EXPECT_NEAR(preferred.height, 16.0f, kEpsilon);                     // 1 行高
+	EXPECT_NEAR(preferred.width, static_cast<float>(29 * 8), kEpsilon); // 全串宽
+	EXPECT_EQ(probe.measurer->FitCalls(), static_cast<std::size_t>(0));  // ★ 零调用
+
+	// ② Paint 同样零调用 + **一条** DrawText（原路径）
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+	const std::vector<std::string> texts = WrapProbe::DrawnTexts(commands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(1));
+	EXPECT_EQ(texts[0].size(), static_cast<std::size_t>(29));   // 整串原样
+	EXPECT_EQ(probe.measurer->FitCalls(), static_cast<std::size_t>(0));
+
+	// ③ 宽度 **不够**也不换行（wrap=false 无视宽度——原路径横向溢出，由 Clip 裁）
+	probe.SetLabelSize(8, 200);
+	CommandBuffer narrowCommands;
+	probe.PaintInto(narrowCommands);
+	EXPECT_EQ(WrapProbe::DrawnTexts(narrowCommands).size(), static_cast<std::size_t>(1));
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterWidgetTests()
@@ -615,4 +909,10 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("AutoSize.LastCallWins", &TestAutoSizeLastCallWins);         // 9.8
     GetTestRegistry().Add("TextWidget.PrefFingerprintHit",      &Test28PrefFingerprintHit);         // T28-3a
     GetTestRegistry().Add("TextWidget.PrefFingerprintInvalidate", &Test28PrefFingerprintInvalidation); // T28-3b
+    GetTestRegistry().Add("TextWidget.WrapLatinBasic",          &Test29WrapLatinBasic);           // T29-1
+    GetTestRegistry().Add("TextWidget.WrapCjkKinsuku",          &Test29WrapCjkKinsuku);           // T29-2
+    GetTestRegistry().Add("TextWidget.WrapWidthDynamics",       &Test29WrapWidthDynamics);        // T29-3
+    GetTestRegistry().Add("TextWidget.WrapEmptyLines",          &Test29WrapEmptyLines);           // T29-WRAP-1
+    GetTestRegistry().Add("TextWidget.WrapSameWidthNoRebuild",  &Test29WrapSameWidthNoRebuild);   // T29-WRAP-3
+    GetTestRegistry().Add("TextWidget.WrapDefaultOffZeroFit",   &Test29WrapDefaultOffZeroFit);    // A2 结构判据（批二）
 }
