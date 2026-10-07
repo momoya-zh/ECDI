@@ -48,6 +48,7 @@ void Button::ApplyTheme(const Theme& theme){
 	m_style.cornerRadius.Apply(defaults.cornerRadius.value);
 	m_style.pressedBackground.Apply(defaults.pressedBackground.value);
 	m_style.hoverBackground.Apply(defaults.hoverBackground.value);
+	m_style.textAlignment.Apply(defaults.textAlignment.value);   // ★ Phase 30 △6（C30-3）：缺省 Center——与硬编码居中期逐位一致
 
 	// 9.6 S1：背景呈现值与主题同步（构造/换主题 = 即时到位；运行期状态变化才走过渡）。
 	// 换主题 = 即时重置语义——若背景动画仍在跑则取消（防旧动画写回旧色）。
@@ -83,15 +84,23 @@ void Button::SetStyle(ButtonStyleOverride override){
 	if (override.cornerRadius)       m_style.cornerRadius.Set(*override.cornerRadius);
 	if (override.pressedBackground)  m_style.pressedBackground.Set(*override.pressedBackground);
 	if (override.hoverBackground)    m_style.hoverBackground.Set(*override.hoverBackground);
+	if (override.textAlignment)      m_style.textAlignment.Set(*override.textAlignment);   // ★ Phase 30 △6
 	Invalidate();
 
 }
 
-// ── 文本位置（P3：水平居中 + 垂直居中；负 offset 合法不修正）────────────
+// ── 文本位置（P3：垂直居中；水平对齐 ★ Phase 30 △6——默认 Center 与硬编码期逐位一致）──
 
 Point Button::CalculateTextPosition(int x, int y, float textWidth, float lineHeight) const{
 
-	const float offsetX = (static_cast<float>(GetWidth()) - textWidth) / 2.0f;
+	// ★ C30-2：三模式共用**全控件矩形**内容区（B4：Button 文本定位从无 padding 概念——
+	//   borderWidth 内框逻辑已随旧实现移除）；垂直恒居中（P7 不动）。
+	float offsetX = 0.0f;
+	switch (m_style.textAlignment.value){
+		case TextAlignment::Right:  offsetX = static_cast<float>(GetWidth()) - textWidth; break;
+		case TextAlignment::Center: offsetX = (static_cast<float>(GetWidth()) - textWidth) / 2.0f; break;
+		case TextAlignment::Left:   break;   // 显式分支（防未来新增枚举值静默漏处理）
+	}
 	const float offsetY = (static_cast<float>(GetHeight()) - lineHeight) / 2.0f;
 
 	return Point{ static_cast<float>(x) + offsetX, static_cast<float>(y) + offsetY };

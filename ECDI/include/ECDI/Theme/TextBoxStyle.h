@@ -14,6 +14,7 @@ struct TextBoxStyle{
 	StyleField<Color> selection;     ///< 选区高亮色
 	StyleField<Color> composition;   ///< 组合串下划线色（IME）
 	StyleField<float> caretWidth;    ///< 光标竖线宽
+	StyleField<Color> caretColor;    ///< ★ Phase 30 △2：光标竖线色（`caretWidth` 同族补齐——此前 `TextBox.cpp:1351` 硬编码 `Color::Black()`；主题缺省 Black = 零行为变化）
 	StyleField<float> padding;       ///< 文本内边距（9.6 收尾方案 B：常驻布局属性，默认 0，不随焦点变化——焦点框改由 DrawFocusRect 绘制，零布局副作用）
 	StyleField<float> cornerRadius;  ///< 圆角半径（0 = 直角；P1 形态——Phase 8 DrawRoundedRect 消费）
 	StyleField<float> borderWidth;   ///< 恒显描边宽（0 = 无恒显边框；>0 = 双矩形描边环——⚠️ 与 border 焦点点线框并存，新语义非旧"焦点内缩"）
@@ -27,6 +28,7 @@ struct TextBoxStyleOverride{
 	std::optional<Color> selection;
 	std::optional<Color> composition;
 	std::optional<float> caretWidth;
+	std::optional<Color> caretColor;   ///< ★ Phase 30 △2：光标竖线色覆盖
 	std::optional<float> padding;
 	std::optional<float> cornerRadius;
 	std::optional<float> borderWidth;

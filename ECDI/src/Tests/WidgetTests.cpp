@@ -18,6 +18,7 @@
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Window/Window.h"
 #include "ECDI/Theme/DefaultTheme.h"
+#include "ECDI/Core/TextAlignment.h"   // ★ Phase 30 T30-2/3：对齐枚举
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
@@ -1055,6 +1056,75 @@ void Test29BubbleEndToEnd(){
 	EXPECT_EQ(probe.label->GetHeight(), height);       // 恢复原行数（同宽同布局）
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 30 批一：T30-2 / T30-3 —— Button 文字对齐（C30-2/C30-3）
+// ══════════════════════════════════════════════════════════════════════
+// ★ 装置 = RecordingBackend（MeasureText 恒 {10,14}）——textWidth 确定 ⇒ pos.x **手算可判**：
+//   Left = 0 · Center = (100−10)/2 = 45 · Right = 100−10 = 90；y = (40−14)/2 = 13 三态恒同（P7）。
+
+/// @brief 画一次 button 并取 DrawText 的 pos.x（每次新 PaintContext——镜像栈不留状态）
+static float PaintButtonTextX(Button& button, RecordingBackend& backend){
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	button.Paint(ctx, 0, 0);
+	for (const auto& cmd : commands){
+		if (const auto* t = std::get_if<DrawTextCommand>(&cmd)){
+			return t->pos.x;
+		}
+	}
+	return -1.0f;   // 不可达（Button 恒画文本）——调用方断言会失败
+}
+
+void Test30ButtonAlignmentModes(){
+	RecordingBackend backend;
+	Button button("OK");
+	button.SetSize(100, 40);
+
+	// ① 默认（主题注入 Center，未 SetStyle）⇒ 与 Phase 30 前硬编码居中**逐位一致**（C30-3 零变化锚）
+	EXPECT_NEAR(PaintButtonTextX(button, backend), 45.0f, kEpsilon);
+
+	// ② 三态切换：Left / Center / Right（C30-2 公式——内容区 = 全控件矩形）
+	ButtonStyleOverride left;  left.textAlignment  = TextAlignment::Left;
+	ButtonStyleOverride center; center.textAlignment = TextAlignment::Center;
+	ButtonStyleOverride right; right.textAlignment  = TextAlignment::Right;
+
+	button.SetStyle(left);
+	EXPECT_NEAR(PaintButtonTextX(button, backend), 0.0f, kEpsilon);
+
+	button.SetStyle(center);
+	EXPECT_NEAR(PaintButtonTextX(button, backend), 45.0f, kEpsilon);
+
+	button.SetStyle(right);
+	EXPECT_NEAR(PaintButtonTextX(button, backend), 90.0f, kEpsilon);
+
+	// ③ 垂直恒居中（P7 三态不变）：取当前 Right 态的 y
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	button.Paint(ctx, 0, 0);
+	const auto* t = std::get_if<DrawTextCommand>(&commands[2]);
+	EXPECT_TRUE(t != nullptr);
+	if (t) { EXPECT_NEAR(t->pos.y, 13.0f, kEpsilon); }
+}
+
+void Test30ButtonAlignmentOverride(){
+	RecordingBackend backend;
+	Button button("OK");
+	button.SetSize(100, 40);
+
+	// ① Override Right ⇒ 生效
+	ButtonStyleOverride o; o.textAlignment = TextAlignment::Right;
+	button.SetStyle(o);
+	EXPECT_NEAR(PaintButtonTextX(button, backend), 90.0f, kEpsilon);
+
+	// ② 再 ApplyTheme ⇒ **仍 Right**（StyleField D7：Override 不被主题覆盖）
+	button.ApplyTheme(GetDefaultTheme());
+	EXPECT_NEAR(PaintButtonTextX(button, backend), 90.0f, kEpsilon);
+
+	// ③ 空 Override 结构不重置（Set 只处理显式字段）
+	button.SetStyle(ButtonStyleOverride{});
+	EXPECT_NEAR(PaintButtonTextX(button, backend), 90.0f, kEpsilon);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterWidgetTests()
@@ -1089,4 +1159,6 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.WrapDegenerate",          &Test29WrapDegenerate);           // T29-5（批三：退化边界）
     GetTestRegistry().Add("TextWidget.WrapKinsukuOverflow",     &Test29WrapKinsukuOverflow);      // T29-WRAP-2（批三：微超不吞普通字符）
     GetTestRegistry().Add("TextWidget.BubbleEndToEnd",          &Test29BubbleEndToEnd);           // T29-6（批三：气泡端到端 + A4）
+    GetTestRegistry().Add("Button.TextAlignmentModes",          &Test30ButtonAlignmentModes);     // T30-2（批一）
+    GetTestRegistry().Add("Button.TextAlignmentOverride",       &Test30ButtonAlignmentOverride);  // T30-3（批一）
 }

@@ -12,6 +12,12 @@
 #include "ECDI/Render/RenderCommand.h"
 #include "ECDI/Render/TextMeasurer.h"
 #include "ECDI/Widget/ScrollBar.h"
+#include "ECDI/Application/Application.h"
+#include "ECDI/Window/Window.h"
+#include "ECDI/Render/RenderServices.h"
+#include "ECDI/Theme/DefaultTheme.h"
+#include "Render/GDIBackend.h"
+#include "Render/GDITextMeasurer.h"
 
 using namespace ECDI;
 
@@ -42,6 +48,7 @@ public:
     using TextBox::OnKeyDown;   ///< 暴露键盘选择路径（Shift+方向/Home/End）
     using TextBox::OnMouseButtonDown;   ///< scrollbar-placement-and-appearance T9：手势隔离守卫（protected override——无头验证）
     using TextBox::OnMouseMove;         ///< scrollbar-placement-and-appearance T9：拖选扩展（同上）
+    using TextBox::OnFocusGained;       ///< ★ Phase 30 T30-1：置 m_showCaret=true（TextBox.cpp:212——窗口访问判空 ⇒ 无窗口/真窗口两可）
 
     /// @brief 文本内边距（protected `m_style` 的中转）——scrollbar-placement-and-appearance v1.5：条内缩 = max(padding, 2)
     [[nodiscard]] float Padding() const noexcept{ return m_style.padding.value; }
@@ -1475,8 +1482,87 @@ void TestTextBoxScrollBarInset()
 
 } // anonymous namespace
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 30 批一：T30-1 caretColor（真窗口装置——caret 绘制需 GetWindow()->GetTextMeasurer()）
+// ══════════════════════════════════════════════════════════════════════
+
+namespace {
+
+/// @brief caret 探针：真窗口（caret 绘制路径读 `GetWindow()->GetTextMeasurer()`——无窗口会空解引用，
+///        故本用例**必须**真窗口；形态沿 WidgetTests 的 FingerprintProbe/WrapProbe）
+struct CaretProbe{
+	Application app;
+	Window* window = nullptr;
+	TestableTextBox* box = nullptr;
+
+	CaretProbe(){
+		RenderServices services{
+			std::make_unique<GDIBackend>(),
+			std::make_unique<GDITextMeasurer>()
+		};
+		window = &app.Create("ECDI_T30_Caret", 200, 120, std::move(services));
+
+		auto owned = std::make_unique<TestableTextBox>(std::string("abc"));
+		box = owned.get();
+		window->GetRootWidget().AddChild(std::move(owned));
+		box->SetSize(150, 30);
+		box->OnFocusGained();   // m_showCaret = true（真窗口 ⇒ SyncTextInputCaret/StartTimer 均可达）
+	}
+	~CaretProbe(){ window->Release(); }
+
+	/// @brief Paint 后收集「宽 == caretWidth」的 DrawRect 颜色（光标是唯一该宽的矩形——宽度即指纹）
+	[[nodiscard]] std::vector<Color> PaintCaretColors() const{
+		CommandBuffer commands;
+		PaintContext ctx(commands, window->GetTextMeasurer());
+		box->Paint(ctx, 0, 0);
+		std::vector<Color> out;
+		for (const auto& cmd : commands){
+			if (const auto* rect = std::get_if<DrawRectCommand>(&cmd)){
+				if (rect->rect.width == 2.0f) { out.push_back(rect->color); }   // 2.0f = 主题缺省 caretWidth
+			}
+		}
+		return out;
+	}
+};
+
+} // anonymous namespace
+
+/// T30-1：caretColor 默认 Black / Override 生效 / ApplyTheme 不覆盖 Override（C30-1）
+void Test30CaretColorStyle(){
+	CaretProbe probe;
+
+	// ① 默认（仅主题注入）：恰一条 caret 矩形，色 = Black（与硬编码期逐位一致——C30-1 零变化锚）
+	{
+		const std::vector<Color> colors = probe.PaintCaretColors();
+		EXPECT_EQ(colors.size(), static_cast<std::size_t>(1));
+		if (!colors.empty()) { EXPECT_TRUE(colors[0] == Color::Black()); }
+	}
+
+	// ② Override 自定义色 ⇒ 生效
+	const Color red = Color::FromRGBA8(220, 30, 30);
+	{
+		TextBoxStyleOverride o;
+		o.caretColor = red;
+		probe.box->SetStyle(o);
+	}
+	{
+		const std::vector<Color> colors = probe.PaintCaretColors();
+		EXPECT_EQ(colors.size(), static_cast<std::size_t>(1));
+		if (!colors.empty()) { EXPECT_TRUE(colors[0] == red); }
+	}
+
+	// ③ 再 ApplyTheme ⇒ **仍红**（StyleField D7：Override 不被主题覆盖——T30-1 的核心语义）
+	probe.box->ApplyTheme(GetDefaultTheme());
+	{
+		const std::vector<Color> colors = probe.PaintCaretColors();
+		EXPECT_EQ(colors.size(), static_cast<std::size_t>(1));
+		if (!colors.empty()) { EXPECT_TRUE(colors[0] == red); }
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
+    GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
     GetTestRegistry().Add("TextBox.InsertDelete", &TestTextBoxInsertDelete);
     GetTestRegistry().Add("TextBox.CaretMovement", &TestTextBoxCaretMovement);
     GetTestRegistry().Add("TextBox.GetSelection", &TestTextBoxGetSelection);

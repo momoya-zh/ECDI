@@ -80,6 +80,7 @@ void TextBox::ApplyTheme(const Theme& theme){
 	m_style.selection.Apply(defaults.selection.value);
 	m_style.composition.Apply(defaults.composition.value);
 	m_style.caretWidth.Apply(defaults.caretWidth.value);
+	m_style.caretColor.Apply(defaults.caretColor.value);   // ★ Phase 30 △5（C30-1）：缺省 Black——与硬编码期逐位一致
 	m_style.padding.Apply(defaults.padding.value);
 	m_style.cornerRadius.Apply(defaults.cornerRadius.value);
 	m_style.borderWidth.Apply(defaults.borderWidth.value);
@@ -101,6 +102,7 @@ void TextBox::SetStyle(TextBoxStyleOverride override){
 	if (override.selection)     m_style.selection.Set(*override.selection);
 	if (override.composition)   m_style.composition.Set(*override.composition);
 	if (override.caretWidth)    m_style.caretWidth.Set(*override.caretWidth);
+	if (override.caretColor)    m_style.caretColor.Set(*override.caretColor);   // ★ Phase 30 △5
 	if (override.padding)       m_style.padding.Set(*override.padding);
 	if (override.cornerRadius)  m_style.cornerRadius.Set(*override.cornerRadius);
 	if (override.borderWidth)   m_style.borderWidth.Set(*override.borderWidth);
@@ -1348,7 +1350,8 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 		// CalculateCaretPosition 返回相对控件原点（含 GetTextLeftInset + scrollOffsetY）
 		const Point caretLocal = CalculateCaretPosition(GetWindow()->GetTextMeasurer());
 		// 7.1.3：宽度用 m_style.caretWidth.value（与 CaretGeometry 输出同源——F2，不散落魔法数字）
-		ctx.DrawRect(Rect{ fx + caretLocal.x, fy + caretLocal.y, m_style.caretWidth.value, lineH }, Color::Black());
+		// ★ Phase 30 △5（C30-1）：颜色样式化——`Color::Black()` 硬编码退场（主题缺省 Black ⇒ 默认态逐位一致）
+		ctx.DrawRect(Rect{ fx + caretLocal.x, fy + caretLocal.y, m_style.caretWidth.value, lineH }, m_style.caretColor.value);
 	}
 
 	ctx.PopClip();   // 9.5 R1 修复：背景区 Clip 出栈（与 OnPaint 内 PushClip 严格配对）

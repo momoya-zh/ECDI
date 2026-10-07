@@ -19,6 +19,7 @@ ButtonStyle DefaultTheme::GetButtonStyle() const{
 	s.cornerRadius.value       = 0.0f;                               // 迁移前 Button 无圆角（Phase 9 开放消费）
 	s.pressedBackground.value  = Color::FromRGBA8(60, 90, 180);     // 迁移前 Button 按下深蓝
 	s.hoverBackground.value    = Color::FromRGBA8(80, 120, 220);   // P1：hover 默认 = background（零视觉变化；demo 改底色须同设 hover 色）
+	s.textAlignment.value      = TextAlignment::Center;            // ★ Phase 30 △4：对齐缺省 = Center（与 Phase 30 前硬编码行为逐位一致——C30-3：禁依赖枚举零值 Left）
 	return s;
 }
 
@@ -31,6 +32,7 @@ TextBoxStyle DefaultTheme::GetTextBoxStyle() const{
 	s.selection.value   = Color::FromRGBA8(173, 216, 230);     // 迁移前 TextBox 选区浅蓝
 	s.composition.value = Color::FromRGBA8(80, 120, 220);      // 迁移前 TextBox 组合串下划线蓝
 	s.caretWidth.value  = 2.0f;                                 // 迁移前 TextBox 光标宽 2px
+	s.caretColor.value  = Color::Black();                       // ★ Phase 30 △4：光标色缺省 = Black（与 `TextBox.cpp:1351` 硬编码期逐位一致——零行为变化）
 	// 9.6 收尾方案 B：padding 语义回归「样式内边距」——常驻布局属性，默认 0
 	//（旧默认 2.0f 是"焦点内缩"，会让焦点切换时文本/可视区/滚动上限/点击定位整体位移 2px）
 	s.padding.value     = 0.0f;
