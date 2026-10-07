@@ -1,7 +1,7 @@
 ﻿# Phase 30 · 文本 / 交互快修小轮 —— 详细设计（v1.0）
 
 > 来源：初设 `phase30-interaction-quickfix-preliminary-design.md` **v1.0（评审 PASS → 详设）**——评审**无 blocker**，三个非 blocker 确认点（remaining 负值 / 末位 stretch 伪代码 / 停泊机械步骤）+ 详设展开清单逐项落实（本稿 §1 D30-G..I + §2/§3/§5）。
-> 状态：**v1.0**（2026-10-07，待评审）
+> 状态：**v1.1**（2026-10-07）——**✅ 评审通过（PASS → Implementation，「比较明确的 PASS，非 Conditional」）**（外部评审 2026-10-07：14 项分表全 ✅、无 blocker；两处纯文档修正当场修毕——修正明细见 §9 v1.1；**评审明示「不要再改设计了」⇒ 直接进 Batch 1**）
 > 定位：**「实现者照着做不会歧义」**——评审明示**不再增加新架构设计**；本稿 = 精确伪代码 + 精确公式 + 精确断言。
 
 ---
@@ -92,6 +92,7 @@ Arrange(parent):
 
 - **全可见逐位等价证明**：`visibleCount == count` ⇒ `gapCount` 同值、求和集合同、`cursor` 累进与旧「加 spacing 于尾」逐点等价（首子前无 spacing、末子后无 spacing）、停泊分支不可达。（C30-5；T30-4 手算锚。）
 - **跨轴注意**：隐藏子**不参与 fillCrossAxis**（不 SetSize）——旧行为会给隐藏子也刷跨轴尺寸，新行为保持其当前尺寸（唯一变化点，仅隐藏子）。
+- **HorizontalLayout 明确映射**（评审修正①——照做无需再推导）：`axis = 宽`（第一遍 fixedTotal 取 `GetWidth()`；stretch 分支 `SetSize(axis, fillCrossAxis ? cross : child->GetHeight())`）；`cross = 高`；`cursor` 作用于 **X**、`SetPosition(cursor, padding)`（**padding 作用于 Y**——跨轴坐标 = padding 的既有契约不变）；跨轴 fill 分支 `SetSize(child->GetWidth(), cross)`。其余（gapCount/remaining/prevVisible/停泊）逐字同构。
 
 ### D30-B′ CalculateTextPosition 精确落码（Button.cpp:92-99 替换）
 
@@ -199,7 +200,7 @@ enum class TextAlignment : std::uint8_t{
 | T30-2 | `Button.TextAlignmentModes` | WidgetTests；RecordingBackend + PaintContext 直 Paint（TestButtonPaint 形态） | SetStyle 三态各 Paint：`DrawTextCommand.pos.x` = 手算（Left: x+0 / Center: x+(w−tw)/2 / Right: x+w−tw，tw = backend.MeasureText 实测宽）；**三态 pos.y 相同**（垂直恒居中）；**默认（不 SetStyle）== Center 现状** |
 | T30-3 | `Button.TextAlignmentOverride` | WidgetTests 同装置 | override Right ⇒ ApplyTheme ⇒ **仍 Right**（D7）；override 后 `SetStyle({})` 空结构不重置（StyleField 语义）；无窗口下全路径不 panic |
 | T30-4 | `Layout.HVAllVisibleBitIdentity` | LayoutTests（Panel + SetLayout + AddChild + `Arrange()` 既有形态） | **专测**：V/H 各两组——(a) 纯固定子；(b) 固定 + 多 stretch 混合（含 spacing/padding 非零）。期望值 = **手算旧公式**（spacing×(n−1) / stretch 截断 / 末位吃余数）逐项 `EXPECT_EQ(GetX/GetY/GetSize)`；再 `Arrange()` 一次断言幂等 |
-| T30-5 | `Layout.VerticalCVis` | LayoutTests 同装置 | 五段：① [A 隐 B 可 C 隐 D 可] ⇒ B、D 连续槽位（间隙 1）、A/D… 停泊 `(−w,−h)`（`EXPECT_EQ(GetX(), -GetWidth())`）；② 隐藏 stretch 子不进权重（visibleStretch 只算可见）；③ 末位**可见** stretch 吃余数；④ 全隐藏 ⇒ Arrange 正常返回 + 全员 `(−w,−h)` + 无 panic；⑤ 全可见子树跑 T30-4 同组数据（本地复核） |
+| T30-5 | `Layout.VerticalCVis` | LayoutTests 同装置 | 五段：① [A 隐 B 可 C 隐 D 可] ⇒ B、D 连续槽位（间隙 1）、**A、C 停泊** `(−w,−h)`（`EXPECT_EQ(GetX(), -GetWidth())`）；② 隐藏 stretch 子不进权重（visibleStretch 只算可见）；③ 末位**可见** stretch 吃余数；④ 全隐藏 ⇒ Arrange 正常返回 + 全员 `(−w,−h)` + 无 panic；⑤ 全可见子树跑 T30-4 同组数据（本地复核） |
 | T30-6 | `Layout.HorizontalCVis` | LayoutTests 同装置 | T30-5 的水平同构 + **fillCrossAxis 与隐藏子交互**：隐藏子跨轴尺寸保持现值（不被刷成 cross） |
 | T30-7 | `CollapsiblePanel.CollapseVisibilityPin` | CollapsiblePanelTests（无窗口瞬时路径，既有 4 用例形态；**新增 include** PaintContext/RecordingBackend/Label） | ① 收起 ⇒ `GetContent()->IsVisible()` false + **Paint 全树零内容 DrawText**（label 进 GetContent()）；② `HitTest` 不命中（**既有断言 TestDownCollapse 已覆盖**——本用例不重复注册，引用其锚）；③ SetExpanded(true) ⇒ 内容恢复绘制；④ 双 Toggle 幂等（两轮收起⇄展开后状态与首轮一致）；⑤ **不改码声明**：本用例若红 = 现状回归，非新功能缺陷 |
 
@@ -239,4 +240,5 @@ enum class TextAlignment : std::uint8_t{
 
 ## 9. 修订记录
 
+- **v1.1**（2026-10-07）**评审吸收（PASS → Implementation）**。**评审总判**：「比较明确的 PASS，非 Conditional」——14 项分表全 ✅（remaining 负值/全隐藏 ×(−1)/stretch 余数/停泊顺序/H·V 兼容性[有证明 + 专测]/Button 对齐/TextAlignment{} 陷阱/caretColor/O1 围栏/CollapsiblePanel 回归/测试装置/CMake 影响面全过）；**评审亮点认可**：C30-5「不是单纯依赖测试而是有结构等价依据」·「外部报告 → 查版本 → 修或不修」的纪律 · T30-7「红了是现状回归不是新功能缺陷」的语义 · 影响面字段族口径诚实。**两处纯文档修正（当场修毕）**：① D30-C′ 补 **HorizontalLayout 明确 X/Y 映射**（axis=宽/cross=高/cursor 作用 X/padding 作用 Y——照做无需再推导）；② T30-5 「A/D… 停泊」笔误 → **A、C 停泊**。**评审明示「不要再改设计了」⇒ 直接进 Batch 1**（批一 = ①②+T30-1/2/3 → 批二 = ③④+T30-4..7+收口）。
 - **v1.0**（2026-10-07）初稿。**输入**：初设 v1.0（评审 **PASS → Detailed Design，无 blocker**）+ 评审 3 个非 blocker 确认点 + 详设展开清单 + 补充勘察（remaining 既有钳制 = `(std::max)(0,…)` F4 冻结点 `VerticalLayout.cpp:38-39`；`OnFocusGained` 无窗口安全 `:212-214`；`HitTest` 公开 `Widget.h:258` 且命中断言已存在于 `TestDownCollapse`）。**D30-G/H/I 逐题钉死**：**G** remaining 负值沿用既有 F4 钳制不创造新规则 + **详设期新识别算术边界 = `visibleCount == 0` 时 `spacing×(−1)` 反向增大** ⇒ 乘法守卫 `gapCount = max(0, visibleCount−1)`（C30-6 算术化）；**H** 末位可见 stretch 伪代码（比较对象 = visibleStretchCount，旧名禁现）；**I** 停泊三步机械顺序（先取尺寸→停泊→continue）。**展开清单全落实**：两遍算法全文（V/H 同构）· CalculateTextPosition 精确落码 · TextAlignment.h 全文 + include 纪律 · 接线五点表格化 · T30-1..7 精确断言与装置（含 T30-7 引用既有命中锚不重复注册）。△1–△8 · C30-1..7 · 盯防 6 · 用例 7 条（349→**356**）· 两批 · 94→95 / API +1 类型 +4 字段 / CMake 0 / 风险 低。
