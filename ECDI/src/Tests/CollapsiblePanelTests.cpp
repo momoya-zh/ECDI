@@ -1,8 +1,14 @@
 ﻿#include "RunAllTests.h"
 #include "TestFramework.h"
 #include "ECDI/Widget/CollapsiblePanel.h"
+#include "ECDI/Widget/Label.h"
+#include "ECDI/Render/PaintContext.h"
+#include "ECDI/Render/RenderCommand.h"
+#include "Render/RecordingBackend.h"
 
 #include <memory>
+#include <string>
+#include <vector>
 
 using namespace ECDI;
 
@@ -279,8 +285,72 @@ void TestDefaultCollapsedPresentation()
 
 } // anonymous namespace
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 30 批二：T30-7 —— CollapsiblePanel 收起可见性**回归钉住**（C30 现状锚）
+// ══════════════════════════════════════════════════════════════════════
+// ★ 本用例**不改码**——框架侧 SetContentVisible 自 81037ed（2026-09-04）即四路径同步
+//   SetVisible（详设 K4 勘误）。若本用例红 = **现状回归**，非新功能缺陷。
+// ★ 命中不命中断言已由 TestDownCollapse 覆盖（HitTest 入口门控）——此处不重复注册。
+
+namespace{
+
+/// @brief 绘制探针：收集 Paint 产生的 DrawText 文本（RecordingBackend 直用）
+std::vector<std::string> PaintTexts(Widget& widget){
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	widget.Paint(ctx, 0, 0);
+	std::vector<std::string> out;
+	for (const auto& cmd : commands){
+		if (const auto* t = std::get_if<DrawTextCommand>(&cmd)){
+			out.push_back(t->text);
+		}
+	}
+	return out;
+}
+
+} // anonymous namespace
+
+void Test30CollapseVisibilityPin(){
+	CollapsiblePanel panel;
+	panel.SetPosition(100, 200);
+	panel.SetSize(300, 400);
+
+	// 内容 = 一个带文本、有尺寸的 Label（经 GetContent() 注入——面板契约）
+	auto label = std::make_unique<Label>(std::string("hidden content"));
+	Label* labelPtr = label.get();
+	labelPtr->SetSize(120, 20);   // ★ 必须有尺寸：0×0 的 Widget 会被 Paint 的可见性门控跳过
+	panel.GetContent()->AddChild(std::move(label));
+	panel.SetExpanded(false);   // 无窗口 ⇒ 瞬时折叠路径（SetContentVisible(false)）
+
+	// ① 收起 ⇒ 内容 invisible + **内容子树 Paint 零文本**（Widget::Paint 入口门控——整棵子树跳过）
+	//   ★ 直接 Paint 内容子树而非整面板：收起态面板轴向为 0 ⇒ 整面板本就被零面积门控跳过，
+	//   直接钉「内容子树因 SetVisible 被跳过」这一语义（面板背景 DrawRect 不影响 DrawText 断言）
+	EXPECT_FALSE(panel.GetContent()->IsVisible());
+	EXPECT_TRUE(PaintTexts(*panel.GetContent()).empty());
+	EXPECT_TRUE(PaintTexts(panel).empty());
+
+	// ② 展开 ⇒ 恢复（内容可见 + 文本出现）
+	panel.SetExpanded(true);
+	EXPECT_TRUE(panel.GetContent()->IsVisible());
+	const std::vector<std::string> expanded = PaintTexts(*panel.GetContent());
+	EXPECT_EQ(expanded.size(), static_cast<std::size_t>(1));
+	if (expanded.size() == 1) { EXPECT_EQ(expanded[0], std::string("hidden content")); }
+
+	// ③ 双 Toggle 幂等：两轮收起⇄展开后状态与首轮一致（无累积效应）
+	panel.Toggle();   // 收起
+	panel.Toggle();   // 展开
+	panel.Toggle();   // 再收起
+	EXPECT_FALSE(panel.GetContent()->IsVisible());
+	EXPECT_TRUE(PaintTexts(*panel.GetContent()).empty());
+	panel.Toggle();   // 再展开
+	EXPECT_TRUE(panel.GetContent()->IsVisible());
+	EXPECT_EQ(PaintTexts(*panel.GetContent()).size(), static_cast<std::size_t>(1));
+}
+
 void ECDI::Test::RegisterCollapsiblePanelTests()
 {
+    GetTestRegistry().Add("CollapsiblePanel.CollapseVisibilityPin", &Test30CollapseVisibilityPin);   // T30-7（Phase 30 批二）
     GetTestRegistry().Add("CollapsiblePanel.DefaultCollapsed",     &TestDefaultCollapsed);
     GetTestRegistry().Add("CollapsiblePanel.DownCollapse",          &TestDownCollapse);
     GetTestRegistry().Add("CollapsiblePanel.UpCollapse",            &TestUpCollapse);

@@ -1156,10 +1156,204 @@ void TestListLayoutNonUniformChildSizes()
 
 } // anonymous namespace
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 30 批二：T30-4/5/6 —— H/V 布局补 C-VIS（D30-C′/G/H/I 的行为锚）
+// ══════════════════════════════════════════════════════════════════════
+
+namespace{
+
+/// @brief 建固定尺寸子并返回裸指针（所有权进 parent）
+Widget* AddFixed(Widget& parent, int w, int h){
+	auto owned = std::make_unique<Widget>();
+	owned->SetSize(w, h);
+	Widget* raw = owned.get();
+	parent.AddChild(std::move(owned));
+	return raw;
+}
+
+/// @brief 建带 stretch 权重的子并返回裸指针
+Widget* AddStretch(Widget& parent, int w, int h, int stretch){
+	auto owned = std::make_unique<Widget>();
+	owned->SetSize(w, h);
+	owned->SetStretch(stretch);
+	Widget* raw = owned.get();
+	parent.AddChild(std::move(owned));
+	return raw;
+}
+
+} // anonymous namespace
+
+// ── T30-4：**全可见逐位不变**专测（C30-5——期望值手算**旧公式**，不只靠存量测试）──────
+void Test30HVAllVisibleBitIdentity(){
+	// ── Vertical：padding 8 + spacing 10 + 1 固定(30 高) + stretch 1 + stretch 2，parent 高 200 ──
+	// 旧公式手算：fixedTotal=30；remaining = 200−16−30 − 10×2 = 134；
+	//   s1 = 134×1/3 = 44（截断）；s2 末位吃余数 = 134−44 = 90；位置 y = 8 / 48 / 102。
+	{
+		Panel panel;
+		panel.SetSize(300, 200);
+		panel.SetLayout(std::make_unique<VerticalLayout>(10, false, 8));
+
+		Widget* a = AddFixed(panel, 100, 30);
+		Widget* b = AddStretch(panel, 100, 50, 1);
+		Widget* c = AddStretch(panel, 100, 50, 2);
+		panel.Arrange();
+
+		EXPECT_EQ(a->GetY(), 8);
+		EXPECT_EQ(a->GetHeight(), 30);
+		EXPECT_EQ(b->GetY(), 8 + 30 + 10);           // 48
+		EXPECT_EQ(b->GetHeight(), 44);               // 134×1/3 截断
+		EXPECT_EQ(c->GetY(), 48 + 44 + 10);          // 102
+		EXPECT_EQ(c->GetHeight(), 90);               // 末位吃余数 134−44
+		// 幂等：再 Arrange 一次结果不变
+		panel.Arrange();
+		EXPECT_EQ(b->GetHeight(), 44);
+		EXPECT_EQ(c->GetHeight(), 90);
+	}
+
+	// ── Horizontal：同构数据（axis=宽）──
+	{
+		Panel panel;
+		panel.SetSize(200, 300);
+		panel.SetLayout(std::make_unique<HorizontalLayout>(10, false, 8));
+
+		Widget* a = AddFixed(panel, 30, 100);
+		Widget* b = AddStretch(panel, 50, 100, 1);
+		Widget* c = AddStretch(panel, 50, 100, 2);
+		panel.Arrange();
+
+		EXPECT_EQ(a->GetX(), 8);
+		EXPECT_EQ(a->GetWidth(), 30);
+		EXPECT_EQ(b->GetX(), 8 + 30 + 10);           // 48
+		EXPECT_EQ(b->GetWidth(), 44);
+		EXPECT_EQ(c->GetX(), 48 + 44 + 10);          // 102
+		EXPECT_EQ(c->GetWidth(), 90);
+		panel.Arrange();
+		EXPECT_EQ(c->GetWidth(), 90);
+	}
+
+	// ── 纯固定 + 无 spacing/padding（间隙 0 路径）──
+	{
+		Panel panel;
+		panel.SetSize(100, 100);
+		panel.SetLayout(std::make_unique<VerticalLayout>(0, false, 0));
+		Widget* a = AddFixed(panel, 40, 40);
+		Widget* b = AddFixed(panel, 40, 40);
+		panel.Arrange();
+		EXPECT_EQ(a->GetY(), 0);
+		EXPECT_EQ(b->GetY(), 40);
+	}
+}
+
+// ── T30-5：Vertical C-VIS（隐藏停泊 / 连续槽位 / 间隙只算可见 / 末位可见 stretch / 全隐藏不 panic）──
+void Test30VerticalCVis(){
+	// ① [A 隐 B 可 C 隐 D 可]：B、D 连续槽位（间隙 1）、A、C 停泊 (−w,−h)
+	{
+		Panel panel;
+		panel.SetSize(200, 100);
+		panel.SetLayout(std::make_unique<VerticalLayout>(10, false, 0));
+
+		Widget* a = AddFixed(panel, 50, 20);
+		Widget* b = AddFixed(panel, 50, 20);
+		Widget* c = AddFixed(panel, 50, 20);
+		Widget* d = AddFixed(panel, 50, 20);
+		a->SetVisible(false);
+		c->SetVisible(false);
+		panel.Arrange();
+
+		// 停泊（C-VIS-4：自身 bbox 负区——先取当前尺寸再 SetPosition）
+		EXPECT_EQ(a->GetX(), -a->GetWidth());
+		EXPECT_EQ(a->GetY(), -a->GetHeight());
+		EXPECT_EQ(c->GetX(), -c->GetWidth());
+		EXPECT_EQ(c->GetY(), -c->GetHeight());
+		// 可见连续：B at 0，D at 0+20+10（间隙只落可见对——1 个而非 3 个）
+		EXPECT_EQ(b->GetY(), 0);
+		EXPECT_EQ(d->GetY(), 30);
+		EXPECT_EQ(b->GetX(), 0);
+		EXPECT_EQ(d->GetX(), 0);
+	}
+
+	// ② 隐藏 stretch 子不进权重 + 末位**可见** stretch 吃余数
+	//    [A stretch=5 隐][B stretch=1 可][C stretch=2 可] parent 高 100：
+	//    remaining = 100；s1 = 100×1/3 = 33；s2 末位 = 100−33 = 67（若误用含 A 的权重：
+	//    s1 = 100×1/8 = 12——断言可辨）
+	{
+		Panel panel;
+		panel.SetSize(100, 100);
+		panel.SetLayout(std::make_unique<VerticalLayout>(0, false, 0));
+
+		Widget* a = AddStretch(panel, 10, 10, 5);
+		Widget* b = AddStretch(panel, 10, 10, 1);
+		Widget* c = AddStretch(panel, 10, 10, 2);
+		a->SetVisible(false);
+		panel.Arrange();
+
+		EXPECT_EQ(a->GetX(), -a->GetWidth());        // 隐藏 stretch 也停泊
+		EXPECT_EQ(b->GetHeight(), 33);               // 只按可见权重分配
+		EXPECT_EQ(c->GetHeight(), 67);               // 末位**可见** stretch 吃余数
+	}
+
+	// ③ 全隐藏 ⇒ 不 panic、全员停泊、无可见定位
+	{
+		Panel panel;
+		panel.SetSize(100, 100);
+		panel.SetLayout(std::make_unique<VerticalLayout>(10, false, 0));
+		Widget* a = AddFixed(panel, 30, 30);
+		Widget* b = AddFixed(panel, 30, 30);
+		a->SetVisible(false);
+		b->SetVisible(false);
+		panel.Arrange();                             // ★ 跑完即守卫成立（D30-G 乘法守卫）
+		EXPECT_EQ(a->GetY(), -a->GetHeight());
+		EXPECT_EQ(b->GetY(), -b->GetHeight());
+	}
+}
+
+// ── T30-6：Horizontal C-VIS 同构 + fillCrossAxis 与隐藏子交互 ──────────────────
+void Test30HorizontalCVis(){
+	// ① 对称断言（axis=宽）：[A 隐 B 可 C 可] 间隙只落可见对
+	{
+		Panel panel;
+		panel.SetSize(200, 100);
+		panel.SetLayout(std::make_unique<HorizontalLayout>(10, false, 0));
+
+		Widget* a = AddFixed(panel, 40, 20);
+		Widget* b = AddFixed(panel, 40, 20);
+		Widget* c = AddFixed(panel, 40, 20);
+		a->SetVisible(false);
+		panel.Arrange();
+
+		EXPECT_EQ(a->GetX(), -a->GetWidth());
+		EXPECT_EQ(a->GetY(), -a->GetHeight());
+		EXPECT_EQ(b->GetX(), 0);
+		EXPECT_EQ(c->GetX(), 50);                    // 0+40+10
+		EXPECT_EQ(b->GetY(), 0);
+		EXPECT_EQ(c->GetY(), 0);
+	}
+
+	// ② ★ fillCrossAxis 与隐藏子交互：隐藏子**不**被刷成 cross 高（D30-I：不 SetSize），
+	//    可见子正常填充
+	{
+		Panel panel;
+		panel.SetSize(200, 100);
+		panel.SetLayout(std::make_unique<HorizontalLayout>(0, true, 0));
+
+		Widget* a = AddFixed(panel, 40, 25);         // 隐藏：跨轴高度必须保持 25
+		Widget* b = AddFixed(panel, 40, 25);         // 可见：填充为 100
+		a->SetVisible(false);
+		panel.Arrange();
+
+		EXPECT_EQ(a->GetHeight(), 25);               // ★ 不被 fill 刷掉
+		EXPECT_EQ(b->GetHeight(), 100);
+		EXPECT_EQ(b->GetX(), 0);                     // A 隐藏 ⇒ B 从起点连续排布
+	}
+}
+
 void ECDI::Test::RegisterLayoutTests()
 {
     GetTestRegistry().Add("Layout.HorizontalLayout", &TestHorizontalLayout);
     GetTestRegistry().Add("Layout.VerticalLayout", &TestVerticalLayout);
+    GetTestRegistry().Add("Layout.HVAllVisibleBitIdentity", &Test30HVAllVisibleBitIdentity);   // T30-4（Phase 30 批二）
+    GetTestRegistry().Add("Layout.VerticalCVis",   &Test30VerticalCVis);                       // T30-5（Phase 30 批二）
+    GetTestRegistry().Add("Layout.HorizontalCVis", &Test30HorizontalCVis);                     // T30-6（Phase 30 批二）
     GetTestRegistry().Add("Layout.StretchBasic", &TestStretchBasic);
     GetTestRegistry().Add("Layout.StretchRemainder", &TestStretchRemainder);
     GetTestRegistry().Add("Layout.StretchNegative", &TestStretchNegative);
