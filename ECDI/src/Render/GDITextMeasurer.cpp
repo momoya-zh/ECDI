@@ -171,9 +171,15 @@ TextFit GDITextMeasurer::FitText(const Font& font, const std::string& text,
 		return TextFit{ 0, 0.0f };
 	}
 
-	// ★ 物理像素口径的宽度上限（DIP → px），与 MeasureText 的 toDip 同公式反向。
+	// ★ 物理像素口径的宽度上限（DIP → px）。★ **必须截断（floor）而非 ceil**（批三 E8 勘误）：
+	//   ceil 会把像素上限顶到 DIP 限宽之上（limit=26.25 DIP ⇒ ceil=27px ⇒ 放行 27px 前缀，
+	//   折回 DIP = 27 > 26.25 = **违反「width 恒不超 maxWidth」契约**）；截断后
+	//   `px ≤ floor(limit·dpi/96) ⟺ px·96/dpi ≤ limit`（px 为整数）⇒ GDI 接受集与
+	//   DIP 口径在**任意 DPI 精确相等**，且宁少一码点不超宽（与代理对回退同保守方向）。
+	//   ★ 该缺陷由 T29-FIT-2 的 DIP oracle 在缩放 100%（dpi=96）下暴露——违规区是否被
+	//   采样踩中取决于 DPI，故此前 125% 缩放时未触发（测试无错，DPI 变化揭了它）。
 	const float limit = (std::max)(0.0f, maxWidth);
-	const LONG maxPx = static_cast<LONG>(std::ceil(limit * static_cast<float>(dpi) / 96.0));
+	const LONG maxPx = static_cast<LONG>(limit * static_cast<float>(dpi) / 96.0);
 
 	HDC measureDC = GetDC(nullptr);
 	if (!measureDC)

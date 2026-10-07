@@ -885,6 +885,176 @@ void Test29WrapDefaultOffZeroFit(){
 	EXPECT_EQ(WrapProbe::DrawnTexts(narrowCommands).size(), static_cast<std::size_t>(1));
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 29 批三：T29-4 / T29-5 / T29-WRAP-2 / T29-6 —— A1–A4 全判 + 气泡端到端
+// ══════════════════════════════════════════════════════════════════════
+
+// ── T29-4：`wrap == false` 命令流**逐字段**等于 Phase 28 基线（A2「旧路径保留」的终判）──
+// ★ 期望命令**手工独立计算**（Phase 28 公式），非调用被测代码——「原样」才有独立参照物。
+void Test29WrapDefaultOff(){
+	WrapProbe probe("ECDI_T29_4", 200, 200);
+	probe.SetLabelSize(40, 200);
+	const std::string text = "aaaa bbbb cccc dddd eeee ffff";   // 29 码点
+	probe.label->SetText(text);
+	// ★ 不调 SetWordWrap（默认 false）
+
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+
+	// ① 恰三条命令 = [PushClip(self), DrawText, PopClip]——Widget::Paint 的固有包裹
+	//   （Widget.cpp:267/282），**无任何 wrap 侧附加命令**（Label 透明背景 ⇒ 零 DrawRect）
+	EXPECT_EQ(commands.size(), static_cast<std::size_t>(3));
+	EXPECT_TRUE(std::holds_alternative<PushClipCommand>(commands[0]));
+	EXPECT_TRUE(std::holds_alternative<DrawTextCommand>(commands[1]));
+	EXPECT_TRUE(std::holds_alternative<PopClipCommand>(commands[2]));
+	const auto& cmd = std::get<DrawTextCommand>(commands[1]);
+
+	// ② 逐字段比对 Phase 28 基线（手工算——左对齐 + 垂直居中 (H−行高)/2，P7 定案）
+	EXPECT_EQ(cmd.text, text);                                     // 整串逐字节
+	EXPECT_NEAR(cmd.pos.x, 0.0f, kEpsilon);                        // 左对齐
+	EXPECT_NEAR(cmd.pos.y, (200.0f - 16.0f) / 2.0f, kEpsilon);     // 垂直居中
+	EXPECT_TRUE(cmd.color == probe.label->GetTextColor());         // 主题前景色
+	const Font themeFont = GetDefaultTheme().GetTextStyle().font.value;
+	EXPECT_NEAR(cmd.font.size, themeFont.size, kEpsilon);          // 主题字体（未变）
+	EXPECT_EQ(cmd.font.family, themeFont.family);
+
+	// ③ 全程零 FitText（A2 结构判据——连 Paint 路径都零，与批二计数用例互补）
+	EXPECT_EQ(probe.measurer->FitCalls(), static_cast<std::size_t>(0));
+}
+
+// ── T29-5：退化边界（A3 收尾：width=0 / 超长无空格词 / 宽 < 一码点 / 空串 / 单字符）──
+void Test29WrapDegenerate(){
+	WrapProbe probe("ECDI_T29_5", 200, 200);
+	probe.label->SetWordWrap(true);
+
+	// ① width = 0 ⇒ **退化单行**（D29-B：wrap 不自造宽度约束——preferred 无宽来源 ⇒ 走原路径）
+	probe.SetLabelSize(0, 200);
+	probe.label->SetText(std::string("aaaa bbbb"));
+	const Size zero = probe.label->GetPreferredSize();
+	EXPECT_NEAR(zero.width, static_cast<float>(9 * 8), kEpsilon);   // 全串测量宽（Phase 28 原语义）
+	EXPECT_NEAR(zero.height, 16.0f, kEpsilon);                       // 1 行
+	EXPECT_EQ(probe.measurer->FitCalls(), static_cast<std::size_t>(0));   // 布局引擎零接触
+	CommandBuffer zeroCommands;
+	probe.PaintInto(zeroCommands);
+	EXPECT_EQ(WrapProbe::DrawnTexts(zeroCommands).size(), static_cast<std::size_t>(1));   // 单条
+
+	// ② 超长无空格词 ⇒ **按字硬断**（20 字母 / 宽 40 ⇒ 4 行 × 5 字母——恰好贴边 5×8=40）
+	probe.SetLabelSize(40, 200);
+	probe.label->SetText(std::string("aaaaaaaaaaaaaaaaaaaa"));   // 20 'a'
+	const Size longWord = probe.label->GetPreferredSize();
+	EXPECT_EQ(static_cast<int>(longWord.height), 4 * 16);
+	CommandBuffer longCommands;
+	probe.PaintInto(longCommands);
+	const std::vector<std::string> lines = WrapProbe::DrawnTexts(longCommands);
+	EXPECT_EQ(lines.size(), static_cast<std::size_t>(4));
+	for (const std::string& l : lines){
+		EXPECT_EQ(l, std::string("aaaaa"));
+	}
+
+	// ③ 宽 < 一个码点 ⇒ 按字硬断**一字**、**绝不挂死**（E7 推进守卫的直接锚——
+	//   FitText 返 fitCp=0 时若不强制推进，Paint 会死循环；本断言「能跑完」即守卫成立）
+	probe.SetLabelSize(4, 200);
+	probe.label->SetText(std::string("AB"));
+	const Size tiny = probe.label->GetPreferredSize();
+	EXPECT_EQ(static_cast<int>(tiny.height), 2 * 16);   // A / B 各一行
+	CommandBuffer tinyCommands;
+	probe.PaintInto(tinyCommands);
+	const std::vector<std::string> tinyLines = WrapProbe::DrawnTexts(tinyCommands);
+	EXPECT_EQ(tinyLines.size(), static_cast<std::size_t>(2));
+	EXPECT_EQ(tinyLines[0], std::string("A"));
+	EXPECT_EQ(tinyLines[1], std::string("B"));
+
+	// ④ 空串 ⇒ 1 空行（非 0 行——否则 preferred 高度归零）；单字符 ⇒ 1 行
+	probe.SetLabelSize(40, 200);
+	probe.label->SetText(std::string(""));
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 16);
+	probe.label->SetText(std::string("A"));
+	EXPECT_EQ(static_cast<int>(probe.label->GetPreferredSize().height), 16);
+	CommandBuffer singleCommands;
+	probe.PaintInto(singleCommands);
+	const std::vector<std::string> singleLines = WrapProbe::DrawnTexts(singleCommands);
+	EXPECT_EQ(singleLines.size(), static_cast<std::size_t>(1));
+	EXPECT_EQ(singleLines[0], std::string("A"));
+}
+
+// ── T29-WRAP-2：禁则微超 = **单标点/整链悬挂、不吞普通字符**（C29-3 上界的直测）────
+void Test29WrapKinsukuOverflow(){
+	WrapProbe probe("ECDI_T29_WRAP2", 200, 200);
+	probe.SetLabelSize(24, 200);   // 宽 24 ⇒ 一行至多 3 码点
+	probe.label->SetWordWrap(true);
+
+	// ① 单标点悬挂：abc）de ⇒ ["abc）", "de"]（行宽 32 = 24 + 8 = 微超一个标点 advance）
+	probe.label->SetText(std::string("abc\xEF\xBC\x89" "de"));   // abc）de
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+	std::vector<std::string> texts = WrapProbe::DrawnTexts(commands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(2));
+	EXPECT_EQ(texts[0], std::string("abc\xEF\xBC\x89"));   // ）悬挂进前行
+	EXPECT_EQ(texts[1], std::string("de"));                // ★ 普通字符 **未被吸收**
+
+	// ② 连续禁则链：abc））de ⇒ ["abc））", "de"]（微超 = 链 advance 总和 = 2 标点）
+	probe.label->SetText(std::string("abc\xEF\xBC\x89\xEF\xBC\x89" "de"));
+	CommandBuffer chainCommands;
+	probe.PaintInto(chainCommands);
+	texts = WrapProbe::DrawnTexts(chainCommands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(2));
+	EXPECT_EQ(texts[0], std::string("abc\xEF\xBC\x89\xEF\xBC\x89"));   // 整条链悬挂（C29-3）
+	EXPECT_EQ(texts[1], std::string("de"));               // ★ 链外普通字符不得吸收
+
+	// ③ 整段全是闭标点 ⇒ 仍有界终止（链到段末即停——一行全挂，微超 16）
+	probe.label->SetText(std::string("\xEF\xBC\x89\xEF\xBC\x89\xEF\xBC\x89"));   // ）））
+	probe.SetLabelSize(8, 200);
+	CommandBuffer allCommands;
+	probe.PaintInto(allCommands);
+	texts = WrapProbe::DrawnTexts(allCommands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(1));
+	EXPECT_EQ(texts[0], std::string("\xEF\xBC\x89\xEF\xBC\x89\xEF\xBC\x89"));
+}
+
+// ── T29-6：气泡端到端（需求 §1.1 消费者场景——A4 线性判据 + 高度自适应）──────────
+void Test29BubbleEndToEnd(){
+	WrapProbe probe("ECDI_T29_6", 300, 400);
+	probe.SetLabelSize(200, 50);   // 气泡内容宽 200（= 25 码点/行）
+	const std::string message =
+		"Phase 29 bubble message: 你好，这是一条混合中英文的长消息 with numbers 12345 "
+		"and punctuation！The quick brown fox jumps over the lazy dog，而中文部分逐字断行。";
+	probe.label->SetText(message);
+	probe.label->SetWordWrap(true);
+
+	// ① 高度自适应：AutoSize ⇒ {气泡宽, 行数 × 行高}（D29-B；长文本必折行 N > 1）
+	EXPECT_TRUE(probe.label->AutoSize());
+	EXPECT_EQ(probe.label->GetWidth(), 200);
+	const int height = probe.label->GetHeight();
+	EXPECT_TRUE(height > 16);
+	EXPECT_EQ(height % 16, 0);                         // 行高整倍数
+	const int lineCount = height / 16;
+
+	// ② ★ **A4 线性判据**：FitText 调用数 == 行数（每行恰一次 fit——扫描状态不重扫，盯防⑧）
+	EXPECT_EQ(probe.measurer->FitCalls(), static_cast<std::size_t>(lineCount));
+
+	// ③ 每行都在宽度界内（200/8 = 25 + 禁则链松弛 2）
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+	const std::vector<std::string> texts = WrapProbe::DrawnTexts(commands);
+	EXPECT_EQ(texts.size(), static_cast<std::size_t>(lineCount));
+	for (const std::string& line : texts){
+		std::size_t cps = 0;
+		for (std::size_t i = 0; i < line.size(); ++i){
+			if ((static_cast<unsigned char>(line[i]) & 0xC0) != 0x80) { ++cps; }
+		}
+		EXPECT_TRUE(cps <= 27);
+	}
+
+	// ④ 宽度动态（端到端形态）：变窄 ⇒ 更多行；恢复原宽 ⇒ 行数复原（指纹失效 + 确定性）
+	probe.SetLabelSize(100, 50);
+	EXPECT_TRUE(probe.label->AutoSize());
+	const int narrowHeight = probe.label->GetHeight();
+	EXPECT_TRUE(narrowHeight > height);                // 更窄 ⇒ 更多行
+	probe.SetLabelSize(200, 50);
+	EXPECT_TRUE(probe.label->AutoSize());
+	EXPECT_EQ(probe.label->GetHeight(), height);       // 恢复原行数（同宽同布局）
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterWidgetTests()
@@ -915,4 +1085,8 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.WrapEmptyLines",          &Test29WrapEmptyLines);           // T29-WRAP-1
     GetTestRegistry().Add("TextWidget.WrapSameWidthNoRebuild",  &Test29WrapSameWidthNoRebuild);   // T29-WRAP-3
     GetTestRegistry().Add("TextWidget.WrapDefaultOffZeroFit",   &Test29WrapDefaultOffZeroFit);    // A2 结构判据（批二）
+    GetTestRegistry().Add("TextWidget.WrapDefaultOff",          &Test29WrapDefaultOff);           // T29-4（批三：命令流逐字段基线）
+    GetTestRegistry().Add("TextWidget.WrapDegenerate",          &Test29WrapDegenerate);           // T29-5（批三：退化边界）
+    GetTestRegistry().Add("TextWidget.WrapKinsukuOverflow",     &Test29WrapKinsukuOverflow);      // T29-WRAP-2（批三：微超不吞普通字符）
+    GetTestRegistry().Add("TextWidget.BubbleEndToEnd",          &Test29BubbleEndToEnd);           // T29-6（批三：气泡端到端 + A4）
 }
