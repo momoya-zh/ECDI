@@ -1,7 +1,7 @@
 ﻿# Phase 30 · 文本 / 交互快修小轮 —— 需求确认（v1.0）
 
 > 来源：`roadmap-deferred.md` **#51**（2026-10-05 登记，2026-10-06 用户拍板「排 Phase 29 之后」）——harness 高保真模型评估的 4 项快修打包 + Phase 29 收口后的顺位兑现。
-> 状态：**v1.0**（2026-10-07，待评审）
+> 状态：**v1.1**（2026-10-07）——**✅ 评审通过（PASS → Preliminary Design）**（外部评审 2026-10-07：需求目标/范围控制/三处衔接全 ✅；**评审明示「不建议继续给需求文档加东西」**⇒ 本版只做轻量吸收：D2 定案 + 初设必钉清单移交； absorption 明细见 §7 v1.1）
 > 定位：**快修小轮**（三处小改 + 一处验证钉住）——非能力型 Phase；单文档走需求 → 初设 → 详设仍按五阶段纪律，但每阶段应短。
 
 ---
@@ -53,7 +53,7 @@ harness 高保真模型仿制评估（2026-10-05，9 项能力缺口 + 2 bug）�
 ## 4. 待决点（倾向已给，待评审）
 
 - **D1 caretColor 形态**：`TextBoxStyle` +`StyleField<Color>`（`caretWidth` 同族——倾向明确：同族补齐，默认 Black 零行为变化；评审只需核对接线四点齐不齐）。
-- **D2 对齐枚举落位**：`TextAlignment` 独立小公共头 `ECDI/Core/TextAlignment.h`（纯值类型零依赖——公共头自包含纪律；**倾向**）vs 塞进 `ButtonStyle.h`（不加文件但 O1 复用时要搬家）。**倾向独立头**：公共头 **94 → 95**，如实记账。
+- **D2 对齐枚举落位**：`TextAlignment` 独立小公共头 `ECDI/Core/TextAlignment.h`（纯值类型零依赖——公共头自包含纪律）。**★ v1.1 定案 = 独立头**（评审确认：塞 `ButtonStyle.h` 会让未来 TextWidget multiline 产生 `TextWidget → ButtonStyle.h → TextAlignment` 的怪依赖方向；独立头则 `TextWidget` 与 `ButtonStyle` 并列依赖它）。公共头 **94 → 95**，如实记账。
 - **D3 H/V C-VIS 语义边界**：**照搬 ListLayout 四层契约**（倾向明确——防第二方言）。评审须裁的细节：① **全可见 ⇒ 结果逐位不变**（零回归红线——spacing 公式在 `visibleCount == count` 时退化为现式）；② **全部隐藏** ⇒ 无间隙无分配、全部停泊（不 panic）；③ **动画中隐藏**（H/V 无动画语义——不在范围）；④ 停泊位 = `(−w, −h)`（C-VIS-4 原文）。
 - **D4 CollapsiblePanel 处置**：**验证钉住不立项改码**（倾向明确——K4 勘误成立即应改 #51 台账，把「4 项快修」修正为「3 改 + 1 钉」；评审确认）。
 
@@ -82,4 +82,5 @@ harness 高保真模型仿制评估（2026-10-05，9 项能力缺口 + 2 bug）�
 
 ## 7. 修订记录
 
+- **v1.1**（2026-10-07）**评审吸收（PASS → Preliminary Design）**。**评审总判**：需求目标 ✅ / Scope 控制 ✅（「三处小改 + 一处验证钉住」定位准确——不机械地把 4 项都当 bug）· 与 Phase 25/29 衔接 ✅ · caretColor/Button 对齐/H-V C-VIS/CollapsiblePanel 四项处置全 ✅ · **④ 的「验证钉住不改码」判断被评审核准**（追溯 SetContentVisible 2026-09-04 既有 + 外部报告先查版本的流程被认可）。**评审明示「不建议继续给需求文档加东西」**⇒ 本版仅两处实体改动：**D2 定案 = 独立头 `Core/TextAlignment.h`**（依赖方向论证）+ 初设必钉 5 件事移交（① TextAlignment 独立头 ② Button Left/Right 的内容区公式——**初设必须先摊清 Button 现有 padding/borderWidth 语义**防三模式内容区不一致 ③ H/V 四层契约逐项映射 ListLayout ④ 全可见 H/V 专测（不只靠存量）⑤ 明示 Phase 30 只建枚举不实现 O1 multiline——防「枚举有了顺便接上」的范围膨胀）。**附加认可**：测试数不硬凑 +6（初设按语义需要 355→357 可接受）；A2 建议显式加全可见 H/V 专测（→ 初设 T30 落实）；`(-w,-h)` 停泊位不在 Phase 30 重新讨论。
 - **v1.0**（2026-10-07）初稿。**输入**：#51 登记（roadmap v1.87 / audit v1.53，2026-10-05）+ 用户拍板排期（2026-10-06）+ 四项带行号勘察（2026-10-07，K1–K6）。**★ 勘察修正 #51 登记项**：④ CollapsiblePanel **框架侧已具备**（`SetContentVisible` 自 81037ed / 2026-09-04 即全路径同步 `SetVisible`；子树经 Widget 入口门控整体隐藏）——harness bug2 针对其自研仿制模型而非 ECDI HEAD（同 viewport-cull 报告「先查版本」教训），处置 = 验证钉住 + 台账勘误，不改码。范围 = ① caretColor（同族补齐，默认 Black）· ② TextAlignment 枚举 + Button 消费（默认 Center；O1 复用面）· ③ H/V 补 C-VIS（照搬 ListLayout 四层契约；全可见逐位不变红线）· ④ 验证钉住。K1–K6 带行号 · D1–D4 倾向已给 · A1–A4 · 影响面 94→95 / API +1 类型 +4 字段 / 用例 349→~355 / CMake 0 / 风险 低。
