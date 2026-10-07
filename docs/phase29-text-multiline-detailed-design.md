@@ -1,7 +1,7 @@
-﻿# Phase 29 · 文本多行能力 —— 详细设计（v1.3）
+﻿# Phase 29 · 文本多行能力 —— 详细设计（v1.4 · ✅ 全链收口）
 
 > 来源：初设 `phase29-text-multiline-preliminary-design.md` **v1.1（评审 PASS → 详设）**——初设评审给的**详设必答 ①–⑦** 逐题钉死（本稿 §1）。
-> 状态：**v1.3**（2026-10-06）——**批一 + 批二已实施**（FitText 三链 + wrap 路径落地，五链 345/345 全绿；批二四条实施勘误见 §11.2）｜v1.2：**批一已实施**（三条勘误见 §10）｜v1.1：**✅ 评审通过（Conditional PASS → 两项文档级必修当场修毕 ⇒ PASS → Implementation）**（外部评审 2026-10-06：架构方向全部认可、15 项边界表全 ✅；**两项必修**=① D29-Ⅰ 状态变量歧义（scan/lineStart/lineEnd 三变量化）② 行宽来源统一（FT 禁 per-line MeasureText、GDI 回退后补测归 O5）；**强烈建议吸收**=③ GDI O4 明确为已知性能债务非 O(n) 契约 ④ TextLayout 指纹显式列键 ⑤ T29-2 措辞受 maxWidth 约束；吸收明细见 §9 v1.1）
+> 状态：**v1.4**（2026-10-07）——**✅ 全链收口**（批一/二/三全部落地，五链 349/349，A1–A5 全判；详设 v1.4 §12 收口）｜v1.3：批二实施（四条勘误见 §11.2）｜v1.2：批一实施（三条勘误见 §10）｜v1.1：**✅ 评审通过（Conditional PASS → 两项文档级必修当场修毕 ⇒ PASS → Implementation）**（外部评审 2026-10-06：架构方向全部认可、15 项边界表全 ✅；**两项必修**=① D29-Ⅰ 状态变量歧义（scan/lineStart/lineEnd 三变量化）② 行宽来源统一（FT 禁 per-line MeasureText、GDI 回退后补测归 O5）；**强烈建议吸收**=③ GDI O4 明确为已知性能债务非 O(n) 契约 ④ TextLayout 指纹显式列键 ⑤ T29-2 措辞受 maxWidth 约束；吸收明细见 §9 v1.1）
 > 定位：**实施规格**——断行状态机正式化、FitText 精确契约、共享 TextLayout 生命周期、逐文件 △、契约 C29、用例 T29、三批。
 
 ---
@@ -165,7 +165,7 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 |---|---|---|
 | 批一 | △1 FitText 默认体 + △2 GDI 覆写 + △3 FontEngine::FitText + △4 FT 转发 + T29-FIT-1/2 | ✅ **已完成**（五链 339/339；+T29-FIT-3/4——见 §10；三条实施勘误见 §10.2） |
 | 批二 | △5/△6 wrap 路径 + T29-1/2/3 + T29-WRAP-1/3 | ✅ **已完成**（五链 345/345；+A2 结构判据用例；四条实施勘误见 §11.2） |
-| 批三 | T29-4/5/6 + harness 气泡端到端（A5）+ 收口 | 五链全绿 + A1–A5 全判 + 五处台账 |
+| 批三 | T29-4/5/6 + harness 气泡端到端（A5）+ 收口 | ✅ **已完成**（五链 349/349；A1–A5 全判——§12.2；+T29-WRAP-2；E8 勘误见 §12.2） |
 
 ---
 
@@ -283,8 +283,64 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 
 ---
 
+## 12. 实施回填（批三 + 全链收口——2026-10-07）
+
+### 12.1 批次执行表（批三）
+
+| 项 | 内容 | 文件 | 实绩 |
+|---|---|---|---|
+| T29-4 | `wrap=false` 命令流**逐字段**基线：`[PushClip, DrawText, PopClip]` 三条、文本/位置/颜色/字体四字段 = 手工 Phase 28 基线（左对齐 + (H−行高)/2 垂直居中）、全程零 `FitText` | `WidgetTests.cpp` `Test29WrapDefaultOff` | ✅ **A2 终判**——「原样」有独立参照物（期望值手工算，非调用被测代码） |
+| T29-5 | 退化边界：width=0 ⇒ **退化单行**（布局引擎零接触）/ 超长无空格词**按字硬断**（20 字母 ⇒ 4×5 恰好贴边）/ **宽 < 一码点 ⇒ 按字断、绝不挂死**（E7 守卫锚）/ 空串 1 行 / 单字符 | `Test29WrapDegenerate` | ✅ A3 收尾（超长词/贴边/空串/单字符全补齐） |
+| T29-WRAP-2 | 禁则微超直测：单标点悬挂（`abc）`/`de`）· **连续链悬挂**（`abc））`/`de`——链外普通字符**不得吸收**）· 全禁则段有界终止 | `Test29WrapKinsukuOverflow` | ✅ C29-3 上界的直接证据 |
+| T29-6 | 气泡端到端：固定宽 200 + realistic 混排语料 ⇒ AutoSize 高度 = 行数×行高；★ **A4 线性判据 = `FitText` 调用数 == 行数**（每行恰一次 fit——盯防⑧的结构性证据）；宽度动态可逆 | `Test29BubbleEndToEnd` | ✅ 需求 §1.1 消费者场景的库内形态 |
+| **E8 修复** | `GDITextMeasurer::FitText` 像素上限 **ceil → 截断**（见 §12.2——批一潜伏缺陷被批三测试揭出） | `GDITextMeasurer.cpp` | ✅ 探针 13/13 档与 DIP oracle **任意 DPI 精确相等** |
+| A5 交付 | Release 静态库（MSVC cl.exe 14.51，HEAD）`cmake --install` 装入 harness 消费前缀 `third_party/ecdi` + **库外气泡探针** | `.workbuddy/spike/p29/bubble_e2e.cpp` | ✅ **E2E PASS（0 failures）**——见 §12.3 |
+
+- **五链验收**：MinGW / Clang / ClangCL Debug + MinGW Release + MSVC Release（cl.exe 14.51，**干净全量重建**）——**349/349 全绿**。
+
+### 12.2 实施勘误（批三 · 一条——**批一潜伏缺陷被揭出**）
+
+| # | 勘误 | 原状 | 修复 | 发现经过 |
+|---|---|---|---|---|
+| E8 | **GDI FitText 的 DIP→像素换算用了 `ceil`** | `maxPx = ceil(limit·dpi/96)`——**超出 DIP 限宽**：limit=26.25 DIP ⇒ 27px ⇒ GDI 放行 27px 前缀，折回 DIP = 27 > 26.25 ⇒ **违反「width 恒不超 maxWidth」契约**（C29-1） | **截断（floor）**：`px ≤ floor(limit·dpi/96) ⟺ px·96/dpi ≤ limit`（px 为整数）⇒ GDI 接受集与 DIP 口径在**任意 DPI 精确相等**，宁少一码点不超宽（与代理对回退同保守方向） | ★ **批三测试在缩放 100%（dpi=96）下首跑即失败**（T29-FIT-2 的 DIP oracle k=5 档：gdi=3 码点/27 vs oracle=2/18）——**用户指出主屏缩放已切到 100%**（此前 125% 时违规区未被 13 个采样点踩中 ⇒ 批一/批二假绿）。★ 探针实测定位 + 修复后 13/13 档一致。**教训：DPI 相关的舍入缺陷会随显示环境变化「迟到曝光」——跨 DPI 精确性要靠换算纪律（floor + 整数像素口径），不靠采样运气** |
+
+### 12.3 A5 读数（库外气泡探针——与 harness 消费方式**同构**）
+
+- **形态**：探针只链接**安装前缀**（`third_party/ecdi` 的 `ECDI.lib` + 公共头）、只用公共工厂 `CreateDefaultRenderServices()`——「外部消费者能否真的用起来」（需求 A5 / 评审 §19）的直接证据；harness 仓库本身**零改动**（其 gui 侧启用 wrap = 一行 `SetWordWrap(true)`，留给 harness 会话）。
+- **读数**（MSVC cl.exe 14.51 / MD Release，真实窗口 + 真实 GDI 后端 + 真实字体度量）：
+
+| 步骤 | 读数 |
+|---|---|
+| ① 默认关（现状） | preferred = **1463×14** 单行（长消息整串流出——正是 #52 挂账的痛点形态）；整串 1 条 DrawText |
+| ② 开 wrap + AutoSize | **6 行、高 84**（气泡长高 6 倍）；宽 = 气泡宽 260 |
+| ③ 逐行绘制 | 6 条 DrawText、y 步进**精确 = 行高 14**、每行宽 ≤ 气泡宽 + 禁则松弛 |
+| ④ 宽度动态 | 260px=6 行 → **160px=10 行** → 复原 260px ⇒ 行数复原 |
+| ⑤ 关回 wrap | 回到单行 14（开关可逆——消费者可灰度） |
+
+- **E2E PASS（0 failures）**。
+
+### 12.4 A1–A5 全判（收口判定表）
+
+| 项 | 判据（需求 §5） | 结果 |
+|---|---|---|
+| **A1** | 存量全绿（默认关 ⇒ 既有用例零回归） | ✅ **349/349 五链**（335 存量 + 14 新增全绿；存量用例零改动） |
+| **A2** | 像素等价 + **旧路径保留**（结构判据） | ✅ T29-4 命令流逐字段 = Phase 28 基线（三条命令形状 + 四字段）+ **零 FitText**（批二计数用例 + 批三终判双重锚）；命令流一致 + 后端确定性 ⇒ 像素等价 |
+| **A3** | wrap 正确性（拉丁按词 / CJK 逐字 / 混排 / 超长无空格词 / 恰好贴边 / 空串与单字符；**每行一条 DrawText**） | ✅ T29-1/2/5 + T29-WRAP-1/2 全覆盖；RecordingBackend 命令流逐行断言；禁 RenderCommand 语义扩张未违反 |
+| **A4** | 性能有界 + 宽度动态 | ✅ **`FitText` 调用数 == 行数**（T29-6 ②——每行恰一次 fit、扫描状态不重扫）；同宽零重建（T29-WRAP-3）；宽度 300→5 行/250→6/400→4 的直测形态 = T29-3 + T29-6 ④；布局零 substr（行 = 码点区间） |
+| **A5** | harness 气泡端到端（消费闭环） | ✅ §12.3 库外探针 E2E PASS + Release 库已交付前缀；harness gui 侧启用 = 一行改动（留 harness 会话） |
+
+### 12.5 收口核对（全链）
+
+- 公共头 **94 → 94**（`TextMeasurer.h`/`TextWidget.h`/`PaintContext.h` 扩员不加文件）；公共 API **+4**（详设原预算 +3，超 1 项 = E6 `PaintContext::GetTextMeasurer()`，如实记账）；**CMake 0**（GLOB 自动入库）；用例 **335 → 349**（+14：批一 4 + 批二 6 + 批三 4）。
+- **批次流水**：批一 `cdafbcf`（FitText 三链）→ 批二 `9be3e7a`（wrap 路径）→ 批三（本节 + 收口提交）。
+- **遗留（不阻塞收口）**：① harness gui 侧气泡启用 wrap = 一行 `SetWordWrap(true)`（harness 会话）；② **O1** 行内对齐（#51③ 消费 `Line.width`）/ **O2** TextBox 编辑器内 wrap（独立挂账）/ **O3** 禁则字面集扩充（按消费者反馈）/ **O4** GDI 每调用 UTF8ToWide（量级可接受）/ **O5** GDI 回退后补测（已在 emitLine 收敛为「仅回退时一次」）。
+- **环境教训（如实记档）**：① **DPI 舍入缺陷会随显示环境迟到曝光**（E8——用户切缩放 100% 揭出批一潜伏缺陷）；② 改公共头布局后**必须全量重建**（批二教训）；③ MSVC 生成器产物在 `Release/` 子目录——跑错路径 = 跑了陈旧二进制。
+
+---
+
 ## 9. 修订记录
 
+- **v1.4**（2026-10-07）**批三实施回填 + ✅ 全链收口**（五链 349/349，A1–A5 全判）。★ **一条实施勘误（E8——批一潜伏缺陷被揭出）**：GDI FitText 的 DIP→像素换算 `ceil` 超顶 DIP 限宽（limit=26.25 ⇒ 27px 放行 ⇒ 违反「width 恒不超 maxWidth」）；**修复 = 截断 floor**（`px ≤ floor(limit·dpi/96) ⟺ DIP ≤ limit`——任意 DPI 精确相等）；**发现经过 = 用户指出主屏缩放已切 100%**（此前 125% 时违规区未被采样踩中 ⇒ 假绿；测试无错，DPI 变化揭了它）。★ **批三用例**：T29-4（命令流逐字段 = 手工 Phase 28 基线）、T29-5（退化边界含 E7 守卫锚「宽 < 一码点不挂死」）、T29-WRAP-2（微超链悬挂、不吞普通字符）、T29-6（气泡端到端 + **A4 线性判据 = FitText 调用数 == 行数**）。★ **A5 交付**：Release 库装 harness 前缀 + **库外气泡探针 E2E PASS（0 failures）**（单行 1463×14 → wrap 6 行 → 动态可逆）。★ 用例 345 → **349**（+4）；API 终值 **+4**（超预算 1 = E6）；公共头 94→94；CMake 0。**遗留** = harness gui 一行启用（harness 会话）+ O1–O5。
 - **v1.3**（2026-10-06）**批二实施回填**（wrap 路径落地——五链 345/345 全绿）。★ **四条实施勘误**（§11.2）：**E4 禁则命名对调**（首版 ④ 调 `IsLineStartForbidden(cps[b-1])` ⇒「行尾禁开括号」被写成「行尾禁闭标点」；靠 T29-2 段落 C 断言发现并修正——**函数名按「禁则作用的位置」读**）· **E5 行首禁则回提上界 = `segEnd`**（取 `hardEnd` 会让硬边界永远赢、规则形同虚设；超宽 = 悬挂链 advance = D29-Ⅱ 微超）· **E6 `PaintContext::GetTextMeasurer()` 新增 ⇒ API 超预算**（wrap 绘制需要 `FitText` 可达的测量器；选「交出引用」而非「转发 FitText」——**公共 API 合计 +4，超详设 +3 一项，如实记账**）· **E7 空段/推进守卫**（`b == lineStart` ⇒ 强制一字、`nextScan <= scan` ⇒ 强制 +1——堵**行宽 < 一码点时的 Paint 死循环**）。★ 批二实测（§11.3）：拉丁 6 行按词 + 空格消费 · CJK 闭标点**悬挂进前行**（`你好）` / `世界`，微超 = 一个标点 advance）· 开括号不独占行尾 · `A\n\nB` = 3 行 2 命令（空行占高零命令）· 同宽 SetSize 零 `FitText` 调用 · **默认关零调用 + 单条 DrawText**（A2 判据前半）。★ **环境教训**：MSVC Release 出现确定性 segfault（虚调用打在失效 `this`——`mov (%rcx),%rax` + 栈上 `std::string` 临时），**根因 = 增量链接的陈旧 exe**（公共头加成员 ⇒ 与旧 `ECDI.lib` 布局不一致）；干净全量重建后全绿 ⇒ **改公共头布局后必须全量重建**。
 - **v1.2**（2026-10-06）**批一实施回填**（FitText 三链落地——五链 339/339 全绿）。★ **三条实施勘误**（§10.2）：**E1 `FitText` 非 const**（原稿 `const` 编译不通过：默认体须调非 const 的 `MeasureText`，`const` 版只能 `const_cast` ⇒ 对写缓存的 `GDITextMeasurer` 是 UB；改非 const 零调用代价）· **E2 `MeasureText` 循环体提取为 `Impl::AdvanceOf`**（两方法共用是**逐位一致**的前提——T29-FIT-3 锚定 192.0000==192.0000）· **E3 码点总数取法**（`CodepointIndexToByteOffset(…,SIZE_MAX)` 返回**字节数**而非码点数——超界钳制语义；改用既有 `ByteOffsetToCodepointIndex(text, text.size())`，**零新增 API**）。★ 批一实测（§10.3）：FT fitCp 单调 + width 与 MeasureText 逐位一致；GDI `A😀B` ⇒ 3/2/1 逐档代理对不拆；GDI 原生 vs `MeasureText` oracle 逐档同。★ 批一验收 = 六个既有 `TextMeasurer` 派生类**零改动编译通过**（盯防⑦）。API 批一 **+1**（总预算 +3）。
 - **v1.1**（2026-10-06）评审吸收（**Conditional PASS → 两修当场修毕 ⇒ PASS → Implementation**）。**架构方向全部认可**（15 项边界表全 ✅；上轮六 🟡 全闭环）；评审定位 =「进入详设只需把算法边界、FitText 精确语义、缓存失效和测试样例继续钉死」并预警 **Phase 29 是 ECDI 第一次真正给 TextWidget 增加文本布局能力**（边界影响将来富文本/shaping/Bidi）。评审强 PASS 项：TextLayout 用 startCp+cpCount 而非 string（布局零 substr/零拷贝——「preferred=5 行实绘=6 行」恶疾被架构消灭 = **强 PASS**）；默认关 = 结构级零回归（T29-4 调用计数判据）；FitText 语义未降级成 glyph service。**两项必修（当场修毕）**：① **D29-Ⅰ 状态变量三分化**（`lineStart`/`lineEnd`/`scan` 语义互斥——原稿「scan」双含义是 off-by-one/跳空格错误根源）；② **行宽来源统一**（D29-Ⅰ ⑦ 的 `MeasureText(切片)` **删除**：FT = 扫描期 advance 累积/`FitText.width` 直接采用、回退后逐码点 memo 求和；GDI = 无回退用 `fit.width`、回退后补测一次归 O5——**禁止对每行再调 MeasureText**）。**强烈建议吸收（三条）**：③ **O(n) 契约范围明确**（**仅限 FT/advance-memo 路径**；GDI `UTF8ToWide` 重复转换 = 已知性能债务 O4 非正确性契约——概念冲突消解，C29-9）；④ **TextLayout 指纹显式列键**（五元组 + `GetTextLayout()` 入口每次判定——不依赖 setter 记得清，C29-10）；⑤ **T29-2 措辞受 maxWidth 约束**（「理想同行」仅宽度允许时；必须换行时禁闭标点独占行首——四段式消歧）。**测试扩展采纳（评审 §22）**：+T29-FIT-1（UTF-8 码点边界）/ +T29-FIT-2（代理对——含 😀 / A😀 / 😀B 三边界样本增强）/ +T29-WRAP-1（连续换行空行）/ +T29-WRAP-2（禁则微超）/ +T29-WRAP-3（同宽不重建）——**用例预算 341 → 346**。**非阻塞采纳**：批一验收 = **所有既有 TextMeasurer 派生类编译级验证**（盯防⑦）；FT 路径避免每行二次 MeasureText（= 必修②同源，盯防⑧）。未采纳：无（O4 不扩大范围——评审 §5 同意）。**评审路线图**：28 文本成本 → 29 多行布局 → #51 行对齐 → TextBox wrap → shaping/bidi/富文本（健康演进不一锅端）。
