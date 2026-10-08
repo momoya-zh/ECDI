@@ -265,7 +265,7 @@ void Widget::Paint(PaintContext& ctx, int offsetX, int offsetY){
 |---|---|---|
 | O1 | A4 基准参数表 | 沿 D26-5 先例（固定参数 / 架构级口径），详设冻结 |
 | O2 | 存量测试对账清单 | 批二实施时盘点全部断言命令流的用例（ClipTests / TextBoxTests / ScrollViewTests…），详设列对账表 |
-| O3 | ★★ **`SetCullingEnabled` 的 API 边界（评审 v1.1 升级：原「命名问题」→ 详设必答题）**——「`IsRectVisible` 属正常 PaintContext 能力，`SetCullingEnabled` 更像测试/debug seam，两者性质不同」。方案 A = 维持公共 API（简单 / A2 方便 / 有逃生门；代价 = 背兼容性契约、用户可随意关）；方案 B = 测试 / 内部缝（构造参数或测试专用路径，生产 API 恒开；实现稍脏）。★ 评审不否掉现方案，详设比较后定 |
+| O3 | ★★ **`SetCullingEnabled` 的 API 边界（评审 v1.1 升级：原「命名问题」→ 详设必答题）**——「`IsRectVisible` 属正常 PaintContext 能力，`SetCullingEnabled` 更像测试/debug seam，两者性质不同」。 | 方案 A = 维持公共 API（简单 / A2 方便 / 有逃生门；代价 = 背兼容性契约、用户可随意关）；方案 B = 测试 / 内部缝（构造参数或测试专用路径，生产 API 恒开；实现稍脏）。★ 评审不否掉现方案，详设比较后定 |
 | O4 | **未来架构候选**：OnPaint 纯绘制化（TextBox `SyncScrollBar` / CaptionBar `SetGlyph` 迁往 Update 相位） | 本 Phase 不做；随 D3 盘点产出登记 deferred（编号待用户拍板） |
 
 ---
