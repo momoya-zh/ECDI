@@ -1127,6 +1127,175 @@ void Test30ButtonAlignmentOverride(){
 
 } // anonymous namespace
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 31 批二：T31-2 —— 行高的**下游布局行为**
+// 判据（详设 §6 T31-2）：**只测 LineHeight() 返回值不足以证明布局正确**——
+//   须覆盖「单行居中 / 多行步进 / totalHeight」三处的实际消费。
+// ★ 装置用**确定性测量器**（行高可参数化）——把「消费者如何使用 LineHeight」
+//   与「后端具体数值」解耦（后者由 T31-1 覆盖）。
+// ══════════════════════════════════════════════════════════════════════
+
+/// @brief 行高**可参数化**的确定性测量器（每码点宽 8；行高由构造参数定）
+/// @details 与 `WrapMeasurer` 同构，唯一差别 = `LineHeight` 可注入
+///          ⇒ 可断言「布局是否**跟随** LineHeight 变化」（而非恰好等于某个常数）
+class ParamLineHeightMeasurer final : public RecordingBackend{
+public:
+	explicit ParamLineHeightMeasurer(float lineHeight) : m_lineHeight(lineHeight) {}
+
+	Size MeasureText(const Font&, const std::string& text) override{
+		// ★ 自有码点计数（与 WrapMeasurer 同模型：1 码点 = 8 宽；不依赖其他类的私有成员）
+		return Size{ 8.0f * static_cast<float>(CountCodepoints(text)), m_lineHeight };
+	}
+	float LineHeight(const Font&) override{ return m_lineHeight; }
+
+private:
+	/// @brief UTF-8 码点计数（非续字节即为码点首字节——与 WrapMeasurer 同款）
+	static std::size_t CountCodepoints(const std::string& s){
+		std::size_t n = 0;
+		for (std::size_t i = 0; i < s.size(); ++i){
+			if ((static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) { ++n; }
+		}
+		return n;
+	}
+
+	float m_lineHeight;
+};
+
+/// @brief 与 WrapProbe 同构、但测量器行高可参数化
+struct ParamProbe{
+	Application app;
+	ParamLineHeightMeasurer* measurer = nullptr;
+	Window* window = nullptr;
+	Label* label = nullptr;
+
+	ParamProbe(const char* title, int w, int h, float lineHeight){
+		auto owned = std::make_unique<ParamLineHeightMeasurer>(lineHeight);
+		measurer = owned.get();
+		RenderServices services{ std::make_unique<GDIBackend>(), std::move(owned) };
+		window = &app.Create(title, w, h, std::move(services));
+
+		auto labelOwned = std::make_unique<Label>(std::string(""));
+		label = labelOwned.get();
+		window->GetRootWidget().AddChild(std::move(labelOwned));
+	}
+	~ParamProbe(){ window->Release(); }
+
+	void PaintInto(CommandBuffer& commands){
+		PaintContext ctx(commands, window->GetTextMeasurer());
+		label->Paint(ctx, 0, 0);
+	}
+
+	[[nodiscard]] static std::vector<float> DrawnYs(const CommandBuffer& commands){
+		std::vector<float> out;
+		for (const auto& cmd : commands){
+			if (const auto* text = std::get_if<DrawTextCommand>(&cmd)){
+				out.push_back(text->pos.y);
+			}
+		}
+		return out;
+	}
+
+	[[nodiscard]] static std::size_t DrawnCount(const CommandBuffer& commands){
+		std::size_t n = 0;
+		for (const auto& cmd : commands){
+			if (std::holds_alternative<DrawTextCommand>(cmd)){ ++n; }
+		}
+		return n;
+	}
+};
+
+// ── T31-2a：多行步进 == LineHeight（逐行 y 差 = 行高）──────────────────
+
+void Test31LineHeightDrivesMultiLineStep()
+{
+	const float kLine = 24.0f;   // ★ 非 16——若布局硬编码 16，本用例必失败
+
+	ParamProbe probe("ECDI_T31_2a", 200, 200, kLine);
+	probe.label->SetSize(40, 200);
+	probe.label->SetText(std::string("aaaa bbbb cccc dddd"));   // 4 词 ⇒ 每行 1 词（宽 32 ≤ 40）
+	probe.label->SetWordWrap(true);
+
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+
+	const std::vector<float> ys = ParamProbe::DrawnYs(commands);
+	EXPECT_TRUE(ys.size() >= 3);   // 至少 3 行
+
+	// ★ 核心：相邻两行的 y 差 == LineHeight（逐行步进由行高决定）
+	for (std::size_t i = 1; i < ys.size(); ++i)
+	{
+		EXPECT_NEAR(ys[i] - ys[i - 1], kLine, kEpsilon);
+	}
+
+	// ★ 整个块高 = 行数 × 行高（preferred 同源）
+	const Size preferred = probe.label->GetPreferredSize();
+	EXPECT_NEAR(preferred.height, kLine * static_cast<float>(ys.size()), kEpsilon);
+}
+
+// ── T31-2b：单行垂直居中位置跟随 LineHeight ──────────────────────────
+
+void Test31LineHeightDrivesSingleLineCenter()
+{
+	const float kLineA = 16.0f;
+	const float kLineB = 40.0f;   // ★ 换行高 ⇒ 居中位置必须随之变化
+
+	// 控件高 100、单行文本 ⇒ 居中 offset = (100 − 行高) / 2
+	auto CenterYFor = [](const char* title, float lineHeight) -> float {
+		ParamProbe probe(title, 200, 200, lineHeight);
+		probe.label->SetSize(200, 100);
+		probe.label->SetText(std::string("abc"));   // 单行（宽 24 < 200，不 wrap）
+		probe.label->SetWordWrap(false);            // ★ 走非 wrap 路径（用 LineHeight 居中）
+
+		CommandBuffer commands;
+		probe.PaintInto(commands);
+		const std::vector<float> ys = ParamProbe::DrawnYs(commands);
+		EXPECT_EQ(ys.size(), static_cast<std::size_t>(1));
+		return ys.empty() ? -1.0f : ys[0];
+	};
+
+	const float yA = CenterYFor("ECDI_T31_2b_a", kLineA);
+	const float yB = CenterYFor("ECDI_T31_2b_b", kLineB);
+
+	EXPECT_TRUE(yA >= 0.0f && yB >= 0.0f);
+	// ★ 判据 = 两值之差 == (kLineB − kLineA) / 2
+	//   推导：offsetY = (H − lineHeight) / 2 ⇒ 行高**更大** ⇒ offsetY **更小**（行顶上移）
+	//   yA − yB = (H − kLineA)/2 − (H − kLineB)/2 = (kLineB − kLineA)/2 = (40 − 16)/2 = +12
+	EXPECT_NEAR(yA - yB, (kLineB - kLineA) / 2.0f, kEpsilon);
+
+	// 且与公式一致（y = (控件高 − 行高) / 2）
+	EXPECT_NEAR(yA, (100.0f - kLineA) / 2.0f, kEpsilon);
+	EXPECT_NEAR(yB, (100.0f - kLineB) / 2.0f, kEpsilon);
+}
+
+// ── T31-2c：空行占行高（totalHeight 含空行——D29-Ⅴ 与行高的交互）──────
+
+void Test31LineHeightEmptyLineOccupies()
+{
+	const float kLine = 20.0f;
+
+	ParamProbe probe("ECDI_T31_2c", 200, 200, kLine);
+	probe.label->SetSize(200, 200);
+	probe.label->SetText(std::string("A\n\nB"));   // 3 行（含 1 空行）
+	probe.label->SetWordWrap(true);
+
+	// totalHeight = 3 × 行高（空行**占行高**——D29-Ⅴ）
+	const Size preferred = probe.label->GetPreferredSize();
+	EXPECT_NEAR(preferred.height, 3.0f * kLine, kEpsilon);
+
+	// DrawText 命令 = 2 条（空行零命令——C29-4）
+	CommandBuffer commands;
+	probe.PaintInto(commands);
+	EXPECT_EQ(ParamProbe::DrawnCount(commands), static_cast<std::size_t>(2));
+
+	// ★ 两条命令的 y 差 = 2 × 行高（跨过空行）
+	const std::vector<float> ys = ParamProbe::DrawnYs(commands);
+	EXPECT_EQ(ys.size(), static_cast<std::size_t>(2));
+	if (ys.size() == 2)
+	{
+		EXPECT_NEAR(ys[1] - ys[0], 2.0f * kLine, kEpsilon);
+	}
+}
+
 void ECDI::Test::RegisterWidgetTests()
 {
     GetTestRegistry().Add("Widget.PanelPaint", &TestPanelPaint);
@@ -1161,4 +1330,8 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.BubbleEndToEnd",          &Test29BubbleEndToEnd);           // T29-6（批三：气泡端到端 + A4）
     GetTestRegistry().Add("Button.TextAlignmentModes",          &Test30ButtonAlignmentModes);     // T30-2（批一）
     GetTestRegistry().Add("Button.TextAlignmentOverride",       &Test30ButtonAlignmentOverride);  // T30-3（批一）
+    // ── Phase 31 批二：行高的下游布局行为 ──
+    GetTestRegistry().Add("TextWidget.LineHeightMultiLineStep", &Test31LineHeightDrivesMultiLineStep);   // T31-2a
+    GetTestRegistry().Add("TextWidget.LineHeightSingleLineCenter", &Test31LineHeightDrivesSingleLineCenter); // T31-2b
+    GetTestRegistry().Add("TextWidget.LineHeightEmptyLine",     &Test31LineHeightEmptyLineOccupies);   // T31-2c
 }

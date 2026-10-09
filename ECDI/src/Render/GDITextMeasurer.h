@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <Windows.h>
 #ifdef DrawText
@@ -50,6 +50,27 @@ public:
 	/// @details ★ 内部件的公开方法，**非公共 API**；服务 T26-12 断言 + 基准指标。
 	std::size_t MeasureCacheMissCount() const noexcept { return m_measureCacheMissCount; }
 
+	// ── 测试注入（仅内部头——不进 Public API；条 51：seam 不出实现层）──────────
+
+	/// @brief `GetOutlineTextMetricsW` 的类型（★ Δ14 失败注入缝——函数指针形态）
+	/// @details 复刻 `Win32PlatformWindow.h:98` 的 `DragFinishFn` / `:114` 的 `HookObserverFn` 先例。
+	///          ⚠️ 声明必须位于首个使用点（`SetOutlineTextMetricsForTests` 的**形参类型**）之前——
+	///          GCC 对成员函数形参不做延迟名字查找（放在 private 区会令 MinGW 报 has not been declared）。
+	using OutlineTextMetricsFn = UINT (WINAPI*)(HDC, UINT, LPOUTLINETEXTMETRICW);
+
+	/// @brief 注入 OTM 查询实现（Phase 31 Δ14——**仅供测试模拟失败**）
+	/// @param fn 替代实现；`nullptr` = 恢复真实 `GetOutlineTextMetricsW`
+	/// @details ★ **为什么需要它**（详设评审 P5.3）：`LineHeight` 的回退分支（C31-3）
+	///          原先只能靠「某个系统字体恰好不是 TrueType」来触发——那会随系统版本 /
+	///          字体替代策略变化而**失稳**。本缝让 T31-3 **稳定地**注入失败。
+	///          ★ **生产路径恒为真实 API**（成员初值即 `&::GetOutlineTextMetricsW`）。
+	void SetOutlineTextMetricsForTests(OutlineTextMetricsFn fn){
+		m_outlineTextMetrics = (fn != nullptr) ? fn : &::GetOutlineTextMetricsW;
+	}
+
+	/// @brief 当前 OTM 查询实现（观测用——便于断言「已恢复真实 API」）
+	OutlineTextMetricsFn GetOutlineTextMetricsForTests() const noexcept{ return m_outlineTextMetrics; }
+
 private:
 	/// @brief 缓存取/建 HFONT（与 GDIBackend 同逻辑；键 = size+family+**dpi**）
 	/// @param dpi ★ **测量基准 DPI**（Phase 26 起 = **窗口 DPI**，`GetDpiForWindow`——
@@ -73,6 +94,11 @@ private:
 	static constexpr std::size_t kMaxMeasureCache = 4096;
 
 	std::size_t m_measureCacheMissCount = 0;   ///< ★ 观测缝（供 T26-12 + 基准指标）
+
+	/// ★ Phase 31 Δ14：OTM 查询实现（**生产恒为真实 API**；测试可注入失败）
+	/// @details 值初始化即 `&::GetOutlineTextMetricsW`——生产路径零额外分支开销
+	///          （函数指针调用 vs 直接调用，同一直链）。
+	OutlineTextMetricsFn m_outlineTextMetrics = &::GetOutlineTextMetricsW;
 };
 
 }

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Core/Size.h"
 #include "ECDI/Core/Font.h"
@@ -116,8 +116,28 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 			return TextFit{ lo, consumed.width };
 		}
 
-		/// @brief 字体行高（单行文本垂直居中用——精确值，非字号估算，P7）
-		/// @return 行高——★ **单位恒为 DIP**（同 MeasureText）
+		/// @brief 字体行高 —— ★ **单位恒为 DIP**
+		/// @details ★★ **语义（Phase 31 选定）**：本方法返回「**该字体在该字号下，ECDI
+		///          逐行排版所用的行框高度（行推进量）**」——即相邻两行**基线**的距离，
+		///          也是「逐行 y 步进」与「**光标高度**」的唯一依据
+		///          （★ 光标高 = 行框高——**不是**「行框内另有偏移」）。
+		///          ★★ **计算口径（Phase 31 定义——两侧各自独立算出同一个数）**：
+		///          ```
+		///          行高 = (ascender − descender + lineGap) × fontSizePx / unitsPerEm
+		///          ```
+		///          · **GDI 实现** → `GetOutlineTextMetricsW` 的
+		///            `otmMacAscent − otmMacDescent + otmMacLineGap`
+		///            （★ 实测即 hhea 的缩放值——12/12 字体误差 0.00 px，见 phase31 初设 §2.6）
+		///          · **FT 实现** → `face->size->metrics.height`（★ 实测本就是该口径）
+		///          ⇒ ★ **两后端应给出同一个数**；允许的差异仅为**舍入**：**≤1 px**
+		///             （@96dpi；两侧整数/26.6 定点的舍入方向之差，**不随字号增长**）。
+		///             ——**该容差是契约的一部分，不是测试的私设**。
+		/// @note ★ **基线不是本方法的职责**（`pos.y` = 字符单元顶边；GL 侧自行下移一个
+		///       `FontEngine::Ascent`——`GLRenderer.cpp:215`）——两者**有关联但不是同一个概念**：
+		///       **行推进量 / 字形垂直定位 / 光标高度**是三个概念（详见 phase31 详设 D31-E）。
+		///       ★ 本方法是 **ECDI 的排版行框参数**，**不是**「后端所有字体度量的统一替代品」。
+		/// @note 回退（三处统一为 `font.size`）：缺 face / 字体无 `hhea` 表 /
+		///       `unitsPerEm == 0` / 查询失败 / 计算出的行框非正。
 		virtual float LineHeight(const Font& font) = 0;
 	};
 

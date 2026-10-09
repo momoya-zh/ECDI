@@ -399,11 +399,18 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 		return;
 	}
 
-	// D5：MeasureText 一次拿宽高（居中需要宽度；height 与 LineHeight 同源）
+	// D5：MeasureText 拿宽（水平对齐需要宽度）
+	// ★★ Phase 31（与行高口径同源）：**垂直居中改用 `LineHeight()`**
+	//   原为 `textSize.height`（= `MeasureText` 的高度）——Phase 31 把 `LineHeight` 改为
+	//   hhea 行框口径后，两者在 GDI 侧**不再同源**（实测 SimSun @14 差 2px、@32 差 5px）。
+	//   若继续用 `textSize.height`，同一控件在 `SetWordWrap` 开关切换时**垂直位置会跳变**
+	//   （wrap 路径用 `LineHeight`、非 wrap 用 `textSize.height`）。
+	//   ⇒ 统一为 `LineHeight()`：**行高是行高**（契约 C31-7「三概念分离」的落地）。
 	const Size textSize = ctx.MeasureText(m_style.font.value, m_text);
+	const float lineHeight = measurer.LineHeight(m_style.font.value);
 
 	ctx.DrawText(
-		CalculateTextPosition(x, y, textSize.width, textSize.height),
+		CalculateTextPosition(x, y, textSize.width, lineHeight),
 		m_text, m_style.foreground.value, m_style.font.value
 	);
 

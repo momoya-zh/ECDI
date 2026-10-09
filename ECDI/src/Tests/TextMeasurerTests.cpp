@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include <Windows.h>
@@ -9,12 +9,17 @@
 #include "ECDI/Core/String.h"                    // UTF8ToWide（T26-10 期望值复算用）
 #include "ECDI/Core/UTF8.h"                      // CodepointIndexToByteOffset（T29-FIT-2 oracle 切片）
 #include "Platform/Win32/Win32RenderContext.h"   // Initialize 注入（同 GDIBackend 先例）
+#include "Platform/Win32/Win32FontSource.h"      // ★ Phase 31 批二：FT 侧同字体族的文件解析
+#include "Render/FontEngine.h"                   // ★ Phase 31 批二：FT 侧行高（两链对照）
+#include "Render/FreeTypeTextMeasurer.h"         // ★ Phase 31 批二：FT 测量器
 #include "Render/GDITextMeasurer.h"              // 内部件（Phase 26 批一）
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <memory>   // ★ Phase 31 批二：make_shared<FontEngine>
 #include <string>
+#include <vector>   // ★ Phase 31 批二：OTM 缓冲
 
 using namespace ECDI;
 
@@ -345,10 +350,202 @@ void Test29GdiFitTextSurrogate()
     (void)fallback;   // ★ 默认体的同语义验证在 T29-FIT-1（固定宽模型下可精确判）
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 31 批二：行高口径（T31-1 / T31-3 / T31-6）
+// 契约 C31-1..C31-3 / C31-7 / C31-10；详见 phase31 详设 §6
+// ══════════════════════════════════════════════════════════════════════
+// ★ 判据（C31-2）：两链之差 ≤1 px（@96dpi，按 DPI 缩放），且**不随字号增长**
+// ★ 口径层级（评审 4.2/P3）：本组结论**只到「同字体族」**——不声称同一文件（见 T31-6）
+
+/// @brief 同字体族的「两侧标识」（GDI 用族名；FT 的 family 走**文件名直查**——Production 语义）
+struct FamilyPair
+{
+    const char* label;
+    const char* gdiFamily;   ///< GDI lfFaceName（族名）
+    const char* ftFamily;    ///< FT FontSource::ResolveFile（**文件名**——详设 L1）
+};
+
+/// @brief 建一个隐藏窗口（GDI 测量链需要 HWND 定 DPI 基准）
+bool Create31Window(const wchar_t* className, MeasurerWindow& out)
+{
+    return CreateMeasurerWindow(className, out);
+}
+
+/// @brief 两链在同字号下的 `LineHeight` 之差
+/// @details ★ 两侧各自**独立**构造测量器（不经被测代码的换算逻辑）
+float TwoChainLineHeightDiff(HWND hwnd, const FamilyPair& p, float size)
+{
+    GDITextMeasurer gdi;
+    gdi.Initialize(Win32RenderContext(hwnd));
+
+    auto engine = std::make_shared<FontEngine>();
+    engine->SetFontSource(std::make_unique<Win32FontSource>());
+    engine->SetDpi(GetDpiForWindow(hwnd));
+    FreeTypeTextMeasurer ft(engine);
+
+    Font gf{}; gf.size = size; gf.family = p.gdiFamily;
+    Font ff{}; ff.size = size; ff.family = p.ftFamily;
+
+    return std::fabs(gdi.LineHeight(gf) - ft.LineHeight(ff));
+}
+
+// ── T31-1：两链行高一致性（多字体 × 多字号）────────────────────────
+
+void Test31LineHeightTwoChainConsistency()
+{
+    MeasurerWindow w;
+    if (!Create31Window(L"ECDI_T31_LineHeight", w))
+    {
+        return;
+    }
+
+    const int dpi = GetDpiForWindow(w.hwnd);
+    const float tol = 1.0f * static_cast<float>(dpi) / 96.0f;   // ★ 容差按 DPI 缩放（C31-2）
+
+    const FamilyPair families[] = {
+        { "SimSun",   "SimSun",   "simsun.ttc"  },
+        { "Arial",    "Arial",    "arial.ttf"   },
+        { "Consolas", "Consolas", "consola.ttf" },
+        { "Segoe UI", "Segoe UI", "segoeui.ttf" },
+    };
+    // ★ 多字号：残差**不随字号增长**是 B-2 的核心判据（旧口径下增长到 +9 px）
+    const float sizes[] = { 12.0f, 14.0f, 20.0f, 32.0f };
+
+    for (const FamilyPair& p : families)
+    {
+        for (float s : sizes)
+        {
+            const float diff = TwoChainLineHeightDiff(w.hwnd, p, s);
+            EXPECT_TRUE(diff <= tol);
+        }
+    }
+
+    // ★ 对照：SimSun @14 —— 改动前 GDI 14 / GL 16（差 2）；改动后 GDI 应为 16
+    //   （harness REQ-05 的复现锚；若此处仍为 14 ⇒ 口径改动未生效）
+    {
+        GDITextMeasurer gdi;
+        gdi.Initialize(Win32RenderContext(w.hwnd));
+        Font f{}; f.size = 14.0f; f.family = "SimSun";
+        EXPECT_NEAR(gdi.LineHeight(f), 16.0f, tol);   // ★ 新口径 = hhea 行框（不再是 tmHeight 的 14）
+    }
+}
+
+// ── T31-3：回退规则（★ 经 △14 注入缝——稳定触发，不依赖某系统字体恰好失败）────
+
+void Test31LineHeightFallback()
+{
+    MeasurerWindow w;
+    if (!Create31Window(L"ECDI_T31_LineHeightFallback", w))
+    {
+        return;
+    }
+
+    GDITextMeasurer measurer;
+    measurer.Initialize(Win32RenderContext(w.hwnd));
+
+    const Font font{ 14.0f, "SimSun" };
+
+    const float normal = measurer.LineHeight(font);
+    EXPECT_TRUE(normal > 0.0f);
+
+    // ① 注入「恒失败」⇒ `otmSize > 0` 不成立 ⇒ 回退 font.size（C31-3）
+    measurer.SetOutlineTextMetricsForTests([](HDC, UINT, LPOUTLINETEXTMETRICW) -> UINT { return 0; });
+    EXPECT_NEAR(measurer.LineHeight(font), font.size, kEps);
+
+    // ② 注入「成功但全零」⇒ box == 0 ⇒ 同样回退（退化字体防御）
+    measurer.SetOutlineTextMetricsForTests([](HDC, UINT size, LPOUTLINETEXTMETRICW buf) -> UINT {
+        if (buf != nullptr && size >= sizeof(OUTLINETEXTMETRICW))
+        {
+            buf->otmMacAscent = 0;
+            buf->otmMacDescent = 0;
+            buf->otmMacLineGap = 0;
+        }
+        return sizeof(OUTLINETEXTMETRICW);
+    });
+    EXPECT_NEAR(measurer.LineHeight(font), font.size, kEps);
+
+    // ③ 恢复真实 API ⇒ 回到正常值（★ 证明注入缝不粘滞）
+    measurer.SetOutlineTextMetricsForTests(nullptr);
+    EXPECT_NEAR(measurer.LineHeight(font), normal, kEps);
+}
+
+// ── T31-6：字体同源性锚（★ **只到「族名相同」层级**——评审 P3/4.2）──────────
+
+void Test31LineHeightFontIdentityLevel()
+{
+    MeasurerWindow w;
+    if (!Create31Window(L"ECDI_T31_FontIdentity", w))
+    {
+        return;
+    }
+
+    const int dpi = GetDpiForWindow(w.hwnd);
+
+    // ① FT 侧：resolve 出的**文件名**（判据 = 与用例期望一致）
+    Win32FontSource source;
+    EXPECT_TRUE(!source.ResolveFile("simsun.ttc").empty());
+
+    // ② GDI 侧：实际解析到的**族名**（GetTextFaceW）——**只证明到族名层级**
+    LOGFONTW lf{};
+    lf.lfHeight = -static_cast<LONG>(std::lround(14.0f * dpi / 96.0));
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfWeight = FW_NORMAL;
+    wcsncpy(lf.lfFaceName, L"SimSun", LF_FACESIZE - 1);
+
+    HFONT hfont = CreateFontIndirectW(&lf);
+    EXPECT_TRUE(hfont != nullptr);
+    if (hfont)
+    {
+        HDC dc = GetDC(nullptr);
+        HGDIOBJ old = SelectObject(dc, hfont);
+
+        wchar_t face[LF_FACESIZE]{};
+        EXPECT_TRUE(GetTextFaceW(dc, LF_FACESIZE, face) > 0);
+        EXPECT_TRUE(wcslen(face) > 0);   // ★ 族名层证据（SimSun → 宋体）
+
+        // ③ ★ 强证据（**非文件级证明**）：GDI em square 与 FT unitsPerEm 应同值
+        const UINT otmSize = GetOutlineTextMetricsW(dc, 0, nullptr);
+        EXPECT_TRUE(otmSize > 0);
+        if (otmSize > 0)
+        {
+            std::vector<BYTE> buf(static_cast<std::size_t>(otmSize) + 64);
+            const BOOL ok = GetOutlineTextMetricsW(dc, otmSize,
+                                                   reinterpret_cast<LPOUTLINETEXTMETRICW>(buf.data()));
+            EXPECT_TRUE(ok != FALSE);
+            if (ok)
+            {
+                const OUTLINETEXTMETRICW* otm = reinterpret_cast<const OUTLINETEXTMETRICW*>(buf.data());
+                EXPECT_TRUE(otm->otmEMSquare > 0);
+            }
+        }
+
+        // ④ FT 侧同字体的 face 可用（LineHeight 正值即证）——供 em square 对照的间接锚
+        {
+            auto engine = std::make_shared<FontEngine>();
+            engine->SetFontSource(std::make_unique<Win32FontSource>());
+            engine->SetDpi(dpi);
+            Font ff{}; ff.size = 14.0f; ff.family = "simsun.ttc";
+            EXPECT_TRUE(engine->LineHeight(ff) > 0.0f);
+        }
+
+        SelectObject(dc, old);
+        ReleaseDC(nullptr, dc);
+        DeleteObject(hfont);
+    }
+
+    // ★★ 文档纪律（评审 P3）：本用例**只断言到「族名相同 + em square 同值」**——
+    //    `GetTextFaceW` 只返回族名，同一族名可有多个文件 / 字重 / 版本
+    //    ⇒ **不得**在任何总结里写成「已验证两链使用同一字体文件」。
+}
+
 void ECDI::Test::RegisterTextMeasurerTests()
 {
     GetTestRegistry().Add("TextMeasurer.UsesWindowDpi",      &Test26MeasurerUsesWindowDpi);   // T26-10
     GetTestRegistry().Add("TextMeasurer.GdiMeasureCacheHit", &Test26GdiMeasureCacheHit);      // T26-12
     GetTestRegistry().Add("TextMeasurer.DefaultFitTextCpBoundary", &Test29DefaultFitTextCpBoundary);   // T29-FIT-1
     GetTestRegistry().Add("TextMeasurer.GdiFitTextSurrogate",     &Test29GdiFitTextSurrogate);       // T29-FIT-2
+    // ── Phase 31 批二：行高口径 ──
+    GetTestRegistry().Add("TextMeasurer.LineHeightTwoChainConsistency", &Test31LineHeightTwoChainConsistency);   // T31-1
+    GetTestRegistry().Add("TextMeasurer.LineHeightFallback",            &Test31LineHeightFallback);              // T31-3
+    GetTestRegistry().Add("TextMeasurer.LineHeightFontIdentityLevel",   &Test31LineHeightFontIdentityLevel);     // T31-6
 }

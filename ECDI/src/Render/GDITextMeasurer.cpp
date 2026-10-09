@@ -1,4 +1,4 @@
-﻿#include "Render/GDITextMeasurer.h"
+#include "Render/GDITextMeasurer.h"
 
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>   // ★ Phase 29 △2：numeric_limits（码点数上界探测）
+#include <memory>   // ★ Phase 31 △1：unique_ptr（OTM 超长时的对齐堆缓冲 RAII）
+#include <new>      // ★ Phase 31 △1：std::align_val_t / operator new(size, align)（对齐分配）
 #include <string>
 
 namespace ECDI{
@@ -259,8 +261,11 @@ TextFit GDITextMeasurer::FitText(const Font& font, const std::string& text,
 
 float GDITextMeasurer::LineHeight(const Font& font)
 {
-	// D2：同 MeasureText 的帧无关测量模式；GetTextMetrics 精确行高（P7）
-	float height = font.size;   // 兜底：字号（**已是 DIP**——与返回值单位一致）
+	// ★★ Phase 31（D31-A）：行高口径 = **hhea 行框**（asc − desc + lineGap）
+	//   经 `GetOutlineTextMetricsW` 的 `otmMac*` 取（= hhea 缩放值——12/12 字体误差 0.00 px）
+	//   ★ **不再用 `tmHeight`**：那是字体映射器的产物（初设 §2.2 证其不可由 FT 复现——
+	//     差值有正有负、随字号放大到 +9 px，且无单一候选式可普遍复现）
+	float height = font.size;   // 兜底：字号（**已是 DIP**——与返回值单位一致；契约 C31-3）
 
 	HDC measureDC = GetDC(nullptr);
 	if (!measureDC)
@@ -280,12 +285,56 @@ float GDITextMeasurer::LineHeight(const Font& font)
 	{
 		HGDIOBJ oldFont = SelectObject(measureDC, hfont);
 
-		TEXTMETRICW metrics{};
-		if (GetTextMetricsW(measureDC, &metrics))
+		// ★ Δ14：经**注入缝**调用（生产恒为真实 API——见头文件契约）
+		const UINT otmSize = m_outlineTextMetrics(measureDC, 0, nullptr);
+
+		if (otmSize > 0)
 		{
-			// ★ Phase 20：物理像素 → DIP（保留 float——测量链路口径）
-			height = static_cast<float>(metrics.tmHeight)
-				* (96.0f / static_cast<float>((dpi > 0) ? dpi : 96));
+			// ★ 对齐保证（详设评审 P3）：`BYTE[]` **不保证**满足 `OUTLINETEXTMETRICW`
+			//   的对齐要求 ⇒ 栈路径 `alignas`、堆路径按对齐分配（**不得**依赖栈帧偶然对齐）
+			//   ★ otmSize 含尾随字符串区（族名/全名/样式名——实测 256–342 B）
+			alignas(OUTLINETEXTMETRICW) BYTE stackBuf[1024];
+			BYTE* buf = stackBuf;
+			std::unique_ptr<BYTE[], void(*)(BYTE*)> heapBuf(
+				nullptr, [](BYTE* p){ ::operator delete(p); });
+
+			if (otmSize > sizeof(stackBuf))
+			{
+				// ★ 超长（极端字体名）⇒ 堆分配，**仍保对齐**
+				heapBuf.reset(static_cast<BYTE*>(
+					::operator new(otmSize, std::align_val_t(alignof(OUTLINETEXTMETRICW)))));
+				buf = heapBuf.get();
+			}
+
+			if (m_outlineTextMetrics(measureDC, otmSize,
+			                         reinterpret_cast<LPOUTLINETEXTMETRICW>(buf)))
+			{
+				const OUTLINETEXTMETRICW* otm =
+					reinterpret_cast<const OUTLINETEXTMETRICW*>(buf);
+
+				// ★★ 字段读法（契约 C31-10——**受控实测结论**，勿改）：
+				//   `otmMacAscent` / `otmMacDescent` 声明为 **int**（wingdi.h:2565/2566）
+				//   `otmMacLineGap` 声明为 **UINT**，但 GDI 实际存的是 **int32 补码**
+				//   ⇒ **按 int 直读即正确**（负数自动还原）。
+				//   实据（本机受控合成——patch 字体副本的 hhea.lineGap，px=20/upem=2048）：
+				//     patch −200  ⇒ GDI 0xFFFFFFFE ⇒ (int) −2（期望 −1.95）✓
+				//     patch −1000 ⇒ GDI 0xFFFFFFF6 ⇒ (int) −10（期望 −9.77）✓
+				//   ★ **不得**做「> 0x7FFF ⇒ 减 65536」式重解释——那在 −200 时会给出 −65538（错）
+				//   ★ 符号约定：ascent > 0 · descent < 0 · lineGap 通常 ≥ 0 可负
+				//     ⇒ 行框高 = asc − desc + gap（desc 为负 ⇒ 实际是加其绝对值）
+				const int macAsc  = otm->otmMacAscent;
+				const int macDesc = otm->otmMacDescent;
+				const int macGap  = static_cast<int>(otm->otmMacLineGap);
+
+				const int box = macAsc - macDesc + macGap;
+
+				if (box > 0)   // ★ 退化字体防御（零/负行框 ⇒ 回退 font.size——契约 C31-3）
+				{
+					// ★ Phase 20：物理像素 → DIP（保留 float——测量链路口径）
+					height = static_cast<float>(box)
+						* (96.0f / static_cast<float>((dpi > 0) ? dpi : 96));
+				}
+			}
 		}
 
 		SelectObject(measureDC, oldFont);
