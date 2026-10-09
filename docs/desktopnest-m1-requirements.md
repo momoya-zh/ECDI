@@ -1,9 +1,10 @@
-﻿# DesktopNest M1 需求稿（观感里程碑）v1.0
+﻿# DesktopNest M1 需求稿（观感里程碑）v1.1
 
-> 阶段：**需求（待评审）**｜日期：2026-10-08
-> 编号体系：**沿 `desktopnest-roadmap.md` M1/M2/M3/M4 里程碑编号，不占 Phase 号**（应用侧 `examples/DesktopNest`，框架公共 API 预期 +0）——2026-10-08 用户拍板
-> 上游：`docs/desktopnest-roadmap.md` v1.17（§1 需求收敛 / §1.2 合并框模型 / §6 里程碑 / §9 待决问题）
+> 阶段：**需求（评审通过 → 初步设计）**｜日期：2026-10-08
+> 编号体系：**沿 `desktopnest-roadmap.md` M1/M2/M3/M4 里程碑编号，不占 Phase 号**（应用侧 `examples/DesktopNest`）——2026-10-08 用户拍板
+> 上游：`docs/desktopnest-roadmap.md` v1.19（§1 需求收敛 / §1.2 合并框模型 / §6 里程碑 / §9 待决问题）
 > ★ **§9 四问本轮拍板（2026-10-08 用户）**：§9-4 菜单 = **自绘**（G-5 就地消解，框架零立项）· §9-5 框 = **可拖动、不可缩放**（G-6 M1 部分就地消解）· §9-7 应用名 = **DesktopNest**（占位名转正）· 文档编号 = **M1 体系不占 Phase 号**
+> ★★ **v1.1（2026-10-08）：评审通过（PASS → Preliminary Design）**——外部评审总判「**M1 定位正确（观感里程碑，非功能里程碑）· 框架侧零新增这一验证比"又完成一个 Phase"更有价值 · 首次把 ECDI → 应用层 → 桌面交互 → 验收串成闭环**」；分项 13 项 = **10 ✅ PASS + 3 🟡 初设必须解决**（🟡 = Popup capture / 点外关闭事件流 · Box/View/Model 职责边界 · 收编拆出后 Model→UI 同步，见 §8）。★★ **注意：本版已修正原先「框架改动 0」的表述**——勘察确认**两项缺口**（运行期窗口几何 · 见 §2.1），已**另立 Phase 31**，故 M1 为「**消费 Phase 31 的新增能力**」，不再是零框架改动。
 
 ---
 
@@ -31,17 +32,23 @@
 
 ## 2. 范围与能力映射
 
-### 2.1 框架侧前置——全部就绪，**框架 Phase = 0**
+### 2.1 框架侧前置——**七项就绪 · 两项缺口（已立 Phase 31）**
 
 | 能力 | 证据 | 状态 |
 |---|---|---|
 | On Desktop 档常驻 | `WindowLayer::Desktop` + `Window::SetWindowLayer`（Phase 16；E 路线六判据全过 = roadmap §7.1） | ✅ |
 | 无边框 + 自绘标题条 | `ChromeMode`（Phase 12）+ `CaptionBar`（Phase 13） | ✅ |
 | 圆角 / 布局 / 动画 / 主题 | `DrawRoundedRect` + V/H·List 布局（Phase 25 C-VIS）+ `AnimationManager` | ✅ |
-| **拖动手势（按键状态）** | ★★ **`MouseEvent::IsButtonDown()`（`MouseEvent.h:61`，Phase 19）**——`MouseMoveEvent` **已携带** `pressedButtons`；`Window::SetCaptureWidget`（`Window.h:187`）做拖出窗口续收 | ✅ |
+| **拖动（整框移动）** | ★★ **`WM_NCHITTEST` → `HTCAPTION`**（`Win32PlatformWindow.cpp:490-504`）——**系统免费提供**拖动 / 双击最大化 / Aero Snap；`CaptionBar` 自身**零拖动代码**（实测 grep） | ✅ |
 | **浮层（成员列表）** | **自绘路线**（§9-4 拍板）：z 序天然（`AddChild` 顺序）+ `HitTest` 逆序 + `SetCaptureWidget` 点外关闭 | ✅（应用侧组装） |
+| 折叠的内容隐藏语义 | `CollapsiblePanel`（`SetContentVisible` 四路径全覆盖；T30-7 已钉住） | ✅ |
+| 点外关闭的捕获基础 | `Window::SetCaptureWidget`（`Window.h:187`）+ `Application::OnMouseButtonUp`（`Application.cpp:306-331`） | ✅ |
+| **★ 运行期窗口尺寸**（K2 折叠） | ❌ **框架无此能力**——`PlatformWindow.h:162` 明写「**不提供「运行期改窗口尺寸」能力**」；`Window` 38 个公共方法无尺寸器 | ❌ **→ Phase 31** |
+| **★ 运行期窗口位置**（K4 级联偏移） | ❌ **框架无此能力**——`Widget::SetPosition` 是**控件在窗口内**的位置，非窗口屏幕位置；`Window` 无 `GetBounds` / 窗口坐标读写 | ❌ **→ Phase 31** |
 
-★★ **勘误（G-6 证据过期）**：`desktopnest-roadmap.md` §5 G-6 行与 §3 勘察表所记「`MouseMoveEvent` 连按键状态都没有（= 缺陷 D-1 / #41）」**已过期**——Phase 19 已为 `MouseEvent` 基类补齐 `pressedButtons` 维度 + `IsButtonDown()` 语义接口（构造注释明示「Phase 19：另携带……两维」）。**M1 拖动手势零框架缺口**。#41 的原缺陷登记（当时属实）维持历史状态不变；本勘误只修正 roadmap 对现状的描述。**须同步回写 roadmap v1.18**（见 §6）。
+★★ **勘误一（「框架改动 0」不再成立）**：v1.0 写「框架侧前置全部就绪、框架 Phase = 0」，**经逐条源码核实后修正**——K2（折叠到「仅标题条」）与 K4（拆出后级联偏移）**都需要运行期窗口几何**，而框架**刻意不提供**该能力（尺寸维度是 Phase 22 契约 C4 的明写决定；位置维度从来不存在）。⇒ **两项缺口已合并另立 [`phase31-window-geometry-and-line-height-requirements.md`](phase31-window-geometry-and-line-height-requirements.md)**（同 Phase 还含 harness `REQ-05` 行高口径缺陷）。**M1 因此从「零框架改动」改为「消费 Phase 31 的新增能力」**。
+
+★★ **勘误二（G-6 证据过期 + 拖动路线修正）**：`desktopnest-roadmap.md` §5 G-6 行与 §3 勘察表所记「`MouseMoveEvent` 连按键状态都没有（= 缺陷 D-1 / #41）」**已过期**——Phase 19 已为 `MouseEvent` 基类补齐 `pressedButtons` 维度 + `IsButtonDown()` 语义接口（`MouseEvent.h:**59**`）。**但 M1 的拖动并不需要它**：`CaptionBar` 的既有路线是 **`HTCAPTION` 系统拖动**（K7/§2.1 第 4 行），**框架零缺口**；`IsButtonDown` 全库**生产零消费**（仅 `EventTests.cpp` 使用）。⇒ K5 据此改为「**消费 `HTCAPTION` 系统拖动**」，不再自绘拖动逻辑。**#41 的原缺陷登记（当时属实）维持历史状态不变**；本勘误只修正 roadmap 对现状的描述。**须同步回写 roadmap v1.19**（见 §6）。
 
 ⚠️ **沿用 roadmap G-5 已记的坑**：浮层容器**不得用 `Panel`**（`Panel::ContainsPoint()` 恒 false ⇒ 点浮层空白会穿透 HitTest 到下层），须用裸 `Widget` 或让可交互部件当子。
 
@@ -52,7 +59,7 @@
 | `DesktopNest.cpp/.h` | 框（Box）与浮层（MemberListPopup）的组装：二态、成员列表、拖动、收编/拆出/切换 |
 | `main.cpp` | 窗口创建（`ChromeMode::Borderless` + `SetWindowLayer(Desktop)`）+ 假数据装配（2~3 个框，其中一个含 2 成员的合并框） |
 | `CMakeLists.txt` | 沿 ModelProbe 模板（`target_link_libraries(... ECDI)` + UNICODE + MinGW `-static`）；**根 CMake 追加 1 行 `add_subdirectory`**（应用侧 CMake 影响面 = +1 行，框架 CMake 0） |
-| 假数据模型 | 内存结构：`BoxId → {title, state, placement, members[], active}`（§8 草案字段子集：id/title/state/members/active；**placement 持久化不做**——M1 不落盘） |
+| 假数据模型 | ★ **v1.1 模型定型（评审 §14 采纳）**——两层：**`Box`** = `{BoxId id; string title; BoxState state; vector<MemberId> members; MemberId active;}` + **`Member`** = `{MemberId id; string title;}`。★ **M1 不放任何文件路径 / Shell ID / FileIdentity**——那是 M2 的增量（`Member` **加**字段，而非推翻 M1 模型）。★ **placement 持久化不做**（M1 不落盘）；放置几何仅在内存（消费 Phase 31 的窗口几何能力） |
 
 ---
 
@@ -64,8 +71,9 @@
 - 尺寸默认 220×320（roadmap §8.1 示例值），不随成员切换改变（§1.2 默认 2 冻结）。
 
 ### K2 二态折叠/展开
-- 右侧按钮 = 唯一二态开关：展开（标题条+内容）/ 折叠（仅标题条）。折叠只改几何高度，内容子树可见性同步（**T30-7 已钉住的框架行为**——`CollapsiblePanel` 路线直接复用，或自组装时按同语义）。
+- 右侧按钮 = 唯一二态开关：展开（标题条+内容）/ 折叠（仅标题条）。折叠**改窗口几何高度**（⇒ 消费 **Phase 31** 的运行期窗口尺寸能力）+ 内容子树可见性同步（**T30-7 已钉住的框架行为**——`CollapsiblePanel` 语义直接复用，或自组装时按同语义）。
 - 切换动画走 `AnimationManager`（缓动可选，时长 ≤200ms，可关）。
+- ★ **v1.1 依赖变更**：v1.0 写「折叠只改几何高度」，但未核实框架是否有该能力——**勘察确认没有**（§2.1）⇒ 本项**依赖 Phase 31 交付**。若 Phase 31 尚未落地，折叠只能降级为「窗口尺寸不变、仅隐藏内容」（观感不完整，不作为 M1 验收态）。
 
 ### K3 成员列表浮层（自绘，§9-4 拍板）
 - **入口**：标题条**左侧**按钮点击弹出；浮层**不改变框尺寸**（§1.2 已定）。
@@ -75,33 +83,36 @@
 
 ### K4 收编 / 拆出 / 切换（纯视图，零文件操作）
 - **收编**：把对方 id 追加进 `members`；被收编框窗口消失，其 placement/state 保留（内存模型）。
-- **拆出**：从 `members` 移除 → 重新成为独立窗口；位置优先恢复被收编前 placement，无记忆或冲突时**一律级联偏移**（§9-6 本轮简化拍板：**不判冲突、一律级联**——M1 假数据阶段不值得做重叠判定）。
+- **拆出**：从 `members` 移除 → 重新成为独立窗口；位置优先恢复被收编前 placement，无记忆或冲突时**一律级联偏移**（§9-6 本轮简化拍板：**不判冲突、一律级联**——M1 假数据阶段不值得做重叠判定）。★ **实现依赖 = Phase 31 的窗口位置读写**（记 placement 要读、恢复/级联要写）。
 - **切换成员**：`active` 指向换人；框尺寸不变、内容滚动（M1 内容用假列表，滚动行为可后置到内容超出时才验）。
 - 合并语义 = 纯视图（roadmap §8.4 冻结）：**不触碰任何 storage 概念**。
+- ★★ **v1.1 数据流纪律（评审 §13 采纳）**：**收编 / 拆出 / 切换是 Model 操作，不是 Widget 操作**——顺序固定为「**Model 变更 → 通知 → UI 同步/重建**」，**禁止**「点击后直接删/建 Widget、顺便改 `members`」（否则 M2 起模型与 UI 极易失同步，正是 A2 自动用例要防的）。具体同步机制留初设（§8 P3）。
 
 ### K5 框拖动（可拖动、不可缩放，§9-5 拍板）
-- 标题条按下拖动整框（`OnMouseButtonDown` 记起点 + `IsButtonDown(Left)` 续拖 + `SetCaptureWidget` 保证拖出窗口不失）。
-- 拖动中不做对齐吸附；松手即落（位置仅在内存，不落盘——落盘是 M4）。
-- 不可缩放：无边框边缘不做 resize 命中；`WM_NCHITTEST` 相关门类（Phase 12 已有）不需要——M1 直接给整框禁用缩放语义（消费 `ChromeMode` 既有契约，无框架改动）。
+- ★★ **v1.1 路线修正**：拖动**消费 `HTCAPTION` 系统路线**——`WM_NCHITTEST` 在标题栏区返回 `HTCAPTION`（`Win32PlatformWindow.cpp:490-504`），**系统免费提供**拖动 / 双击最大化 / Aero Snap；`CaptionBar` 自身零拖动代码即此模式。**应用侧不写拖动逻辑**（v1.0 写的「`OnMouseButtonDown` 记起点 + `IsButtonDown` 续拖 + `SetCaptureWidget`」**作废**——既与 `CaptionBar` 既有路线不一致，且 `IsButtonDown` 生产零消费）。
+  - ⚠️ **前提**：标题条须位于 `captionHeight` 行为区内，且**其上的按钮**须能被 `IsClientInteractiveAt` 认出为可交互（否则按钮点不动、整条都在拖动）。按钮的命中与拖动区分由该门控负责（Phase 13 R2 既有机制）。
+- 拖动中不做对齐吸附；松手即落。位置**仅在内存**（不落盘——落盘是 M4）；★ 若要记录拖动后的位置，需 **Phase 31 的窗口位置读回**。
+- 不可缩放：无边框边缘不做 resize 命中——**M1 不调用** `SetResizeInset` 之外的手段；整框禁用缩放语义可由「`SetResizeInset(0)`」达成（消费 Phase 12 既有契约，无框架改动）。
 
-### K6 假数据装配
-- 启动即建 3 个框：A（普通，工作文档）、B（普通，学习资料）、C（合并框，收编了 C2；或运行期用「加入成员」从 A/B 现场收编一次以演示）——精确装配表实施期定，验收以「能演示收编→拆出→切换全回路」为准。
+### K6 假数据装配（★ v1.1 冻结初始态与验收路径——评审 §15 采纳）
+- **初始态（冻结）**：启动即建 **3 个框**——`A`（独立）· `B`（独立）· `C`（合并框 = `[C1, C2]`，含 2 成员）。
+- **A1 验收路径（冻结）**：**必须现场执行一次**——① 收编 `B → A` ② 拆出 `B` ③ 切换成员。⇒ **不再保留 v1.0 的「或运行期现场收编一次以演示」这种二选一表述**（两个实现者会走出不同的验收路径）。
 - 多开（同进程多窗）：DesktopNest 框 = 每框一个顶层 `Window`（`Desktop` 档多窗口结构上支持——Phase 16 `DesktopLayerTests` T16-4 双窗口用例在案）。
 
 ### K7 应用与工程
 - 应用名 **DesktopNest**（§9-7 拍板转正）；落 `examples/DesktopNest/`；目标名 `desktopnest`。
-- 框架侧改动 = **0**（公共 API +0 / 框架 CMake 0）；应用侧 = 新目录 4 文件 + 根 CMake +1 行 `add_subdirectory(examples/DesktopNest)`。
+- ★ **v1.1 框架侧改动修正**：**不再是「0」**——M1 消费 **Phase 31** 新增的**运行期窗口几何**（尺寸 + 位置）能力；其余全部消费既有能力。**M1 自身不新增框架 API**（应用侧 = 新目录 4 文件 + 根 CMake +1 行 `add_subdirectory(examples/DesktopNest)`；框架 CMake 0）。
 - 主屏缩放≠100% 时观感正常（DIP 契约随框架，无应用侧特殊处理；不做多屏 M1 验收——多屏是 M4）。
 
 ---
 
 ## 4. 验收标准（A1–A5）
 
-- **A1 观感主回路（人工）**：桌面常驻（Win+D 可见、被应用覆盖）、圆角、折叠/展开、浮层弹出、收编→拆出→切换全回路演示成功；框拖动顺滑、拖出窗口边缘不丢（capture 生效）。
-- **A2 模型一致性（自动）**：收编/拆出/切换后内存模型状态断言（`members`/`active` 与 UI 一致；被收编框窗口销毁、拆出重建 placement 恢复正确、无记忆时级联偏移）。
+- **A1 观感主回路（人工）**：桌面常驻（Win+D 可见、被应用覆盖）、圆角、折叠/展开、浮层弹出、收编→拆出→切换全回路演示成功；框拖动顺滑、**拖出窗口边缘不失**（`HTCAPTION` 系统拖动固有行为）。★ 验收路径按 **K6 冻结表**执行（现场收编 `B → A` → 拆出 `B` → 切换成员）。
+- **A2 模型一致性（自动）**：收编/拆出/切换后内存模型状态断言（`members`/`active` 与 UI 一致；被收编框窗口销毁、拆出重建 placement 恢复正确、无记忆时级联偏移）——★ 判据针对 **Model→UI 单向数据流**（K4 v1.1 纪律）。
 - **A3 浮层纪律（自动）**：点浮层空白**不穿透**（裸 Widget 容器纪律的回归锚）；点外部关闭；浮层弹出期间主框尺寸逐位不变。
-- **A4 拖动语义（自动+人工）**：`IsButtonDown` 门控（无按键时 Move 不触发拖动——Phase 19 语义的消费锚）；拖动后框位置与鼠标位移一致（DIP 精度）。
-- **A5 既有全绿**：框架测试套件 356/356 不动（零框架改动 ⇒ 计数不变）；doc_lint 无新增缺陷。
+- **A4 拖动语义（自动+人工）**：★ **v1.1 修正**——判据从「`IsButtonDown` 门控」改为「**`HTCAPTION` 路线成立**」：标题条空白区拖动整框、标题条上的按钮**点击可用**（不被拖动吃掉）、不可缩放（边缘无 resize 命中）；拖动后框位置与鼠标位移一致（DIP 精度）。
+- **A5 既有全绿**：框架测试套件**全绿**（基线 **356**，Phase 31 落地后按其新增用例数重算——★ **不再是「356 不动」**，因 M1 现已依赖 Phase 31 的框架改动）；doc_lint 无新增缺陷。
 
 ---
 
@@ -109,11 +120,11 @@
 
 | 维度 | 值 |
 |---|---|
-| 框架公共头 / API | **0 / 0**（M1 全部消费既有能力） |
+| 框架公共头 / API | **M1 自身 0 / 0**；★ 但**依赖 Phase 31** 的窗口几何 API（+≥3）与行高口径修正 |
 | 框架 CMake | 0；应用侧 +1 行 `add_subdirectory` |
 | 测试 | 新增 DesktopNest 模型级用例 ~4–6 条（A2/A3/A4 自动部分；沿 ModelProbeTests「demo 实现链进测试」先例）——精确数实施期定 |
-| 文档 | 本稿 + roadmap v1.18 回写（§6）+ docs/README/根 README 行（M1 落盘时同步） |
-| 风险 | **低**——零文件操作、零框架改动、全部消费已验证能力；最大不确定点 = CaptionBar 复用 vs 自绘（实施期裁决，两者都无框架改动） |
+| 文档 | 本稿 + roadmap v1.19 回写（§6）+ docs/README 行 |
+| 风险 | **低～中**——零文件操作；主要风险已外移：K2/K4 的正确性取决于 **Phase 31** 的窗口几何能力（M1 自身只做组装）；最大应用侧不确定点 = 浮层 capture 事件流（§8 P1）与 Box 职责边界（§8 P2） |
 
 **风险继承**：R-3（框内图标功能阻断）结构性存在，M1 即按「框倾向贴边/贴角」摆放假数据；R-4（z 序被打断）框架侧 `WM_WINDOWPOSCHANGING` 持续强制已覆盖。
 
@@ -121,13 +132,28 @@
 
 ## 6. 台账联动（本稿落盘时）
 
-1. `desktopnest-roadmap.md` → **v1.18**：§9 表 4/5/7 三行标拍板结果 + §9-6 简化裁决（一律级联）+ §5 G-5/G-6 行标「M1 就地消解（自绘/IsButtonDown）」+ **G-6 证据勘误**（Phase 19 已补按键维度）+ §6 M1 行标「✅ 需求稿 v1.0」。
-2. `docs/README.md`：文档计数 170→171 + M1 需求稿行。
-3. 根 `README.md`：Project layout 或 Status 注一句应用侧 M1 启动（不动 Phase 表）。
+1. `desktopnest-roadmap.md` → **v1.19**：M1 行标「v1.1 评审 PASS → 初设」+ **框架侧新增缺口（窗口几何）已立 Phase 31** + **G-6 拖动路线勘误**（`HTCAPTION` 系统路线；`IsButtonDown` 生产零消费）+ `MouseEvent.h:61` → **`:59`** 行号订正。
+2. `docs/README.md`：M1 需求稿行状态 → v1.1 PASS；**新增 Phase 31 需求稿行**（文档计数 171 → 172）。
+3. 根 `README.md`：M1 行已存在（2026-10-08 落盘时写入）——本版**仅需**在措辞上反映「依赖 Phase 31」，不动 Phase 表（Phase 31 未收口前不进 Status 表）。
 4. memory 同步。
 
 ---
 
-## 7. 修订记录
+## 7. 初设闸门（★ v1.1 新增——评审移交的三件必钉项）
 
-- v1.0（2026-10-08）初稿。§9 四问拍板（自绘 / 可拖动不可缩放 / DesktopNest / M1 体系）+ **G-6 证据勘误**（Phase 19 `IsButtonDown` 已在——roadmap G-6 行「无按键状态」过期）+ §9-6 简化（拆出落点一律级联，不判重叠）+ K1–K7 / A1–A5 / 影响面（框架 0 改动）。
+★ 本节的定位：**进初步设计的闸门清单**。需求阶段只登记「初设必须解决什么」，**不含任何设计结论**（事件流图 / 类结构 / 同步伪代码一律留初设）。
+
+| # | 必钉项 | 评审原话要点 |
+|---|---|---|
+| **P1** | **Popup 的 capture 与「点外关闭」事件流** | 「初设最好明确：打开 Popup → capture owner = ？ → MouseDown/MouseUp/Move → 如何判断点击在 popup 内还是外 → 关闭 popup → ReleaseCapture」；★ 评审点名的风险：「**避免 Popup 自己 capture，然后所有 MouseDown 都被 Popup 自己吃掉，导致『点外面关闭』反而无法自然发生**」——★ **不阻塞需求**，但初设必须把事件流画清楚。 |
+| **P2** | **Box / View / Model 的职责边界** | 「『Box』目前还是一个**概念对象**……不要让一个 `BoxWidget` 同时承担**窗口生命周期 / 模型 / 视图**，否则后面 M2/M3 很容易开始纠缠」；评审倾向第三种思路：`DesktopNest → BoxWindow → BoxView` + 独立 `model`。 |
+| **P3** | **收编/拆出/切换之后 Model → UI 的同步机制** | 「应该保持 `Model` →（sync）→ `UI`……尤其**收编/拆出是模型操作，然后 UI 重建/同步**——不要变成『点击收编 → 直接删 Widget → 然后顺便修改 members』」。 |
+
+★ **同表另记两条评审已认可、勿再重开的事项**：① **浮层容器禁用 `Panel`**（`ContainsPoint` 恒 false ⇒ 穿透）——评审明确「建议继续作为实现期的**红线**」；② **不要再为 M1 做框架设计**——「Desktop Layer、拖动、折叠、布局、主题、DPI……**直接消费现有 ECDI 能力**」（与本稿 §2.1 的修正一致：唯一例外是 Phase 31 已立的窗口几何）。
+
+---
+
+## 8. 修订记录
+
+- **v1.0**（2026-10-08）初稿。§9 四问拍板（自绘 / 可拖动不可缩放 / DesktopNest / M1 体系）+ **G-6 证据勘误**（Phase 19 `IsButtonDown` 已在——roadmap G-6 行「无按键状态」过期）+ §9-6 简化（拆出落点一律级联，不判重叠）+ K1–K7 / A1–A5 / 影响面（框架 0 改动）。
+- **v1.1**（2026-10-08）**评审吸收（PASS → Preliminary Design）**。**评审总判**：M1 定位正确（观感里程碑而非功能里程碑）· 框架侧零新增这一验证价值高 · 首次串成「ECDI → 应用层 → 桌面交互 → 验收」闭环；13 项 = **10 ✅ + 3 🟡**。**本版实体改动**：① **§2.1 表**改为「七项就绪 + **两项缺口**」并新增**勘误一**——**「框架改动 0」不再成立**，K2/K4 所需运行期窗口几何**框架刻意不提供**（`PlatformWindow.h:162`），**已另立 Phase 31**（同 Phase 含 harness `REQ-05` 行高口径缺陷）；② **勘误二**补充**拖动路线修正**——`CaptionBar` 既有路线是 `HTCAPTION` 系统拖动（`Win32PlatformWindow.cpp:490-504`），`IsButtonDown` **生产零消费**，故 **K5 改走系统路线**、**A4 判据随之改**；③ **§2.2 模型定型**（评审 §14：`Box` / `Member` 两层 + 明示 M1 不放文件路径）；④ **K6 冻结初始态与 A1 验收路径**（评审 §15：消除「或运行期现场收编」的二义）；⑤ **K4 增补 Model→UI 单向数据流纪律**（评审 §13）；⑥ **新增 §7 初设闸门**（评审移交的 P1/P2/P3 三件必钉项 + 两条勿重开事项）；⑦ 行号订正 `MouseEvent.h:61` → **`:59`**；⑧ §5 风险与 A5 口径随之修正（依赖 Phase 31）。★ **§ 编号约定**：新增 §7「初设闸门」插在修订记录**之前**，原 §7 修订记录顺延为 **§8**（本稿 v1.0 的 §7 即修订记录）。**未改动**：K1/K3/K7 的实质内容 · §1 目标与非目标 · roadmap §9 四问拍板结论。
