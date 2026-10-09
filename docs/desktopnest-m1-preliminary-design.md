@@ -1,7 +1,7 @@
-# DesktopNest M1 · 初步设计（v1.1）
+# DesktopNest M1 · 初步设计（v1.2）
 
 > 来源：需求稿 `desktopnest-m1-requirements.md` **v1.1 ✅ 评审通过（PASS → Preliminary Design）**
-> 状态：**v1.1**（2026-10-08，自审缺口补完——A 类矛盾修正 + B 类机制补节 + C 类接口钉死 + D 类 A→C→T 闭合；待评审）
+> 状态：**v1.2**（2026-10-09，外部评审吸收——**有条件通过** ⇒ 必须项 P1–P5 / P7 / P8 + 建议项 P6 / P9 全部闭合；待复核 → 详细设计）
 > 定位：**初步设计**——把需求稿 **§7 初设闸门**的三件必钉项（P1 capture 事件流 / P2 Box·View·Model 边界 / P3 Model→UI 同步）钉死，落成组件划分与接口契约。
 > ★★ **框架侧改动 = 0**（需求稿 §2.1 v1.1 修正后的口径）：M1 **消费** Phase 31 已交付的运行期窗口几何；**本初设不新增任何框架 API**（评审「不要再为 M1 做框架设计」）。
 > ★ **依赖前置已就绪**：Phase 31 **三批全部实施完成**（`SetBounds` / `GetBounds` 可用 · 三链 366/366）⇒ M1 的窗口几何阻塞**已解除**。
@@ -100,7 +100,7 @@ void BoxRoot::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 | # | 边界 | 说明 | 去向 |
 |---|---|---|---|
-| **B1** | **标题条区域的点击不会关闭浮层** | 标题条走 `HTCAPTION`（F8：空白处 `IsClientInteractiveAt` 为 false）⇒ 该 Down **不进 Widget 派发链** ⇒ 根容器收不到 ⇒ 浮层不关（★ 且此时用户意图是「拖框」，不关是**合理**的） | 记为**设计选择**（非缺陷） |
+| **B1** | **标题条空白区的点击不会关闭浮层**（★ v1.2 收窄——标题条**按钮**会进派发链 ⇒ **会**触发点外关闭，见 §3.2） | 标题条空白走 `HTCAPTION`（F8：空白处 `IsClientInteractiveAt` 为 false）⇒ 该 Down **不进 Widget 派发链** ⇒ 根容器收不到 ⇒ 浮层不关（★ 且此时用户意图是「拖框」，不关是**合理**的）；标题条上的按钮（`ConsumesMouseInput=true`）**会进派发链** ⇒ 根容器判据适用 ⇒ 点另一个按钮**会关闭**浮层 | 记为**设计选择**（非缺陷） |
 | **B2** | **点其他框 / 桌面不会关闭浮层** | 每个框是**独立顶层窗口**；点别的窗口 ⇒ 消息进那个窗口 ⇒ 本框无从得知。★ 框架**零窗口失活事件**（F4）⇒ 无跨窗关闭的现成手段 | ★ **M1 不做**（需框架级能力）；记为 **O6** |
 
 ★ **另一条可选路径（不采用，记为备选）**：`backdrop`（弹浮层时铺一层全框透明裸 `Widget` 作遮罩，点它即关闭）。
@@ -114,7 +114,7 @@ void BoxRoot::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 | 件 | 层 | 职责（一句话） | ★ **不做什么** |
 |---|---|---|---|
-| **`BoxModel`** | **纯数据**（`desktopnest::` 命名空间，**零 ECDI 依赖**） | 持有全部框的 `Box` 记录（`id` / `title` / `state` / `members` / `active`），提供**纯函数式**查询与变更（`Collect` / `Detach` / `SetActive` / `Toggle`），并在每次变更后**发通知** | ★ **不持有 Widget / Window / 任何 ECDI 类型**；**不做布局、不碰 UI** |
+| **`BoxModel`** | **纯数据**（`desktopnest::` 命名空间，**零 ECDI 依赖**） | 持有全部框的 `Box` 记录（`id` / `title` / `state` / `members` / `active` / **`placement`**[收编时由应用侧传入后保存]），提供**纯函数式**查询与变更（`Collect` / `Detach` / `SetActive` / `Toggle`——★ 窗口几何一律**作数据参数传入**[如 `Collect(a, b, placement)`]，**Model 内部不读窗口**——P2），并在每次变更后**发通知** | ★ **不持有 Widget / Window / 任何 ECDI 类型**；**不做布局、不碰 UI** |
 | **`BoxWindow`** | **窗口生命周期** | 持有一个顶层 `Window&`（经 `Application::Create`）+ 其**根子树**（`BoxRoot` + `BoxView`——装配接线见 **C-M1-9**）；负责创建 / 销毁 / 用 Phase 31 的 `SetBounds`/`GetBounds` 落实几何 | ★ **不解释鼠标手势**、**不持有成员语义**（那是 View/Model） |
 | **`BoxView`** | **视图组装** | 组装框内控件树（**根容器 `BoxRoot`** + 标题条三部件 + 内容区 + 浮层）；把用户操作**翻译成 Model 调用**；按 Model 状态**重建/同步**自身；**「点外关闭」判据的宿主**（§1.1.2——落在 `BoxRoot::OnMouseButtonDown`） | ★ **不直接改 `members`**（必须经 Model）；★ **不自行决定几何**（窗口几何归 `BoxWindow`）；★ **不碰 `Window` 类型**（几何请求经 `BoxWindow&`——C-M1-6/9） |
 | **`MemberListPopup`** | **视图（浮层的独立件）** | 浮层本体（裸 `Widget` 子类）：两分区渲染 + 选择意图回调 + **弹出几何**（§3.4） | ★ **不碰 Model**——它只**发出选择意图**（回调），由 `BoxView` 转译成 Model 调用；★ **不承担「点外关闭」判据**——判据在 `BoxRoot`（F1 冒泡链决定 popup 收不到点外事件，§1.1.2） |
@@ -129,14 +129,14 @@ void BoxRoot::OnMouseButtonDown(const MouseButtonDownEvent& event){
 ```
 用户操作（如点「收编 B」）
       ↓
-① BoxView 的意图转译：model.Collect(a, b)          ← ★ 只改数据
+① BoxView 的意图转译：model.Collect(a, b, placement) ← ★ 只改数据（placement = 应用侧经 `BoxWindow::GetBounds()` 读回后**作数据传入**——P2：Model 不碰窗口）
       ↓
 ② BoxModel 内部：members 变更 → 自增 revision → **多播通知**（★ **形态钉死 = 多播 `std::function` 回调列表**——沿框架 Phase 7.5 先例[`Button::SetOnClick`]；签名 `void(BoxId, ModelChange)`，Model 对**每个受影响的 Box 各发一次**：收编/拆出 = 2 次[A 与 B]、切换 = 1 次；`BoxView` 在**构造期**注册自己的 handler）
       ↓
 ③ 各 BoxView 的 OnModelChanged() 被调用             ← ★ 唯一的 UI 更新入口
       ↓
 ④ View 按**当前 Model 状态**重建/同步自身：
-     · 被收编者（B）：BoxWindow->Close()（销毁窗口）  ← ★ 由 View 执行「窗口生命周期」的请求
+     · 被收编者（B）：BoxWindow->Close()（关原生窗口——包装对象存活，C-M1-10）  ← ★ 由 View 执行「窗口生命周期」的请求
      · 收编者（A）：标题徽标 / 成员列表 / 内容 按新 state 重建
       ↓
 ⑤ 收尾：Invalidate()（★ 条 65——数据变了必须显式请求重绘）
@@ -151,6 +151,8 @@ void BoxRoot::OnMouseButtonDown(const MouseButtonDownEvent& event){
 | **S3** | **`OnModelChanged` 必须幂等**（按当前状态重建，不依赖「上一次是什么」） | ❌ 「删掉刚加的那个 Widget」式增量补丁 |
 
 ★ **S3 的意义**：让「Model 是唯一真相源」在实现上可验证——**重建的结果只取决于 Model 快照**；A2 用例即按此断言（改 Model → 调 handler → 查 UI 与 Model 一致）。
+
+★ **派发顺序契约（P4）**：`Collect()` **先完成全部数据变更**（Model 内部状态已一致）→ 再按**快照**派发通知（C-M1-8）→ handler **只读完整的 Model 状态**重建 → 关闭 / 重建窗口按 **C-M1-10** 生命周期契约执行 ⇒ 仍待执行的 handler 不会访问已销毁对象（M1 内 `BoxView` 不随窗口销毁——C-M1-10）。
 
 ---
 
@@ -202,6 +204,8 @@ win.SetWindowLayer(WindowLayer::Desktop);                    // K1 常驻：被�
 
 ★ **成员数徽标**（K3「左侧按钮加成员数徽标」）：左侧按钮 = `BadgeButton : public Button`——`OnPaint` 先调 `Button::OnPaint`（既有绘制不动），再在按钮右上角叠加**圆角底 + 数字**（`DrawRoundedRectCommand` + `DrawTextCommand`，命令现成）；徽标值 = `members.size()`（M1 假数据下仅合并框 C 显示 `2`），经 `OnModelChanged` 重建（S3 幂等）。★ **不自创绘制设施**——只消费 Phase 5.1 / Phase 8 命令。
 
+★ **入口按钮二次点击（P6 契约）**：浮层已打开时再点左侧入口按钮 = **关闭浮层**（切换语义——二态浮层的自然行为，避免「按钮失响应」观感）。实现：按钮 `OnClick` 判 `m_popup->IsVisible()` ⇒ 已开则走 §1.1 的同一关闭路径（`SetVisible(false)` + `Invalidate()`），未开则 `Open()`。
+
 ### 3.3 折叠 / 展开（K2）
 
 **消费 `CollapsiblePanel` 既有语义**（`SetExpanded` / `Toggle` / `SetExpandDirection(Down)`）：
@@ -217,6 +221,7 @@ win.SetWindowLayer(WindowLayer::Desktop);                    // K1 常驻：被�
 - **z 序**：`AddChild` **最后一个**（F5：逆序命中 ⇒ 最上层）；
 - **点外关闭**：§1.1 的判据；
 - ★ **弹出几何（钉死）**：锚点 = 标题条左侧按钮——`x` = 按钮左边缘、`y` = 标题条底边（= `captionHeight` = **32 DIP**）；**宽 = 框客户区宽**、**高 = 内容区剩余高度**（框高 − 标题条高）⇒ 浮层 = 覆盖内容区的全高浮层。理由三条：① K3「浮层不改变框尺寸」⇒ 只能占框内已有空间；② O2「不出框」⇒ 高 = 内容区高；③ 入口在标题条 ⇒ 从标题条底边展开是唯一自然锚点。★ 像素级微调（留边 / 圆角）留详设，**几何口径初设钉死**。
+- ★ **「点外面」的实际范围（P5 注记）**：浮层铺满内容区 ⇒ 框内 popup 之外的**可交互区域 = 标题条上的按钮**（标题条空白走 `HTCAPTION` 不进派发链——B1）⇒ M1 的点外关闭触发面 = 标题条按钮（含入口按钮二次点击 = P6 关闭）；内容区在浮层打开期间不可点（标准下拉面板行为）。
 - **不改变框尺寸**：浮层是框内的**浮层**（绝对定位在框内，允许溢出框外？⇒ ★ **M1 限制：浮层位于框内且不出框**——理由：出框需要「子节点不裁剪」的额外语义（`ClipsChildren` 是 `ScrollView` 等在用），M1 不做。**记为 O2**）。
 
 ### 3.5 收编 / 拆出 / 切换（K4）
@@ -225,8 +230,8 @@ win.SetWindowLayer(WindowLayer::Desktop);                    // K1 常驻：被�
 
 | 操作 | Model | View（在 `OnModelChanged` 中） |
 |---|---|---|
-| **收编** `A.Collect(B)` | `A.members += B`；`B` 记录 `placement`（收编前 `GetBounds`）后标记为非顶层 | `B.BoxWindow->Close()`；`A` 重建徽标/列表 |
-| **拆出** `A.Detach(B)` | `A.members -= B`；`B` 恢复为顶层 | `B.BoxWindow = Create()` + `SetBounds(恢复的 placement 或级联偏移)` |
+| **收编** `A.Collect(B, placement)` | `A.members += B`；保存**传入的** `placement`（★ **P2**：由应用侧经 `BoxWindow::GetBounds()` 读回后**作数据传入**——Model 内部不读窗口）后标记 B 非顶层 | `B.BoxWindow->Close()`（★ **P3 / C-M1-10**：只关原生窗口，**包装对象与 `BoxView` 不销毁**）；`A` 重建徽标/列表 |
+| **拆出** `A.Detach(B)` | `A.members -= B`；`B` 恢复为顶层 | **同一包装对象** `B.BoxWindow->Create()`（★ **P3 / C-M1-10**：`Create()` 可重复调用——重建 `Window&` + `BoxRoot` + 控件树）+ `SetBounds(恢复的 placement 或级联偏移)` |
 | **切换** `A.SetActive(X)` | `A.active = X` | `A` 重建标题 + 内容区 |
 
 ★ **级联偏移**（K4 冻结「一律级联、不判重叠」）：`newPlacement = 原 placement + (kCascadeStep, kCascadeStep)`（无记忆时 = 收编者右下角 + 步进）。
@@ -262,21 +267,24 @@ int main(){
 
 ★ **所有权链**（无环——C-M1-4）：`main` 拥有 `BoxModel`（最底层）与 `BoxWindow` 列表；`BoxWindow` 拥有 `BoxView` 并持 `Window&`（`Application::Create` 返回，窗口生命周期由 `Application` 容器管理——框架既有契约）；`BoxView` 持 `BoxWindow&`（**几何请求唯一通道**——C-M1-6/9）与 `BoxModel&`（数据）；`BoxModel` **零 ECDI 依赖**。`BoxView` 构造期向 `BoxModel` 注册自己的变更 handler（C-M1-8）——`main.cpp` **不注册**任何 Model 回调。
 
+★ **`BoxWindow` 生命周期契约（P3 / C-M1-10）**：包装对象由 `main` **持有至应用退出**（收编后 B 的包装对象**活着**、窗口关着；拆出时经**同一对象** `Create()` 重建——`main` 容器**不换对象**）；`Close()` **只关原生窗口**（HWND 与其控件树由框架随窗口销毁），**不销毁 `BoxView`**（归包装对象所有）⇒ M1 内**无对象销毁 ⇒ 无悬空回调**（P1 结构性消解）；**禁止**使用已 `Close()` 的 `Window&`。
+
 ---
 
-## §4 契约（C-M1-1..C-M1-9）
+## §4 契约（C-M1-1..C-M1-10）
 
 | # | 契约 |
 |---|---|
-| **C-M1-1** | **框架侧改动 = 0**（公共 API 0 / 框架 CMake 0）；M1 只消费 Phase 31 + 既有能力 |
+| **C-M1-1** | **框架公共 API = 0 / 框架实现文件 = 0**；**框架 CMake 按测试集成允许最小改动**（★ v1.2 评审吸收 **P7 = O5 拍板 (a)**：M1 用例沿 `ModelProbeTests` 先例进 `ecdi_tests`——`TEST_SOURCES` 追加应用源 +1~2 行）；M1 只消费 Phase 31 + 既有能力 |
 | **C-M1-2** | ★★ **浮层不建立捕获**；**「点外关闭」判据落在「框的根容器」**（不是 popup 自己——F1 冒泡链决定 popup 收不到「点外」事件，见 §1.1.2） |
 | **C-M1-3** | **浮层容器必须是裸 `Widget`**（禁 `Panel`——`ContainsPoint` 恒 false ⇒ 穿透） |
 | **C-M1-4** | **依赖单向**：`BoxModel` 零 ECDI 依赖 ← `BoxView` ← `BoxWindow`；**无环** |
 | **C-M1-5** | **UI 更新唯一入口 = `OnModelChanged`**（S1）；**Model 变更前不碰 Widget**（S2）；**重建幂等**（S3） |
-| **C-M1-6** | **窗口几何只经 `BoxWindow`**（`SetBounds` / `GetBounds`）；`BoxView` 不直接碰 `Window` |
+| **C-M1-6** | **窗口几何只经 `BoxWindow`**（`SetBounds` / `GetBounds`）；`BoxView` 不直接碰 `Window`；几何**作数据**传入 `BoxModel`（`Collect(a, b, placement)`——**P2**：Model 内部不读窗口） |
 | **C-M1-7** | **折叠先 `SetBounds` 后 `SetExpanded`**；折叠保留 `x/y` 只改 `height`（K2） |
-| **C-M1-8** | **Model 通知 = 多播 `std::function` 回调**（沿 Phase 7.5 先例）；签名 `void(BoxId, ModelChange)`，每个受影响 Box 各发一次；`BoxView` 构造期注册，`main.cpp` 不注册 |
+| **C-M1-8** | **Model 通知 = 多播 `std::function` 回调**（沿 Phase 7.5 先例）；签名 `void(BoxId, ModelChange)`，每个受影响 Box 各发一次；**注册 / 注销成对**（`BoxView` 析构时注销——**P1**）；**派发 = 先复制回调快照再遍历**（handler 内注销只改活列表、不影响本轮已快照的派发——P1）；红线：**handler 只关闭自己的窗口**（P1/P4）；`BoxView` 构造期注册，`main.cpp` 不注册 |
 | **C-M1-9** | **装配接线**：`BoxWindow::Create()` 内 = `Application::Create` → `BoxRoot` 挂 `GetRootWidget()` → `BoxView` 装配；`BoxView` 持 `BoxWindow&`（几何请求唯一通道），不碰 `Window` 类型 |
+| **C-M1-10** | **`BoxWindow` 生命周期契约**（**P3**）：包装对象由 `main` **持有至应用退出**（收编后活着、窗口关着；拆出经**同一对象** `Create()` 重建——容器不换对象）；`Close()` **只关原生窗口**（HWND + 控件树随窗口销毁），**不销毁 `BoxView`**；`Create()` **可重复调用**（重建 `Window&` → `BoxRoot` 挂 `GetRootWidget()` → `BoxView` 重建控件树——成员重建清单由详设枚举）；**禁止**使用已 `Close()` 的 `Window&` |
 
 ---
 
@@ -288,8 +296,8 @@ int main(){
 | **O2** | 浮层是否允许**溢出框外** | ★ **M1 不允许**（框内绝对定位）——溢出需「子节点不裁剪」语义，M1 不做（YAGNI） |
 | **O3** | 「加入成员…」的候选列表**排序规则** | 按 Model 记录序（插入序）——M1 假数据规模下不值得排序 |
 | **O4** | `CaptionBar` 复用 vs 自绘标题条（需求稿 §2.1 原留项） | ★ **倾向自绘**——`CaptionBar` 的三按钮（最小化/最大化/关闭）与 M1 需要的三部件（成员列表/标题/折叠）**语义不符**；且 `CaptionBar` 内部固定布局，无法插入「徽标」⇒ **自组装标题条**（容器 + 三子件） |
-| ★ **O5** | ★★ **M1 用例进 `ecdi_tests` 需改框架 `CMakeLists.txt`**（追加应用源到 `TEST_SOURCES`——沿 `ModelProbeTests` 先例 `CMakeLists.txt:157`）⇒ **与 C-M1-1「框架 CMake 0」冲突** | 两选项见 **§8 第 4 问**；★ **倾向 (a)**（沿先例、测试同批跑），并把 **C-M1-1 如实修正**为「框架公共 API 0 / 框架 CMake **+1 行**」 |
-| ★★ **O6** | **点「其他框 / 桌面」不关闭浮层**（§1.1.3 B2）：每框是独立顶层窗口，且框架**零窗口失活事件**（F4）⇒ **无跨窗关闭手段** | ★ **M1 接受**（记为已知边界——不影响 A1/A3 验收：A3 只要求「点外部关闭」，M1 口径 = **同框内**点外部）；★ 若将来要求跨窗关闭 ⇒ 需框架级「失活事件」（**新 Phase**，M1 不做） |
+| ★ **O5** | M1 用例进 `ecdi_tests` 需改框架 `CMakeLists.txt`（追加应用源到 `TEST_SOURCES`——沿 `ModelProbeTests` 先例 `CMakeLists.txt:157`） | ✅ **已拍板 (a)**（v1.2 评审吸收 **P7**——用户确认）：公共 API 0 / 框架实现 0 / 框架 CMake **按测试集成允许最小改动**（+1~2 行）⇒ **C-M1-1 已如实修正**；自动验收与框架测试**同批跑** |
+| ★★ **O6** | **点「其他框 / 桌面」不关闭浮层**（§1.1.3 B2）：每框是独立顶层窗口，且框架**零窗口失活事件**（F4）⇒ **无跨窗关闭手段** | ✅ **已拍板：接受为 M1 已知边界**（v1.2 评审吸收 **P8**——用户确认）；验收口径统一：**「点外关闭」= 同框内、进 Widget 派发链的外部点击**（不含他窗 / 桌面 / `HTCAPTION` 标题条空白——B1）；若将来要求跨窗关闭 ⇒ 需框架级「失活事件」（**新 Phase**，M1 不做） |
 | **O7** | 切换成员时的**内容滚动** | ★ **M1 不做**（需求稿 K4 允许后置——M1 假列表不超出一屏）；内容超出时的滚动留 M2+（`ScrollView` 能力现成，届时直接消费） |
 
 ---
@@ -308,14 +316,14 @@ int main(){
 
 | 用例 | 验收 | 契约 | 装置与判据 |
 |---|---|---|---|
-| **T-M1-1** | **A2** | C-M1-5 / C-M1-8 | **收编** `B→A`：断言 `A.members` 含 `B`、`A` 徽标重建为 `2`、`B` 收到销毁请求（`BoxWindow::Close` 被调） |
-| **T-M1-2** | **A2** | C-M1-5 / C-M1-6 / C-M1-8 | **拆出** `B`：`A.members` 移除 + `B` 窗口重建；`SetBounds` 恢复 placement（有记忆）/ 级联偏移 `原值 + (kCascadeStep, kCascadeStep)`（无记忆）逐项断言 |
-| **T-M1-3** | **A2** | C-M1-5 / C-M1-8 | **切换成员**：`active` 变更 + 标题 / 内容区重建断言 |
-| **T-M1-4** | **A3** | C-M1-2 / C-M1-3 | 点浮层空白 ⇒ `HitTest` 命中 popup 自身（**不穿透**）；点框内外部 ⇒ 根容器判据触发关闭（`IsVisible == false`）；浮层期间 `GetBounds` **逐位不变** |
+| **T-M1-1** | **A2** | C-M1-5 / C-M1-8 / C-M1-10 | **收编** `B→A`：断言 `A.members` 含 `B`、`A` 徽标重建为 `2`、`B` 收到销毁请求（`BoxWindow::Close` 被调——**只关原生窗口，包装对象与 `BoxView` 存活**）；**`A`、`B` 各恰好收到一次通知**（P9） |
+| **T-M1-2** | **A2** | C-M1-5 / C-M1-6 / C-M1-8 / C-M1-10 | **拆出** `B`：`A.members` 移除 + `B` 窗口经**同一包装对象** `Create()` 重建（容器不换对象）；`SetBounds` 恢复 placement（有记忆）/ 级联偏移 `原值 + (kCascadeStep, kCascadeStep)`（无记忆）逐项断言；★ **关闭 B 后后续 Model 变更仍安全**（P9——收编后 B 窗口关着、`BoxView` 存活，后续通知不触及已关窗口） |
+| **T-M1-3** | **A2** | C-M1-5 / C-M1-8 | **切换成员**：`active` 变更 + 标题 / 内容区重建断言；**仅 `A` 收到通知**（其他框 0 次——P9） |
+| **T-M1-4** | **A3** | C-M1-2 / C-M1-3 | 四条路径分开断言（**P5**）：① 点 popup 内部控件 ⇒ 不关闭；② 点 popup 空白 ⇒ `HitTest` 命中 popup 自身（**不穿透**）、不关闭；③ 点标题条**另一按钮** ⇒ 根容器判据触发关闭（`IsVisible == false`）；④ 点标题条**空白** ⇒ 走 `HTCAPTION`、**不进派发链**、不关闭；⑤ 浮层打开时再点入口按钮 ⇒ 关闭（**P6** 切换契约）。浮层期间 `GetBounds` **逐位不变** |
 | **T-M1-5** | **A3** | C-M1-5（S3） | 重建幂等：连续两次触发 `OnModelChanged` ⇒ UI 状态逐位一致 |
 | **T-M1-6** | **A4** | C-M1-1 | `IsClientInteractiveAt`：标题条空白 ⇒ `false`（走 `HTCAPTION`）/ 标题条按钮 ⇒ `true` |
 
-★ **装置**：沿 `ModelProbeTests` 先例（demo 实现链入 `ecdi_tests`——O5 待拍板）；`BoxModel` 零 ECDI 依赖 ⇒ **T-M1-1..3 可在纯数据层先验（无头）**；T-M1-4..6 需窗口装置（`TestWindow` 先例 / `RecordingBackend`）。
+★ **装置**：沿 `ModelProbeTests` 先例（demo 实现链入 `ecdi_tests`——O5 已拍板 (a)）；`BoxModel` 零 ECDI 依赖 ⇒ **T-M1-1..3 可在纯数据层先验（无头）**；T-M1-4..6 需窗口装置（`TestWindow` 先例 / `RecordingBackend`）。★ 通知次数的观测 = 各 `BoxView` 的 handler 内放测试计数器（P9 的「各恰好一次 / 仅 A」由此断言）；**派发期注销的专测装置留详设**（C-M1-8 快照契约的实证）。
 
 ---
 
@@ -323,10 +331,10 @@ int main(){
 
 | 维度 | 值 |
 |---|---|
-| 框架公共头 / API | **0 / 0** |
-| 框架 CMake | **0**；根 CMake **+1 行** |
+| 框架公共头 / API / 实现文件 | **0 / 0 / 0** |
+| 框架 CMake | **+1~2 行**（★ v1.2 评审吸收 **P7 = O5 拍板 (a)**：`TEST_SOURCES` 追加应用源，沿 `ModelProbeTests` 先例）；根 CMake **+1 行** |
 | 应用侧文件 | **6**（§2；★ 需求稿原写 4——按 P2 四件分离如实上修） |
-| 测试 | 新增 M1 用例 **6 条**（**T-M1-1..6**——§6 A→C→T 闭合表：A2×3 / A3×2 / A4×1）——★ **需框架 CMake 的 tests 链接应用实现**（沿 `ModelProbeTests` 先例：`CMakeLists.txt:157` 把 `ModelProbe.cpp` 追加进 `TEST_SOURCES`）⇒ ★ **框架 CMake 可能 +1~2 行**（★ 与 C-M1-1「框架 CMake 0」**冲突**，见 O5） |
+| 测试 | 新增 M1 用例 **6 条**（**T-M1-1..6**——§6 A→C→T 闭合表：A2×3 / A3×2 / A4×1；判据含 P5 四路径 + P6 切换 + P9 通知次数）——需框架 CMake 的 tests 链接应用实现（沿 `ModelProbeTests` 先例：`CMakeLists.txt:157` 把 `ModelProbe.cpp` 追加进 `TEST_SOURCES`）⇒ 框架 CMake **+1~2 行**（O5 已拍板 (a)，与 C-M1-1 v1.2 修正一致） |
 | 风险 | **低～中**——零文件操作；最大不确定点已由 §1 三题钉死 |
 
 ---
@@ -336,8 +344,10 @@ int main(){
 1. **P1 的方案**（§1.1）：★ **「不建立 popup 捕获」+「判据落在框的根容器」** 是否认可——它是评审点名风险的**结构性规避**（§1.1.2 给出了 F1 冒泡链的推论：判据放 popup 上是**死代码**）；
 2. **P2 四件分离**（`BoxModel` / `BoxWindow` / `BoxView` / `MemberListPopup`）是否认可；
 3. **O4 倾向自绘标题条**（不复用 `CaptionBar`）是否认可；
-4. ★ **新增 O5**（§7 暴露的冲突）：M1 用例要进 `ecdi_tests` 就需**改框架 `CMakeLists.txt`**（追加应用源）——这与 C-M1-1「框架 CMake 0」冲突。**两个选项**：**(a)** 沿用 ModelProbe 先例，框架 CMake +1 行（**如实修正** C-M1-1 为「框架公共 API 0 / 框架 CMake +1 行」）；**(b)** M1 用例不进 `ecdi_tests`，改为应用侧独立测试目标（**框架 CMake 仍 0**，但测试不在主套件里跑）。★ **本稿倾向 (a)**——沿既有先例、且 M1 的自动验收（A2/A3/A4）应当与框架其余测试**同批跑**；
-5. ★★ **O6（跨窗关闭）**：§1.1.3 B2 登记的边界——**点其他框/桌面不关闭浮层**（框架零失活事件）。★ **M1 是否接受该边界**？（接受 ⇒ 不影响 A3 验收口径；不接受 ⇒ 需**新立框架 Phase** 加失活事件，M1 顺延）。
+4. ~~O5~~ ✅ **已拍板 (a)**（v1.2——用户确认评审建议 **P7**）：M1 用例进 `ecdi_tests`（沿 `ModelProbeTests` 先例），框架 CMake 按测试集成允许最小改动；C-M1-1 / §7 已如实修正；
+5. ~~O6~~ ✅ **已拍板：接受为已知边界**（v1.2——用户确认评审建议 **P8**）；验收口径已统一（见 §5 O6 行 / §6 T-M1-4）。
+
+★ **外部评审结论（v1.2 吸收）**：**有条件通过**——必须项 P1–P5 / P7 / P8 与建议项 P6 / P9 **全部闭合于本版**（见 §9 v1.2 修订记录）；第 1–3 问仍待确认。
 
 ---
 
@@ -356,3 +366,13 @@ int main(){
   ④ **D 类（验收闭合）**：§6 **新增 A→C→T 闭合表**——**T-M1-1..6**（A2×3 / A3×2 / A4×1；`BoxModel` 零依赖 ⇒ T-M1-1..3 纯数据层无头先验，T-M1-4..6 窗口装置）；§7 测试数「~4–6 条」收敛为 **6 条**；
   ⑤ **契约表扩为 C-M1-1..C-M1-9**、**开放项扩为 O1–O7**。
   **未改动**：§1.1 P1 全部结论（F1–F8 / B1 / B2 / 根容器判据）· §1.2 四件分离形态 · §1.3 S1–S3 纪律 · §8 待评审五问。
+- **v1.2**（2026-10-09）**外部评审吸收**（GPT 评审：**有条件通过**——「架构方向基本通过，但先修正几个实现前必须明确的问题」；用户拍板确认全部吸收项 + O5 (a) / O6 接受）。**实体改动**：
+  ① **P1（Model 回调生命周期）**：C-M1-8 修订——**注册 / 注销成对**（`BoxView` 析构时注销）；**派发 = 先复制回调快照再遍历**（handler 内注销只改活列表、不影响本轮已快照的派发）；红线 = **handler 只关闭自己的窗口**；★ 评审指出的「销毁订阅者 ⇒ 悬空回调」风险，由 P3 的选择**结构性消解**（M1 内 `BoxView` 不随窗口销毁——C-M1-10），注销 + 快照是为将来所有权调整留的安全缝；
+  ② **P2（`Collect()` 的 placement 越界——真实笔误）**：§1.2 / §1.3 / §3.5 收编行全部改为**应用侧经 `BoxWindow::GetBounds()` 读回后作数据传入**（签名 `Collect(a, b, placement)`）——`BoxModel` 纯数据边界成立（Model 内部不读窗口）；`Box` 记录字段增列 `placement`（收编时保存）；
+  ③ **P3 + P4（`BoxWindow` 生命周期契约 + 通知顺序）**：**新增 C-M1-10**——包装对象 `main` 持有至应用退出（收编后活着、窗口关着；拆出经**同一对象** `Create()` 重建，容器不换对象）；`Close()` 只关原生窗口、不销毁 `BoxView`；`Create()` 可重复调用（成员重建清单留详设）；禁止使用已 `Close()` 的 `Window&`；§1.3 新增**派发顺序契约**（数据先一致 → 快照派发 → handler 读完整状态 → 按 C-M1-10 执行）；
+  ④ **P5（浮层点外关闭范围 + B1 过宽）**：B1 收窄为「标题条**空白区**不关闭」（标题条**按钮**会进派发链 ⇒ 会触发关闭）；§3.4 新增「点外面」实际范围注记（触发面 = 标题条按钮）；T-M1-4 拆为**四条路径分开断言**（popup 内部 / popup 空白 / 标题条另一按钮 / 标题条空白）；
+  ⑤ **P6（入口按钮二次点击）**：定为**切换契约**——再点入口 = 关闭（§3.2）；T-M1-4 增第 ⑤ 路径；
+  ⑥ **P7（O5 拍板 (a)）**：C-M1-1 如实修正为「公共 API 0 / 框架实现 0 / 框架 CMake 按测试集成允许最小改动（+1~2 行）」；§7 影响面同步；
+  ⑦ **P8（O6 接受）**：O6 标 ✅ 已拍板；验收口径统一为「点外关闭 = 同框内、进 Widget 派发链的外部点击」（不含他窗 / 桌面 / `HTCAPTION` 空白）；
+  ⑧ **P9（通知链路测试）**：折进现有用例判据（不增条数，守 ~4–6 上界）——T-M1-1 += A、B 各恰好一次通知；T-M1-2 += 同一包装对象重建 + 关闭 B 后后续变更安全；T-M1-3 += 仅 A 收到通知；装置注记 = 测试计数器观测通知次数；派发期注销专测装置留详设。
+  **未改动**：§1.1 P1 事件流主体（F1–F8 / 根容器判据 / 事件流图）· §1.2 四件分离 · S1–S3 · §3.1 / §3.3 / §3.6 机制 · T-M1-5 / T-M1-6。
