@@ -1,8 +1,8 @@
 ﻿# DesktopNest M1 详细设计
 
-> **状态**：v1.0（2026-10-09，待评审）
+> **状态**：v1.1（2026-10-09，外部评审吸收——有条件通过 ⇒ 必须项闭合；待复核）
 > **输入**：需求稿 `desktopnest-m1-requirements.md` **v1.1**（评审 PASS）· 初设 `desktopnest-m1-preliminary-design.md` **v1.2**（外部评审吸收版——必须项 P1–P5/P7/P8 + 建议项 P6/P9 全闭合）
-> **定位**：详设 = 初设契约的**落地形式**（条 42（详设/实施规格必须按最小修改面写））——初设已钉的机制（判据落点 / 四件分离 / 单向数据流）此处不重开，只给实现形态；本稿新增物 = 逐文件分解（△1..△12）+ 头全文 + 实现级契约（C-M1-11..C-M1-19）+ 测试装置（§7）。
+> **定位**：详设 = 初设契约的**落地形式**（条 42（详设/实施规格必须按最小修改面写））——初设已钉的机制（判据落点 / 四件分离 / 单向数据流）此处不重开，只给实现形态；本稿新增物 = 逐文件分解（△1..△12）+ 头全文 + 实现级契约（C-M1-11..C-M1-21）+ 测试装置（§7）。
 > **框架事实基准**：初设 §1 的 F1–F8（带行号）继续有效；本稿新增实测引用另行标注行号。
 
 ## §1 范围映射
@@ -32,7 +32,7 @@
 | `Collected` | 收编方（target） | `Rebuild()`（徽标/标题/内容） |
 | `Absorbed` | 被收编方（source） | `m_onAbsorbed()` → 协调器关原生窗口（C-M1-10②） |
 | `MemberDetached` | 源框 | `Rebuild()` |
-| `Released` | 被拆出的成员 | **无本地操作**——其视图树已随旧窗销毁（C-M1-16⑧），协调器负责重建窗口 |
+| `Released` | 被拆出的成员 | **无本地操作**——旧树随旧窗销毁（延迟到泵清理点，C-M1-20；C-M1-16⑧），协调器负责重建窗口 |
 | `Activated` | 切换方 | `Rebuild()` |
 
 ★ 反证（为何三分种不够）：若按操作分种，`Detach` 同时通知源框（应重建）与被拆成员（应无操作）——两者都收到「Detach」，视图无法区分 ⇒ 要么被拆成员误 `Rebuild()`（**悬空访问已销毁的树**），要么源框漏重建。五种即无歧义，且 handler 无需本地状态（无 last-state 跟踪）。
@@ -42,9 +42,9 @@
 | 验收 | 契约 | 用例 | 覆盖边界 |
 |---|---|---|---|
 | A1 观感主回路 | C-M1-1/2/5/7/9 | 人工（K6 冻结路径） | 人工——自动用例不重复 |
-| A2 模型一致性 | C-M1-6/8/13 | T-M1-1/2/3 + T-M1-4⑤ | **流程级自动**（协调器可链入测试——§2.6）；窗口销毁 = `BoxWindow::IsOpen()` 可观测 |
-| A3 浮层纪律 | C-M1-12/19 | T-M1-4 | ①–④ 无头树 + ⑤ 真实派发 |
-| A4 拖动语义 | C-M1-2/5 | T-M1-6 | 命中门控自动；拖动顺滑/拖出边缘不失 = 人工（系统行为） |
+| A2 模型一致性 | C-M1-6/8/13/20 | T-M1-1/2/3 + T-M1-4⑤⑥ | **流程级自动**（协调器可链入测试——§2.6；T-M1-2④ 真调 `Detach()`）；窗口销毁 = `BoxWindow::IsOpen()` 可观测；回收时序 = C-M1-20 框架契约（测试态延后到 `~Application`——有界） |
+| A3 浮层纪律 | C-M1-12/19 | T-M1-4 | ①–④ 无头树 + ⑤ 真实派发 + ⑥ 浮层重开 |
+| A4 拖动语义 | C-M1-2/5 | T-M1-6 | **命中路由自动**；拖动顺滑/拖出边缘不失 = 人工（系统行为）——两者分开记录（评审 §4.3） |
 | A5 既有全绿 | — | 框架套件 | 基线 366（Phase 31 收口值）+ 新增 6 用例 |
 
 ## §2 头全文草案
@@ -78,7 +78,7 @@ enum class ModelChange {
 	Collected,        ///< 收编方：我吸收了一个成员
 	Absorbed,         ///< 被收编方：我成为他人成员
 	MemberDetached,   ///< 源框：我少了一个成员
-	Released,         ///< 被拆出成员：我恢复独立（视图树已随旧窗销毁——无本地操作）
+	Released,         ///< 被拆出成员：我恢复独立（旧树随旧窗销毁——延迟到泵清理点，C-M1-20；无本地操作）
 	Activated         ///< 切换当前成员
 };
 
@@ -431,24 +431,30 @@ public:
 	void Create(Application& application, const Rect& placement,
 	            BoxView& view, std::string title);
 
-	/// 关闭原生窗口（Release——幂等；窗口对象由 Application 持有至析构）。
+	/// 关闭原生窗口（Release——幂等）。
+	/// @details ★ 关闭后**置 m_window = nullptr**（C-M1-20）：Window C++ 对象的销毁是
+	/// **延迟的**（WM_DESTROY → Application 移入 m_deferredDestroy → 消息循环清理点
+	/// 才 ~Window——Application.cpp:127-153 / :109-118）⇒ 包装对象不得保留该指针，
+	/// 否则 GetBounds/SetBounds 转发即悬空解引用。
 	void Close();
 
 	/// 显示（Create 后；A1 人工回路入口）。
 	void Show();
 
 	/// 运行期几何（Phase 31——请求语义）。
+	/// @note Close 后 `m_window == nullptr` ⇒ GetBounds 返回空 Rect（**不得**当有效位置用——
+	///       级联 fallback 的前提见 △6 Detach）。
 	void SetBounds(const Rect& bounds);
 	[[nodiscard]] Rect GetBounds() const;
 
 	/// @name 观测面
 	/// @{
 	bool IsOpen() const noexcept { return m_open; }   // 窗口存活（A2 可观测）
-	Window* GetWindow() const noexcept { return m_window; }   // 测试/协调器缝
+	Window* GetWindow() const noexcept { return m_window; }   // 测试/协调器缝（Close 后为 nullptr）
 	/// @}
 
 private:
-	Window* m_window = nullptr;   ///< 非拥有——Application 容器（Window.h:40）
+	Window* m_window = nullptr;   ///< 非拥有——Application 容器（Window.h:40）；Close 后置空（C-M1-20）
 	bool m_open = false;
 };
 
@@ -683,8 +689,9 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
   }
   ```
 
-  `Close`：`if (m_window) { m_window->Release(); m_open = false; }`（Release 幂等——重复 Close 安全）。
-  `SetBounds`/`GetBounds`：转发 `m_window`（`m_window == nullptr` ⇒ 空 Rect——GetBounds 的「平台窗口未就绪 ⇒ 返回空 Rect」语义，Window.h:168）。
+  `Close`（C-M1-20）：`if (m_window) { m_window->Release(); m_window = nullptr; m_open = false; }`
+  ——Release 幂等（重复 Close 安全）；**置空是必须的**（Window 对象延迟销毁 ⇒ 不置空即悬空指针）。
+  `SetBounds`/`GetBounds`：转发 `m_window`（`m_window == nullptr` ⇒ 空 Rect——Close 后与「平台窗口未就绪」同语义，Window.h:168）。
 
 ### △6 DesktopNest.h/.cpp（新——协调器）
 
@@ -700,8 +707,10 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     	m_model.Collect(target, source, placement);                  // 通知驱动余下一切
     }
     ```
-  - `Detach`：落点 = `recorded.width > 0 ? recorded : CascadedPlacement(m_boxes[box].window->GetBounds())`（恢复优先、无记忆级联——§9-6）→ `m_model.Detach(box)` → 被拆成员**同一 BoxWindow 包装对象**重建：`entry.window->Create(m_app, placement, *entry.view, title)` + `Show()`。
+  - `Detach`：落点 = `recorded.width > 0 ? recorded : CascadedPlacement(sourceBounds)`（恢复优先、无记忆级联——§9-6）→ `m_model.Detach(box)` → 被拆成员**同一 BoxWindow 包装对象**重建：`entry.window->Create(m_app, placement, *entry.view, title)` + `Show()`。
+    ★ **fallback 前提显式化**（评审 §3.2）：级联基准 = **源框自己**的当前窗口边界（`m_boxes[box].window->GetBounds()`）——源框在拆出动作期间必然打开（动作由源框浮层发起），故前提恒成立；契约仍写明「**只在 `IsOpen()` 且读回 `width > 0` 时使用当前边界**，否则落默认落点（源框位置 + 步长，不读已关窗口）」——防日后重建流程改动时误依赖已关闭窗口的边界。
   - `CloseBoxEntry`：`entry.window->Close()` + `entry.view->Disassemble()`（C-M1-10② + C-M1-16 解装不变量）。
+    ★ **顺序不可交换**（C-M1-20）：Close 后旧树仍存活到泵清理点 ⇒ `Disassemble()` 必须紧接着断掉视图的非拥有指针，否则清理点前任何视图访问都是悬空。
   - `CloseOtherPopups`：遍历 `m_boxes`，`id != keepOpen` ⇒ `entry.view->ClosePopup()`。
 
 ### △7 examples/DesktopNest/CMakeLists.txt（新——沿 ModelProbe 模板）
@@ -753,7 +762,7 @@ endif()
 
 - 全文按 §7.2 逐用例判据实现；装置按 §7.1 三层；注册按 §7.3 口径。
 
-## §4 契约（实现级——C-M1-11..C-M1-19；初设 C-M1-1..C-M1-10 为前提，不再重述）
+## §4 契约（实现级——C-M1-11..C-M1-21；初设 C-M1-1..C-M1-10 为前提，不再重述）
 
 | # | 契约 |
 |---|---|
@@ -762,10 +771,12 @@ endif()
 | C-M1-13 | **通知五种**（§1.3）：按「对接收方意味着什么」分种（Collected / Absorbed / MemberDetached / Released / Activated）；handler 无本地状态。 |
 | C-M1-14 | **几何通道可空**：`BoxView::SetBoxWindow(BoxWindow*)`——`nullptr` = 无头测试态，几何请求（折叠 SetBounds）跳过；生产由 `BoxWindow::Create` 注入（△5 步⑦）。细化初设 C-M1-9 的「持 BoxWindow&」——& 形式使无头测试无法构造 BoxView（ModelProbeTests 无窗构造先例）。 |
 | C-M1-15 | **框架测试集成线**（O5 (a) 完整形态）：ecdi_tests = TEST_SOURCES 追加 5 源 + include 目录 1 行（**+6 行**，非初设估的 +1~2——ModelProbe 是单文件先例）；RunAllTests.h/.cpp 各 +1 行登记；公共 API 0 / 框架实现文件 0 不变。 |
-| C-M1-16 | **Create 重建清单**（BoxWindow::Create 十步——△5）：① 释放旧 HWND（幂等）② Application::Create ③–⑥ 配置期四件套 ⑦ 注入几何通道 ⑧ `BoxView::Assemble` 在新根上全量重建（S3）⑨ SetBounds(placement) ⑩ 存活标记。**重建 = 控件树 + 几何，不重建 BoxView 对象与订阅**（订阅构造期一次注册、析构期注销——C-M1-8③）。**解装不变量**：协调器 `CloseBoxEntry` = `Close()` + `view->Disassemble()`——Assemble 只在「已解装或首次」时被调（悬空树防护）。附：拆出重建的框 = **展开态**（折叠态是纯视图态、不随 Model 持久——M1 不保留，留 D-O4）。 |
+| C-M1-16 | **Create 重建清单**（BoxWindow::Create 十步——△5）：① 释放旧 HWND（幂等；**同时置 `m_window = nullptr`**——见 C-M1-20(b)）② Application::Create ③–⑥ 配置期四件套 ⑦ 注入几何通道 ⑧ `BoxView::Assemble` 在新根上全量重建（S3）⑨ SetBounds(placement) ⑩ 存活标记。**重建 = 控件树 + 几何，不重建 BoxView 对象与订阅**（订阅构造期一次注册、析构期注销——C-M1-8③）。**解装不变量**：协调器 `CloseBoxEntry` = `Close()` + `view->Disassemble()`（**顺序不可交换**——C-M1-20(c)）——Assemble 只在「已解装或首次」时被调（悬空树防护）。附：拆出重建的框 = **展开态**（折叠态是纯视图态、不随 Model 持久——M1 不保留，留 D-O4）。 |
 | C-M1-17 | **派生标题**：显示标题 = `members.empty() ? box.title : GetMember(active).title`（K3①「标题+内容整体换成该成员」）；`Rebuild` 时 `SetText` + `Invalidate()`。 |
 | C-M1-18 | **折叠时序**：窗口几何瞬时（SetBounds 请求语义）**先行**，内容子树随后（`CollapsiblePanel::SetExpanded` 内置 200ms 过渡，kToggleDurationMs = 200——CollapsiblePanel.h:92）。已知观感折中：折叠时内容在剩余高度内被窗口边界裁切（父 Clip 语义——CollapsiblePanel.h:54）⇒ 实际观感 = 内容瞬隐 + 窗口瞬切；展开 = 窗口瞬切 + 内容 200ms 过渡。需求 K2「动画可关」——观感里程碑，平滑度非验收项；窗口跟随动画的平滑收缩 = M2+（需动画 tick 驱动 SetBounds——框架无此钩子，D-O2）。 |
 | C-M1-19 | **派发安全三规则**（本稿新发现——初设层不可见）：框架冒泡派发在「调用后才读父」（`Application.cpp:294-302` Down / `318-326` Up：`current->OnMouseButtonDown(event); current = current->GetParent();`）⇒ **点击回调若销毁被点控件或其任意祖先 = 悬空读（UB）**。三规则共同保证回调执行期间「被点行 → 浮层 → BoxRoot」全链存活：<br>**R1** 浮层行全量重建只在 `OpenPopup` 时（`Rebuild`）；<br>**R2** 浮层可见期间的模型变更**只可能是 `Activated`**（单线程交互 + R3 ⇒ 成员数不变）⇒ `Refresh` 原位更新文本、**不销毁任何控件**；<br>**R3** 收编/拆出动作回调**先 `ClosePopup()` 再执行 Model 操作**——通知到达时浮层已隐藏 ⇒ `Rebuild` 跳过浮层（△4 Rebuild 步⑤）⇒ 被点行不销毁。 |
+| C-M1-20 | **窗口回收时序与包装指针纪律**（v1.1 新增——吸收外部评审 §2/§3.2；实测链条带行号）：① `BoxWindow::Close()` → `Window::Release()`（`Window.cpp:147-157`）**只销毁 HWND**（`m_platformWindow->Release()`——`Win32PlatformWindow.cpp:373`）；② HWND 销毁 → 同步 `WM_DESTROY` → `Application::OnWindowDestroyed`（`Application.cpp:127-153`）把 Window 从 `m_windows` **移入 `m_deferredDestroy`**（`Application.h:166-168`，unique_ptr 所有权转移）；③ `ProcessDeferredDestroy`（`Application.cpp:109-118`）由平台消息循环**在每条消息处理后**调用（`Application.cpp:41` 注入回调）⇒ `m_deferredDestroy.clear()` ⇒ `~Window` ⇒ **根控件树随 Window 对象一并销毁**。<br>⇒ 纪律：**(a) 旧树不泄漏**——生产态（跑 `Run()`）在 Close 后一条消息内销毁；测试态（不泵消息）延后到 `~Application`，**有界**（框架契约原文 `window-ownership.md` §4.3；`Application.cpp:112-116` 自注「消费者**不得**假设窗口关闭后 Window 对象立即析构」）；**(b) `Close()` 必须置 `m_window = nullptr`**——销毁是延迟的，保留指针即悬空（△5）；**(c) `CloseBoxEntry` 的 `Close` → `Disassemble` 顺序不可交换**——清理点前旧树仍存活，视图非拥有指针必须先断；**(d) C-M1-19 前提不破**——旧树销毁发生在泵清理点（消息处理**之后**），不在点击回调的派发栈内；**(e) `GetBounds()` 空 Rect 不得当有效位置**（评审 §3.2）——级联 fallback 前提 = 源窗口 `IsOpen()` 且读回 `width > 0`（△6 Detach）。 |
+| C-M1-21 | **订阅者寿命**（v1.1 新增——吸收外部评审 §3.1）：快照派发（C-M1-8②）只保证「回调列表修改不使本轮遍历失效」，**不**保证回调所引用对象的寿命 ⇒ 订阅者（`BoxView`）必须活到可能引用它的快照回调全部执行完毕。M1 满足方式 = `DesktopNestApp` 持有全部 `BoxView` 至退出（C-M1-10①）——**运行中销毁 View = 必须重新设计这条保证**（M2+ 若引入动态框增删则先解此题）。 |
 
 ## §5 影响面
 
@@ -776,8 +787,8 @@ endif()
 | 框架 CMake | **+6 行**（TEST_SOURCES 追加 5 源 + include 目录 1 行——O5 (a)；初设 v1.2 估 +1~2 按单文件先例，本稿按实测修正） |
 | 框架测试登记 | RunAllTests.h / .cpp 各 +1 行 |
 | 框架公共头 / 公共 API / 框架实现文件 | **0 / 0 / 0**（不变——C-M1-1 口径维持） |
-| 测试 | 新文件 `src/Tests/DesktopNestTests.cpp`——**6 注册用例**（T-M1-1..6；需求稿「~4–6 条」上界内；条 99（计数口径）：T 编号数 = 注册条目数 = 6，一注册内多断言） |
-| 文档 | 本稿 + roadmap v1.20 回写 + docs/README.md 新行 |
+| 测试 | 新文件 `src/Tests/DesktopNestTests.cpp`——**6 注册用例**（T-M1-1..6；需求稿「~4–6 条」上界内；条 99（计数口径）：T 编号数 = 注册条目数 = 6，一注册内多断言——v1.1 的流程级判据[T-M1-2④⑤、T-M1-4⑥]并入既有注册，不新增条目） |
+| 文档 | 本稿 + roadmap v1.21 回写 + docs/README.md 新行 |
 
 ## §6 待定项
 
@@ -788,6 +799,7 @@ endif()
 | D-O3 | 非 100% 缩放下放置几何：Phase 31 GetBounds/SetBounds 为 DIP 口径（理论一致），未实测 ⇒ 留 M4 位置持久化阶段。 |
 | D-O4 | 内容区滚动：M1 假数据 5 行 × 24 = 120 DIP < 内容区 288 DIP——不触发；内容超出时引入 ScrollView（K4 已声明滚动可后置）。折叠态持久化同批再议。 |
 | D-O5 | 弹出期间拖动框（浮层随窗口移动）：未验证；M1 假数据阶段拖动通常发生在浮层关闭态——若评审计入自动覆盖，装置补充（拖动中泵 + 断言）。 |
+| D-O6 | 系统关闭路径（`WM_CLOSE` / Alt+F4 → `WindowCloseRequested` → 框架默认 `Release()`，`Application.cpp:170-176`）未接：该路径会绕过 `BoxWindow::Close()`（不置空 `m_window`）⇒ 包装指针悬空。M1 不阻塞——框不设焦点（K1 常驻观感），Alt+F4 不可达；M2 随真实关闭语义（含 `~Application` 残留窗口隐患，`Application.cpp:117` 自注）一并处理。 |
 
 ## §7 测试方向
 
@@ -806,17 +818,18 @@ endif()
 | 用例 | 装置 | 判据 |
 |---|---|---|
 | T-M1-1 `DesktopNest.ModelCollectNotifiesBoth` | D1 + D2 | ① `A.members == [B]` · `B.state == Merged` · `B.placement == 传入值` ② A/B handler 各恰好 1 次、C 0 次（P9 通知次数判据） ③ **派发期注销实证**（初设装置注记的落地）：A 的 handler 内注销 C 的订阅 ⇒ C 本轮仍收到（快照语义）、后续 `SetActive` 不再通知 C ④ D2 无头树：`Assemble` 后入口按钮 `GetBadgeCount() == members.size()`（徽标重建） |
-| T-M1-2 `DesktopNest.ModelDetachRestoresMembership` | D1 + D3 | ① `CanDetach([C1,C2]) == true`；`Detach` 后 `members == [C2]` · `C1.state == TopLevel` · `C1.placement` 保留 · `CanDetach == false`（members.size() == 1） ② 级联纯函数：`CascadedPlacement({100,100,220,320}) == {128,128,220,320}` ③ D3：`BoxWindow::Create(placement)` → `GetBounds() == placement`（Phase 31 请求语义——读回为准）；★ 端到端「拆出后窗口出现在落点」= A1 人工（K6 冻结路径）——自动用例覆盖其每个组成原语 |
+| T-M1-2 `DesktopNest.ModelDetachRestoresMembership` | D1 + D3 | ① `CanDetach([C1,C2]) == true`；`Detach` 后 `members == [C2]` · `C1.state == TopLevel` · `C1.placement` 保留 · `CanDetach == false`（members.size() == 1） ② 级联纯函数：`CascadedPlacement({100,100,220,320}) == {128,128,220,320}` ③ D3：`BoxWindow::Create(placement)` → `GetBounds() == placement`（Phase 31 请求语义——读回为准） ④ **流程级**（v1.1 吸收评审 §4.1——真调协调器 `DesktopNestApp::Detach()`，非原语拼装）：被拆成员 `state == TopLevel` · `entry.window->IsOpen() == true` · `GetBounds() == 请求落点`（有记忆 ⇒ 恢复；无记忆 ⇒ 级联） · 源框 `members`/`active` 正确（active 仍指向有效成员） ⑤ **收编↔拆出循环两轮**（v1.1 吸收评审 §2 建议）：`Collect → Detach → Collect → Detach`，每轮断言 ④ 同款 + **逐次通知计数恒 == 1**（无重复订阅/重复控件——「遗留订阅」的可观测替代；旧树释放本身由框架契约 C-M1-20 保证、不可移植断言，故以契约引用代之） |
 | T-M1-3 `DesktopNest.ModelSetActiveNotifiesOnlyOwner` | D1 + D2 | ① `SetActive(C, C2)` ⇒ C 的 handler 恰好 1 次、C1/C2 的 handler 0 次（仅属主通知） ② 内容重建：D2 树 `GetContent()` 首行文本含「C2」（切换后内容整体换人——K3①） ③ 派生标题：标题 Label 文本 == 「C2」（C-M1-17） |
-| T-M1-4 `DesktopNest.PopupDiscipline` | D2 + D3 | ① 浮层内空白 `HitTest` == 浮层自身（不穿透——A3） ② 浮层外（内容区行）`HitTest` 返回外部控件且 `!m_popup->Contains(hit)` ③ 浮层可见时 Down @（标题条另一按钮 \| 内容区行）⇒ 浮层隐藏（判据⑤——点外含标题条按钮与内容区） ④ 浮层不可见时同坐标 Down ⇒ 无操作（判据①） ⑤ D3 真实派发（SendMessage · DIP→物理换算）：入口按钮点击 ×2 = 开→关（P6 切换）；成员行点击 = 切换且**行不被销毁**（派发安全——C-M1-19 R2）；「加入」行点击 = 收编全路径（模型状态正确 + 被收编框 `IsOpen() == false` + 发起浮层已关——R3） |
+| T-M1-4 `DesktopNest.PopupDiscipline` | D2 + D3 | ① 浮层内空白 `HitTest` == 浮层自身（不穿透——A3） ② 浮层外（内容区行）`HitTest` 返回外部控件且 `!m_popup->Contains(hit)` ③ 浮层可见时 Down @（标题条另一按钮 \| 内容区行）⇒ 浮层隐藏（判据⑤——点外含标题条按钮与内容区） ④ 浮层不可见时同坐标 Down ⇒ 无操作（判据①） ⑤ D3 真实派发（SendMessage · DIP→物理换算）：入口按钮点击 ×2 = 开→关（P6 切换）；成员行点击 = 切换且**行不被销毁**（派发安全——C-M1-19 R2）；「加入」行点击 = 收编全路径（模型状态正确 + 被收编框 `IsOpen() == false` + 发起浮层已关——R3） ⑥ **浮层重开生命周期**（v1.1 吸收评审 §4.2——验证 Refresh/Rebuild 分工）：开 → 切成员（原位刷新）→ 关 → **再开** ⇒ 成员勾选、拆出项可用性、加入列表**全部与当前 Model 一致**（重开走 `Rebuild` 全量重建，而非沿用可见期的原位状态） |
 | T-M1-5 `DesktopNest.FoldGeometry` | D3 + D2 | ① D3 真实窗：`ToggleCollapse` → `GetBounds().height == kCaptionHeight`；再 `Toggle` → `== kWindowHeight`（C-M1-18 几何瞬时） ② D2 无头：CollapsiblePanel 无 Window 降级瞬时切换（CollapsiblePanel.h:53）⇒ `IsExpanded() == false && GetContent()->IsVisible() == false`；再 `Toggle` 恢复（无需泵驱动——动画被降级跳过） |
-| T-M1-6 `DesktopNest.DragRoute` | D3 | `IsClientInteractiveAt(150, 16) == false`（标题文本上——⇒ caption 区返回 HTCAPTION，可拖动——「拖标题文字可移动窗口」，Widget.h:207）· `IsClientInteractiveAt(56, 16) == true`（入口按钮）· `IsClientInteractiveAt(204, 16) == true`（折叠按钮）（⇒ HTCLIENT——按钮可点、不被拖动吃掉——A4） |
+| T-M1-6 `DesktopNest.DragRoute` | D3 | **本用例证明的是「命中路由」**（评审 §4.3——真实拖动的顺滑/边缘行为仍属 A1 人工，报告须分开记录）：`IsClientInteractiveAt(150, 16) == false`（标题文本上——⇒ caption 区返回 HTCAPTION，可拖动——「拖标题文字可移动窗口」，Widget.h:207）· `IsClientInteractiveAt(56, 16) == true`（入口按钮）· `IsClientInteractiveAt(204, 16) == true`（折叠按钮）（⇒ HTCLIENT——按钮可点、不被拖动吃掉——A4） |
 
 ### 7.3 装置注记
 
 - **测试坐标 = 常量推导**（条 47（文档里写下的测试探针坐标必须在脚本里复算断言））：入口按钮中心 `(kBarPad + kEntryButtonWidth/2, 16) = (56, 16)`；折叠按钮中心 `(kWindowWidth − kCollapseButtonSize/2, 16) = (204, 16)`；标题文本探针 `(150, 16)`（Label 区域内）；成员行 i 中心 `(kPopupRowPad + 86, kCaptionHeight + 4 + i×24 + 12)`；加入行 j 中心 `(kPopupRowPad + 86, kCaptionHeight + 56 + n×24 + j×24 + 12)`——测试内用 `Metrics` 常量算并 `assert`，不写字面量。
 - **注册↔定义做差**（条 127）：`&(TestDesktopNest\w+)\);` 与 `^void TestDesktopNest\w+\(` 两集合做差必须为空。
 - **清理**：每个 D3 用例结束前 `Close` 全部窗（Release 幂等）；Application 析构兜底（ApplicationDispatchTests 先例）。
+- **回收时序（C-M1-20）**：D3 用例不跑 `Application::Run()` ⇒ Window 对象与旧树延后到 `~Application` 销毁——**有界、非泄漏**；用例**不得**假设「Close 后 Window 对象立即析构」（框架契约原文 `Application.cpp:112-116`）。用例内只断言 `IsOpen()`/`GetBounds()` 等包装层观测点。
 - **断言启用**：Debug 构建断言层经 CMakeLists 持久修复对 MinGW 亦启用（条 35/50——2026-09-18 起四链 10/10）；报绿时写明构建配置。
 
 ## §8 开放决策点
@@ -840,4 +853,13 @@ endif()
   ⑦ **派发安全三规则**（C-M1-19）：详设级新发现——派发循环「调用后才读父」（Application.cpp:294-302/318-326）⇒ 点击回调销毁被点控件即 UB；R1/R2/R3 共同保证全链存活。
   ⑧ **折叠时序钉死**（C-M1-18）+ **拆出重建 = 展开态**（折叠态不随 Model 持久——D-O4）。
   ⑨ **测试装置三层**（§7.1）+ D3 坐标单位契约（条 109——平台入站折 DIP，装置发物理像素）。
-}
+
+- **v1.1**（2026-10-09）**外部评审吸收**（评审结论：**有条件通过**——「先确认旧控件树的生命周期，再进入实施」）。★ 评审认可项：五种面向接收者的通知语义 / 句柄注销 + 快照派发 / C-M1-19 派发安全 / 协调器独立使流程级自动测试可行。**必须项与建议项处置**：
+  ① **旧控件树生命周期 ⇒ 新增 C-M1-20**（评审 §2）：实测链条 = `Close()` → `Window::Release()`（`Window.cpp:147-157`，只销毁 HWND）→ 同步 `WM_DESTROY` → `Application::OnWindowDestroyed` 移入 `m_deferredDestroy`（`Application.cpp:127-153`）→ 消息循环**每条消息后** `ProcessDeferredDestroy`（`Application.cpp:109-118`，`:41` 注入）⇒ `~Window` ⇒ 根树一并销毁。**结论：不泄漏**（生产态一条消息内回收；测试态延后到 `~Application`，有界——框架契约原文 `window-ownership.md` §4.3）。**由此揪出并修掉本稿一处真缺陷**：销毁是延迟的 ⇒ `BoxWindow::Close()` 若不置空 `m_window` 即**悬空指针**（`GetBounds()` 转发即 UB）——改为 `Release() + m_window = nullptr + m_open = false`；`CloseBoxEntry` 的 `Close → Disassemble` 顺序标为不可交换（清理点前旧树仍存活，视图非拥有指针必须先断）。
+  ② **`GetBounds()` 空值语义**（评审 §3.2）⇒ 并入 C-M1-20(e) + △6 Detach：级联 fallback 前提 = 源窗口 `IsOpen()` 且读回 `width > 0`；M1 中动作恒由源框浮层发起 ⇒ 前提恒成立，契约写明防日后退化。
+  ③ **订阅者寿命**（评审 §3.1）⇒ **新增 C-M1-21**：快照派发不保证回调引用对象寿命 ⇒ 订阅者须活到本轮派发结束（M1 = 协调器持有全部 View 至退出；运行中销毁 View 须重新设计——M2+）。
+  ④ **T-M1-2 补流程级 + 循环**（评审 §4.1/§2 建议）⇒ 增判据 ④（真调 `DesktopNestApp::Detach()`：状态/`IsOpen()`/落点读回/源框 members·active）与 ⑤（`Collect↔Detach` 两轮，通知计数恒 1 = 无重复订阅；旧树释放本身以 C-M1-20 契约引用代替不可移植断言）。
+  ⑤ **T-M1-4 补浮层重开**（评审 §4.2）⇒ 增判据 ⑥（开→切→关→**再开** ⇒ 全部与当前 Model 一致——验证 `Refresh`/`Rebuild` 分工）。
+  ⑥ **T-M1-6 表述收窄**（评审 §4.3）⇒ 判据明写「本用例证明**命中路由**；真实拖动顺滑/边缘行为属 A1 人工，报告分开记录」。
+  ⑦ **新增 D-O6**：系统关闭路径（`WM_CLOSE`/Alt+F4 → `WindowCloseRequested` → 框架默认 `Release()`，`Application.cpp:170-176`）绕过 `BoxWindow::Close()` ⇒ 指针悬空；M1 不阻塞（框不设焦点，Alt+F4 不可达），M2 随真实关闭语义一并处理。
+  ⑧ 契约区间 C-M1-11..**C-M1-21**；§7.3 增「回收时序」装置注记；**清理 v1.0 文末游离 `}`**（落盘残留）。
