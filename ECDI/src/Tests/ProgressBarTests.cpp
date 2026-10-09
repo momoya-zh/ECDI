@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include "ECDI/Animation/AnimationManager.h"
@@ -82,6 +82,15 @@ public:
 	// ── Phase 22：新增 1 个纯虚（本替身不关心启动尺寸——空实现）──
 
 	void ApplyStartupSize() override{}
+
+	// ── Phase 31：新增 2 个纯虚（★ **记录式**——供 Window 级转发断言，非空实现）──
+
+	void SetBounds(const Rect& bounds) override{ lastBounds = bounds; ++setBoundsCount; }
+
+	[[nodiscard]] Rect GetBounds() const override{ return lastBounds; }
+
+	Rect lastBounds{};          ///< 最近一次 SetBounds 的入参（记录式替身——Phase 31）
+	int setBoundsCount = 0;     ///< SetBounds 调用计数（Phase 31）
 
 	PlatformRenderContext m_context;   ///< 空基类可实例化（无纯虚）——测试替身直接持有
 

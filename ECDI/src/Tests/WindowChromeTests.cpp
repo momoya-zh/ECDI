@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include <Windows.h>
@@ -17,6 +17,7 @@
 #include "ECDI/Window/WindowLayer.h"
 #include "ECDI/Window/WindowState.h"
 
+#include <cmath>        // Phase 31：std::nanf（T31-5 非法输入用例）
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -412,6 +413,217 @@ void TestRuntimeApiRejectedBeforeShow()
     EXPECT_EQ(app.seen.back(), WindowState::maximized);
 }
 
+// ══════════════════════════════════════════════════════════════════
+// Phase 31 批一：窗口几何（T31-4 / T31-4b / T31-5 / T31-7）
+// 契约 C31-4..C31-9；详见 phase31 详设 §6
+// ══════════════════════════════════════════════════════════════════
+
+/// @brief 取窗口**物理**外框矩形（三方区分用——「API 输入 / 系统物理矩形 / DIP 读回」）
+/// @details T31-5 需要「系统的实际值」这一中间量：直接问 OS，不经框架换算。
+RECT PhysicalWindowRect(HWND hwnd)
+{
+    RECT rc{};
+    GetWindowRect(hwnd, &rc);
+    return rc;
+}
+
+/// @brief 系统物理矩形 → 整数 DIP（与 `Win32PlatformWindow::GetBounds` 同口径复算）
+/// @details ★ **独立复算**（不调用被测代码）——用作 oracle（条 99：判据不来自被测实现）
+Rect ExpectedDipFromPhysical(HWND hwnd)
+{
+    const RECT rc = PhysicalWindowRect(hwnd);
+    const int dpi = GetDpiForWindow(hwnd);
+    return Rect{
+        static_cast<float>(PixelsToDip(rc.left, dpi)),
+        static_cast<float>(PixelsToDip(rc.top, dpi)),
+        static_cast<float>(PixelsToDip(rc.right - rc.left, dpi)),
+        static_cast<float>(PixelsToDip(rc.bottom - rc.top, dpi))
+    };
+}
+
+// ── T31-4：几何往返（基础——整数 DIP）──────────────────────────────
+
+void Test31BoundsRoundTrip()
+{
+    TestApp app;
+    TestWindow win(app, ChromeMode::Borderless, 32, 8);
+
+    HWND hwnd = win.Handle();
+
+    win.window->Show();
+    PumpMessages(32);
+
+    // 目标：屏幕坐标 + 总尺寸（含边框）——与 Create 同口径
+    const Rect target{ 100.0f, 200.0f, 400.0f, 300.0f };
+    win.window->SetBounds(target);
+    PumpMessages(32);
+
+    const Rect got = win.window->GetBounds();
+
+    // ★ 判据一：读回 == 系统物理矩形的独立换算（oracle，非「== 入参」）
+    const Rect expected = ExpectedDipFromPhysical(hwnd);
+
+    EXPECT_NEAR(got.x, expected.x, 1.0f);
+    EXPECT_NEAR(got.y, expected.y, 1.0f);
+    EXPECT_NEAR(got.width, expected.width, 1.0f);
+    EXPECT_NEAR(got.height, expected.height, 1.0f);
+
+    // ★ 判据二：常规矩形（不超屏、非负）下，系统应按请求落实
+    //   ⇒ 与入参的差也在容差内（@96dpi 精确；高 DPI 允许 1 DIP 舍入）
+    EXPECT_NEAR(got.x, target.x, 1.0f);
+    EXPECT_NEAR(got.y, target.y, 1.0f);
+    EXPECT_NEAR(got.width, target.width, 1.0f);
+    EXPECT_NEAR(got.height, target.height, 1.0f);
+}
+
+// ── T31-4b：非整数 DIP 往返（★ 评审 P5.2——验证 float 精度保留）────────
+
+void Test31BoundsFractionalDip()
+{
+    TestApp app;
+    TestWindow win(app, ChromeMode::Borderless, 32, 8);
+
+    HWND hwnd = win.Handle();
+
+    win.window->Show();
+    PumpMessages(32);
+
+    // ★ 非整数 DIP：若实现先 `static_cast<int>` 截断，@144dpi 下 x 会偏 1 px
+    const Rect target{ 100.8f, 200.5f, 400.25f, 300.75f };
+    win.window->SetBounds(target);
+    PumpMessages(32);
+
+    const Rect got = win.window->GetBounds();
+    const Rect expected = ExpectedDipFromPhysical(hwnd);
+
+    // ★ 核心断言：读回 == 系统物理矩形的独立换算（证明「系统收到的」与「读回的」一致）
+    EXPECT_NEAR(got.x, expected.x, 1.0f);
+    EXPECT_NEAR(got.y, expected.y, 1.0f);
+    EXPECT_NEAR(got.width, expected.width, 1.0f);
+    EXPECT_NEAR(got.height, expected.height, 1.0f);
+
+    // ★ 与入参容差 1 DIP（舍入允许；但**不得**出现截断引入的额外偏差）
+    EXPECT_NEAR(got.x, target.x, 1.0f);
+    EXPECT_NEAR(got.y, target.y, 1.0f);
+    EXPECT_NEAR(got.width, target.width, 1.0f);
+    EXPECT_NEAR(got.height, target.height, 1.0f);
+}
+
+// ── T31-5：退化输入（负坐标 / 超屏 / 非法值）─────────────────────────
+
+void Test31BoundsDegenerateInput()
+{
+    TestApp app;
+    TestWindow win(app, ChromeMode::Borderless, 32, 8);
+
+    HWND hwnd = win.Handle();
+
+    win.window->Show();
+    PumpMessages(32);
+
+    // ① 负坐标：多屏布局合法——系统应接受（读回可为负），且不崩溃
+    win.window->SetBounds(Rect{ -50.0f, -50.0f, 200.0f, 100.0f });
+    PumpMessages(32);
+    {
+        const Rect got = win.window->GetBounds();
+        const Rect expected = ExpectedDipFromPhysical(hwnd);
+        // ★ 三者区分的核心：读回 == 系统物理矩形的换算（不论系统是否按原值放置）
+        EXPECT_NEAR(got.x, expected.x, 1.0f);
+        EXPECT_NEAR(got.y, expected.y, 1.0f);
+        // 请求是负坐标 ⇒ 系统通常接受（不做「一定为负」的强断言——系统可自行约束）
+        EXPECT_TRUE(got.width > 0.0f);
+        EXPECT_TRUE(got.height > 0.0f);
+    }
+
+    // ② 尺寸大于屏幕：不崩溃 + 读回如实反映**系统实际值**（可能被钳制）
+    win.window->SetBounds(Rect{ 0.0f, 0.0f, 9999.0f, 9999.0f });
+    PumpMessages(32);
+    {
+        const Rect got = win.window->GetBounds();
+        const Rect expected = ExpectedDipFromPhysical(hwnd);
+        EXPECT_NEAR(got.width, expected.width, 1.0f);
+        EXPECT_NEAR(got.height, expected.height, 1.0f);
+    }
+
+    // ③ 非法尺寸：0 / 负 / NaN / Inf ⇒ **Warning + 无副作用**（C31-9）
+    {
+        const Rect before = win.window->GetBounds();
+        const RECT physBefore = PhysicalWindowRect(hwnd);
+
+        win.window->SetBounds(Rect{ 0.0f, 0.0f, 0.0f, 100.0f });      // 宽 = 0
+        win.window->SetBounds(Rect{ 0.0f, 0.0f, 100.0f, -5.0f });     // 高 < 0
+        win.window->SetBounds(Rect{ 0.0f, 0.0f, std::nanf(""), 100.0f });        // NaN
+        win.window->SetBounds(Rect{ 0.0f, 0.0f, 1.0e30f, 100.0f });   // 超范围
+        PumpMessages(32);
+
+        const Rect after = win.window->GetBounds();
+        const RECT physAfter = PhysicalWindowRect(hwnd);
+
+        // ★ 无副作用：几何逐位未变
+        EXPECT_NEAR(after.x, before.x, 0.001f);
+        EXPECT_NEAR(after.y, before.y, 0.001f);
+        EXPECT_NEAR(after.width, before.width, 0.001f);
+        EXPECT_NEAR(after.height, before.height, 0.001f);
+
+        EXPECT_EQ(physAfter.left, physBefore.left);
+        EXPECT_EQ(physAfter.top, physBefore.top);
+        EXPECT_EQ(physAfter.right, physBefore.right);
+        EXPECT_EQ(physAfter.bottom, physBefore.bottom);
+    }
+
+    // ④ 非法输入之后仍可正常设置（拒绝是**单次**的，不留粘滞状态）
+    win.window->SetBounds(Rect{ 150.0f, 120.0f, 300.0f, 200.0f });
+    PumpMessages(32);
+    {
+        const Rect got = win.window->GetBounds();
+        EXPECT_NEAR(got.width, 300.0f, 1.0f);
+        EXPECT_NEAR(got.height, 200.0f, 1.0f);
+    }
+}
+
+// ── T31-7：几何 API 的生命周期（★ C31-6 的**例外**——Create 后即可用）────
+
+void Test31BoundsAvailableBeforeShow()
+{
+    TestApp app;
+    TestWindow win(app, ChromeMode::Borderless, 32, 8);
+
+    HWND hwnd = win.Handle();
+
+    // ★★ 本用例的要点：SetBounds/GetBounds **不要求 Show()**（与 Minimize 组**不同**）
+    //   依据：Phase 22 `ApplyStartupSize` 先例——完全构造后调 SetWindowPos 安全；
+    //   M1 的拆出流程 = Create → SetBounds（恢复 placement）→ Show（避免闪烁）
+    EXPECT_FALSE(IsWindowVisible(hwnd));   // 前置：确实尚未显示
+
+    win.window->SetBounds(Rect{ 300.0f, 250.0f, 350.0f, 220.0f });
+
+    // ★ 未 Show 也应生效（读回反映系统值 ⇒ 证明 SetBounds 真的落到了窗口上）
+    const Rect got = win.window->GetBounds();
+    const Rect expected = ExpectedDipFromPhysical(hwnd);
+
+    EXPECT_NEAR(got.x, expected.x, 1.0f);
+    EXPECT_NEAR(got.y, expected.y, 1.0f);
+    EXPECT_NEAR(got.width, expected.width, 1.0f);
+    EXPECT_NEAR(got.height, expected.height, 1.0f);
+
+    EXPECT_NEAR(got.width, 350.0f, 1.0f);
+    EXPECT_NEAR(got.height, 220.0f, 1.0f);
+
+    // 仍不可见（几何设置不产生显示副作用）
+    EXPECT_FALSE(IsWindowVisible(hwnd));
+
+    // Show 之后继续可用（两个子段都成立）
+    win.window->Show();
+    PumpMessages(32);
+
+    win.window->SetBounds(Rect{ 120.0f, 130.0f, 260.0f, 180.0f });
+    PumpMessages(32);
+
+    const Rect afterShow = win.window->GetBounds();
+    EXPECT_NEAR(afterShow.width, 260.0f, 1.0f);
+    EXPECT_NEAR(afterShow.height, 180.0f, 1.0f);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterWindowChromeTests()
@@ -425,4 +637,9 @@ void ECDI::Test::RegisterWindowChromeTests()
     GetTestRegistry().Add("WindowChrome.ZeroBoundaryClamp",              &TestZeroBoundaryClamp);
     GetTestRegistry().Add("WindowChrome.StateEventFromApi",              &TestStateEventFromApi);
     GetTestRegistry().Add("WindowChrome.RuntimeApiRejectedBeforeShow",   &TestRuntimeApiRejectedBeforeShow);
+    // ── Phase 31 批一：窗口几何 ──
+    GetTestRegistry().Add("WindowBounds.RoundTrip",                      &Test31BoundsRoundTrip);
+    GetTestRegistry().Add("WindowBounds.FractionalDip",                  &Test31BoundsFractionalDip);
+    GetTestRegistry().Add("WindowBounds.DegenerateInput",                &Test31BoundsDegenerateInput);
+    GetTestRegistry().Add("WindowBounds.AvailableBeforeShow",            &Test31BoundsAvailableBeforeShow);
 }

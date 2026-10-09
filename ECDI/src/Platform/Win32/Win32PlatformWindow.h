@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Platform/PlatformWindow.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
@@ -79,6 +79,18 @@ public:
 	/// @brief 按当前窗口 DPI 落实启动尺寸 —— ★ 含翻译器 DPI 同步（契约 C9；详见基类契约）
 	/// @details 幂等；★ **未设置启动尺寸（`0`）⇒ 直接返回，连 `SetDpi` 也不执行**（契约 C10）。
 	void ApplyStartupSize() override;
+
+	// ── Phase 31：窗口几何读写（运行期——`Create` 返回后即可用）──────────
+
+	/// @brief 设置窗口边界（★ 请求语义；契约见基类）——`SetWindowPos` 一次提交位置 + 尺寸
+	/// @details ★ `SWP_NOZORDER`（z 序归 `WindowLayer` 维护）+ `SWP_NOACTIVATE`（不抢焦点）；
+	///          **非法输入拒绝**（非有限 / 尺寸非正 / 超范围）⇒ Warning + 忽略；
+	///          **float 精度保留至最后一次取整**（走 `DpiConversion` 的 float 重载）。
+	/// @note ★ **不要求 `Show()`**（与 `Minimize` 组不同）——`Create` 返回后即可用
+	void SetBounds(const Rect& bounds) override;
+
+	/// @brief 读取窗口边界（屏幕坐标、DIP、含边框总尺寸——如实反映系统当前值）
+	[[nodiscard]] Rect GetBounds() const override;
 
 	/// @brief DragFinish 测试缝类型（v1.1 拍板：函数指针——不出实现层、保 final）
 	/// @details 声明必须位于首个使用点之前——GCC 对成员函数形参不做延迟名字查找

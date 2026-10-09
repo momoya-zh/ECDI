@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Core/Point.h"
+#include "ECDI/Core/Rect.h"   // Phase 31：SetBounds/GetBounds 的几何类型
 #include "ECDI/Animation/AnimationManager.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
 #include "ECDI/Widget/CaretGeometry.h"
@@ -142,6 +143,30 @@ class Window : public PlatformWindowHost {
 		/// （属 Phase 9 Alpha 合成范畴）——连「`a == 0` 就跳过清屏」这类分支也不做。
 		/// @param color 底色（默认 `Color::White()` = 改动前的行为）
 		void SetBackgroundColor(const Color& color);
+
+		// ── Phase 31：窗口几何（运行期——Create 返回后即可用）────────────
+
+		/// @brief 设置窗口边界（★ Phase 31——**请求语义**，见 `PlatformWindow::SetBounds`）
+		/// @param bounds **屏幕坐标**（DIP）：左上角 + **总尺寸（含边框和标题栏）**——
+		///        与 `Application::Create(width, height)` **同口径**（`Application.h:65-66`）。
+		///        ★ `x/y` 可为负（多屏布局）；`width/height` **必须为正**。
+		/// @details ★ **请求而非保证**：系统可调整（超屏被移回 / 最大化态下受 `WM_GETMINMAXINFO` 影响）
+		///          ⇒ **读回值以 `GetBounds` 为准**，本方法**不补偿、不臆测**（Phase 12 D-COMP-1 同族）。
+		///          ★ **一次平台调用同时提交位置与尺寸**（避免框架用两次独立调用**主动制造**中间状态）；
+		///          **不承诺**系统不在设置过程中派发尺寸/位置消息（`WM_SIZE` 同步派发是预期行为）。
+		///          ★ **非法输入被拒绝**：非有限值（NaN/±Inf）/ 尺寸非正 / 超范围 ⇒ Warning + 忽略
+		///          （**不静默规范化**——不猜测调用者意图）。
+		/// @pre `Create` 返回后即可用（★ 不要求 `Show()`——避免「先显示再移动」的闪烁；
+		///      依据 Phase 22 `ApplyStartupSize` 的既有先例：完全构造后调 `SetWindowPos` 是安全的）。
+		void SetBounds(const Rect& bounds);
+
+		/// @brief 读取窗口边界（屏幕坐标、DIP、含边框总尺寸）
+		/// @details **如实反映系统当前值**（非「上次 `SetBounds` 的入参」）——
+		///          二者不同属正常（系统调整 / DPI 变更 / 最大化）。
+		///          ★ **单位恒 DIP**，按**窗口当前 DPI** 折回（跨屏后以新屏 DPI 解释）。
+		///          ★ 读回量化为**整数 DIP**（框架几何口径——物理像素天然为整数）。
+		/// @pre 同 `SetBounds`（`Create` 返回后；★ 平台窗口未就绪 ⇒ 返回空 `Rect`）
+		[[nodiscard]] Rect GetBounds() const;
 
 		// ── Phase 12：窗口状态（运行期——**Show() 之后**才有效）────────
 

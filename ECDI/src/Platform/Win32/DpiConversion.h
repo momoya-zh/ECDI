@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // ── Phase 20：DPI 换算（**唯一真相源**；内部头——不进公共 API）──────────────────
 // ★ 为什么**独立成件**而不挂在某个类上：它有**两个消费者**——
@@ -77,6 +77,37 @@ inline int PixelsToDip(int px, int dpi){
 	}
 
 	return RoundHalfAwayFromZero(static_cast<long long>(px) * 96, dpi);
+
+}
+
+/// @brief DIP → 物理像素（★ **float 输入重载**——Phase 31）
+/// @param dip DIP 值（**保留小数**——公共几何 API 的 `Rect` 成员是 float）
+/// @param dpi 目标 DPI（`<= 0` ⇒ 按 96 处理——fail-safe）
+/// @details ★ **为什么需要它**（Phase 31 详设评审 P1）：整数重载会迫使调用方
+///          **先截断再换算**——`static_cast<int>(100.8)` 得到 100 DIP，在 144 DPI 下
+///          物理坐标随之偏 1 px。那是**在 DIP 端额外丢一次精度**，与「物理像素网格
+///          不可避免的量化」是两件事。本重载**保留 float 至最后一次取整**。
+/// @note ★ **同一真相源、同一舍入规则**：把 DIP 先落到 `1/65536 DIP` 子像素分辨率，
+///       再复用 `RoundHalfAwayFromZero` —— **舍入只允许出现在那一个函数里**（grep 可检）。
+/// @note ★ 与文本测量链路的区别**不变**：本件仍是**几何/坐标口径**，**不服务文本测量链路**。
+inline int DipToPixels(float dip, int dpi){
+
+	if (dpi <= 0){
+
+		dpi = 96;   // fail-safe（与整数重载同款）
+
+	}
+
+	// ★ 1/65536 DIP 子像素分辨率：足以承载 float 的有效精度；
+	//   中间量升 long long 后不溢出（int DIP 上限 × 65536 × dpi 远小于 2^63）
+	constexpr float kSubPixel = 65536.0f;
+
+	// ★ half-away-from-zero（与 RoundHalfAwayFromZero 同向——负数远离零）
+	const float scaled = dip * kSubPixel;
+	const long long sub = static_cast<long long>(
+		scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
+
+	return RoundHalfAwayFromZero(sub * dpi, 96LL * 65536LL);
 
 }
 

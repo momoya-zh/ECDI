@@ -1,4 +1,4 @@
-﻿#include "ECDI/Window/Window.h"
+#include "ECDI/Window/Window.h"
 
 #include "Platform/Win32/Win32PlatformWindow.h"
 #include "ECDI/Widget/TextBox.h"
@@ -242,6 +242,29 @@ void Window::SetBackgroundColor(const Color& color){
 
 	// 职责契约（O1）：改了可见状态 → **自身**负责请求重绘（同 TextBox.cpp:189 的既定写法）
 	Invalidate();
+
+}
+
+// ── Phase 31：窗口几何（运行期——纯转发，契约与判据在平台层）──────────
+
+void Window::SetBounds(const Rect& bounds){
+
+	// 与 SetWindowLayer / Minimize 同款纯转发（判据 = 非法输入校验 + 运行期门控，均在平台层）
+	// ★ m_platformWindow 在构造初始化列表必建 ⇒ 不需要判空（同 SetChromeMode :216）
+	m_platformWindow->SetBounds(bounds);
+
+}
+
+Rect Window::GetBounds() const{
+
+	// ★ 判空（与 GetDpiScale :200 同款——const 只读访问器的防御风格）
+	if (!m_platformWindow){
+
+		return Rect{};
+
+	}
+
+	return m_platformWindow->GetBounds();
 
 }
 

@@ -1,4 +1,4 @@
-﻿#include "Platform/Win32/Win32PlatformWindow.h"
+#include "Platform/Win32/Win32PlatformWindow.h"
 
 #include "Platform/Win32/Win32WindowClass.h"
 #include "Platform/Win32/DpiConversion.h"   // Phase 20：DPI 换算（唯一真相源——与 WindowMessageHandler 共用）
@@ -17,6 +17,7 @@
 #undef DrawText   // Win32 宏防护（dwmapi.h / windowsx.h 展开链也可能带入 Windows.h）
 #endif
 
+#include <cmath>                       // Phase 31：std::isfinite / std::fabs（SetBounds 非法输入校验）
 #include <cstring>
 #include <cwchar>                      // Phase 16：IsDesktopClassWindow 的 wcscmp（D-6——显式列全，不依赖 <Windows.h> 的展开链）
 #include <string>
@@ -193,6 +194,78 @@ void Win32PlatformWindow::ApplyStartupSize() {
 		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 
 	// ★ dpi == 96 时尺寸不变 ⇒ SetWindowPos 为 no-op（G5 恒真）——★ 实测届时连 WM_SIZE 都不派发。
+
+}
+
+// ── Phase 31：窗口几何读写（运行期——`Create` 返回后即可用）────────────────────
+
+void Win32PlatformWindow::SetBounds(const Rect& bounds){
+
+	// ★★ 非法输入**明确拒绝**（不静默规范化——不猜测调用者意图）
+	//   ① 非有限值（NaN / ±Inf）② 尺寸非正 ③ 超范围（防 int 转换溢出）
+	const bool finite = std::isfinite(bounds.x) && std::isfinite(bounds.y)
+	                 && std::isfinite(bounds.width) && std::isfinite(bounds.height);
+
+	if (!finite || bounds.width <= 0.0f || bounds.height <= 0.0f){
+
+		Logger::Log(LogLevel::Warning, L"SetBounds: non-finite or non-positive bounds ignored");
+		return;
+
+	}
+
+	// ★ 2^24 DIP：远超任何真实屏幕（防 `DipToPixels` 的中间量溢出）——坐标与尺寸同限
+	constexpr float kMaxDip = 16777216.0f;
+
+	if (std::fabs(bounds.x) > kMaxDip || std::fabs(bounds.y) > kMaxDip
+	    || bounds.width > kMaxDip || bounds.height > kMaxDip){
+
+		Logger::Log(LogLevel::Warning, L"SetBounds: out-of-range bounds ignored");
+		return;
+
+	}
+
+	const int dpi = GetDpiForWindow(m_hwnd);
+
+	// ★ **一次平台调用同时提交位置 + 尺寸**（消除框架主动制造的中间状态）。
+	//   · `SWP_NOZORDER`  —— z 序归 `WindowLayer`（Phase 16 D11）持续维护，本方法不碰
+	//   · `SWP_NOACTIVATE`——折叠 / 级联不应抢焦点（DesktopNest 场景）
+	//   · 不带 `SWP_NOSIZE` / `SWP_NOMOVE`——本方法就是要改这两者
+	// ★ 走 **float 重载**：保留 DIP 小数至最后一次取整（不先截断——那会额外丢一次精度）
+	SetWindowPos(m_hwnd, nullptr,
+		DipToPixels(bounds.x, dpi),
+		DipToPixels(bounds.y, dpi),
+		DipToPixels(bounds.width, dpi),
+		DipToPixels(bounds.height, dpi),
+		SWP_NOZORDER | SWP_NOACTIVATE);
+
+}
+
+Rect Win32PlatformWindow::GetBounds() const{
+
+	if (m_hwnd == nullptr){
+
+		return Rect{};   // 平台窗口未就绪 ⇒ 空值（与基类契约一致）
+
+	}
+
+	RECT rc{};
+
+	if (!GetWindowRect(m_hwnd, &rc)){
+
+		return Rect{};
+
+	}
+
+	// ★ 物理像素 → DIP（**整数**重载：物理像素天然为整数，此方向无需 float）
+	//   走当前**窗口 DPI**——跨屏后以新屏 DPI 解释（契约 C31-5）
+	const int dpi = GetDpiForWindow(m_hwnd);
+
+	return Rect{
+		static_cast<float>(PixelsToDip(rc.left, dpi)),
+		static_cast<float>(PixelsToDip(rc.top, dpi)),
+		static_cast<float>(PixelsToDip(rc.right - rc.left, dpi)),
+		static_cast<float>(PixelsToDip(rc.bottom - rc.top, dpi))
+	};
 
 }
 

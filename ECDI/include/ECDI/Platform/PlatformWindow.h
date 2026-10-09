@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Core/Size.h"
+#include "ECDI/Core/Rect.h"   // Phase 31：SetBounds/GetBounds 的几何类型
 #include "ECDI/Widget/CaretGeometry.h"
 #include "ECDI/Window/ChromeMode.h"
 #include "ECDI/Window/WindowLayer.h"
@@ -161,6 +162,26 @@ public:
 	///       `WM_SIZE` 都不派发**（需求稿 §1.7），故 `Show()` 里的复核调用**零运行期成本**。
 	/// @note **不提供「运行期改窗口尺寸」能力**：尺寸来源唯一（构造期记录，契约 C4）。
 	virtual void ApplyStartupSize() = 0;
+
+	// ── Phase 31：窗口几何读写（运行期——**`Create` 返回后**即可用）──────────
+
+	/// @brief 设置窗口边界（★ **请求语义**——系统可调整，读回见 `GetBounds`）
+	/// @param bounds **屏幕坐标**（DIP）：左上角 + **总尺寸（含边框与标题栏）**——
+	///        与 `Application::Create(width, height)` **同口径**。
+	///        ★ `x/y` **可为负**（多屏布局）；`width/height` **必须为正**。
+	/// @details ★ **一次平台调用同时提交位置与尺寸**——消除框架**主动制造**的中间状态。
+	///          ★ **不承诺**系统不派发中间消息（`SetWindowPos` 可**同步派发 `WM_SIZE`**）。
+	///          ★ **非法输入拒绝**（非有限值 / 尺寸非正 / 超范围）⇒ Warning + 忽略。
+	///          ★ **float 精度保留至最后一次取整**（不先截断到整数 DIP——那会额外丢一次精度）。
+	/// @pre 无（★ 与 Minimize 组不同——`Create` 返回后即可用，**不要求 `Show()`**；
+	///      依据 Phase 22 `ApplyStartupSize` 先例：完全构造后调 `SetWindowPos` 是安全的）
+	virtual void SetBounds(const Rect& bounds) = 0;
+
+	/// @brief 读取窗口边界（屏幕坐标、DIP、含边框总尺寸）
+	/// @details **如实反映系统当前值**（非「上次 `SetBounds` 的入参」）——
+	///          二者不同属正常（系统调整 / DPI 变更 / 最大化）。量化为**整数 DIP**。
+	/// @return 边界；**平台窗口未就绪 ⇒ 空 `Rect`**
+	[[nodiscard]] virtual Rect GetBounds() const = 0;
 };
 
 }

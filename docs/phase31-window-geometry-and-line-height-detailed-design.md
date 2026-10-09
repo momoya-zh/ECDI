@@ -1,7 +1,7 @@
 ﻿# Phase 31 · 窗口几何与行高口径 —— 详细设计（v1.1 · 实施规格）
 
 > 来源：初设 `phase31-window-geometry-and-line-height-preliminary-design.md` **v1.1**（评审吸收 B-2：窗口几何 **PASS → 详设**；行高 **公共 hhea 口径**由需求评审拍板）
-> 状态：**v1.1**（2026-10-08）——**详设评审结论：窗口几何方向通过（补输入校验与浮点转换后可实施）；GDI 行高实施前必办三项——已全部处理（P1/P2/P3）；测试与文档修订已闭合**
+> 状态：**v1.2**（2026-10-08）——**批一（窗口几何）已实施**：△6–△13 落地，**三链 360/360 全绿**（MinGW / Clang / ClangCL），**M1 阻塞已解除**；批二/批三待实施（见 §9 实施回填）
 > 定位：**实施规格**——把初设的 D31-A..F 落成**逐文件、逐行**的改动与精确测试装置。
 > ★ 需求稿锁定的范围不变：**不做虚拟化 / 脏区 / 后端执行端 / OnPaint 纯绘制重构 / 富文本 / shaping**。
 > ★★ **v1.1 三项实施前必办（评审给定，已处理）**：① **P1 浮点精度**——`SetBounds` 不再先截断到 int DIP，改走新增的 **float 重载**（△13）；② **P2 `otmMacLineGap` 语义**——经**受控合成实验**证其存 **int32 补码**（原稿「减 65536」在负值下**算错**）⇒ 改直读（C31-10）；③ **P3 缓冲区对齐**——`alignas` 保证。
@@ -431,3 +431,74 @@ inline int DipToPixels(float dip, int dpi)
   ② ★★ **P2 `otmMacLineGap` 语义（已受控实测并修正）**——原稿「> 0x7FFF ⇒ 减 65536」**是假设而非事实**（评审：不能因原始表是 INT16 就断言 Win32 返回值编码）⇒ **本会话做了受控合成实验**：本机 385 face **负 lineGap = 0**（无现成样本）⇒ patch 一份 `arial.ttf` 副本的 `hhea.lineGap` 为 −1/−200/−1000 + 改名 + `AddFontResourceExW(FR_PRIVATE)` 私有装载，实测 **GDI 存 int32 补码**（−200 ⇒ `0xFFFFFFFE`、−1000 ⇒ `0xFFFFFFF6`）⇒ **`(int)` 直读即正确；原稿逻辑在 −200 时算出 −65538（错）**。⇒ 实现改为直读，**新增 C31-10** 与盯防 **⑪**（禁 65536 式重解释），**新增 O8**（该分支无真实字体覆盖，如实登记）。
   ③ ★ **P3 缓冲区对齐（已修正）**——`BYTE[]` **不保证** `OUTLINETEXTMETRICW` 对齐 ⇒ 栈路径 **`alignas(OUTLINETEXTMETRICW)`**、堆路径 **`operator new(size, align_val_t(...))`**；**新增盯防 ⑫**。
   **其余吸收**：④ **P5.1** 非法输入明确拒绝（非有限 / 尺寸 ≤ 0 / 超 ±2²⁴ DIP ⇒ Warning + 忽略，**不静默规范化**）——**新增 C31-9** 与盯防 **⑬**、T31-5 第 ⑤ 类；⑤ **P5.2** T31-4b（见上）；⑥ **P5.3** T31-3 改为**稳定注入失败**——**新增 △14**（内部函数指针缝，复刻 `SetDragFinishForTests` 先例；**不进公共 API**）与盯防 **⑮**；⑦ **评审 4.2/P3** **T31-1 与 T31-6 口径统一**——T31-1 结论**限定为「同字体族」**、T31-6 补 `otmEMSquare == FT units_per_EM` 作**强证据但非文件级证明**，并明写「**名称同 ≠ 文件同**」不得含糊；⑧ **评审 §6** T31-8 **命名纪律**——只称「**字形栅格包围盒对齐**」，**不得**扩大解释为「已证明基线一致」；⑨ **§2 基线扩 B13–B17**（`wingdi.h` 字段类型 / 负 `lineGap` 扫描 / 受控实测 / DpiConversion 现状 / 内部缝先例）；⑩ 用例 **+8 → +9**（加 T31-4b）⇒ **356 → 365**，**§8 批次累计数同步**（批一 360 / 批二 364 / 批三 365）；⑪ **§9 新增 O8（负 lineGap 实机覆盖）与 O9（float 重载的命名/位置）**。**未改动**：窗口几何的 API 形态（`SetBounds`/`GetBounds`）· `SWP_NOZORDER`/`SWP_NOACTIVATE` 的选择 · D31-A 的 **hhea 口径**（评审支持该方向）· FT 侧零改动 · D31-D 原子边界 · D31-E 三概念分离。
+- **v1.2**（2026-10-08）**批一实施回填（见 §11）**。状态行更新为「批一已实施 · 三链 360/360 全绿」。
+
+---
+
+## §11 实施回填（批一——窗口几何）
+
+> ★ 本节按条 6「实现回写三件套」在**实施后**补写：**实测数据 + 与详设的偏离 + 遗留项**。
+
+### 11.1 落地清单（△6–△13；★ 与 §3 逐条对照）
+
+| △ | 文件 | 落地 |
+|---|---|---|
+| △6 | `PlatformWindow.h` | ✅ `#include "ECDI/Core/Rect.h"` + `SetBounds` / `GetBounds` 两纯虚（含契约注释） |
+| △7 | `Win32PlatformWindow.h` | ✅ 两 override 声明（`ApplyStartupSize` 之后——与 §3 一致） |
+| △8 | `Win32PlatformWindow.cpp` | ✅ 非法输入校验 + `DipToPixels`（**float 重载**）+ `SetWindowPos(SWP_NOZORDER \| SWP_NOACTIVATE)` + `GetWindowRect` → `PixelsToDip` |
+| △9 | `Window.h` | ✅ `#include "ECDI/Core/Rect.h"` + 两公共方法（放在 Phase 12 运行期组之前，独立小节） |
+| △10 | `Window.cpp` | ✅ 两转发（`SetBounds` 直转；`GetBounds` 带 `m_platformWindow` 判空——与 `GetDpiScale` :200 同款） |
+| △11 | `AnimationTests.cpp` | ✅ `TestPlatformWindow` **记录式**替身（`lastBounds` + `setBoundsCount`） |
+| △12 | `ProgressBarTests.cpp` | ✅ 同 △11 |
+| △13 | `DpiConversion.h` | ✅ `DipToPixels(float, int)` 重载（1/65536 DIP 子像素 → 复用 `RoundHalfAwayFromZero`） |
+| △14 | `GDITextMeasurer` | ⏳ **批二**（行高口径一并落地） |
+
+### 11.2 ★ 实施期偏离（如实记录）
+
+| # | 详设原稿 | 实施落地 | 原因 |
+|---|---|---|---|
+| **1** | 日志写 `Logger::Warning(L"...")` | ✅ 改为 **`Logger::Log(LogLevel::Warning, L"...")`** | ★ 详设原稿的 API 名**不存在**——`Logger` 只有 `Log(LogLevel, msg)`（`Logger.h:28`）。**编译期即暴露**（条 62 的价值） |
+| **2** | `#include` 未列 `<cmath>` | ✅ 补 `#include <cmath>` | `std::isfinite` / `std::fabs` 需要 |
+| **3** | （未预见） | ✅ `Invalidate()` **未调用** | ★ `SetBounds` 改几何 ⇒ 系统**同步派发 `WM_SIZE`** ⇒ `OnResized` → `Arrange` → 既有的重绘链**自动覆盖**；**无需**框架自加 `Invalidate()`（与 Phase 22 `ApplyStartupSize` 同款——那是既有路径） |
+| **4** | 详设 §1 D31-C 代码未含 `m_hwnd == nullptr` 守卫 | ✅ `GetBounds` 加该守卫 | 防御性：平台窗口未就绪 ⇒ 空 `Rect`（与基类契约「未就绪 ⇒ 空值」一致） |
+
+### 11.3 ★★ 验收读数（三链全绿）
+
+| 链 | 编译 | 测试 |
+|---|---|---|
+| **MinGW**（`cmake-build-debug-mingw`） | ✅ 全目标（ECDI + ecdi_tests + 3 示例） | ✅ **360 / 360** |
+| **Clang**（`cmake-build-debug-clang`） | ✅ 全目标 | ✅ **360 / 360** |
+| **ClangCL**（`cmake-build-debug-clangcl`） | ✅ 全目标 | ✅ **360 / 360** |
+
+★ **用例数 356 → 360**（+4 = T31-4 / T31-4b / T31-5 / T31-7）——**与详设 §8 批一投影（360）逐位一致**。
+★ **断言层已启用**（条 35/50）：`CMAKE_BUILD_TYPE=Debug` + `build.ninja` 含 `-D_DEBUG`（MinGW 链为 CMake 显式补入——见根 `CMakeLists.txt:25-27`）。
+
+### 11.4 ★ 非空虚验证（独立探针——条 99「判据不来自被测实现」）
+
+探针 `.workbuddy/spike/p31-geometry/probe_batch1_verify.cpp`（读数 `batch1_verify.txt`）**独立复算**并证明新用例的断言**非空虚**：
+
+| 检验 | 读数 | 意义 |
+|---|---|---|
+| **G5 恒等（@96dpi）** | 整型 vs float 重载在 `-500..500` **全等** | ★ float 重载**不破坏**「dpi==96 恒等」零回归红线 |
+| **P1 精度差真实存在** | `100.8 DIP @144dpi` ⇒ float 路径 **151 px** vs 截断路径 **150 px** | ★ 证明评审 P1 指出的「多丢一次」**是真实的 1 px**（T31-4b 即为此而设） |
+| **C10 负数对称** | `±100.8 @144dpi` ⇒ **−151 / 151** | 远离零舍入在 float 重载中**保持** |
+| **Show 前生效** | 读回 `(300,250) 350x220` | ★ D31-G 前提成立（`Create` 后即可用） |
+| **非整数 DIP** | 读回 `(101,201) 400x301` | 400.25 → 400、300.75 → 301（**合理舍入**，非截断） |
+| **非法输入无副作用** | `400x301 → 400x301`（逐位未变） | ★ C31-9 生效 |
+| **负坐标** | 读回 `(-50,-50) 200x100` | 系统接受负坐标、框架如实读回 |
+
+★ **探针本身未发现仪器错误**（对照初设 §2.5 的两处——本轮读数与生产代码路径一致）。
+
+### 11.5 遗留项
+
+| # | 项 | 去向 |
+|---|---|---|
+| ★ **L1** | **`SetBounds` 的 DPI 跨屏场景未实测**（T31-5 第 ② 类「跨 DPI」需要**双屏/双 DPI 环境**） | 本机单屏 ⇒ **如实登记为未覆盖**（同 Phase 26 T26-10 的诚实标注先例）；O4 跟踪 |
+| **L2** | △14（失败注入缝）与批二同时落地 | **批二** |
+| **L3** | 批二的 **9 消费点核对**（GDI 行高会变） | **批二** |
+
+### 11.6 状态
+
+- **批一 = ✅ 完成**（△6–△13 + T31-4/4b/5/7；三链 360/360）⇒ ★★ **DesktopNest M1 的窗口几何阻塞已解除**
+- **批二**（行高口径 △1–△3 + △14 + T31-1/2/3/6）**待实施**
+- **批三**（T31-8 + harness 复跑 + 收口）**待实施**
