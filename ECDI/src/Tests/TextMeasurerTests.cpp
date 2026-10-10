@@ -1,4 +1,4 @@
-#include "RunAllTests.h"
+﻿#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include <Windows.h>
@@ -490,7 +490,15 @@ void Test31LineHeightFontIdentityLevel()
     lf.lfHeight = -static_cast<LONG>(std::lround(14.0f * dpi / 96.0));
     lf.lfCharSet = DEFAULT_CHARSET;
     lf.lfWeight = FW_NORMAL;
-    wcsncpy(lf.lfFaceName, L"SimSun", LF_FACESIZE - 1);
+    // ★ 2026-10-09：`wcsncpy` 被 UCRT 显式标 `deprecated`（clang-cl 默认告警集报
+    //   -Wdeprecated-declarations）⇒ 换 `std::copy_n`（`<algorithm>` 已在，四链通吃、
+    //   不依赖 `_CRT_SECURE_NO_WARNINGS` 这类「关告警」的掩盖式修法）。
+    //   `lf` 已零初始化（`LOGFONTW lf{}`）⇒ 拷贝「含终止符」的字面量即安全；
+    //   `static_assert` 把「放得下」变成编译期判据（不再靠 LF_FACESIZE-1 的人工留位）。
+    constexpr wchar_t kFaceName[] = L"SimSun";
+    static_assert(sizeof(kFaceName) / sizeof(wchar_t) <= LF_FACESIZE,
+                  "face name must fit LOGFONTW::lfFaceName (including terminator)");
+    std::copy_n(kFaceName, sizeof(kFaceName) / sizeof(wchar_t), lf.lfFaceName);
 
     HFONT hfont = CreateFontIndirectW(&lf);
     EXPECT_TRUE(hfont != nullptr);
