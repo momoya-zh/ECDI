@@ -1,4 +1,4 @@
-#include "RunAllTests.h"
+﻿#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include "../../examples/DesktopNest/BoxModel.h"        // 2026-10-09：demo 移 examples/；测试文件留框架侧
@@ -305,9 +305,19 @@ void TestM1ModelDetachRestoresMembership(){
 		EXPECT_NEAR(memberBounds.width, static_cast<float>(Metrics::kWindowWidth), kFloatEps);
 
 		// ⑤ 收编↔拆出循环两轮（通知计数恒 1 = 无重复订阅）
-		// ★ 实施勘误 E-6（2026-10-09，行为探针发现）：`Detach` 要求 members.size() > 1
-		//   ⇒ 每轮须「先收编出第二个成员，再拆出 active」；且计数器须设 watch
-		//   （生产语义 = 只认自己的 box——C-M1-13）。
+		// ★ E-6 修正（2026-10-09，行为探针 + MSVC 实测两轮发现）：`Detach` 要求
+		//   `members.size() > 1`，且被收编方必须是**独立框**（窗口打开——C-M1-22(f) 守卫）
+		//   ⇒ 循环前先收编 **C 与 C1**（④ 拆出后二者均为独立框、窗口已重建）作常驻成员，
+		//   此后每轮「收编 B → 拆出 B」，A 始终保有 2 个成员 ⇒ `CanDetach` 恒成立。
+		//   计数器须设 watch（生产语义 = 只认自己的 box——C-M1-13）。
+		const BoxId c1 = app.GetModel().GetBox(fixture.c).members[0];   // ④ 之后 C 仅剩 C2
+
+		app.Collect(fixture.a, fixture.c);
+		app.Collect(fixture.a, member);   // ④ 拆出的成员（现为独立框）
+
+		EXPECT_TRUE(app.GetModel().CanDetach(fixture.a));   // 循环前置：A 有 2 个成员
+		(void)c1;
+
 		for (int round = 0; round < 2; ++round){
 
 			ChangeCounter counterC;
@@ -333,16 +343,10 @@ void TestM1ModelDetachRestoresMembership(){
 			EXPECT_EQ(counterA.collected, 1);  // 收编方恰好一次
 			EXPECT_FALSE(app.GetEntry(fixture.b).window->IsOpen());
 
-			// 拆出前置：members.size() > 1 ⇒ 再收编一个（用已拆出的成员 C1，它已独立）
-			const BoxId extra = app.GetModel().GetBox(fixture.c).members[0];
-
-			if (app.GetEntry(extra).window->IsOpen() && extra != fixture.b){
-
-				app.Collect(fixture.a, extra);
-			}
-
 			counterB.Reset();
 			counterA.Reset();
+
+			EXPECT_TRUE(app.GetModel().CanDetach(fixture.a));   // 前置成立（确实拆得出）
 
 			// 拆出：把 B 从 A 拆出（B 的 placement 有记忆 ⇒ 恢复）
 			// ★ 选中走 Model（协调器只暴露 Collect/Detach——选中是视图动作，
@@ -555,26 +559,34 @@ void TestM1PopupDiscipline(){
 void TestM1FoldGeometry(){
 
 	// ① D3 真实窗：几何瞬时
+	// ★ E-8（2026-10-09，用户侧实测 + MSVC 探针）：折叠目标**不是** kCaptionHeight——
+	//   `GetBounds()` 是总尺寸（含边框）口径，而 K2 的「仅标题条」是客户区口径；
+	//   且系统有**最小窗口高**（实测请求 32 → 读回 39 = 32 + 7 边框）。
+	//   ⇒ 折叠目标 = `BoxWindow::CollapsedHeight()`（请求探测出的真实下限，方案 A）。
 	{
 		DesktopNestApp app;
 		const DesktopNestApp::Fixture fixture = app.BuildFixture(false);
 
 		BoxView& view = *app.GetEntry(fixture.a).view;
+		BoxWindow& window = *app.GetEntry(fixture.a).window;
 
+		const int collapsedHeight = window.CollapsedHeight();
+
+		EXPECT_TRUE(collapsedHeight >= Metrics::kCaptionHeight);   // ≥ 标题条（含边框）
 		EXPECT_TRUE(view.GetContentPanel()->IsExpanded());
-		EXPECT_NEAR(app.GetEntry(fixture.a).window->GetBounds().height,
+		EXPECT_NEAR(window.GetBounds().height,
 		            static_cast<float>(Metrics::kWindowHeight), kFloatEps);
 
 		view.ToggleCollapse();
 
 		EXPECT_FALSE(view.GetContentPanel()->IsExpanded());
-		EXPECT_NEAR(app.GetEntry(fixture.a).window->GetBounds().height,
-		            static_cast<float>(Metrics::kCaptionHeight), kFloatEps);
+		EXPECT_NEAR(window.GetBounds().height,
+		            static_cast<float>(collapsedHeight), kFloatEps);
 
 		view.ToggleCollapse();
 
 		EXPECT_TRUE(view.GetContentPanel()->IsExpanded());
-		EXPECT_NEAR(app.GetEntry(fixture.a).window->GetBounds().height,
+		EXPECT_NEAR(window.GetBounds().height,
 		            static_cast<float>(Metrics::kWindowHeight), kFloatEps);
 	}
 
@@ -634,7 +646,10 @@ void TestM1DragRoute(){
 
 }   // namespace
 
-void RegisterDesktopNestTests(){
+// ★ 定义须**全限定**（`ECDI::Test::`）——声明在 RunAllTests.h 的 `ECDI::Test` 命名空间内；
+//   写成全局作用域会定义出 `::RegisterDesktopNestTests`（另一个符号）⇒ 链接期 LNK2019
+//   （本项目 32/33 个先例同款；`-fsyntax-only` 不解析符号 ⇒ 必须做链接级验证才发现）。
+void ECDI::Test::RegisterDesktopNestTests(){
 
 	TestRegistry& registry = GetTestRegistry();
 

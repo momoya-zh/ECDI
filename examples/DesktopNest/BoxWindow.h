@@ -54,9 +54,21 @@ public:
 	/// @brief 底层窗口指针（测试/协调器缝；Close 后为 nullptr）
 	[[nodiscard]] Window* GetWindow() const noexcept { return m_window; }
 
+	/// @brief 折叠态总高（DIP）——★ **标题条 + 系统边框/调整区**（C-M1-18 / 方案 A）。
+	/// @details 为什么不能直接写 `kCaptionHeight`（实测 2026-10-09）：`GetBounds()` 是
+	///          `GetWindowRect` 口径（**总尺寸含边框**），而 K2 要的「仅标题条」是**客户区**口径；
+	///          且系统对窗口有**最小尺寸**（本机实测：总高 < 39 被钳到 39 = 32 + 7 边框）。
+	///          ⇒ 本方法以「请求 `kCaptionHeight` → 读回」**探测**真实下限（一次，缓存），
+	///          跨 DPI 亦成立（钳制由系统按 DPI 计算，框架不猜边框值）。
+	/// @note 未创建 / 已关闭 ⇒ 退化返回 `kCaptionHeight`（无窗口可探）。
+	[[nodiscard]] int CollapsedHeight() const;
+
 private:
 	Window* m_window = nullptr;   ///< 非拥有——Application 容器（Window.h:40）；Close 后置空（C-M1-20(b)）
 	bool m_open = false;          ///< 存活标记（末位设置——C-M1-16⑩）
+
+	/// @brief 折叠态总高缓存（0 = 未探测——`CollapsedHeight` 首次调用时探测并写入）
+	mutable int m_collapsedHeight = 0;
 };
 
 }   // namespace ECDI::DesktopNest

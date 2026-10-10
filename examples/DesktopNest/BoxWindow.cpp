@@ -76,4 +76,53 @@ Rect BoxWindow::GetBounds() const{
 	return m_window->GetBounds();
 }
 
+int BoxWindow::CollapsedHeight() const{
+
+	// ★ 方案 A（用户 2026-10-09 拍板）：折叠总高 = **标题条 + 系统边框/调整区**。
+	//   实测（本机 96 DPI，Borderless + SetResizeInset(0)）：
+	//     · `GetBounds()` 是 GetWindowRect 口径（**总尺寸含边框**），而 K2 的「仅标题条」是
+	//       **客户区**口径 —— 两者不是同一个量；
+	//     · 系统对窗口有**最小尺寸**：请求总高 32 → 读回 **39**（= 32 + 7 边框）；
+	//       请求 ≥ 40 → 精确生效；请求 1 → 39（同被钳）。
+	//   ⇒ 用「请求 kCaptionHeight → 读回」**探测**真实下限（一次，缓存）——
+	//     跨 DPI 亦成立（钳制由系统按 DPI 算，应用侧不猜边框值）。
+	if (m_collapsedHeight > 0){
+
+		return m_collapsedHeight;
+	}
+
+	if (m_window == nullptr){
+
+		return Metrics::kCaptionHeight;   // 无窗口可探（未创建/已关闭）——退化
+	}
+
+	Rect probe = m_window->GetBounds();
+
+	if (probe.width <= 0.0f){
+
+		return Metrics::kCaptionHeight;   // 几何不可读——退化
+	}
+
+	const float expandedHeight = probe.height;
+
+	probe.height = static_cast<float>(Metrics::kCaptionHeight);
+	m_window->SetBounds(probe);
+
+	const Rect readback = m_window->GetBounds();
+
+	m_collapsedHeight = (readback.height > 0.0f) ? static_cast<int>(readback.height)
+	                                             : Metrics::kCaptionHeight;
+
+	// 探测后**恢复**展开高度（探测语义 = 纯查询——目标高由调用方随后自设）
+	if (expandedHeight > 0.0f){
+
+		Rect restore = readback;
+
+		restore.height = expandedHeight;
+		m_window->SetBounds(restore);
+	}
+
+	return m_collapsedHeight;
+}
+
 }   // namespace ECDI::DesktopNest

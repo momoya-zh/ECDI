@@ -51,6 +51,30 @@ BoxId DesktopNestApp::MakeMergedBox(const std::string& title,
 
 	const BoxId id = m_model.AddMergedBox(title, members);
 
+	// ★ E-7（2026-10-09，用户侧实测发现）：**成员框也必须建登记项**——
+	//   成员在收编态没有窗口，但 `Detach` 要对被拆成员 `m_boxes.at(member)` 取包装对象
+	//   来重建窗口；只在 `MakeBox` 建登记 ⇒ 拆出成员时 `at()` 抛 `std::out_of_range`
+	//   （T-M1-2 的 `unhandled exception` 根因）。视图此刻不装配（无窗口）——
+	//   拆出时由 `Detach` 走 `Create` 装配（C-M1-16）。
+	{
+		const Box& record = m_model.GetBox(id);
+
+		for (const BoxId member : record.members){
+
+			BoxEntry& memberEntry = m_boxes[member];
+
+			memberEntry.window = std::make_unique<BoxWindow>();
+			memberEntry.view = std::make_unique<BoxView>(m_model, member);
+
+			// 成员视图与属主同款接线（拆出后即为独立框，回调须就位）
+			memberEntry.view->SetOnAction([this, member](BoxView::Action action, BoxId source){
+				OnBoxAction(member, action, source);
+			});
+			memberEntry.view->SetOnAbsorbed([this, member]{ CloseBoxEntry(member); });
+			memberEntry.view->SetOnPopupOpening([this, member]{ CloseOtherPopups(member); });
+		}
+	}
+
 	BoxEntry& entry = m_boxes[id];
 
 	entry.window = std::make_unique<BoxWindow>();

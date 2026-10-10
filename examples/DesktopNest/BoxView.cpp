@@ -461,8 +461,11 @@ void BoxView::ToggleCollapse(){
 
 		if (bounds.width > 0.0f){
 
-			bounds.height = static_cast<float>(expanded ? Metrics::kWindowHeight
-			                                            : Metrics::kCaptionHeight);
+			// ★ 折叠目标高 = 「标题条 + 系统边框」（方案 A——C-M1-18）：
+			//   `GetBounds()` 是总尺寸口径，而 K2 的「仅标题条」是客户区口径，
+			//   且系统有最小窗口高 ⇒ 不能直接写 kCaptionHeight（实测会被钳到 39）。
+			bounds.height = expanded ? static_cast<float>(Metrics::kWindowHeight)
+			                         : static_cast<float>(m_window->CollapsedHeight());
 			m_window->SetBounds(bounds);
 		}
 	}
