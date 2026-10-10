@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 namespace ECDI::Test {
 
@@ -40,5 +40,6 @@ void RegisterLineCoverageTests();   ///< Phase 24：DrawLine 线段抗锯齿（T
 void RegisterTextMeasurerTests();   ///< Phase 26：文本测量链（T26-10 D-8 闭合 / T26-12 GDI 测量缓存）
 void RegisterFontEngineTests();   ///< Phase 26：FreeType 共享底层（T26-1..T26-6——PixelSize / 两级缓存 / GlyphKey / FontSource）
 void RegisterGLBackendTests();   ///< Phase 26：GL 后端（T26-7 图集 shelf 分配 / T26-8 初始化失败 no-op）
+void RegisterDesktopNestTests();   ///< M1：DesktopNest（T-M1-1..T-M1-6——模型/浮层/折叠/拖动路由/关闭路径）
 
 } // namespace ECDI::Test

@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include <cstdio>
@@ -38,6 +38,7 @@ int ECDI::Test::RunAllTests()
     RegisterTextMeasurerTests();   // Phase 26：文本测量链（T26-10 / T26-12）
     RegisterFontEngineTests();   // Phase 26：FontEngine（T26-1..T26-6）
     RegisterGLBackendTests();   // Phase 26：GL 后端（T26-7 / T26-8）
+    RegisterDesktopNestTests();   // M1：DesktopNest（T-M1-1..T-M1-6）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

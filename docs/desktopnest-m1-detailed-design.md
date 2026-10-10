@@ -1,6 +1,6 @@
 ﻿# DesktopNest M1 详细设计
 
-> **状态**：v1.3（2026-10-09，第三轮外部评审吸收——复评「有条件通过」⇒ 三项必办闭合：关闭策略拍板方案 B + `AddMergedBox` 非空前置 + `Create()` 异常口径如实化；待复核）
+> **状态**：v1.4（2026-10-09，**实施勘误回写**——实现已完成并三重验证：6 头自包含 + 6 源调用点语法（g++/clang++ 双链）+ 纯数据层行为探针；实测发现 5 处详设级偏差全部登记于 §9 v1.4；真实窗口层判据待用户侧构建实测）
 > **输入**：需求稿 `desktopnest-m1-requirements.md` **v1.1**（评审 PASS）· 初设 `desktopnest-m1-preliminary-design.md` **v1.3**（外部评审吸收版 + §8 五问全部收口——必须项 P1–P5/P7/P8 + 建议项 P6/P9 全闭合）
 > **定位**：详设 = 初设契约的**落地形式**（条 42（详设/实施规格必须按最小修改面写））——初设已钉的机制（判据落点 / 四件分离 / 单向数据流）此处不重开，只给实现形态；本稿新增物 = 逐文件分解（△1..△12）+ 头全文 + 实现级契约（C-M1-11..C-M1-24）+ 测试装置（§7）。
 > **框架事实基准**：初设 §1 的 F1–F8（带行号）继续有效；本稿新增实测引用另行标注行号。
@@ -617,17 +617,17 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 - `.h` 全文 = §2.3。
 - `.cpp` 要点：
   - `OnPaint`：`ctx.DrawRoundedRect(Rect{x, y, w, h}, Metrics::kPopupRadius, Palette::PopupBackground())`（坐标约定同 Button::OnPaint——Button.cpp:244-248 先例）。
-  - **布局表（DIP，相对浮层；n = 成员数，m = 可加入独立框数）**：
+  - **布局表（DIP，相对浮层；n = 成员数，m = 可加入独立框数）**——★ **v1.4 按实现对齐**（实施期实测：v1.3 本表多列一行「分隔线」且偏移整体 +4，而实现**不绘制分隔线** ⇒ 以实现为准修正）：
 
     | 行 | 矩形 |
     |---|---|
     | 成员行 i | `(4, 4 + i×24, 172, 24)` |
-    | 分隔线 | y = `8 + n×24`（DrawLine 1px，TitleSeparator） |
-    | 拆出行 | `(4, 12 + n×24, 172, 24)` |
-    | 「加入成员」头 | `(4, 36 + n×24, 172, 20)`——Label，非交互 |
-    | 加入行 j | `(4, 56 + n×24 + j×24, 172, 24)` |
+    | 拆出行 | `(4, 8 + n×24, 172, 24)` |
+    | 「加入成员」头 | `(4, 32 + n×24, 172, 20)`——Label，非交互 |
+    | 加入行 j | `(4, 52 + n×24 + j×24, 172, 24)` |
 
-    浮层高 = `60 + n×24 + m×24`。
+    浮层高 = `52 + n×24 + m×24 + 8`（末项 = 底部留白；`OpenPopup` 按 `60 + n×24 + m×24` 设高）。
+    ★ **测试坐标推导**（条 47）：加入行 0 中心（n=0）= 浮层局部 `(4+86, 52+12) = (90, 64)` ⇒ 客户区 `(90, 32+64) = (90, 96)`；成员行 1 中心（n=2）= 局部 `(90, 4+24+12) = (90, 40)` ⇒ 客户区 `(90, 72)`。
   - `Rebuild`：`ClearRows()` → 按布局表建行（成员行文本 = `[X] 标题`（active）/ `[ ] 标题`；拆出行 = `拆出「<active 标题>」`，`SetEnabled(CanDetach)`；加入行 = `加入 <框标题>`，排除 owner 自身）→ 逐行 `SetOnClick` 绑回调（捕获 **id 值**，不捕获控件指针——C-M1-19 安全论证的一环）。
   - `Refresh`（仅 `IsVisible()` 时被调——C-M1-19 R2）：原位 `SetText` 成员行勾选前缀 + 拆出行标题/可用性；**不创建、不销毁任何控件**。
 
@@ -883,7 +883,7 @@ endif()
 
 ### 7.3 装置注记
 
-- **测试坐标 = 常量推导**（条 47（文档里写下的测试探针坐标必须在脚本里复算断言））：入口按钮中心 `(kBarPad + kEntryButtonWidth/2, 16) = (56, 16)`；折叠按钮中心 `(kWindowWidth − kCollapseButtonSize/2, 16) = (204, 16)`；标题文本探针 `(150, 16)`（Label 区域内）；成员行 i 中心 `(kPopupRowPad + 86, kCaptionHeight + 4 + i×24 + 12)`；加入行 j 中心 `(kPopupRowPad + 86, kCaptionHeight + 56 + n×24 + j×24 + 12)`——测试内用 `Metrics` 常量算并 `assert`，不写字面量。
+- **测试坐标 = 常量推导**（条 47（文档里写下的测试探针坐标必须在脚本里复算断言））：入口按钮中心 `(kBarPad + kEntryButtonWidth/2, 16) = (56, 16)`；折叠按钮中心 `(kWindowWidth − kCollapseButtonSize/2, 16) = (204, 16)`；标题文本探针 `(150, 16)`（Label 区域内）；成员行 i 中心（浮层局部 → 客户区）= `(kPopupRowPad + 86, kCaptionHeight + 4 + i×24 + 12)`；加入行 j 中心 = `(kPopupRowPad + 86, kCaptionHeight + 52 + n×24 + j×24 + 12)`（★ v1.4 按实现修正——v1.3 写的 `+56` 对应已被删除的「分隔线」行）——测试内用 `Metrics` 常量算并 `assert`，不写字面量。
 - **注册↔定义做差**（条 127）：`&(TestDesktopNest\w+)\);` 与 `^void TestDesktopNest\w+\(` 两集合做差必须为空。
 - **清理**：每个 D3 用例结束前 `Close` 全部窗（Release 幂等）；Application 析构兜底（ApplicationDispatchTests 先例）。
 - **回收时序（C-M1-20）**：D3 用例不跑 `Application::Run()` ⇒ Window 对象与旧树延后到 `~Application` 销毁——**有界、非泄漏**；用例**不得**假设「Close 后 Window 对象立即析构」（框架契约原文 `Application.cpp:112-116`）。用例内只断言 `IsOpen()`/`GetBounds()` 等包装层观测点。
@@ -933,3 +933,12 @@ endif()
   ② **`AddMergedBox` 空成员列表（复评 P2a）⇒ 取「非空前置」**：`@pre memberTitles 非空` + Debug `FRAMEWORK_ASSERT`（空列表会使 `active = memberTitles.front()` 成为 UB；合并框定义即「含成员的框」⇒ 不定义空列表语义，沿最小修改面）+ 新增 T-M1-1⑥ 验证非空路径；**不**为非法输入引入用例/错误码机制。
   ③ **`Create()` 异常口径（复评 P2b）⇒ 删保证性措辞、改如实口径**：复评指出 v1.2「任一步异常 ⇒ 状态一致」**推理不严谨**——★ **实测确认异常启用**（平台层确有 `throw std::system_error`：`Win32PlatformWindow.cpp:137` / `Win32WindowClass.cpp:64`；CMake 未禁用；开发规范只有「析构不得抛 / 对象始终可析构 / Framework 不伪造资源状态」）⇒ 明确 **`Create()` 不是异常安全事务**：`m_open == false` **只保证不报告存活**，**不保证**无遗留窗口 / 控件树完整 / 可重试；M1 口径 = **异常向上传播至 `Run()`**，不新增恢复机制（YAGNI——不在应用层另立与框架不同的约定）。
   **留意项吸收**：C-M1-23 独立编译检查标「**实施期必做动作**」（补齐头文件 ≠ 已验证）· T-M1-4⑦ 增 ③「拒绝 ≠ 改模型」（断言模型逐位不变）与 ④「**两类框**都覆盖」（独立框 A + 含成员合并框 C）· §7.3 增关闭策略注记。契约区间仍 **C-M1-11..C-M1-24**（本轮为既有契约的补款与新前置，不新增编号）。
+
+- **v1.4**（2026-10-09）**实施勘误回写**（实现阶段按「单头独立编译 + 调用点语法检查 + 纯数据层行为探针」三重验证，实测发现 **5 处详设级偏差**——全部如实登记，条 100（改公共头后的自包含/调用点/行为三重验证））：
+  ① **E-1 `Widget::Contains` 是 private**（`Widget.h:280`——仅服务 `AddChild` 防环）⇒ v1.0 §9⑥ 写的「用既有 `Widget::Contains` 替代手写上溯」**不成立**；判据③ 回到初设 §1.1.2 的 `GetParent()` 上溯（语义等价）。实现处已注明。
+  ② **E-2 首次收编未确定 `active`（真缺陷——行为探针发现）**：v1.3 的 `Collect` 只 `push_back(members)`，未处理 `target.active == -1` 的情形 ⇒ 一个**首次**收到成员的框出现「`members` 非空而 `active == -1`」⇒ 派生标题（C-M1-17）退化、`Detach` 读 `active` 命中前置失败。**修法**：首次收编时 `active = source`（已有 active 则不动——保持用户当前选中项）；已加回归锚（探针 8 项断言）。
+  ③ **E-3 `Window::IsClientInteractiveAt` 是 private**（`Window.h:295`——它实现 `PlatformWindowHost` 契约）⇒ T-M1-6 的判据入口改为**经基类引用调用**（`Window : public PlatformWindowHost`，Window.h:44；该虚函数在基类是 public 纯虚——`PlatformWindowHost.h:64`）。
+  ④ **E-4 浮层布局表与实现不一致**：v1.3 表多列一行「分隔线」（`8 + n×24`）且整体偏移 +4，而实现**不绘制分隔线** ⇒ 表已按实现修正（拆出行 `8 + n×24`、头 `32 + n×24`、加入行 `52 + n×24 + j×24`），§7.3 测试坐标同步（`+56` → `+52`）。★ 影响：若按旧表写测试坐标，T-M1-4⑤ 的「加入行」点击会**落在行外**（假红/假绿）。
+  ⑤ **E-5 头文件前置声明命名空间**：`BoxView.h` / `MemberListPopup.h` / `BoxWindow.h` 初稿把自有三件的前置声明写在 `ECDI` 里（应为 `ECDI::DesktopNest`）⇒ 声明出 `ECDI::BoxWindow` 等**另一个类型**，`BoxWindow::Create` 定义与声明不匹配（GCC 直接报 `no declaration matches`）。已修，并在头内注明。
+  ⑥ **E-6 测试设计两处口径错误（行为探针发现）**：**(a)** T-M1-2⑤ 的「收编↔拆出循环」直接 `Detach` 会**静默无效**——`Detach` 要求 `members.size() > 1`，而 `Collect(a,b)` 后 A 只有 1 个成员 ⇒ 须「先收编第二个成员再拆出 active」；**(b)** 通知断言必须带 **box 过滤**（`ChangeCounter::watch`）——派发是**广播**（`BoxModel::Notify` 遍历全部 handler），「只认自己」是**消费者**（`BoxView::OnModelChanged` 的 `box != m_box`）的职责（C-M1-13）⇒ 不过滤的计数器会收到全部变更，断言「C 收到 0 次」会假红。已按生产语义修正测试装置。
+  ★ **验证口径**（本轮实测）：**6 头单头自包含**（g++ 16.1 + clang++ 双链 `-fsyntax-only` 全过）· **6 源调用点语法检查**（同双链全过）· **纯数据层行为探针**（BoxModel 23 项 + E-2 回归 8 项 + 模型级模拟 **32 项**，均实跑通过）。**未做**：完整 `ecdi_tests` 构建与运行（本环境不构建整个工程）——真实窗口层（D3）与浮层/折叠/拖动判据**待用户侧构建实测**。

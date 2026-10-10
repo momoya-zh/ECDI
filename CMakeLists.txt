@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20)
 # ★ Phase 26：加入 **C** 语言——vendor 的 FreeType 是 C 源码（独立静态库目标 freetype）
 project(ECDI VERSION 0.1.0 LANGUAGES CXX C)
 
@@ -155,12 +155,22 @@ file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
 )
 # ModelProbeTests 断言 ModelProbePage 行为 → 需链接 demo 实现（examples 内，非框架）
 list(APPEND TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/examples/ModelProbe/ModelProbe.cpp")
+# DesktopNestTests 断言 DesktopNestApp/BoxView/BoxModel 行为 → 同款链接 demo 实现（5 源；
+# main.cpp 不入：wWinMain 与测试入口冲突——test_main.cpp 先例）
+list(APPEND TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/DesktopNest/BoxModel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/DesktopNest/MemberListPopup.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/DesktopNest/BoxView.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/DesktopNest/BoxWindow.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/DesktopNest/DesktopNest.cpp"
+)
 add_executable(ecdi_tests ${TEST_SOURCES})
 target_include_directories(ecdi_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/include"            # ECDI 公共头
     "${CMAKE_BINARY_DIR}/generated"                       # version.h
     "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/src"                # 下沉头（RecordingBackend 等）
     "${CMAKE_CURRENT_SOURCE_DIR}/examples/ModelProbe"     # ModelProbe.h
+    "${CMAKE_CURRENT_SOURCE_DIR}/examples/DesktopNest"    # DesktopNest 头（BoxModel.h 等）
 )
 target_link_libraries(ecdi_tests PRIVATE ECDI)
 target_compile_definitions(ecdi_tests PRIVATE UNICODE _UNICODE)
@@ -206,3 +216,6 @@ add_subdirectory(examples/VisualTest)
 
 # ── 最小消费者（Phase 10 库化烟雾测试——in-tree / 外部消费者双路径见其 CMakeLists）──
 add_subdirectory(examples/MinimalApp)
+
+# ── DesktopNest（M1 观感里程碑——桌面整理器应用；需求 K7 目标名 desktopnest）──
+add_subdirectory(examples/DesktopNest)
