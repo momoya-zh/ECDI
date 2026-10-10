@@ -1,8 +1,8 @@
 ﻿# DesktopNest M1 详细设计
 
-> **状态**：v1.1（2026-10-09，外部评审吸收——有条件通过 ⇒ 必须项闭合；待复核）
+> **状态**：v1.2（2026-10-09，第二轮外部评审吸收——复评「有条件通过」⇒ P1/P2 必改闭合 + S1–S5 建议项全收；待复核）
 > **输入**：需求稿 `desktopnest-m1-requirements.md` **v1.1**（评审 PASS）· 初设 `desktopnest-m1-preliminary-design.md` **v1.2**（外部评审吸收版——必须项 P1–P5/P7/P8 + 建议项 P6/P9 全闭合）
-> **定位**：详设 = 初设契约的**落地形式**（条 42（详设/实施规格必须按最小修改面写））——初设已钉的机制（判据落点 / 四件分离 / 单向数据流）此处不重开，只给实现形态；本稿新增物 = 逐文件分解（△1..△12）+ 头全文 + 实现级契约（C-M1-11..C-M1-21）+ 测试装置（§7）。
+> **定位**：详设 = 初设契约的**落地形式**（条 42（详设/实施规格必须按最小修改面写））——初设已钉的机制（判据落点 / 四件分离 / 单向数据流）此处不重开，只给实现形态；本稿新增物 = 逐文件分解（△1..△12）+ 头全文 + 实现级契约（C-M1-11..C-M1-24）+ 测试装置（§7）。
 > **框架事实基准**：初设 §1 的 F1–F8（带行号）继续有效；本稿新增实测引用另行标注行号。
 
 ## §1 范围映射
@@ -43,9 +43,9 @@
 |---|---|---|---|
 | A1 观感主回路 | C-M1-1/2/5/7/9 | 人工（K6 冻结路径） | 人工——自动用例不重复 |
 | A2 模型一致性 | C-M1-6/8/13/20 | T-M1-1/2/3 + T-M1-4⑤⑥ | **流程级自动**（协调器可链入测试——§2.6；T-M1-2④ 真调 `Detach()`）；窗口销毁 = `BoxWindow::IsOpen()` 可观测；回收时序 = C-M1-20 框架契约（测试态延后到 `~Application`——有界） |
-| A3 浮层纪律 | C-M1-12/19 | T-M1-4 | ①–④ 无头树 + ⑤ 真实派发 + ⑥ 浮层重开 |
+| A3 浮层纪律 | C-M1-12/19 | T-M1-4 | ①–④ 无头树 + ⑤ 真实派发 + ⑥ 浮层重开 + ⑦ 系统关闭路径（v1.2） |
 | A4 拖动语义 | C-M1-2/5 | T-M1-6 | **命中路由自动**；拖动顺滑/拖出边缘不失 = 人工（系统行为）——两者分开记录（评审 §4.3） |
-| A5 既有全绿 | — | 框架套件 | 基线 366（Phase 31 收口值）+ 新增 6 用例 |
+| A5 既有全绿 | — | 框架套件 | 基线 366（Phase 31 收口值）+ 新增 6 用例（v1.2 补 7 项判据均并入既有注册——不新增条目） |
 
 ## §2 头全文草案
 
@@ -59,6 +59,7 @@
 #include <cstddef>
 #include <functional>
 #include <string>
+#include <utility>   // std::pair（订阅表条目）——头自包含（v1.2：不依赖传递包含）
 #include <vector>
 
 namespace ECDI::DesktopNest {
@@ -111,18 +112,24 @@ public:
 	/// 收编：source 作为成员并入 target。
 	/// @param sourcePlacement 调用方在调用前读 source 窗口位置（Phase 31
 	///        GetBounds——「记 placement 要读」）；Model 只存数据（C-M1-6）。
-	/// @pre source 为 TopLevel 且 != target（调用方门控——弹层「加入成员」只列独立框）。
+	/// @pre `target` 与 `source` 均为**有效 id 且处于 TopLevel**（Merged 框不可再被收编），
+	///      且 `source != target`（弹层「加入成员」只列独立框——UI 门控同源）。
 	void Collect(BoxId target, BoxId source, const Rect& sourcePlacement);
 
 	/// 拆出「当前成员」：active 从 members 移除并恢复 TopLevel（placement 记录保留）。
-	/// @pre CanDetach(box)（members.size() > 1——弹层拆出项的可用性门控）。
+	/// @pre `CanDetach(box)`（members.size() > 1——弹层拆出项的可用性门控），
+	///      且 `box` 有效、`active` 指向本框成员。
 	void Detach(BoxId box);
 
 	/// 切换当前成员（active 指向换人；框尺寸不变——内容重建由通知驱动）。
+	/// @pre `member ∈ GetBox(box).members`（不能切到不属于本框的成员）、二者 id 均有效。
 	void SetActive(BoxId box, BoxId member);
 
 	/// @name 查询
 	/// @{
+	/// @note ★ **引用寿命**（v1.2 吸收复评 S4）：返回引用指向内部 `std::vector<Box>` 元素
+	///       ⇒ `AddBox`/`AddMergedBox` 的 `push_back` 一旦扩容即**全部失效**；调用点须
+	///       **即取即用**（或按值拷贝）——不得跨越 `AddBox`/`AddMergedBox` 持有。
 	const Box& GetBox(BoxId box) const;
 	/// 「加入成员…」列表 = 全部独立框（含 owner 自身——由弹层排除自身）。
 	std::vector<BoxId> GetTopLevelBoxes() const;
@@ -216,6 +223,7 @@ inline Rect CascadedPlacement(const Rect& sourceBounds) {
 
 #include <functional>
 #include <string>
+#include <utility>   // std::move（SetOnXxx 内联）——头自包含（v1.2）
 #include <vector>
 
 namespace ECDI {
@@ -285,6 +293,7 @@ private:
 
 #include <functional>
 #include <memory>
+#include <utility>   // std::move（SetOnXxx 内联）——头自包含（v1.2）
 
 namespace ECDI {
 class BoxWindow;
@@ -409,6 +418,8 @@ private:
 #include "ECDI/Core/Rect.h"
 #include "ECDI/Window/Window.h"
 
+#include <string>   // std::string（Create 形参）——头自包含（v1.2）
+
 namespace ECDI {
 class BoxView;
 
@@ -480,10 +491,12 @@ private:
 
 #include "ECDI/Application/Application.h"
 #include "ECDI/Core/Rect.h"
+#include "ECDI/EventSystem/Window/WindowCloseRequsted.h"   // OnWindowCloseRequested 形参（C-M1-22）
 
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ECDI::DesktopNest {
@@ -499,7 +512,13 @@ struct BoxEntry {
 /// ① 收编/拆出 = 「读几何（Phase 31）→ Model 变更 → 通知驱动视图/窗口」——
 /// 禁止「点击后直接删/建 Widget、顺便改 members」（需求 K4 v1.1 纪律）；
 /// ② 收编/拆出动作**先关发起浮层**再执行 Model 操作（C-M1-19 R3）。
-class DesktopNestApp {
+/// ★ **继承 Application**（v1.2 吸收复评 P1）：关闭请求的唯一拦截点是
+/// `Application::OnWindowCloseRequested`（virtual——Application.h:121 /
+/// EventRouter.h:60），而 `DesktopNestApp` 原先只是**持有** Application 成员
+/// ⇒ 无法 override。改为继承后即可拦截系统关闭路径（TestApp 先例：
+/// ApplicationDispatchTests.cpp:310；拦截先例：CaptionBarTests.cpp:60-76）。
+/// 窗口仍由基类容器持有（`Create` 登记、框架延迟回收——C-M1-20）——继承不改变所有权。
+class DesktopNestApp : public Application {
 public:
 	/// K6 冻结初始态：A（独立）· B（独立）· C（合并框 = [C1, C2]）。
 	/// @param show 生产 = true；测试 = false（隐藏窗——装置不扰动桌面）。
@@ -508,6 +527,10 @@ public:
 
 	/// 生产入口：BuildFixture(true) → 消息循环（阻塞至退出）。
 	int Run();
+
+	/// 关闭请求拦截（C-M1-22——`WM_CLOSE`/Alt+F4 与 `Window::RequestClose()` 同路径、同步派发）：
+	/// 先同步包装器与视图（`Close` 置空指针 + `Disassemble`），**再委托基类**实际销毁。
+	void OnWindowCloseRequested(const WindowCloseRequestedEvent& event) override;
 
 	/// @name 流程（A2 自动判据的驱动面——与弹层动作回调同一入口）
 	/// @{
@@ -519,7 +542,6 @@ public:
 	/// @{
 	BoxModel& GetModel() noexcept { return m_model; }
 	BoxEntry& GetEntry(BoxId box) { return m_boxes.at(box); }
-	Application& GetApplication() noexcept { return m_app; }
 	/// @}
 
 private:
@@ -530,10 +552,11 @@ private:
 	void CloseBoxEntry(BoxId box);         ///< 关原生窗口 + 视图解装（C-M1-10②/16）
 	void CloseOtherPopups(BoxId keepOpen); ///< 单浮层纪律（开新关旧）
 	void OnBoxAction(BoxId owner, BoxView::Action action, BoxId source);
+	BoxId FindBoxByWindow(const Window* window) const;   ///< 关闭请求反查（C-M1-22；未命中返回 -1）
 
-	Application m_app;                       ///< 进程唯一（Application.h:43 语义）
 	BoxModel m_model;                        ///< 唯一事实源（P3）
 	std::map<BoxId, BoxEntry> m_boxes;     ///< id → 登记（持有至退出）
+	// ★ 无 Application 成员（v1.2）：基类即 Application 实例——Create/Run/PostToUi 直接可用。
 };
 
 }   // namespace ECDI::DesktopNest
@@ -564,16 +587,24 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
 > 全部为**新增文件**（应用侧）或**追加行**（构建/登记）——无既有文件修改面
 > （条 42：每个 △ 的改动面即其全文/追加行，其余行保持现状）。
+> ★ **头文件自包含纪律**（v1.2 吸收复评 S1）：每个头**直接包含自身使用的标准库声明**，
+> 不依赖其他头的传递包含（`std::pair`/`std::move` ⇒ `<utility>`；`std::string` ⇒ `<string>`；
+> 依此类推）——实施期以「单头独立编译检查」验证（每个头单独 `#include` 编译通过）。
 
 ### △1 BoxModel.h/.cpp（新——纯数据层）
 
 - `.h` 全文 = §2.1。
 - `.cpp` 要点：
-  - `AddBox`：`m_boxes.push_back(Box{m_nextId, std::move(title), BoxState::TopLevel, {}, -1, {}})` → 返回 `m_nextId++`。
-  - `AddMergedBox`：先建合并框记录（`members` = 成员 id 列表、`active` = 首成员），再逐个建成员记录（`state = Merged`、`placement` 空 = 无记忆）。
-  - `Collect`：`target.members.push_back(source)` · `source.state = Merged` · `source.placement = sourcePlacement` → `Notify(target, Collected)` + `Notify(source, Absorbed)`。
-  - `Detach`：`member = box.active` → 从 `box.members` 移除 → `member.state = TopLevel`（`placement` 记录保留）→ `box.active = box.members.front()`（保有效指向）→ `Notify(box, MemberDetached)` + `Notify(member, Released)`。
-  - `SetActive`：`box.active = member` → `Notify(box, Activated)`。
+  - `AddBox`：`m_boxes.push_back(Box{m_nextId, std::move(title), BoxState::TopLevel, {}, -1, {}})` → 返回 `m_nextId++`（持有 `const Box&` 的调用点须注意扩容失效——§2.1 引用寿命注记）。
+  - `AddMergedBox`（v1.2 吸收复评 S4——**ID 预分配 + 记录构建顺序固定**）：
+    1. **先一次性确定全部 ID**：`boxId = m_nextId`、`memberIds[i] = m_nextId + 1 + i`（自 0 单调、不跳号 ⇒ 分配完成时 `id == 下标` 恒成立）；
+    2. **再构造全部记录**（合并框在前、成员随后）——此步一次性 `push_back`，**期间不对外暴露任何引用**；
+    3. **最后回填关系**：合并框的 `members = memberIds`、`active = memberIds.front()`；成员记录 `state = Merged`、`placement` 空（= 无记忆 ⇒ 日后拆出走级联，§9-6）；
+    4. `m_nextId` 前移到已用区间之后，**完成状态初始化后才返回**（返回即对外可见）。
+    ★ 顺序固定后，实现不再依赖「先建成员还是先建框」的脆弱插入序；`std::vector` 扩容只发生在第 2 步，且该步内无人持有元素引用。
+  - `Collect`：先断前置（Debug 断言——C-M1-24：target/source 有效且均 TopLevel、`source != target`）→ `target.members.push_back(source)` · `source.state = Merged` · `source.placement = sourcePlacement` → `Notify(target, Collected)` + `Notify(source, Absorbed)`。
+  - `Detach`：断前置（`CanDetach(box)`）→ `member = box.active` → 从 `box.members` 移除 → `member.state = TopLevel`（`placement` 记录保留）→ `box.active = box.members.front()`（保有效指向）→ `Notify(box, MemberDetached)` + `Notify(member, Released)`。
+  - `SetActive`：断前置（`member ∈ box.members`）→ `box.active = member` → `Notify(box, Activated)`。
   - `Notify`（C-M1-8② 快照派发）：`auto snapshot = m_handlers;`（值拷贝）→ 遍历副本回调——注销只改活列表、不影响本轮。
   - `RemoveHandler`：按句柄 erase-remove（句柄单调递增不复用——C-M1-11）。
 
@@ -674,9 +705,12 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
   ```cpp
   void BoxWindow::Create(Application& application, const Rect& placement,
                          BoxView& view, std::string title){
-  	if (m_window)
-  		m_window->Release();                    // ① 幂等——重复 Create 先释放旧 HWND
-  	m_window = &application.Create(std::move(title),   // ② 唯一构造入口（Window.h:42）
+  	if (m_window) {                                     // ① 幂等前置：释放旧窗并**立即**
+  		m_window->Release();                            //    断开包装指针（C-M1-20(b)/C-M1-16）
+  		m_window = nullptr;
+  		m_open = false;
+  	}
+  	m_window = &application.Create(std::move(title),   // ② 唯一构造入口（Window.h:42；无失败返回）
   	                               Metrics::kWindowWidth, Metrics::kWindowHeight);
   	m_window->SetChromeMode(ChromeMode::Borderless);   // ③ F2——Show 前
   	m_window->SetCaptionHeight(Metrics::kCaptionHeight); // ④ F3——标题条行为区（K5 前提）
@@ -685,9 +719,11 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
   	view.SetBoxWindow(this);                            // ⑦ C-M1-14 几何通道注入
   	view.Assemble(m_window->GetRootWidget());           // ⑧ C-M1-16⑧ S3 全量重建
   	m_window->SetBounds(placement);                     // ⑨ Phase 31——请求语义
-  	m_open = true;                                      // ⑩ 存活标记（A2 可观测）
+  	m_open = true;                                      // ⑩ **末位**存活标记（A2 可观测）
   }
   ```
+
+  ★ **失败语义**（v1.2 吸收复评 P2）：`Application::Create`（`Application.cpp:67-91`）**无失败返回**——恒返回 `Window&`，前置/构造失败不在契约面（唯一构造入口 + friend `new`，`Application.cpp:69-72` 自注）⇒ **无回滚路径**；一致性由「⑩ 存活标记置末位」保证——②–⑨ 任一步的异常都会在 `m_open` 仍为 `false` 时展开，包装器不会报告存活（本阶段不引入 try/catch——沿框架口径，条 95（命名即语义/不引入投机抽象））。
 
   `Close`（C-M1-20）：`if (m_window) { m_window->Release(); m_window = nullptr; m_open = false; }`
   ——Release 幂等（重复 Close 安全）；**置空是必须的**（Window 对象延迟销毁 ⇒ 不置空即悬空指针）。
@@ -697,8 +733,20 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 
 - `.h` 全文 = §2.6。
 - `.cpp` 要点：
-  - `BuildFixture`：`MakeBox("独立框 A", {16, 16, 220, 320})` · `MakeBox("独立框 B", {252, 16, …})` · `MakeMergedBox("合并框 C", {"C1", "C2"}, {488, 16, …})`（贴顶边一排——需求 §5 风险继承 R-3 的「框倾向贴边」摆放）。
-  - `MakeBox`/`MakeMergedBox`：建 `BoxEntry` → 视图注册三回调（`SetOnAction` → `OnBoxAction`；`SetOnAbsorbed` → `CloseBoxEntry`；`SetOnPopupOpening` → `CloseOtherPopups`）→ `window->Create(m_app, placement, *view, title)` → `if (show) window->Show()`。
+  - `BuildFixture(bool show)`（v1.2 吸收复评 S2——**`show` 逐层显式传递**，不靠默认参数/省略隐藏生产与测试的差异）：
+
+    ```cpp
+    DesktopNestApp::Fixture DesktopNestApp::BuildFixture(bool show){
+    	const BoxId a = MakeBox("独立框 A", {16, 16, Metrics::kWindowWidth, Metrics::kWindowHeight}, show);
+    	const BoxId b = MakeBox("独立框 B", {252, 16, Metrics::kWindowWidth, Metrics::kWindowHeight}, show);
+    	const BoxId c = MakeMergedBox("合并框 C", {"C1", "C2"},
+    	                              {488, 16, Metrics::kWindowWidth, Metrics::kWindowHeight}, show);
+    	return Fixture{a, b, c};
+    }
+    ```
+
+    摆放 = 贴顶边一排（需求 §5 风险继承 R-3 的「框倾向贴边」）——初始 X = 16 / 252 / 488（16 + 220 + 16 递推），Y 恒 16。
+  - `MakeBox`/`MakeMergedBox`：建 `BoxEntry` → 视图注册三回调（`SetOnAction` → `OnBoxAction`；`SetOnAbsorbed` → `CloseBoxEntry`；`SetOnPopupOpening` → `CloseOtherPopups`）→ `window->Create(*this, placement, *view, title)`（v1.2：基类即 Application——原 `m_app` 成员已删除）→ `if (show) window->Show()`。
   - `Collect`（流程纪律①）：
 
     ```cpp
@@ -707,8 +755,10 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     	m_model.Collect(target, source, placement);                  // 通知驱动余下一切
     }
     ```
-  - `Detach`：落点 = `recorded.width > 0 ? recorded : CascadedPlacement(sourceBounds)`（恢复优先、无记忆级联——§9-6）→ `m_model.Detach(box)` → 被拆成员**同一 BoxWindow 包装对象**重建：`entry.window->Create(m_app, placement, *entry.view, title)` + `Show()`。
+  - `Detach`：落点 = `recorded.width > 0 ? recorded : CascadedPlacement(sourceBounds)`（恢复优先、无记忆级联——§9-6）→ `m_model.Detach(box)` → 被拆成员**同一 BoxWindow 包装对象**重建：`entry.window->Create(*this, placement, *entry.view, title)` + `Show()`。
+    ★ **引用即取即用**（v1.2 吸收复评 S4）：`recorded`/`placement` 一律**按值**取（`GetBox` 返回引用的寿命见 §2.1）——本流程不跨 `AddBox`/`AddMergedBox` 持有引用，实现时不得改为引用局部变量。
     ★ **fallback 前提显式化**（评审 §3.2）：级联基准 = **源框自己**的当前窗口边界（`m_boxes[box].window->GetBounds()`）——源框在拆出动作期间必然打开（动作由源框浮层发起），故前提恒成立；契约仍写明「**只在 `IsOpen()` 且读回 `width > 0` 时使用当前边界**，否则落默认落点（源框位置 + 步长，不读已关窗口）」——防日后重建流程改动时误依赖已关闭窗口的边界。
+  - `OnWindowCloseRequested`（v1.2 新增——C-M1-22 关闭路径同步）：`WM_CLOSE`/Alt+F4（`WindowMessageHandler.cpp:86-88`）与 `Window::RequestClose()`（`Window.h:191-200`，**同路径 + 同步派发**）都到达此处 ⇒ 按 `event.GetWindow()` 定位 `BoxEntry` → 走与 `CloseBoxEntry` **同一收尾**（`window->Close()`[置空指针] + `view->Disassemble()`）→ **再委托基类**（`Application::OnWindowCloseRequested` → `Release()` 实际销毁）。委托顺序不可颠倒（先同步包装器、后关闭原生窗口——否则基类返回后包装器仍报存活）。
   - `CloseBoxEntry`：`entry.window->Close()` + `entry.view->Disassemble()`（C-M1-10② + C-M1-16 解装不变量）。
     ★ **顺序不可交换**（C-M1-20）：Close 后旧树仍存活到泵清理点 ⇒ `Disassemble()` 必须紧接着断掉视图的非拥有指针，否则清理点前任何视图访问都是悬空。
   - `CloseOtherPopups`：遍历 `m_boxes`，`id != keepOpen` ⇒ `entry.view->ClosePopup()`。
@@ -762,7 +812,7 @@ endif()
 
 - 全文按 §7.2 逐用例判据实现；装置按 §7.1 三层；注册按 §7.3 口径。
 
-## §4 契约（实现级——C-M1-11..C-M1-21；初设 C-M1-1..C-M1-10 为前提，不再重述）
+## §4 契约（实现级——C-M1-11..C-M1-24；初设 C-M1-1..C-M1-10 为前提，不再重述）
 
 | # | 契约 |
 |---|---|
@@ -771,18 +821,22 @@ endif()
 | C-M1-13 | **通知五种**（§1.3）：按「对接收方意味着什么」分种（Collected / Absorbed / MemberDetached / Released / Activated）；handler 无本地状态。 |
 | C-M1-14 | **几何通道可空**：`BoxView::SetBoxWindow(BoxWindow*)`——`nullptr` = 无头测试态，几何请求（折叠 SetBounds）跳过；生产由 `BoxWindow::Create` 注入（△5 步⑦）。细化初设 C-M1-9 的「持 BoxWindow&」——& 形式使无头测试无法构造 BoxView（ModelProbeTests 无窗构造先例）。 |
 | C-M1-15 | **框架测试集成线**（O5 (a) 完整形态）：ecdi_tests = TEST_SOURCES 追加 5 源 + include 目录 1 行（**+6 行**，非初设估的 +1~2——ModelProbe 是单文件先例）；RunAllTests.h/.cpp 各 +1 行登记；公共 API 0 / 框架实现文件 0 不变。 |
-| C-M1-16 | **Create 重建清单**（BoxWindow::Create 十步——△5）：① 释放旧 HWND（幂等；**同时置 `m_window = nullptr`**——见 C-M1-20(b)）② Application::Create ③–⑥ 配置期四件套 ⑦ 注入几何通道 ⑧ `BoxView::Assemble` 在新根上全量重建（S3）⑨ SetBounds(placement) ⑩ 存活标记。**重建 = 控件树 + 几何，不重建 BoxView 对象与订阅**（订阅构造期一次注册、析构期注销——C-M1-8③）。**解装不变量**：协调器 `CloseBoxEntry` = `Close()` + `view->Disassemble()`（**顺序不可交换**——C-M1-20(c)）——Assemble 只在「已解装或首次」时被调（悬空树防护）。附：拆出重建的框 = **展开态**（折叠态是纯视图态、不随 Model 持久——M1 不保留，留 D-O4）。 |
+| C-M1-16 | **Create 重建清单**（BoxWindow::Create 十步——△5；v1.2 按复评 P2 收紧为**逐步生命周期**）：① **幂等前置**：`m_window` 非空 ⇒ `Release()` **并立即** `m_window = nullptr` + `m_open = false`（**不得**只 Release 不置空——见 C-M1-20(b)）② Application::Create（**无失败返回**，见下）③–⑥ 配置期四件套 ⑦ 注入几何通道 ⑧ `BoxView::Assemble` 在新根上全量重建（S3）⑨ SetBounds(placement) ⑩ **末位**置 `m_open = true`。<br>★ **失败语义**（复评 P2）：`Application::Create`（`Application.cpp:67-91`）恒返回 `Window&`，无失败返回/无异常契约 ⇒ **无回滚路径**；一致性由「⑩ 末位置位」保证——②–⑨ 任一失败展开时 `m_open` 仍为 `false`，包装器不会报告存活。<br>**重建 = 控件树 + 几何，不重建 BoxView 对象与订阅**（订阅构造期一次注册、析构期注销——C-M1-8③）。**解装不变量**：协调器 `CloseBoxEntry` = `Close()` + `view->Disassemble()`（**顺序不可交换**——C-M1-20(c)）——Assemble 只在「已解装或首次」时被调（悬空树防护）。附：拆出重建的框 = **展开态**（折叠态是纯视图态、不随 Model 持久——M1 不保留，留 D-O4）。 |
 | C-M1-17 | **派生标题**：显示标题 = `members.empty() ? box.title : GetMember(active).title`（K3①「标题+内容整体换成该成员」）；`Rebuild` 时 `SetText` + `Invalidate()`。 |
 | C-M1-18 | **折叠时序**：窗口几何瞬时（SetBounds 请求语义）**先行**，内容子树随后（`CollapsiblePanel::SetExpanded` 内置 200ms 过渡，kToggleDurationMs = 200——CollapsiblePanel.h:92）。已知观感折中：折叠时内容在剩余高度内被窗口边界裁切（父 Clip 语义——CollapsiblePanel.h:54）⇒ 实际观感 = 内容瞬隐 + 窗口瞬切；展开 = 窗口瞬切 + 内容 200ms 过渡。需求 K2「动画可关」——观感里程碑，平滑度非验收项；窗口跟随动画的平滑收缩 = M2+（需动画 tick 驱动 SetBounds——框架无此钩子，D-O2）。 |
 | C-M1-19 | **派发安全三规则**（本稿新发现——初设层不可见）：框架冒泡派发在「调用后才读父」（`Application.cpp:294-302` Down / `318-326` Up：`current->OnMouseButtonDown(event); current = current->GetParent();`）⇒ **点击回调若销毁被点控件或其任意祖先 = 悬空读（UB）**。三规则共同保证回调执行期间「被点行 → 浮层 → BoxRoot」全链存活：<br>**R1** 浮层行全量重建只在 `OpenPopup` 时（`Rebuild`）；<br>**R2** 浮层可见期间的模型变更**只可能是 `Activated`**（单线程交互 + R3 ⇒ 成员数不变）⇒ `Refresh` 原位更新文本、**不销毁任何控件**；<br>**R3** 收编/拆出动作回调**先 `ClosePopup()` 再执行 Model 操作**——通知到达时浮层已隐藏 ⇒ `Rebuild` 跳过浮层（△4 Rebuild 步⑤）⇒ 被点行不销毁。 |
 | C-M1-20 | **窗口回收时序与包装指针纪律**（v1.1 新增——吸收外部评审 §2/§3.2；实测链条带行号）：① `BoxWindow::Close()` → `Window::Release()`（`Window.cpp:147-157`）**只销毁 HWND**（`m_platformWindow->Release()`——`Win32PlatformWindow.cpp:373`）；② HWND 销毁 → 同步 `WM_DESTROY` → `Application::OnWindowDestroyed`（`Application.cpp:127-153`）把 Window 从 `m_windows` **移入 `m_deferredDestroy`**（`Application.h:166-168`，unique_ptr 所有权转移）；③ `ProcessDeferredDestroy`（`Application.cpp:109-118`）由平台消息循环**在每条消息处理后**调用（`Application.cpp:41` 注入回调）⇒ `m_deferredDestroy.clear()` ⇒ `~Window` ⇒ **根控件树随 Window 对象一并销毁**。<br>⇒ 纪律：**(a) 旧树不泄漏**——生产态（跑 `Run()`）在 Close 后一条消息内销毁；测试态（不泵消息）延后到 `~Application`，**有界**（框架契约原文 `window-ownership.md` §4.3；`Application.cpp:112-116` 自注「消费者**不得**假设窗口关闭后 Window 对象立即析构」）；**(b) `Close()` 必须置 `m_window = nullptr`**——销毁是延迟的，保留指针即悬空（△5）；**(c) `CloseBoxEntry` 的 `Close` → `Disassemble` 顺序不可交换**——清理点前旧树仍存活，视图非拥有指针必须先断；**(d) C-M1-19 前提不破**——旧树销毁发生在泵清理点（消息处理**之后**），不在点击回调的派发栈内；**(e) `GetBounds()` 空 Rect 不得当有效位置**（评审 §3.2）——级联 fallback 前提 = 源窗口 `IsOpen()` 且读回 `width > 0`（△6 Detach）。 |
 | C-M1-21 | **订阅者寿命**（v1.1 新增——吸收外部评审 §3.1）：快照派发（C-M1-8②）只保证「回调列表修改不使本轮遍历失效」，**不**保证回调所引用对象的寿命 ⇒ 订阅者（`BoxView`）必须活到可能引用它的快照回调全部执行完毕。M1 满足方式 = `DesktopNestApp` 持有全部 `BoxView` 至退出（C-M1-10①）——**运行中销毁 View = 必须重新设计这条保证**（M2+ 若引入动态框增删则先解此题）。 |
+| C-M1-22 | **关闭请求路径与包装器同步**（v1.2 新增——吸收复评 P1；**取消** v1.1「框不设焦点 ⇒ Alt+F4 不可达」的豁免理由——用户点击可交互按钮后焦点可能落入框内，该前提不可靠）：`WM_CLOSE`/Alt+F4（`WindowMessageHandler.cpp:86-88`）与 `Window::RequestClose()`（`Window.h:191-200`，文档明写「与系统 X **完全同路径**」）**同路径**、**同步派发**到 `Application::OnWindowCloseRequested`（virtual——`Application.h:121` / `EventRouter.h:60`；默认实现 = `Release()`，`Application.cpp:170-176`）。⇒ 纪律：**(a)** `DesktopNestApp` **继承** `Application`（TestApp 先例 `ApplicationDispatchTests.cpp:310`；拦截先例 `CaptionBarTests.cpp:60-76`）——仅「持有」无法 override；**(b)** override 中**先同步包装器**（按 `event.GetWindow()` 反查 → `Close()`[置空 `m_window`/`m_open=false`] + `view->Disassemble()`，与 `CloseBoxEntry` **同一收尾**）**再委托基类**实际销毁——顺序不可颠倒；**(c)** 关闭后包装器**不得**报告存活：`IsOpen() == false` · `GetWindow() == nullptr` · `GetBounds()` 返回空 Rect；**(d)** 未命中登记的窗口 ⇒ 直接委托基类。 |
+| C-M1-23 | **头文件自包含**（v1.2 新增——吸收复评 S1）：每个头**直接包含自身使用的标准库声明**，不依赖其他头的传递包含——本稿修正：`BoxModel.h` + `<utility>`（`std::pair` 订阅表）· `MemberListPopup.h` + `<utility>`（`std::move`）· `BoxView.h` + `<utility>`（`std::move`）· `BoxWindow.h` + `<string>`（`Create` 形参）· `DesktopNest.h` + `<utility>` + 关闭事件头（C-M1-22 形参）。实施期验证方式 = **单头独立编译检查**（每个头单独 `#include` 编译通过，不靠 TU 巧合）。 |
+| C-M1-24 | **模型前置条件与非法调用口径**（v1.2 新增——吸收复评 S3）：`BoxModel` 是唯一事实源，不把正确性完全寄托在 UI 门控上。**@pre**：`Collect` = target/source 均有效 id 且**均 TopLevel**（Merged 不可再被收编）、`source != target`；`Detach` = `CanDetach(box)`（members.size() > 1）；`SetActive` = `member ∈ GetBox(box).members`、id 均有效。**统一处理** = Debug 构建 `FRAMEWORK_ASSERT`（暴露缺陷）+ Release 由 UI 门控保证（弹层只列合法项），**不引入**异常 / 错误码 / 状态返回值（M1 最小实现——YAGNI；沿框架既有口径 `Application.cpp:139-146`：Debug 断言 + Release 运行时分支避免 UB）。 |
 
 ## §5 影响面
 
 | 维度 | 值 |
 |---|---|
 | 应用侧新目录 `examples/DesktopNest/` | **8 件**（初设 6 件 + VisualStyle.h + DesktopNest.h/.cpp；main.cpp 由「装配点」降为薄壳——偏离登记见 §9）：BoxModel.h/.cpp · VisualStyle.h · MemberListPopup.h/.cpp · BoxView.h/.cpp · BoxWindow.h/.cpp · DesktopNest.h/.cpp · main.cpp · CMakeLists.txt |
+| 框架侧 | **0**（v1.2 关闭路径亦零框架改动——C-M1-22 走 `Application` 既有 virtual 接缝，属公共 API 既有用法：「继承 + override」） |
 | 根 CMakeLists.txt | +1 行（`add_subdirectory`） |
 | 框架 CMake | **+6 行**（TEST_SOURCES 追加 5 源 + include 目录 1 行——O5 (a)；初设 v1.2 估 +1~2 按单文件先例，本稿按实测修正） |
 | 框架测试登记 | RunAllTests.h / .cpp 各 +1 行 |
@@ -799,7 +853,7 @@ endif()
 | D-O3 | 非 100% 缩放下放置几何：Phase 31 GetBounds/SetBounds 为 DIP 口径（理论一致），未实测 ⇒ 留 M4 位置持久化阶段。 |
 | D-O4 | 内容区滚动：M1 假数据 5 行 × 24 = 120 DIP < 内容区 288 DIP——不触发；内容超出时引入 ScrollView（K4 已声明滚动可后置）。折叠态持久化同批再议。 |
 | D-O5 | 弹出期间拖动框（浮层随窗口移动）：未验证；M1 假数据阶段拖动通常发生在浮层关闭态——若评审计入自动覆盖，装置补充（拖动中泵 + 断言）。 |
-| D-O6 | 系统关闭路径（`WM_CLOSE` / Alt+F4 → `WindowCloseRequested` → 框架默认 `Release()`，`Application.cpp:170-176`）未接：该路径会绕过 `BoxWindow::Close()`（不置空 `m_window`）⇒ 包装指针悬空。M1 不阻塞——框不设焦点（K1 常驻观感），Alt+F4 不可达；M2 随真实关闭语义（含 `~Application` 残留窗口隐患，`Application.cpp:117` 自注）一并处理。 |
+| D-O6 | ~~系统关闭路径未接~~ ⇒ **v1.2 已就地闭合**（复评 P1 ⇒ C-M1-22）：`DesktopNestApp` 继承 `Application` 并 override `OnWindowCloseRequested`，`WM_CLOSE`/Alt+F4 与 `Window::RequestClose()` 同路径同步派发 ⇒ 包装器与原生窗口生命周期保持同步（判据见 T-M1-4⑦）。残留边界：关闭后该框**不重建**（M1 无新建 UI，模型无删除操作——框记录保留、窗口不再出现）；若后续需要「关闭后自动重建」或「从模型移除」，随 M2 动态框增删一并处理（与 C-M1-21 末句同批）。 |
 
 ## §7 测试方向
 
@@ -817,10 +871,10 @@ endif()
 
 | 用例 | 装置 | 判据 |
 |---|---|---|
-| T-M1-1 `DesktopNest.ModelCollectNotifiesBoth` | D1 + D2 | ① `A.members == [B]` · `B.state == Merged` · `B.placement == 传入值` ② A/B handler 各恰好 1 次、C 0 次（P9 通知次数判据） ③ **派发期注销实证**（初设装置注记的落地）：A 的 handler 内注销 C 的订阅 ⇒ C 本轮仍收到（快照语义）、后续 `SetActive` 不再通知 C ④ D2 无头树：`Assemble` 后入口按钮 `GetBadgeCount() == members.size()`（徽标重建） |
-| T-M1-2 `DesktopNest.ModelDetachRestoresMembership` | D1 + D3 | ① `CanDetach([C1,C2]) == true`；`Detach` 后 `members == [C2]` · `C1.state == TopLevel` · `C1.placement` 保留 · `CanDetach == false`（members.size() == 1） ② 级联纯函数：`CascadedPlacement({100,100,220,320}) == {128,128,220,320}` ③ D3：`BoxWindow::Create(placement)` → `GetBounds() == placement`（Phase 31 请求语义——读回为准） ④ **流程级**（v1.1 吸收评审 §4.1——真调协调器 `DesktopNestApp::Detach()`，非原语拼装）：被拆成员 `state == TopLevel` · `entry.window->IsOpen() == true` · `GetBounds() == 请求落点`（有记忆 ⇒ 恢复；无记忆 ⇒ 级联） · 源框 `members`/`active` 正确（active 仍指向有效成员） ⑤ **收编↔拆出循环两轮**（v1.1 吸收评审 §2 建议）：`Collect → Detach → Collect → Detach`，每轮断言 ④ 同款 + **逐次通知计数恒 == 1**（无重复订阅/重复控件——「遗留订阅」的可观测替代；旧树释放本身由框架契约 C-M1-20 保证、不可移植断言，故以契约引用代之） |
+| T-M1-1 `DesktopNest.ModelCollectNotifiesBoth` | D1 + D2 | ① `A.members == [B]` · `B.state == Merged` · `B.placement == 传入值` ② A/B handler 各恰好 1 次、C 0 次（P9 通知次数判据） ③ **派发期注销实证**（初设装置注记的落地）：A 的 handler 内注销 C 的订阅 ⇒ C 本轮仍收到（快照语义）、后续 `SetActive` 不再通知 C ④ D2 无头树：`Assemble` 后入口按钮 `GetBadgeCount() == members.size()`（徽标重建） ⑤ **订阅边界**（v1.2 吸收复评 S5——补注销/再注册/新注册者语义）：**派发期新注册**的订阅者**本轮不收到**、**下一轮起**收到（快照语义的对偶面）；**注销后重新注册** = 新句柄（单调递增不复用——C-M1-11），旧句柄 `RemoveHandler` 幂等无副作用；★ 每条断言均指明**计数对象**（哪个订阅者）与**清零时机**（每次操作**前**清零） |
+| T-M1-2 `DesktopNest.ModelDetachRestoresMembership` | D1 + D3 | ① `CanDetach([C1,C2]) == true`；`Detach` 后 `members == [C2]` · `C1.state == TopLevel` · `C1.placement` 保留 · `CanDetach == false`（members.size() == 1） ② 级联纯函数：`CascadedPlacement({100,100,220,320}) == {128,128,220,320}` ③ D3：`BoxWindow::Create(placement)` → `GetBounds() == placement`（Phase 31 请求语义——读回为准） ④ **流程级**（v1.1 吸收评审 §4.1——真调协调器 `DesktopNestApp::Detach()`，非原语拼装）：被拆成员 `state == TopLevel` · `entry.window->IsOpen() == true` · `GetBounds() == 请求落点`（有记忆 ⇒ 恢复；无记忆 ⇒ 级联） · 源框 `members`/`active` 正确（active 仍指向有效成员） ⑤ **收编↔拆出循环两轮**（v1.1 吸收评审 §2 建议）：`Collect → Detach → Collect → Detach`，每轮断言 ④ 同款 + **逐次通知计数恒 == 1**（无重复订阅/重复控件——「遗留订阅」的可观测替代；旧树释放本身由框架契约 C-M1-20 保证、不可移植断言，故以契约引用代之）<br>★ **计数口径**（v1.2 吸收复评 §4 表）：**每订阅者独立计数器**，**每次操作前清零**；断言写明「本轮由哪个订阅者收到几次」（如 `Collect` ⇒ target 的计数 == 1 且 source 的计数 == 1、无关框 == 0） |
 | T-M1-3 `DesktopNest.ModelSetActiveNotifiesOnlyOwner` | D1 + D2 | ① `SetActive(C, C2)` ⇒ C 的 handler 恰好 1 次、C1/C2 的 handler 0 次（仅属主通知） ② 内容重建：D2 树 `GetContent()` 首行文本含「C2」（切换后内容整体换人——K3①） ③ 派生标题：标题 Label 文本 == 「C2」（C-M1-17） |
-| T-M1-4 `DesktopNest.PopupDiscipline` | D2 + D3 | ① 浮层内空白 `HitTest` == 浮层自身（不穿透——A3） ② 浮层外（内容区行）`HitTest` 返回外部控件且 `!m_popup->Contains(hit)` ③ 浮层可见时 Down @（标题条另一按钮 \| 内容区行）⇒ 浮层隐藏（判据⑤——点外含标题条按钮与内容区） ④ 浮层不可见时同坐标 Down ⇒ 无操作（判据①） ⑤ D3 真实派发（SendMessage · DIP→物理换算）：入口按钮点击 ×2 = 开→关（P6 切换）；成员行点击 = 切换且**行不被销毁**（派发安全——C-M1-19 R2）；「加入」行点击 = 收编全路径（模型状态正确 + 被收编框 `IsOpen() == false` + 发起浮层已关——R3） ⑥ **浮层重开生命周期**（v1.1 吸收评审 §4.2——验证 Refresh/Rebuild 分工）：开 → 切成员（原位刷新）→ 关 → **再开** ⇒ 成员勾选、拆出项可用性、加入列表**全部与当前 Model 一致**（重开走 `Rebuild` 全量重建，而非沿用可见期的原位状态） |
+| T-M1-4 `DesktopNest.PopupDiscipline` | D2 + D3 | ① 浮层内空白 `HitTest` == 浮层自身（不穿透——A3） ② 浮层外（内容区行）`HitTest` 返回外部控件且 `!m_popup->Contains(hit)` ③ 浮层可见时 Down @（标题条另一按钮 \| 内容区行）⇒ 浮层隐藏（判据⑤——点外含标题条按钮与内容区） ④ 浮层不可见时同坐标 Down ⇒ 无操作（判据①） ⑤ D3 真实派发（SendMessage · DIP→物理换算）：入口按钮点击 ×2 = 开→关（P6 切换）；成员行点击 = 切换且**行不被销毁**（派发安全——C-M1-19 R2）；「加入」行点击 = 收编全路径（模型状态正确 + 被收编框 `IsOpen() == false` + 发起浮层已关——R3） ⑥ **浮层重开生命周期**（v1.1 吸收评审 §4.2——验证 Refresh/Rebuild 分工）：开 → 切成员（原位刷新）→ 关 → **再开** ⇒ 成员勾选、拆出项可用性、加入列表**全部与当前 Model 一致**（重开走 `Rebuild` 全量重建，而非沿用可见期的原位状态） ⑦ **系统关闭路径**（v1.2 吸收复评 P1/S5——**必须走真实消息路径**，不得用直接调 `Close()` 代替）：`SendMessage(hwnd, WM_CLOSE, 0, 0)` ⇒ ① 断言 C-M1-22(c) 三项（`IsOpen() == false` · `GetWindow() == nullptr` · `GetBounds()` 为空 Rect）② 其余框**不受影响**（仍 `IsOpen()`）③ 对已关框执行一次模型查询/流程入口**不崩溃、不访问已销毁 Window**（C-M1-22 生命周期同步的实证）；★ 另一入口 `Window::RequestClose()`（`Window.h:191-200`，同路径）以同款断言覆盖——两条入口都要走 |
 | T-M1-5 `DesktopNest.FoldGeometry` | D3 + D2 | ① D3 真实窗：`ToggleCollapse` → `GetBounds().height == kCaptionHeight`；再 `Toggle` → `== kWindowHeight`（C-M1-18 几何瞬时） ② D2 无头：CollapsiblePanel 无 Window 降级瞬时切换（CollapsiblePanel.h:53）⇒ `IsExpanded() == false && GetContent()->IsVisible() == false`；再 `Toggle` 恢复（无需泵驱动——动画被降级跳过） |
 | T-M1-6 `DesktopNest.DragRoute` | D3 | **本用例证明的是「命中路由」**（评审 §4.3——真实拖动的顺滑/边缘行为仍属 A1 人工，报告须分开记录）：`IsClientInteractiveAt(150, 16) == false`（标题文本上——⇒ caption 区返回 HTCAPTION，可拖动——「拖标题文字可移动窗口」，Widget.h:207）· `IsClientInteractiveAt(56, 16) == true`（入口按钮）· `IsClientInteractiveAt(204, 16) == true`（折叠按钮）（⇒ HTCLIENT——按钮可点、不被拖动吃掉——A4） |
 
@@ -830,6 +884,7 @@ endif()
 - **注册↔定义做差**（条 127）：`&(TestDesktopNest\w+)\);` 与 `^void TestDesktopNest\w+\(` 两集合做差必须为空。
 - **清理**：每个 D3 用例结束前 `Close` 全部窗（Release 幂等）；Application 析构兜底（ApplicationDispatchTests 先例）。
 - **回收时序（C-M1-20）**：D3 用例不跑 `Application::Run()` ⇒ Window 对象与旧树延后到 `~Application` 销毁——**有界、非泄漏**；用例**不得**假设「Close 后 Window 对象立即析构」（框架契约原文 `Application.cpp:112-116`）。用例内只断言 `IsOpen()`/`GetBounds()` 等包装层观测点。
+- **关闭路径用例（C-M1-22 / T-M1-4⑦）**：必须经**真实消息路径**（`SendMessage(WM_CLOSE)` 或 `Window::RequestClose()`）触发——**不得**用直接调 `BoxWindow::Close()` 代替（否则覆盖不到本次发现的风险）；断言只针对包装器状态与应用行为，底层回收时序按 C-M1-20 作为框架契约引用（复评 §4 末段原则：不用「旧树应立即销毁」这类断言去测框架已明确允许延迟销毁的生命周期）。
 - **断言启用**：Debug 构建断言层经 CMakeLists 持久修复对 MinGW 亦启用（条 35/50——2026-09-18 起四链 10/10）；报绿时写明构建配置。
 
 ## §8 开放决策点
@@ -863,3 +918,8 @@ endif()
   ⑥ **T-M1-6 表述收窄**（评审 §4.3）⇒ 判据明写「本用例证明**命中路由**；真实拖动顺滑/边缘行为属 A1 人工，报告分开记录」。
   ⑦ **新增 D-O6**：系统关闭路径（`WM_CLOSE`/Alt+F4 → `WindowCloseRequested` → 框架默认 `Release()`，`Application.cpp:170-176`）绕过 `BoxWindow::Close()` ⇒ 指针悬空；M1 不阻塞（框不设焦点，Alt+F4 不可达），M2 随真实关闭语义一并处理。
   ⑧ 契约区间 C-M1-11..**C-M1-21**；§7.3 增「回收时序」装置注记；**清理 v1.0 文末游离 `}`**（落盘残留）。
+
+- **v1.2**（2026-10-09）**第二轮外部评审（复评）吸收**（复评结论：**有条件通过**——「完成 P1、P2 后进入实施；S1–S5 尽量在实施前闭合」）。★ 复评认可并保留项：五种通知语义 / 四件分离 / 快照派发与订阅者寿命**分别约束** / C-M1-19 派发安全三规则 / M1 功能边界记录。**必须项**：
+  ① **P1 关闭路径**（复评：v1.1 的豁免理由「框不设焦点 ⇒ Alt+F4 不可达」**不成立**——用户点击可交互按钮后焦点可能落入框内）⇒ **取消该豁免**，新增 **C-M1-22**：实测确认 `WM_CLOSE`（`WindowMessageHandler.cpp:86-88`）与 `Window::RequestClose()`（`Window.h:191-200`）**同路径、同步派发**到 `Application::OnWindowCloseRequested`（virtual——`Application.h:121`）⇒ **`DesktopNestApp` 改继承 `Application`**（TestApp 先例 `ApplicationDispatchTests.cpp:310`；拦截先例 `CaptionBarTests.cpp:60-76`），override 中**先同步包装器**（与 `CloseBoxEntry` 同一收尾）**再委托基类**；验收定义 = 触发后 `IsOpen()==false` / `GetWindow()==nullptr` / `GetBounds()` 空 Rect。**零框架改动**（既有 virtual 接缝）。原 D-O6 就此**就地闭合**（残留：关闭后不重建 —— 留 M2 动态框增删）。
+  ② **P2 Create 一致性**（复评：△5 示例只有 `Release()`，未落实契约声明的「同时置空」）⇒ **C-M1-16 收紧为逐步生命周期**（① 释放 + **立即**置空指针/存活标记 → … → ⑩ **末位**置存活）+ △5 代码同步修正；补**失败语义**：`Application::Create`（`Application.cpp:67-91`）**恒返回引用、无失败返回** ⇒ 无回滚路径，一致性由「末位置位」保证。
+  **建议项**：③ **S1 头自包含** ⇒ 新增 **C-M1-23**（`BoxModel.h`/`MemberListPopup.h`/`BoxView.h`/`DesktopNest.h` + `<utility>`、`BoxWindow.h` + `<string>`、`DesktopNest.h` + 关闭事件头）+ §3 头自包含纪律 + 实施期「单头独立编译检查」。④ **S2 签名一致** ⇒ △6 `BuildFixture` 示例改为**逐层显式传 `show`**（并给出完整摆放常量）。⑤ **S3 模型前置条件** ⇒ 新增 **C-M1-24**（`Collect`/`Detach`/`SetActive` 的 @pre + 统一口径 = Debug `FRAMEWORK_ASSERT` / Release 由 UI 门控，不引入异常与错误码）。⑥ **S4 ID 分配顺序** ⇒ △1 `AddMergedBox` 明写**四步固定顺序**（预分配全部 ID → 一次性构造记录 → 回填 `members`/`active` → 返回）；§2.1 补 **`GetBox` 引用寿命注记**（`push_back` 扩容即失效 ⇒ 即取即用），△6 `Detach` 标注按值取用。⑦ **S5 测试闭环** ⇒ T-M1-4 增判据 ⑦（**真实 `WM_CLOSE` 消息路径** + `Window::RequestClose()` 双入口；含「其余框不受影响」「对已关框操作不崩溃」）+ T-M1-1 增判据 ⑤（订阅边界：派发期新注册者本轮不收到、下轮起收到；注销后重注册 = 新句柄）+ T-M1-2 明写**计数对象与清零时机**（每订阅者独立、操作前清零）。⑧ 契约区间 C-M1-11..**C-M1-24**；§5 增「框架侧 0」行（关闭路径亦零框架改动）。

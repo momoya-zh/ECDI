@@ -144,7 +144,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
 ```
 ECDI/       framework sources (include/ = 95 public headers, src/ = implementation + tests)
-examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest; DesktopNest (desktop organizer -- app-side M1: requirements v1.1 review passed, preliminary design v1.2 and detailed design v1.1 filed 2026-10-09 -- detailed design review absorbed, pending re-review)
+examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest; DesktopNest (desktop organizer -- app-side M1: requirements v1.1 review passed, preliminary design v1.2 and detailed design v1.2 filed 2026-10-09 -- two review rounds absorbed, pending re-review)
 probe-go/   Go backend embedded into ModelProbe as an RC resource
 docs/       design documents (171 files; requirements → preliminary → detailed, per phase)
 ```
