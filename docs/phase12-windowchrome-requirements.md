@@ -1,4 +1,4 @@
-﻿# Phase 12 WindowChrome 需求确认（v1.2）
+# Phase 12 WindowChrome 需求确认（v1.2）
 
 > 阶段：需求确认（五阶段法 ①）
 > 日期：2026-09-08（v1.1：2026-09-11 追加 R9/R10；v1.2：2026-09-11 外部评审 14 条全采纳；2026-09-12 §7 影响面措辞回写）
@@ -170,7 +170,7 @@ window.SetWindowLayer(WindowLayer::Desktop);
 ## 5. 非目标（YAGNI 圈定）
 
 - MDI 子窗口 chrome
-- Mica/Acrylic 毛玻璃材质（Win11 DWM 材质——另立）
+- Mica/Acrylic 毛玻璃材质（Win11 DWM 材质——另立）★ **已由 Phase 32 承接**（2026-10-09 立项 `phase32-frosted-backdrop-requirements.md`；本行原「另立」即该 Phase 的兑现）
 - 自绘窗口动画（最小化/恢复动画跟随系统）
 - 跨平台 chrome（Linux 窗管差异大——抽象接口先立，实现仅 Win32）
 - 布局系统改造（chrome 模式下客户区即整窗，标题栏由应用/控件自己布局——Layout 已能表达）
@@ -207,3 +207,4 @@ window.SetWindowLayer(WindowLayer::Desktop);
 
 - v1.1（2026-09-11）DesktopNest 规划回灌：① 追加 §1 勘察两项（窗口 z 序控制缺失、应用层消息不可达——均 grep/读头文件实证）；② 新增 **R9 平台消息扩展接缝**（Phase 13 前置，托盘与拖入的唯一通路）与 **R10 窗口层级能力**（`Normal`/`Bottom`/`Desktop` 三档，`Desktop` 档路线未验证须前置 spike）；③ 决策点 4 → 6（新增接缝形态、Desktop 档是否进 MVP）；④ 非目标补 OLE 完整拖放与 Desktop 档实现细节；⑤ 测试方向补 R10 spike 与 R9 零回归；⑥ 影响面表补 R10 接口与链接依赖。
 - v1.0（2026-09-08）需求确认初稿：现状勘察（抽象面零 chrome/消息零拦截/像素测试先例）+ 技术路线（保留 WS_OVERLAPPEDWINDOW + NCCALCSIZE/HITTEST 拦截——非 WS_POPUP）+ R1-R8（chrome API/无边框/命中/最大化修正/CaptionBar 分歧/DWM/事件/兼容底线）+ 4 决策点（范围/DWM/API 形态/事件形态）+ 非目标（MDI/毛玻璃/跨平台）+ 测试方向 + 影响面。待评审。
+  ★ **事后同步（2026-10-09）**：非目标中的「**毛玻璃**」已由 **Phase 32**（`phase32-frosted-backdrop-requirements.md`）承接立项——该 Phase 的勘察证实**依赖本 Phase 的三件套**（`WS_OVERLAPPEDWINDOW` 保留 + `WM_NCCALCSIZE` 拦截 + `SWP_FRAMECHANGED`，见 `Win32PlatformWindow.cpp:472 / 1072`），故原「另立」在此兑现。
