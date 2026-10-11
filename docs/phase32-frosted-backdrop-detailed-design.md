@@ -176,6 +176,16 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | **限制** | 已知限制清单的最终状态（文字 AA 近似 / DrawImage 半透明[#56] / tint 碰撞） |
 | **台账** | 五处台账收口状态（本文件 §10 + framework-defect-audit + roadmap-deferred + docs/README + 根 README） |
 
+### §10.2 批二（2026-10-11，材质应用与状态机）
+
+| 项 | 内容 |
+|---|---|
+| **落地** | △4（`Win32PlatformWindow`：`SetWindowCompositionAttribute` **动态解析**[lazy + 失败也缓存——全仓首个 GetProcAddress，沿 R6 失败容忍]· `ApplyBackdrop`[Acrylic 尽力 ⇒ 解析失败/调用失败/系统不支持一律 Degraded 绝不裸透；None ⇒ `state=0` 可编程移除（SW1 实证）]· `Show()` 尾部首应用 + `WM_DPICHANGED`（既有 case 内追加）/`WM_DWMCOMPOSITIONCHANGED`（新增 case）重应用 · C32-12 `nColor = alpha<<24`、RGB=黑）· △7（`Win32PlatformWindowInternal.h` 注入头：`BackdropInjection {None, FailResolve, FailCall}`）· `Window::SyncBackdropSurface`（PaintFrame 帧首把平台 actual 翻译为后端清屏语义[Acrylic = tint-A0 / Degraded = 白 204]，**变化才下发**——轮询式无新回调接缝） |
+| **测试** | **ClangCL / Clang 378/378 全绿**（375 + T32-5/6/8；MinGW 待 #57）· T32-5（FailResolve ⇒ 解析失败不调用未解析函数直落 Degraded / FailCall ⇒ 调用真实执行结果强制 FALSE ⇒ 同落 Degraded；两者「renderer 确已收到 Degraded 提交语义」经**真实 GDIBackend 观测缝** `DebugCommitUsesAlphaBlend` 断言——评审 P2-4 分支覆盖）· T32-6（Degraded 请求完全忽略 / Show 前 applied=false / Show 后状态确定性 / Show 后设置请求态不变）· T32-8（签名 static_assert 钉死 + `!is_abstract_v<GDIBackend>`） |
+| **偏差** | ★ **E-B2-1（注入 × 解析缓存的交互）**：`g_setWcaResolved` 是**进程级缓存**且首个窗口 `Show()` 即完成真实解析（批二把 ApplyBackdrop 挂进 Show ⇒ 更早注册的测试窗口就触发了缓存）⇒ 注入在其后设置必须**显式作用于缓存**（FailResolve ⇒ `g_setWca=null` + 视为已解析；FailCall/None ⇒ 重置解析标记），否则 FailResolve 永不生效（首版实测 actual=Acrylic——诊断计数器定位）。★ **E-B2-2（首帧时序）**：Show 内部 `UpdateWindow` 的首帧发生在 ApplyBackdrop **之前** ⇒ 测试需 `Invalidate()` 驱动第二帧才能让实际态到达后端（生产无此问题——任何后续失效都晚于应用）。★ **实现注记**：`SetBackdropInjectionForTests` 的定义不能包在嵌套 `namespace ECDI{}` 内（变 ECDI::ECDI:: ⇒ 链接 undef，首版实测） |
+| **限制** | 真机 Acrylic 成功路径（actual=Acrylic + 真实 DWM 材质）未在本批验证——批四库外 E2E + 目视承接（设计如此：单测以注入保持确定性） |
+| **台账** | 本行 + audit v1.80 + deferred v2.14 + docs/README + 根 README（同批提交） |
+
 ### §10.1 批一（2026-10-11，缓冲地基）
 
 | 项 | 内容 |

@@ -3,6 +3,7 @@
 #include "ECDI/Platform/PlatformWindow.h"
 #include "ECDI/Platform/PlatformWindowHost.h"
 #include "ECDI/Window/ChromeMode.h"
+#include "ECDI/Window/WindowBackdrop.h"   // Phase 32：BackdropMode / WindowBackdropState
 #include "ECDI/Window/WindowLayer.h"
 #include "ECDI/Window/WindowState.h"
 #include "Platform/Win32/Win32RenderContext.h"
@@ -52,6 +53,10 @@ public:
 	void SetCaptionHeight(int height) override;
 	void SetResizeInset(int inset) override;
 	void SetWindowLayer(WindowLayer layer) override;
+
+	// ── Phase 32：窗口衬底（带默认实现的基类虚函数——配置存此处，应用在 Show/重应用）──
+	void SetWindowBackdrop(BackdropMode mode, const Color& tint) override;
+	[[nodiscard]] WindowBackdropState GetWindowBackdropState() const noexcept override;
 
 	// ── Phase 12：窗口状态（运行期——Show() 之后才有效）──────────
 	void Minimize() override;
@@ -136,6 +141,12 @@ private:
 
 	/// @brief 实例级消息处理（WindowProc 路由到这里）
 	LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+	/// @brief 应用衬底（Phase 32 详设 D32-H——Show()/WM_DPICHANGED/WM_DWMCOMPOSITIONCHANGED 调用）
+	/// @details 尝试 Acrylic ⇒ 成功 actual=Acrylic；解析失败/调用失败/系统不支持 ⇒
+	///          **立即降级语义 actual=Degraded（绝不裸透）**；None ⇒ 已在位则 state=0 移除。
+	///          动态解析 lazy + 缓存（失败也缓存——避免每次重试）；注入缝见 D32-N。
+	void ApplyBackdrop();
 
 	/// @brief WM_DROPFILES 处理（Phase 14——解析 HDROP → DragFinish → 抛事件，R9/R10/R11）
 	void HandleDropFiles(HDROP hDrop);
@@ -232,6 +243,13 @@ private:
 	bool m_shown = false;	///< 是否已调用过 Show()（配置期/运行期判据——「API 调用事实」，非「系统当前可见」）
 	bool m_chromeConfigured = false;	///< ChromeMode 是否已配置（D-CHROME-1：一次确定——重复调用一律 Warning + 忽略）
 	WindowState m_lastWindowState = WindowState::restored;	///< 状态事件去重锚（零值 = 窗口初始态）
+
+	// ── Phase 32：窗口衬底状态（详设 D32-C/H）──────────────────────────
+	BackdropMode m_backdropRequested = BackdropMode::None;	///< 应用请求（Window 闸门后的合法请求——Degraded 不可达）
+	Color m_backdropTint{ 0.0f, 0.0f, 0.0f, 0.0f };	///< 雾面色调（C32-12：alpha → DWM nColor 浓淡；RGB → 缓冲清屏色由 Window 下达）
+	BackdropMode m_backdropActual = BackdropMode::None;	///< 最近一次应用结果（D32-C：非未来保证）
+	bool m_backdropApplied = false;	///< Show()/重应用后置位（「尚未应用 ≠ 应用失败」——D32-M）
+	bool m_backdropPolicyActive = false;	///< accent policy 当前是否在位（None 回退时决定是否发 state=0——SW1 实证可编程移除）
 
 	int m_imeResultPendingChars = 0;	///< 待吞掉的 IME 结果 WM_CHAR 数（8.5.1：GCS_RESULTSTR 已提交框架——
 	///< 系统随后仍发结果 WM_CHAR（DefWindowProc 通道），吞掉防双写；UTF-16 码元计数 = WM_CHAR 消息数）

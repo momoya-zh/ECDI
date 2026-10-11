@@ -20,6 +20,7 @@
 #include <string>
 #include <memory>
 #include <chrono>
+#include <cstdint>   // Phase 32：衬底清屏色 AABBGGRR
 
 namespace ECDI{
 
@@ -379,6 +380,14 @@ class Window : public PlatformWindowHost {
 		BackdropMode m_backdropRequested = BackdropMode::None;   ///< 请求态（持久意图——D32-C）
 		Color m_backdropTint{ 0.0f, 0.0f, 0.0f, 0.0f };          ///< 雾面色调（None 模式下无语义）
 		bool m_shown = false;   ///< Show() 调用事实（配置期闸门判据——同平台 m_shown 语义：「API 调用事实」非「系统当前可见」）
+
+		// ── Phase 32：衬底实际态 → 后端 的下发缓存（变化才下发——SyncBackdropSurface）──
+		bool m_backdropSurfaceSynced = false;   ///< 尚未向 renderer 下达过（首帧必下发）
+		BackdropMode m_backdropModePushed = BackdropMode::None;   ///< 最近一次下发的模式
+		std::uint32_t m_backdropClearPushed = 0;   ///< 最近一次下发的清屏色（AABBGGRR）
+
+		/// @brief 衬底实际态 → renderer（Phase 32 D32-H——PaintFrame 帧首调用；变化才下发）
+		void SyncBackdropSurface();
 
 };
 

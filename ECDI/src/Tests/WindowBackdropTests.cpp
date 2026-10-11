@@ -9,11 +9,18 @@
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Rect.h"
 #include "ECDI/Window/WindowBackdrop.h"
+#include "ECDI/Window/Window.h"
+#include "ECDI/Application/Application.h"
+#include "ECDI/Render/RenderServices.h"
 #include "Platform/Win32/Win32RenderContext.h"
+#include "Platform/Win32/Win32PlatformWindowInternal.h"   // Phase 32 D32-N：注入缝（测试专用——内部头先例）
 #include "Render/GDIBackend.h"
+#include "Render/RecordingBackend.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 using namespace ECDI;
@@ -240,9 +247,159 @@ void Test32ModeSwitchNoResidue()
     backend.EndFrame();
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 32 批二：材质应用与状态机（T32-5 失败注入 / T32-6 配置期契约 / T32-8 结构性）
+// 装置 = WindowBackgroundTests 先例（Application::Create + RenderServices 注入 +
+// Show/泵驱动——PaintFrame 是 private），但后端注入**真实 GDIBackend**（观测缝
+// DebugCommitUsesAlphaBlend 断言「renderer 确已收到 Degraded 语义」——评审 P2-4 的
+// 分支覆盖项）。注入缝 = D32-N（进程级全局——**串行假设**，用后恢复 None）。
+// ══════════════════════════════════════════════════════════════════════
+
+namespace {
+
+/// @brief 手动消息泵（仿 WindowBackgroundTests.cpp:37——上限防 WM_PAINT 洪水）
+void PumpMessages(int maxCount)
+{
+    MSG msg{};
+    for (int i = 0; i < maxCount && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE); ++i)
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}
+
+/// @brief 测试装置：Application + **真实 GDIBackend**（观测缝可达）
+/// @details 成员声明序保证 app 最后析构（窗口先亡——WindowBackgroundTests.cpp:50 同约束）。
+struct BackdropProbe
+{
+    Application app;
+    GDIBackend* gdi = nullptr;    ///< **非拥有**（所有权已 move 进 RenderServices → Window）
+    Window* window = nullptr;     ///< **非拥有**（所有权归 Application）
+
+    explicit BackdropProbe(const char* title)
+    {
+        auto backendOwned = std::make_unique<GDIBackend>();
+        gdi = backendOwned.get();
+        RenderServices services{
+            std::move(backendOwned),
+            std::make_unique<RecordingBackend>()   // 测量占位（不参与断言）
+        };
+        window = &app.Create(title, 400, 300, std::move(services));
+    }
+
+    ~BackdropProbe() { window->Release(); }
+
+    void ShowAndPump() { window->Show(); PumpMessages(64); }
+
+    /// @brief Show + 泵 + **失效驱动第二帧**（★ Show 内部 UpdateWindow 的首帧发生在
+    /// ApplyBackdrop 之前——衬底实际态需 Invalidate 后的下一帧才到达后端）
+    void ShowApplyAndRepaint() { window->Show(); PumpMessages(64); window->Invalidate(); PumpMessages(64); }
+};
+
+const Color kBackdropTint{ 0.22f, 0.18f, 0.17f, 0.6f };   // 深雾 tint（α 0.6）
+
+}   // namespace
+
+// ── T32-5：失败注入状态机（D32-N 两类故障分开覆盖——外部评审 P2-4）──────────
+// 判据：① FailResolve ⇒ 解析失败**不调用未解析函数**，直接 Degraded；
+//       ② FailCall ⇒ 调用路径真实执行、结果强制 FALSE ⇒ 同落 Degraded；
+//       ③ 两者的「renderer 收到 Degraded 提交语义」都经真实 GDIBackend 观测缝验证。
+// ★ 注入标志为进程级全局（D32-N）——本用例串行使用并在末尾恢复 None（不得并行）。
+void Test32FailureInjectionStateMachine()
+{
+    // ① FailResolve
+    SetBackdropInjectionForTests(BackdropInjection::FailResolve);
+    {
+        BackdropProbe probe("ECDI_BdFailResolve");
+        probe.window->SetWindowBackdrop(BackdropMode::Acrylic, kBackdropTint);
+        probe.ShowApplyAndRepaint();
+
+        const WindowBackdropState s = probe.window->GetWindowBackdropState();
+        EXPECT_TRUE(s.requested == BackdropMode::Acrylic);
+        EXPECT_TRUE(s.applied);
+        EXPECT_TRUE(s.actual == BackdropMode::Degraded);      // 解析失败 ⇒ Degraded（绝不裸透）
+        EXPECT_TRUE(probe.gdi->DebugCommitUsesAlphaBlend());  // renderer 确已收到 Degraded 语义
+    }
+
+    // ② FailCall
+    SetBackdropInjectionForTests(BackdropInjection::FailCall);
+    {
+        BackdropProbe probe("ECDI_BdFailCall");
+        probe.window->SetWindowBackdrop(BackdropMode::Acrylic, kBackdropTint);
+        probe.ShowApplyAndRepaint();
+
+        const WindowBackdropState s = probe.window->GetWindowBackdropState();
+        EXPECT_TRUE(s.applied);
+        EXPECT_TRUE(s.actual == BackdropMode::Degraded);
+        EXPECT_TRUE(probe.gdi->DebugCommitUsesAlphaBlend());
+    }
+
+    SetBackdropInjectionForTests(BackdropInjection::None);   // ★ 恢复（串行假设的契约）
+}
+
+// ── T32-6：配置期契约 + Degraded 忽略语义（D32-M）──────────────────────────
+// 判据：① Degraded 请求（Show 前）⇒ 完全忽略且不改请求态；② Show 前 applied=false；
+//       ③ Show 后 applied=true（注入 FailResolve ⇒ actual 确定性 Degraded，与机器解耦）；
+//       ④ Show 后 SetWindowBackdrop ⇒ Warning + 请求态不变；⑤ Degraded 请求（Show 后）同忽略。
+void Test32ConfigGateAndDegradedIgnore()
+{
+    SetBackdropInjectionForTests(BackdropInjection::FailResolve);   // actual 判定与机器能力解耦
+    {
+        BackdropProbe probe("ECDI_BdConfig");
+
+        // ① Degraded 请求 ⇒ 完全忽略
+        probe.window->SetWindowBackdrop(BackdropMode::Degraded, kBackdropTint);
+        EXPECT_TRUE(probe.window->GetWindowBackdropState().requested == BackdropMode::None);
+
+        // ② Show 前：applied=false、actual 无语义（None）
+        EXPECT_TRUE(!probe.window->GetWindowBackdropState().applied);
+        EXPECT_TRUE(probe.window->GetWindowBackdropState().actual == BackdropMode::None);
+
+        // ③ 正常请求 + Show（FailResolve ⇒ Degraded 确定性）
+        probe.window->SetWindowBackdrop(BackdropMode::Acrylic, kBackdropTint);
+        EXPECT_TRUE(probe.window->GetWindowBackdropState().requested == BackdropMode::Acrylic);
+        probe.ShowApplyAndRepaint();
+        {
+            const WindowBackdropState s = probe.window->GetWindowBackdropState();
+            EXPECT_TRUE(s.applied);
+            EXPECT_TRUE(s.actual == BackdropMode::Degraded);
+        }
+
+        // ④ Show 后 SetWindowBackdrop ⇒ Warning + 请求态不变（不重应用）
+        probe.window->SetWindowBackdrop(BackdropMode::None, Color::Black());
+        EXPECT_TRUE(probe.window->GetWindowBackdropState().requested == BackdropMode::Acrylic);
+
+        // ⑤ Degraded 请求（Show 后）⇒ 同样忽略
+        probe.window->SetWindowBackdrop(BackdropMode::Degraded, kBackdropTint);
+        EXPECT_TRUE(probe.window->GetWindowBackdropState().requested == BackdropMode::Acrylic);
+    }
+    SetBackdropInjectionForTests(BackdropInjection::None);   // ★ 恢复
+}
+
+// ── T32-8：结构性判据（A9②——C++ 可表达部分；grep 判据 + 每公共头无 Windows.h
+//    独立编译由既有 ecdi_public_header_test 目标承载）──────────────────────────
+void Test32StructuralSignatures()
+{
+    // ① 公共查询签名钉死（Win32 类型无法混入——本断言即证）
+    static_assert(std::is_same_v<decltype(&ECDI::Window::GetWindowBackdropState),
+        ECDI::WindowBackdropState (ECDI::Window::*)() const noexcept>,
+        "Window::GetWindowBackdropState signature must stay Win32-free");
+    // ② 后端签名 = 既有公共枚举 + 原语（外部评审 P1-1 的解——不得回退为内部类型）
+    static_assert(std::is_same_v<decltype(&ECDI::RenderingBackend::SetBackdropSurface),
+        void (ECDI::RenderingBackend::*)(ECDI::BackdropMode, std::uint32_t)>,
+        "RenderingBackend::SetBackdropSurface must stay primitives-only");
+    // ③ 带默认实现（非纯虚）——TestPlatformWindow×2 与 RecordingBackend/GLRenderer
+    //    的零改动编译是机制面证明；本断言把「GDIBackend 可实例化」显式化。
+    static_assert(!std::is_abstract_v<ECDI::GDIBackend>);
+    EXPECT_TRUE(true);   // 主断言在编译期
+}
+
 void ECDI::Test::RegisterWindowBackdropTests()
 {
     GetTestRegistry().Add("WindowBackdrop.ZeroRegression", &Test32DefaultZeroRegression);              // T32-1
     GetTestRegistry().Add("WindowBackdrop.DegradedClearAndCommitBranch", &Test32DegradedClearAndCommitBranch); // T32-4
     GetTestRegistry().Add("WindowBackdrop.ModeSwitchNoResidue", &Test32ModeSwitchNoResidue);           // T32-7
+    GetTestRegistry().Add("WindowBackdrop.FailureInjectionStateMachine", &Test32FailureInjectionStateMachine); // T32-5
+    GetTestRegistry().Add("WindowBackdrop.ConfigGateAndDegradedIgnore", &Test32ConfigGateAndDegradedIgnore);   // T32-6
+    GetTestRegistry().Add("WindowBackdrop.StructuralSignatures", &Test32StructuralSignatures);         // T32-8
 }

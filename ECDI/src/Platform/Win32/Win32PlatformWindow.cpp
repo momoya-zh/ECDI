@@ -1,4 +1,5 @@
 #include "Platform/Win32/Win32PlatformWindow.h"
+#include "Platform/Win32/Win32PlatformWindowInternal.h"   // Phase 32 D32-N：衬底失败注入缝（测试专用）
 
 #include "Platform/Win32/Win32WindowClass.h"
 #include "Platform/Win32/DpiConversion.h"   // Phase 20：DPI 换算（唯一真相源——与 WindowMessageHandler 共用）
@@ -17,6 +18,7 @@
 #undef DrawText   // Win32 宏防护（dwmapi.h / windowsx.h 展开链也可能带入 Windows.h）
 #endif
 
+#include <algorithm>                   // Phase 32：std::clamp（tint alpha 的 ToByte 语义）
 #include <cmath>                       // Phase 31：std::isfinite / std::fabs（SetBounds 非法输入校验）
 #include <cstring>
 #include <cwchar>                      // Phase 16：IsDesktopClassWindow 的 wcscmp（D-6——显式列全，不依赖 <Windows.h> 的展开链）
@@ -35,6 +37,134 @@
 namespace ECDI{
 
 namespace{   // 匿名 namespace：Win32PlatformWindow 内部辅助（不暴露）
+
+// ── Phase 32（D32-H/N）：衬底动态解析 + 失败注入（进程级——注册表串行假设）──
+// `SetWindowCompositionAttribute` / `ACCENTPOLICY` 为**未公开 API**（需求 §6 风险①）：
+// 动态解析 + 失败容忍（沿 Phase 12 R6 姿态）——全仓首个 GetProcAddress 用例。
+enum { kWcaAccentPolicy = 19 };                 // WINDOWCOMPOSITIONATTRIBDATA::Attrib（未公开）
+enum { kAccentEnableAcrylicBlurBehind = 4 };    // ACCENTPOLICY::nAccentState（未公开）
+
+struct AccentPolicy { int nAccentState; int nFlags; int nColor; int nAnimationId; };
+struct WindowCompositionAttribData { int Attrib; PVOID pvData; SIZE_T cbData; };
+using PFN_SetWCA = BOOL(WINAPI*)(HWND, WindowCompositionAttribData*);
+
+PFN_SetWCA g_setWca = nullptr;          ///< 解析结果（lazy；**失败也缓存**——避免每次重试）
+bool g_setWcaResolved = false;          ///< 是否已尝试解析
+BackdropInjection g_backdropInjection = BackdropInjection::None;   ///< D32-N 注入（测试专用）
+
+/// @brief tint alpha → DWM nColor（C32-12：**RGB 分量 = 黑**——tint 观感由缓冲清屏色承载，
+/// 防「DWM tint + 缓冲泄漏」双重 tint；alpha 分量 = 材质浓淡。ToByte 语义沿决策 21/23）
+int ComposeAccentColor(const Color& tint)
+{
+	const float clamped = std::clamp(tint.a, 0.0f, 1.0f);
+	const unsigned alpha = static_cast<unsigned>(clamped * 255.0f + 0.5f) << 24;
+	return static_cast<int>(alpha);
+}
+
+}   // namespace（Phase 32 衬底辅助——匿名 namespace 块结束）
+
+// Phase 32 D32-N：注入缝实现（**ECDI 作用域**——内部头 Win32PlatformWindowInternal.h 的
+// 声明；⚠️ 本文件整体已在 namespace ECDI 内 ⇒ 此处**直接定义**即可，不能再包一层
+// namespace ECDI（那会变成 ECDI::ECDI:: ⇒ 链接 undef——首版实测）。存储在上方便名
+// namespace，同 TU 可见。
+void SetBackdropInjectionForTests(BackdropInjection injection) noexcept
+{
+	// ★ E-B2-1（批二实测勘误）：解析结果**进程级缓存**且首个窗口 Show() 即完成真实解析——
+	// 注入在其后设置必须**显式作用于缓存**，否则 FailResolve 永不生效（首版实测 actual=Acrylic）。
+	// - FailResolve：已缓存的成功解析失效（g_setWca = null 且视为已解析 ⇒ 后续应用直接 Degraded）；
+	// - FailCall：重置解析标记 ⇒ 下次应用重新解析（函数指针必须有效——调用结果在调用点强制 FALSE）；
+	// - None：重置解析标记 ⇒ 恢复真实路径。
+	g_backdropInjection = injection;
+	if (injection == BackdropInjection::FailResolve)
+	{
+		g_setWca = nullptr;
+		g_setWcaResolved = true;
+	}
+	else
+	{
+		g_setWcaResolved = false;
+	}
+}
+
+namespace{   // 匿名 namespace 续
+
+/// @brief 应用衬底（D32-H：Acrylic 尽力；解析失败/调用失败/系统不支持 ⇒ 立即 Degraded，绝不裸透）
+void ApplyBackdropImpl(HWND hwnd, BackdropMode requested, const Color& tint,
+                       bool policyActive, BackdropMode& outActual, bool& outPolicyActive)
+{
+	// 解析：lazy + 一次性（失败也缓存）
+	if (!g_setWcaResolved)
+	{
+		g_setWcaResolved = true;
+		if (g_backdropInjection == BackdropInjection::FailResolve)
+		{
+			Logger::Log(LogLevel::Warning,
+				L"WindowBackdrop: injection FailResolve - dynamic resolution treated as unavailable");
+		}
+		else if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+		{
+			g_setWca = reinterpret_cast<PFN_SetWCA>(
+				GetProcAddress(user32, "SetWindowCompositionAttribute"));
+		}
+		if (!g_setWca)
+		{
+			Logger::Log(LogLevel::Warning,
+				L"WindowBackdrop: SetWindowCompositionAttribute unavailable - acrylic disabled");
+		}
+	}
+
+	const bool materialAvailable = (g_setWca != nullptr);
+
+	if (requested == BackdropMode::Acrylic && materialAvailable)
+	{
+		// 尝试 Acrylic：nColor = (alpha << 24)，RGB = 黑（C32-12）
+		AccentPolicy policy{};
+		policy.nAccentState = kAccentEnableAcrylicBlurBehind;
+		policy.nFlags = 2;
+		policy.nColor = ComposeAccentColor(tint);
+		WindowCompositionAttribData data{};
+		data.Attrib = kWcaAccentPolicy;
+		data.pvData = &policy;
+		data.cbData = sizeof(policy);
+		// FailCall：调用路径真实执行、结果强制失败（外部评审 P2-4 的调用失败分支）
+		const BOOL ok = (g_backdropInjection == BackdropInjection::FailCall)
+			? FALSE : g_setWca(hwnd, &data);
+		if (ok)
+		{
+			outActual = BackdropMode::Acrylic;
+			outPolicyActive = true;
+			return;
+		}
+		Logger::Log(LogLevel::Warning,
+			L"WindowBackdrop: accent call failed - degraded to translucent white");
+		outActual = BackdropMode::Degraded;
+		outPolicyActive = false;
+		return;
+	}
+
+	if (requested == BackdropMode::Acrylic)
+	{
+		// 解析失败（或 FailResolve 注入）⇒ Degraded——清屏语义由 Window 经 renderer 下达
+		outActual = BackdropMode::Degraded;
+		outPolicyActive = false;
+		return;
+	}
+
+	// None：已在位则 state=0 可编程移除（探针 8 SW1 实证；从未应用则跳过）
+	if (policyActive && materialAvailable)
+	{
+		AccentPolicy policy{};
+		policy.nAccentState = 0;   // ACCENT_ENABLE_NONE——移除
+		policy.nFlags = 2;
+		WindowCompositionAttribData data{};
+		data.Attrib = kWcaAccentPolicy;
+		data.pvData = &policy;
+		data.cbData = sizeof(policy);
+		g_setWca(hwnd, &data);   // 移除失败容忍（下轮重应用再试）
+	}
+	outActual = BackdropMode::None;
+	outPolicyActive = false;
+}
 
 /// @brief 剪贴板打开守卫（8.5.1 C10：OpenClipboard/CloseClipboard 资源配对——局部 RAII）
 /// @details 仅封装资源配对，不做任何业务逻辑（YAGNI——非 ClipboardManager）；
@@ -285,13 +415,17 @@ void Win32PlatformWindow::Show() {
 		//   ⇒ **零运行期成本**（契约 C6）。
 		ApplyStartupSize();
 
-		m_shown = true;   // 配置期 → 运行期分界线（与 Window::Show() 一一对应）
+	m_shown = true;   // 配置期 → 运行期分界线（与 Window::Show() 一一对应）
 
-		ShowWindow(m_hwnd, SW_SHOW);
+	ShowWindow(m_hwnd, SW_SHOW);
 
-		UpdateWindow(m_hwnd);
+	UpdateWindow(m_hwnd);
 
-	}
+	// Phase 32（D32-H）：首次衬底应用——窗口真实存在后再尝试（material API 需要有效 HWND）；
+	// 失败容忍 ⇒ Degraded（绝不裸透），状态经 GetWindowBackdropState 可查（T32-5 断言面）。
+	ApplyBackdrop();
+
+}
 
 }
 
@@ -725,8 +859,17 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 			suggested->bottom - suggested->top,
 			SWP_NOZORDER | SWP_NOACTIVATE);
 
+		// Phase 32（D32-O）：DPI 变化后重应用衬底（重应用触发全集之一——A8 自动化面）
+		ApplyBackdrop();
+
 		return 0;   // 已处理（字体缓存无需清理——DPI 已进缓存键，旧 DPI 的 HFONT 自然不命中）
 	}
+
+	// Phase 32（D32-O）：DWM 组成状态变化（开关/主题切换）⇒ 重应用衬底——
+	// accent 是 DWM 合成属性，composition 变化后可能失效（失败容忍 ⇒ 最坏落 Degraded）。
+	case WM_DWMCOMPOSITIONCHANGED:
+		ApplyBackdrop();
+		return 0;
 
 	case WM_EXITSIZEMOVE:
 		// 7.1.1 职责：窗口移动/缩放结束 → 通知 Host（框架层决定如何响应）。
@@ -1075,6 +1218,41 @@ void Win32PlatformWindow::SetChromeMode(ChromeMode mode){
 	// ③ DWM 增强（阴影/圆角——失败容忍）
 	ApplyDwmEnhancements(m_hwnd);
 
+}
+
+// ── Phase 32：窗口衬底（D32-A/C/H/R）────────────────────────────────────
+
+void Win32PlatformWindow::SetWindowBackdrop(BackdropMode mode, const Color& tint)
+{
+	// 配置期闸门在 Window 层（批一）——到达此处的请求已合法（Degraded 不可达）。
+	// 只存配置：应用发生在 Show()/重应用（D32-H），actual 届时产出。
+	m_backdropRequested = mode;
+	m_backdropTint = tint;
+}
+
+WindowBackdropState Win32PlatformWindow::GetWindowBackdropState() const noexcept
+{
+	// D32-M：applied 区分「尚未应用」（Show 前，actual 无语义）与「最近一次应用结果」；
+	// 状态归属**当前 HWND**——重建/重应用后刷新，不跨 HWND 泄漏（C32-6）。
+	return WindowBackdropState{ m_backdropRequested, m_backdropActual, m_backdropApplied };
+}
+
+void Win32PlatformWindow::ApplyBackdrop()
+{
+	if (m_hwnd == nullptr)
+	{
+		return;   // 防御（同 SetWindowLayer 的 HWND 生命周期前提）
+	}
+
+	BackdropMode actual = m_backdropActual;
+	bool policyActive = m_backdropPolicyActive;
+
+	ApplyBackdropImpl(m_hwnd, m_backdropRequested, m_backdropTint,
+		m_backdropPolicyActive, actual, policyActive);
+
+	m_backdropActual = actual;
+	m_backdropPolicyActive = policyActive;
+	m_backdropApplied = true;   // D32-M：此后 actual 有语义（未应用 ≠ 应用失败 的分界）
 }
 
 void Win32PlatformWindow::SetCaptionHeight(int height){

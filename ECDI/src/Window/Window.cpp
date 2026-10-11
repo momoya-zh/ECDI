@@ -12,6 +12,8 @@
 #include "ECDI/EventSystem/Window/WindowCloseRequsted.h"
 #include "ECDI/Render/PaintContext.h"
 
+#include <algorithm>   // Phase 32：std::clamp（tint → 清屏色的 ToByte 语义）
+#include <cstdint>     // Phase 32：衬底清屏色 AABBGGRR
 #include <string>
 #include <memory>
 #include <system_error>
@@ -142,6 +144,7 @@ void Window::PaintFrame()
 	PaintContext ctx(m_commands, *m_textMeasurer,
 	                 Rect{ 0.0f, 0.0f, static_cast<float>(clientSize.width), static_cast<float>(clientSize.height) });   // 7.1.4：测量独立指针（GDITextMeasurer）
 	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
+	SyncBackdropSurface();                            // Phase 32（D32-H）：衬底实际态 → 后端（变化才下发）
 	m_renderer.BeginFrame(m_backgroundColor);         // 决策 13：转发（Phase 18：携带本帧背景色）
 	m_renderer.Execute(m_commands, GetDpiScale());   // Phase 20.1：每帧取窗口 DPI 缩放（不缓存 ⇒ 跨屏下一帧自动跟随）
 	m_renderer.EndFrame();
@@ -268,6 +271,63 @@ WindowBackdropState Window::GetWindowBackdropState() const noexcept {
 	}
 
 	return state;
+
+}
+
+// ── Phase 32（D32-H/R）：衬底实际态 → 渲染后端（帧首同步，**变化才下发**）──────
+// 平台在 Show()/重应用后产出 actual；本函数把它翻译为后端的清屏语义：
+//   Acrylic   = tint RGB + A=0（C32-12：材质透出 + tint 观感由缓冲承载）；
+//   Degraded  = 预乘白 0.8 = 0xCCCCCCCC（R-c 固定形态，P4/P5 实证）；
+//   None/未应用 = 不下发（后端保持既有清屏路径——逐位同 Phase 18，A6①）。
+// 轮询式（每帧一次虚调用）而非事件回调：无新接缝、重应用天然跟随（详设 §4 △2 注）。
+
+namespace {   // Window.cpp 局部：tint → 缓冲清屏色（AABBGGRR，A=0——C32-12）
+
+std::uint32_t ComposeTintClearABGR(const Color& tint)
+{
+	const auto toByte = [](float v)
+	{
+		const float clamped = std::clamp(v, 0.0f, 1.0f);
+		return static_cast<std::uint32_t>(clamped * 255.0f + 0.5f);
+	};
+	// 内存序 BGRA（byte0=B）⇒ AABBGGRR：A=0（材质区透出）、BB/GG/RR = tint
+	return (toByte(tint.b) << 16) | (toByte(tint.g) << 8) | toByte(tint.r);
+}
+
+}   // namespace
+
+void Window::SyncBackdropSurface()
+{
+
+	BackdropMode mode = BackdropMode::None;
+	std::uint32_t clear = 0;
+
+	if (m_platformWindow != nullptr){
+
+		const WindowBackdropState state = m_platformWindow->GetWindowBackdropState();
+
+		if (state.applied && state.actual == BackdropMode::Acrylic){
+
+			mode = BackdropMode::Acrylic;
+			clear = ComposeTintClearABGR(m_backdropTint);   // tint RGB 承载观感（C32-12）
+
+		} else if (state.applied && state.actual == BackdropMode::Degraded){
+
+			mode = BackdropMode::Degraded;
+			clear = 0xCCCCCCCCu;   // 预乘白 0.8（R-c；tint 形参不参与降级——固定白）
+
+		}
+
+	}
+
+	if (!m_backdropSurfaceSynced || mode != m_backdropModePushed || clear != m_backdropClearPushed){
+
+		m_renderer.SetBackdropSurface(mode, clear);
+		m_backdropModePushed = mode;
+		m_backdropClearPushed = clear;
+		m_backdropSurfaceSynced = true;
+
+	}
 
 }
 
