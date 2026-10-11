@@ -85,14 +85,18 @@ void Test32DefaultZeroRegression()
 
     RECT client{};
     GetClientRect(window.hwnd, &client);
+
+    // ① White 清屏（None 路径 = CreateSolidBrush + FillRect 逐字保留）
+    backend.BeginFrame(Color::White());
+
+    // ★ 位指针必须在**首帧 BeginFrame 之后**捕获——EnsureBackBuffer 在 BeginFrame 内
+    //   懒创建（首版把捕获放在其之前 = 解引用空指针，GDB 实证 SIGSEGV@base[i*4+2]）
     const BitsView bits{
         static_cast<BYTE*>(backend.DebugBackBufferBits()),
         client.right, client.bottom };
     EXPECT_TRUE(bits.base != nullptr);
     EXPECT_TRUE(bits.Count() > 0);
 
-    // ① White 清屏（None 路径 = CreateSolidBrush + FillRect 逐字保留）
-    backend.BeginFrame(Color::White());
     for (std::size_t i = 0; i < bits.Count(); ++i)
     {
         EXPECT_EQ(bits.R(i), 255);
@@ -146,10 +150,6 @@ void Test32DegradedClearAndCommitBranch()
 
     RECT client{};
     GetClientRect(window.hwnd, &client);
-    const BitsView bits{
-        static_cast<BYTE*>(backend.DebugBackBufferBits()),
-        client.right, client.bottom };
-    EXPECT_TRUE(bits.base != nullptr);
 
     // ① 下达 Degraded（预乘白 0.8：AABBGGRR = 0xCCCCCCCC）
     backend.SetBackdropSurface(BackdropMode::Degraded, 0xCCCCCCCCu);
@@ -157,6 +157,13 @@ void Test32DegradedClearAndCommitBranch()
 
     // 清屏：全缓冲四字节 = 204（背景色形参在衬底模式下不消费）
     backend.BeginFrame(Color::White());
+
+    // ★ 位指针在首帧 BeginFrame 后捕获（同 T32-1 的勘误——首版空指针解引用）
+    const BitsView bits{
+        static_cast<BYTE*>(backend.DebugBackBufferBits()),
+        client.right, client.bottom };
+    EXPECT_TRUE(bits.base != nullptr);
+
     for (std::size_t i = 0; i < bits.Count(); ++i)
     {
         EXPECT_EQ(bits.B(i), 204);
@@ -185,10 +192,6 @@ void Test32ModeSwitchNoResidue()
 
     RECT client{};
     GetClientRect(window.hwnd, &client);
-    const BitsView bits{
-        static_cast<BYTE*>(backend.DebugBackBufferBits()),
-        client.right, client.bottom };
-    EXPECT_TRUE(bits.base != nullptr);
 
     // tint RGB(56,47,43) + A=0 → AABBGGRR = 0x00382F2B（探针 7 M0/M1 的 tint）
     const std::uint32_t tintABGR = 0x00382F2Bu;
@@ -196,6 +199,13 @@ void Test32ModeSwitchNoResidue()
     // ① Acrylic：全缓冲 = BGRA(43,47,56,0)
     backend.SetBackdropSurface(BackdropMode::Acrylic, tintABGR);
     backend.BeginFrame(Color::White());
+
+    // ★ 位指针在首帧 BeginFrame 后捕获（同 T32-1 的勘误——首版空指针解引用）
+    const BitsView bits{
+        static_cast<BYTE*>(backend.DebugBackBufferBits()),
+        client.right, client.bottom };
+    EXPECT_TRUE(bits.base != nullptr);
+
     for (std::size_t i = 0; i < bits.Count(); ++i)
     {
         EXPECT_EQ(bits.B(i), 43);

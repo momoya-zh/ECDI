@@ -181,7 +181,7 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | 项 | 内容 |
 |---|---|
 | **落地** | △1（新公共头 `Window/WindowBackdrop.h`，95→96）· △2（`Window::SetWindowBackdrop`[Degraded 完全忽略 + `m_shown` 配置期闸门——**实现注记**：闸门在 Window 侧而非平台侧，因请求态/tint 是决策层状态，平台侧闸门会让 Window 请求态先被改写而平台已忽略 ⇒ 两层失同步]· `GetWindowBackdropState`）· △3（`PlatformWindow` +2 默认虚函数——`TestPlatformWindow`×2 **零改动**实证 S7）· △5（`RenderingBackend::SetBackdropSurface(BackdropMode, uint32)` 默认实现 + `Renderer` 单行转发）· △6（**DDB → 32bpp top-down DIB**[事务性重建保留]· 清屏三分支[None = 既有 FillRect 路径**逐字保留**]· 提交分支[Degraded→AlphaBlend / 其余→BitBlt]· `DebugBackBufferBits`/`DebugCommitUsesAlphaBlend` 观测缝）· RunAllTests 接线 |
-| **测试** | **三链 369/369 全绿**（MinGW-Ninja / ClangCL / Clang，各 366+3；注册数 369 实测）· T32-1（None 清屏 RGB 精确 + alpha 恒 0 + DrawRect 内外精确）· T32-4（Degraded 全缓冲四字节 204 + AlphaBlend 分支 + None 恢复 BitBlt）· T32-7（Acrylic→None→Acrylic 三段全缓冲无残留） |
-| **偏差** | ① T32-4 的「DrawRect 后矩形 A=255」断言属 K①（批三）——批一先落清屏+提交分支两半；② △7（注入内部头）随批二（与 △4 同文件族，批一无需空壳） |
+| **测试** | ★ **勘误 E-B1-2（2026-10-11 同日订正）**：**ClangCL / Clang 375/375 全绿**（375 = 运行时注册数——grep 口径 369 + 循环注册 6）；**MinGW 链被 #57（既有 M1 堆损坏，非本批引入——pre-batch-1 worktree 复现）阻塞**，待 #57 修复后补跑。T32-1（None 清屏 RGB 精确 + alpha 恒 0 + DrawRect 内外精确）· T32-4（Degraded 全缓冲四字节 204 + AlphaBlend 分支 + None 恢复 BitBlt）· T32-7（Acrylic→None→Acrylic 三段全缓冲无残留） |
+| **偏差** | ① T32-4 的「DrawRect 后矩形 A=255」断言属 K①（批三）——批一先落清屏+提交分支两半；② △7（注入内部头）随批二（与 △4 同文件族，批一无需空壳）；③ ★ **勘误 E-B1-1（用户 GDB 定位）**：首版三测试把 `DebugBackBufferBits()` 捕获放在 `BeginFrame` **之前**——DIB 尚未分配（懒创建）⇒ 解引用空指针（SIGSEGV@`base[i*4+2]`，即 BitsView::R）；修 = 位指针移到首帧分配后捕获；④ ★ **工具勘误**：批一验证初版用 `cmd & echo %ERRORLEVEL%` 读退出码——**%ERRORLEVEL% 在 cmd 解析期展开**（回显旧值）⇒ 三链「EXIT=0」假绿；改用 PowerShell `$LASTEXITCODE` 后真相浮出 |
 | **限制** | 无新增（K①..K④ 修补未在本批） |
 | **台账** | 本行 + audit v1.78 + deferred v2.12 + docs/README + 根 README（同批提交） |
