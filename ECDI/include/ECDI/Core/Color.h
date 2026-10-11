@@ -16,7 +16,7 @@ struct Color
 	float r = 0.0f;		///< 红 [0,1]
 	float g = 0.0f;		///< 绿 [0,1]
 	float b = 0.0f;		///< 蓝 [0,1]
-	float a = 1.0f;		///< 透明度 [0,1]（第一版后端不消费）
+	float a = 1.0f;		///< alpha／**不透明度** [0,1]：`1.0` = 完全不透明，`0.0` = 全透明（★ **不是「透明度」**——措辞反了会让「0.8」被误读成 80% 透明）。消费方 = `DrawRect` / `DrawRoundedRect` 经 `BlendAlphaSolid`（Phase 9）；★ **窗口清屏路径不消费**（Phase 18 C4：`COLORREF` 无 alpha 通道——见 `Window::SetBackgroundColor` 注释）
 
 	static constexpr Color White()   noexcept { return { 1.0f, 1.0f, 1.0f, 1.0f }; }
 	static constexpr Color Black()   noexcept { return { 0.0f, 0.0f, 0.0f, 1.0f }; }
