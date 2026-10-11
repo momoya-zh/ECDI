@@ -39,6 +39,7 @@ int ECDI::Test::RunAllTests()
     RegisterFontEngineTests();   // Phase 26：FontEngine（T26-1..T26-6）
     RegisterGLBackendTests();   // Phase 26：GL 后端（T26-7 / T26-8）
     RegisterDesktopNestTests();   // M1：DesktopNest（T-M1-1..T-M1-6）
+    RegisterWindowBackdropTests();   // Phase 32：窗口衬底（T32-1 / T32-4 / T32-7）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

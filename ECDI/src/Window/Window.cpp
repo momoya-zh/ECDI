@@ -5,6 +5,7 @@
 #include "ECDI/Application/Application.h"
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Core/ECDIAssert.h"
+#include "ECDI/Core/Logger.h"          // Phase 32：Degraded 不可请求 / Show 后配置期 Warning
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/String.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
@@ -89,6 +90,8 @@ void Window::Show() {
 		m_platformWindow->Show();
 
 	}
+
+	m_shown = true;   // Phase 32：Show() 调用事实（配置期闸门判据——「API 调用事实」非「系统当前可见」）
 
 }
 
@@ -214,6 +217,57 @@ float Window::GetDpiScale() const noexcept{
 void Window::SetChromeMode(ChromeMode mode){
 
 	m_platformWindow->SetChromeMode(mode);
+
+}
+
+// ── Phase 32：窗口衬底（配置期）────────────────────────────────────────
+// ★ 与 chrome 四件套「判据在平台层、Window 纯转发」不同：请求态与 tint 是**决策层状态**
+//   （Phase 18 底色同构——单一真相源在 Window）⇒ Degraded 忽略与 Show 闸门必须在
+//   Window 侧先于存储生效，否则平台已忽略而 Window 侧请求态已被改写 ⇒ 两层失同步。
+
+void Window::SetWindowBackdrop(BackdropMode mode, const Color& tint){
+
+	if (mode == BackdropMode::Degraded){
+
+		// D32-M：Degraded 只读——完全忽略且不改变既有请求态
+		Logger::Log(LogLevel::Warning,
+			L"WindowBackdrop: Degraded is not a requestable mode - ignored");
+
+		return;
+
+	}
+
+	if (m_shown){
+
+		Logger::Log(LogLevel::Warning,
+			L"WindowBackdrop: SetWindowBackdrop ignored after Show() - config-time only");
+
+		return;
+
+	}
+
+	m_backdropRequested = mode;
+	m_backdropTint = tint;
+
+	// 平台默认 no-op（批二 override 才真正应用——批一仅状态与转发通路）
+	m_platformWindow->SetWindowBackdrop(mode, tint);
+
+}
+
+WindowBackdropState Window::GetWindowBackdropState() const noexcept {
+
+	WindowBackdropState state;
+	state.requested = m_backdropRequested;
+
+	if (m_platformWindow != nullptr){
+
+		const WindowBackdropState platform = m_platformWindow->GetWindowBackdropState();
+		state.actual = platform.actual;
+		state.applied = platform.applied;
+
+	}
+
+	return state;
 
 }
 

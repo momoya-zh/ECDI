@@ -42,6 +42,11 @@ namespace ECDI {
 
 	void Renderer::BeginFrame(const Color& background) { m_backend.BeginFrame(background); }
 
+	void Renderer::SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR)
+	{
+		m_backend.SetBackdropSurface(actual, clearABGR);   // Phase 32：单行转发（决策 13 同族）
+	}
+
 	// ★ Phase 20.1：`scale` **只在此处进入流程**，逐层**显式传参**（Renderer 不存成员）；
 	// `commands` 是 const 引用 + 循环体是 const 引用 ⇒ **A2 / C-10 由类型系统保证**（想改缓冲写不出来）。
 	void Renderer::Execute(const CommandBuffer& commands, float scale)

@@ -41,5 +41,6 @@ void RegisterTextMeasurerTests();   ///< Phase 26：文本测量链（T26-10 D-8
 void RegisterFontEngineTests();   ///< Phase 26：FreeType 共享底层（T26-1..T26-6——PixelSize / 两级缓存 / GlyphKey / FontSource）
 void RegisterGLBackendTests();   ///< Phase 26：GL 后端（T26-7 图集 shelf 分配 / T26-8 初始化失败 no-op）
 void RegisterDesktopNestTests();   ///< M1：DesktopNest（T-M1-1..T-M1-6——模型/浮层/折叠/拖动路由/关闭路径）
+void RegisterWindowBackdropTests();   ///< Phase 32：窗口衬底（T32-1 零回归 / T32-4 Degraded / T32-7 切换无残留——批一）
 
 } // namespace ECDI::Test

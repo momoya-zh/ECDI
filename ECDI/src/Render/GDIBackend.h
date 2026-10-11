@@ -18,6 +18,7 @@
 #include<string>
 #include<tuple>
 #include<vector>
+#include <cstdint>
 
 namespace ECDI {
 
@@ -56,6 +57,21 @@ public:
 	void SetAntiAliasing(bool enabled) noexcept { m_antiAliasing = enabled; }
 	bool IsAntiAliasingEnabled() const noexcept { return m_antiAliasing; }
 
+	// ── Phase 32：窗口衬底（详设 D32-E/R；批一 = 缓冲地基）────────────────
+
+	/// @brief 衬底状态下达（override——签名 = 既有公共枚举 + 原语，外部评审 P1-1）
+	/// @details 帧外调用（Window→Renderer→backend），下一帧起整体一致；
+	///          提交机制映射 = 本类私有：None/Acrylic → BitBlt 逐字节含 alpha（C32-9），
+	///          Degraded → AlphaBlend 预乘源（P4/P5 实证形态）。
+	void SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR) override;
+
+	/// @brief 内部观测缝（Internal 头内的公有方法——**不属于公共 API**，同 SetAntiAliasing 先例）
+	/// @details 返回 32bpp top-down DIB 的位指针（BGRA，行距 = width×4）；T32 缓冲级断言用。
+	void* DebugBackBufferBits() const noexcept { return m_dibBits; }
+
+	/// @brief 内部观测缝：当前提交分支是否为 AlphaBlend（T32-4 断言用——同上非公共 API）
+	bool DebugCommitUsesAlphaBlend() const noexcept { return m_backdropActual == BackdropMode::Degraded; }
+
 private:
 	void EnsureBackBuffer();               ///< 决策 15/19/26/38：懒创建 + 尺寸自检 + 先建后替
 	void ReleaseBackBuffer();              ///< 决策 20/31：SelectObject(old)→DeleteObject→DeleteDC
@@ -70,6 +86,9 @@ private:
 	HBITMAP m_oldBitmap = nullptr;         ///< 决策 20：SelectObject 返回值
 	int m_bitmapWidth = 0;                 ///< 尺寸自检（决策 26）
 	int m_bitmapHeight = 0;
+	void* m_dibBits = nullptr;             ///< Phase 32（D32-E）：32bpp top-down DIB 位指针（BGRA）
+	BackdropMode m_backdropActual = BackdropMode::None;   ///< Phase 32：衬底实际态（帧外下达）
+	std::uint32_t m_backdropClearABGR = 0;                ///< Phase 32：衬底清屏色（AABBGGRR）
 	bool m_inFrame = false;                ///< 决策 32：Begin/End 配对断言
 
 	std::vector<int> m_clipStack;          ///< Phase 8 §8.5：SaveDC 返回值栈（Push 时入、Pop 时出）

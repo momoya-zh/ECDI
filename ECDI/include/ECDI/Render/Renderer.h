@@ -1,6 +1,9 @@
 ﻿#pragma once
 
 #include "ECDI/Render/RenderCommand.h"
+#include "ECDI/Window/WindowBackdrop.h"   // Phase 32：SetBackdropSurface 的模式枚举
+
+#include <cstdint>
 
 namespace ECDI {
 
@@ -20,6 +23,9 @@ namespace ECDI {
 		explicit Renderer(RenderingBackend& backend);   
 
 		void BeginFrame(const Color& background);   ///< Phase 18：透明转发（背景色是决策层输入，Renderer 不持有）
+		/// @brief 衬底状态下达（Phase 32——单行透明转发，同 BeginFrame 家族；Renderer 不持有状态）
+		/// @details 语义见 RenderingBackend::SetBackdropSurface（详设 D32-R：签名 = 既有公共枚举 + 原语）。
+		void SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR);
 		/// @brief 执行一批命令（★ Phase 20.1：`scale` = 本次执行的 DIP → 物理 几何缩放因子）
 		/// @param commands 命令缓冲（几何恒为 **DIP**；★ 本函数**不修改**它——A2 / 契约 C-10）
 		/// @param scale 坐标缩放因子（**finite + positive**；★ 语义 = **本次 Execute 调用**的

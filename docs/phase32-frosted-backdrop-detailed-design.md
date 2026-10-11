@@ -175,3 +175,13 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | **验证** | 库外 E2E 探针读数（D6 阶段 B）+ A8 目视矩阵结果 |
 | **限制** | 已知限制清单的最终状态（文字 AA 近似 / DrawImage 半透明[#56] / tint 碰撞） |
 | **台账** | 五处台账收口状态（本文件 §10 + framework-defect-audit + roadmap-deferred + docs/README + 根 README） |
+
+### §10.1 批一（2026-10-11，缓冲地基）
+
+| 项 | 内容 |
+|---|---|
+| **落地** | △1（新公共头 `Window/WindowBackdrop.h`，95→96）· △2（`Window::SetWindowBackdrop`[Degraded 完全忽略 + `m_shown` 配置期闸门——**实现注记**：闸门在 Window 侧而非平台侧，因请求态/tint 是决策层状态，平台侧闸门会让 Window 请求态先被改写而平台已忽略 ⇒ 两层失同步]· `GetWindowBackdropState`）· △3（`PlatformWindow` +2 默认虚函数——`TestPlatformWindow`×2 **零改动**实证 S7）· △5（`RenderingBackend::SetBackdropSurface(BackdropMode, uint32)` 默认实现 + `Renderer` 单行转发）· △6（**DDB → 32bpp top-down DIB**[事务性重建保留]· 清屏三分支[None = 既有 FillRect 路径**逐字保留**]· 提交分支[Degraded→AlphaBlend / 其余→BitBlt]· `DebugBackBufferBits`/`DebugCommitUsesAlphaBlend` 观测缝）· RunAllTests 接线 |
+| **测试** | **三链 369/369 全绿**（MinGW-Ninja / ClangCL / Clang，各 366+3；注册数 369 实测）· T32-1（None 清屏 RGB 精确 + alpha 恒 0 + DrawRect 内外精确）· T32-4（Degraded 全缓冲四字节 204 + AlphaBlend 分支 + None 恢复 BitBlt）· T32-7（Acrylic→None→Acrylic 三段全缓冲无残留） |
+| **偏差** | ① T32-4 的「DrawRect 后矩形 A=255」断言属 K①（批三）——批一先落清屏+提交分支两半；② △7（注入内部头）随批二（与 △4 同文件族，批一无需空壳） |
+| **限制** | 无新增（K①..K④ 修补未在本批） |
+| **台账** | 本行 + audit v1.78 + deferred v2.12 + docs/README + 根 README（同批提交） |

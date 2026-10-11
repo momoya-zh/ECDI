@@ -2,8 +2,10 @@
 
 #include "ECDI/Core/Size.h"
 #include "ECDI/Core/Rect.h"   // Phase 31：SetBounds/GetBounds 的几何类型
+#include "ECDI/Core/Color.h"  // Phase 32：SetWindowBackdrop 的 tint 形参
 #include "ECDI/Widget/CaretGeometry.h"
 #include "ECDI/Window/ChromeMode.h"
+#include "ECDI/Window/WindowBackdrop.h"   // Phase 32：BackdropMode / WindowBackdropState
 #include "ECDI/Window/WindowLayer.h"
 #include "ECDI/Window/WindowState.h"
 
@@ -107,7 +109,27 @@ public:
 	/// 交系统自然演化）。
 	virtual void SetWindowLayer(WindowLayer layer) = 0;
 
-	// ── Phase 12：窗口状态（运行期——**Show() 之后**才有效）──────────
+		// ── Phase 32：窗口衬底（带默认实现——S7 硬契约：既有实现者零改动）──────
+
+		/// @brief 设置衬底配置（Phase 32——详设 D32-A/R）
+		/// @param mode 请求的衬底模式（Degraded 已在 Window 层拦截，不会到达此处）
+		/// @param tint 雾面色调（平台在 Show()/重应用时消费——D32-Q）
+		/// @details ★ **默认实现 = no-op，语义是「该平台未实现此能力」**（外部评审 P2-6），
+		/// 而非「已成功应用 None」——查询经 GetWindowBackdropState 的 applied 区分。
+		virtual void SetWindowBackdrop(BackdropMode mode, const Color& tint)
+		{
+			(void)mode;
+			(void)tint;
+		}
+
+		/// @brief 查询衬底应用状态（Phase 32——实际态 = 最近一次应用结果，D32-C/M）
+		/// @details 默认实现返回 `{None, None, false}` = 平台未实现此能力（applied 恒 false）。
+		[[nodiscard]] virtual WindowBackdropState GetWindowBackdropState() const noexcept
+		{
+			return WindowBackdropState{ BackdropMode::None, BackdropMode::None, false };
+		}
+
+		// ── Phase 12：窗口状态（运行期——**Show() 之后**才有效）──────────
 	// @pre 运行期契约（初设 v1.3）：Show() 之前调用记 Warning 并忽略；
 	//      与配置期四件套**对称**（配置期 = Show 前有效 / 运行期 = Show 后有效）。
 

@@ -248,6 +248,15 @@ void GDIBackend::Initialize(const PlatformRenderContext& context)
 	m_hwnd = static_cast<const Win32RenderContext&>(context).GetHandle();
 }
 
+void GDIBackend::SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR)
+{
+	// Phase 32（D32-R）：帧外下达、下一帧起整体一致（清屏读于 BeginFrame、提交读于
+	// EndFrame——同一 actual 贯穿一帧，不半途切换）。模式切换无残留由 T32-7 钉住：
+	// 每帧从**整客户区清屏**开始（决策 29 完整重绘模型），旧模式的像素不会幸存。
+	m_backdropActual = actual;
+	m_backdropClearABGR = clearABGR;
+}
+
 void GDIBackend::BeginFrame(const Color& background)
 {
 	// 决策 32：Begin/End 严格配对
@@ -264,16 +273,38 @@ void GDIBackend::BeginFrame(const Color& background)
 	RECT client{};
 	GetClientRect(m_hwnd, &client);
 
-	// 决策 16（Phase 18 修订）：清屏用**本帧背景色**——默认白由 Window 给出（本层不持有默认值）
-	// 决策 24：画刷每次创建/销毁（无缓存）——与 DrawRect 同款
-	// 决策 21/23：ToColorRef 内含 ToByte Clamp；★ alpha 被忽略（COLORREF 无 alpha 通道）
-	HBRUSH brush = CreateSolidBrush(ToColorRef(background));
-	if (brush)
+	// ── Phase 32（D32-E/F）：清屏按衬底实际态分派 ─────────────────────────
+	// ★ Phase 18 红线 ④ 不破：分支判据是**衬底状态**，不是 background.a；
+	//   None 分支 = 既有路径**逐字保留**（A6①：逐位同 Phase 18）。
+	if (m_backdropActual != BackdropMode::None)
 	{
-		FillRect(m_memoryDC, &client, brush);
-		DeleteObject(brush);
+		// Acrylic = tintRGB + A=0（材质透出——探针 7 M0/M1）；Degraded = 预乘白 0.8
+		// （P4/P5 形态）。DWORD 直填 DIB（背景色形参不消费——衬底清屏色唯一来源 = clearABGR）。
+		if (m_dibBits && client.right > 0 && client.bottom > 0)
+		{
+			DWORD* pixels = static_cast<DWORD*>(m_dibBits);
+			const std::size_t count = static_cast<std::size_t>(client.right)
+			                        * static_cast<std::size_t>(client.bottom);
+			for (std::size_t i = 0; i < count; ++i)
+			{
+				pixels[i] = m_backdropClearABGR;
+			}
+		}
+		// else：缓冲缺失（创建失败）⇒ 沿决策 30「失败 → 局部跳过」，本帧其余绘制照常
 	}
-	// else：决策 30「失败 → 局部跳过」——底色不刷新，本帧其余绘制照常（不加断言）
+	else
+	{
+		// 决策 16（Phase 18 修订）：清屏用**本帧背景色**——默认白由 Window 给出（本层不持有默认值）
+		// 决策 24：画刷每次创建/销毁（无缓存）——与 DrawRect 同款
+		// 决策 21/23：ToColorRef 内含 ToByte Clamp；★ alpha 被忽略（COLORREF 无 alpha 通道）
+		HBRUSH brush = CreateSolidBrush(ToColorRef(background));
+		if (brush)
+		{
+			FillRect(m_memoryDC, &client, brush);
+			DeleteObject(brush);
+		}
+		// else：决策 30「失败 → 局部跳过」——底色不刷新，本帧其余绘制照常（不加断言）
+	}
 }
 
 void GDIBackend::EnsureBackBuffer()
@@ -291,7 +322,18 @@ void GDIBackend::EnsureBackBuffer()
 
 	// 决策 38：先创建新资源 → 全部成功 → 替换成员 → 释放旧（事务性）
 	HDC newDC = CreateCompatibleDC(m_windowDC);
-	HBITMAP newBitmap = CreateCompatibleBitmap(m_windowDC, width, height);
+	// Phase 32（D32-E）：后缓冲 DDB → **32bpp top-down DIB section**（探针 7 O1：同序列
+	// 绘制 RGB 逐位等同 ⇒ 普通窗口零回归；alpha 字节可寻址 = 衬底能力的前提）。
+	// 负高 = top-down：位指针行序与 y 向下坐标一致，行距 = width×4（32bpp 无行填充）。
+	BITMAPINFO dibInfo{};
+	dibInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	dibInfo.bmiHeader.biWidth = width;
+	dibInfo.bmiHeader.biHeight = -height;
+	dibInfo.bmiHeader.biPlanes = 1;
+	dibInfo.bmiHeader.biBitCount = 32;
+	dibInfo.bmiHeader.biCompression = BI_RGB;
+	void* newBits = nullptr;
+	HBITMAP newBitmap = CreateDIBSection(newDC, &dibInfo, DIB_RGB_COLORS, &newBits, nullptr, 0);
 	if (!newDC || !newBitmap)
 	{
 		// 决策 30：Back Buffer 创建失败 = 框架级错误（旧资源未动）
@@ -312,6 +354,7 @@ void GDIBackend::EnsureBackBuffer()
 	m_oldBitmap = oldInNewDC;
 	m_bitmapWidth = width;
 	m_bitmapHeight = height;
+	m_dibBits = newBits;   // Phase 32：与新位图同生共死（ReleaseBackBuffer 置空）
 }
 
 void GDIBackend::ReleaseBackBuffer()
@@ -330,6 +373,7 @@ void GDIBackend::ReleaseBackBuffer()
 		DeleteDC(m_memoryDC);
 	}
 	m_memoryDC = nullptr;
+	m_dibBits = nullptr;   // Phase 32：位指针与位图同生共死（悬垂防护）
 	m_bitmap = nullptr;
 	m_oldBitmap = nullptr;
 	m_bitmapWidth = 0;
@@ -917,10 +961,23 @@ void GDIBackend::EndFrame()
 	FRAMEWORK_ASSERT(m_inFrame);
 	m_inFrame = false;
 
-	// 决策 29：完整 BitBlt（SRCCOPY）——与完整重绘模型一致
+	// ── Phase 32（D32-G）：提交按衬底实际态分派 ───────────────────────────
+	// None / Acrylic → BitBlt（SRCCOPY 逐字节提交——缓冲 alpha 原样到达重定向表面，
+	// C32-9 全域保真 + K13/P1 的 0/255 端证据）；Degraded → AlphaBlend（预乘源 +
+	// alpha 感知提交——P4/P5 实证形态；探针 8 AL2 证 dst 垃圾参与 ⇒ 仅 Degraded 用）。
 	if (m_memoryDC && m_windowDC)
 	{
-		BitBlt(m_windowDC, 0, 0, m_bitmapWidth, m_bitmapHeight, m_memoryDC, 0, 0, SRCCOPY);
+		if (m_backdropActual == BackdropMode::Degraded)
+		{
+			BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+			AlphaBlend(m_windowDC, 0, 0, m_bitmapWidth, m_bitmapHeight,
+				m_memoryDC, 0, 0, m_bitmapWidth, m_bitmapHeight, blend);
+		}
+		else
+		{
+			// 决策 29：完整 BitBlt（SRCCOPY）——与完整重绘模型一致
+			BitBlt(m_windowDC, 0, 0, m_bitmapWidth, m_bitmapHeight, m_memoryDC, 0, 0, SRCCOPY);
+		}
 	}
 
 	// 决策 17：BeginPaint/EndPaint 严格配对

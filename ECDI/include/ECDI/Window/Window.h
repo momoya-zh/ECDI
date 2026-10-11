@@ -13,6 +13,7 @@
 #include "ECDI/Render/RenderCommand.h"
 #include "ECDI/Render/TextMeasurer.h"
 #include "ECDI/Window/ChromeMode.h"
+#include "ECDI/Window/WindowBackdrop.h"
 #include "ECDI/Window/WindowLayer.h"
 #include "ECDI/Window/WindowState.h"
 
@@ -130,6 +131,26 @@ class Window : public PlatformWindowHost {
 		/// @details 档位语义见 WindowLayer 定义；实现手段（WM_WINDOWPOSCHANGING /
 		/// reparent / WinEventHook）为平台细节，公共 API 不承诺任何具体机制。
 		void SetWindowLayer(WindowLayer layer);
+
+		// ── Phase 32：窗口衬底（Frosted Backdrop——配置期 API）──────────────
+
+		/// @brief 设置窗口衬底（Phase 32——整窗雾面材质 + 控件不透明，详设 D32-A/M/Q）
+		/// @param mode 衬底模式。★ `Degraded` 不可请求——传入记 Warning 并**完全忽略**
+		///        （不改变既有请求态，D32-M）。
+		/// @param tint 雾面色调（**唯一权威来源**，D32-Q）：alpha 分量驱动 DWM 材质浓淡、
+		///        RGB 分量作为缓冲清屏色（材质可见时该色以「加性泄漏」呈现——探针 7 M1 定律）。
+		/// @pre 必须在 Show() 之前调用（配置期——同 SetChromeMode 生命周期契约）；
+		/// Show() 之后调用记 Warning 并忽略（不抛异常）。实际应用在 `Show()` 时发生，
+		/// 结果经 `GetWindowBackdropState()` 查询（A7 生命周期：applied/actual）。
+		/// @note 已知限制：内容像素 RGB 恰等于 tint RGB 时哨兵不可判（材质透过该像素）——
+		///       建议 tint 与内容主色错开；AA 边缘混色亦可能碰触（实测基线 0/38400，probe8 TC1）。
+		void SetWindowBackdrop(BackdropMode mode, const Color& tint);
+
+		/// @brief 查询衬底状态（Phase 32——请求态 vs 实际态，详设 D32-C/M）
+		/// @details `requested` = 本地持久意图；`actual`/`applied` = 平台最近一次应用事实。
+		/// `Show()` 前 `applied == false`（未应用 ≠ 应用失败）；平台默认实现返回
+		/// `{None, None, false}` = 「该平台未实现此能力」（外部评审 P2-6）。
+		[[nodiscard]] WindowBackdropState GetWindowBackdropState() const noexcept;
 
 		// ── Phase 18：窗口客户区底色（运行期 API——Show 前后均可）────────────
 
@@ -352,6 +373,12 @@ class Window : public PlatformWindowHost {
 		/// 窗口客户区底色（Phase 18）——**唯一默认值来源**：清屏色只在这里给出，
 		/// 每帧经 `m_renderer.BeginFrame(m_backgroundColor)` 传给后端（后端不持有默认值）。
 		Color m_backgroundColor = Color::White();
+
+		// ── Phase 32：窗口衬底（决策层状态——应用事实在 PlatformWindow）──────
+
+		BackdropMode m_backdropRequested = BackdropMode::None;   ///< 请求态（持久意图——D32-C）
+		Color m_backdropTint{ 0.0f, 0.0f, 0.0f, 0.0f };          ///< 雾面色调（None 模式下无语义）
+		bool m_shown = false;   ///< Show() 调用事实（配置期闸门判据——同平台 m_shown 语义：「API 调用事实」非「系统当前可见」）
 
 };
 

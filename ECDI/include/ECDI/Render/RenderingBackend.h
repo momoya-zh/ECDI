@@ -11,7 +11,9 @@
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Font.h"
 #include "ECDI/Core/Image.h"
+#include "ECDI/Window/WindowBackdrop.h"   // Phase 32：SetBackdropSurface 的模式枚举（公共叶子头）
 
+#include <cstdint>
 #include <string>
 
 namespace ECDI {
@@ -34,6 +36,21 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		/// @param context 平台渲染上下文（Win32 后端 static_cast 取句柄——体系内约定，
 		/// 非跨层 dynamic_cast；无需平台句柄的后端（如 RecordingBackend）继承默认空实现零改动）
 		virtual void Initialize(const PlatformRenderContext& context) {}
+
+		/// @brief 衬底状态下达（Phase 32——带默认实现，详设 D32-R：签名 = 既有公共枚举 + 原语）
+		/// @param actual 最近一次应用的衬底模式（平台在 Show()/重应用后经 Window→Renderer 下达；
+		///        **帧外调用**，帧内不半途生效——下一帧起整体一致）
+		/// @param clearABGR 衬底清屏色，**AABBGGRR**（小端写入 BGRA 缓冲 byte0=B——C32-5 同族；
+		///        Acrylic = tintRGB + A=0（材质透出）；Degraded = 预乘白 0.8 = 0xCCCCCCCC；
+		///        actual == None 时无语义——后端走既有清屏路径，**逐位同 Phase 18**（A6①））
+		/// @details 默认实现 = no-op（S7：GLRenderer / RecordingBackend 零改动）。
+		///          提交机制（None/Acrylic → BitBlt 逐字节含 alpha [C32-9]；Degraded → AlphaBlend
+		///          预乘源 [P4/P5 形态]）是**后端私有抉择**，不进公共签名（外部评审 P1-1）。
+		virtual void SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR)
+		{
+			(void)actual;
+			(void)clearABGR;
+		}
 
 		/// @brief 后端是否就绪（可正常工作）
 		/// @details ★ **默认 `true`**：绝大多数后端只要构造即可用（`GDIBackend`），无需覆盖。
