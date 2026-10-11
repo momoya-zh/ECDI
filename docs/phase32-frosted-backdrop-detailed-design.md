@@ -185,6 +185,7 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | **偏差** | ★ **E-B2-4（clear 布局）**：`ComposeTintClear` 的缓冲布局 = **0x00RRGGBB**（小端 BGRA：byte0 = 值低字节 = B）——首版按「AABBGGRR」组装成 (b<<16) ⇒ **R/B 互换**（E2E 的 SBS 抓屏 `clear=002B2E38` vs 期望 `00382E2B` 定位）；★ **发现 #58（视觉整合缺口）**：accent 调用真机成功（J1c）+ 下发链逐站验证到位（Window→renderer→backend 的 SYNCD/SBS 诊断）**但框架窗口的合成视觉 = 白**——同调用在手工 Win32 探针（6/7/8）上可见 ⇒ 差异在框架窗口形态（DPI 缩放尺寸/主题/窗口形状）的某处，**未定位** |
 | **限制** | ① 视觉整合 = **#58**（雾面端到端视觉验收——A1/A2 的端到端面、AA 观感矩阵的通过判定一并挂起）；② MinGW 链 = **#57** |
 | **台账** | 本行 + audit v1.82 + deferred v2.16（#58 登记）+ docs/README + 根 README（同批提交） |
+| **批四追加（同日）** | ★ **#57 修复落地（Application 析构期容器改写 UB——MinGW 全套 381/381 解禁）**：机制 = 成员析构序（m_deferredDestroy 声明在后 ⇒ 先亡）× m_windows 析构中同步 WM_DESTROY → OnWindowDestroyed 向**已析构 vector** emplace_back（0xC0000374 直接来源）+ erase 收缩 finish 到析构循环指针之后 ⇒ 循环越尾（第二重 UB）；触发条件 = Application 析构时仍有存活窗口（M1 的 DesktopNestApp 按 C-M1-20 由基类持有 ⇒ 全套必现；生产正常退出 m_windows 已空不触发）。修复 = `m_shuttingDown` 旗标（~Application 第一件事置位）+ 显式排水（m_deferredDestroy/m_windows clear，OnWindowDestroyed 旗标直返）——**三链 381/381 全绿（MinGW 解禁）**；回归锚 = MinGW 全套（崩溃即失败，无需专用用例——UB 的失败形态就是崩溃）。详见 audit v1.83 |
 
 ### §10.3 批三（2026-10-11，每命令 alpha 修补）
 

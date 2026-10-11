@@ -170,6 +170,13 @@ private:
 	bool m_running=true;	///< 消息循环是否继续运行
 
 	bool m_quitOnLastWindowClosed = true;	///< Phase 14 R13：最后窗口关闭是否隐式退出（默认 true = 既有行为）
+
+	// ★ Phase 32/#57 修复：析构期旗标——~Application **第一件事**置位。残留窗口的
+	// WM_DESTROY 会同步触发 OnWindowDestroyed，而那时 m_deferredDestroy（声明在后
+	// ⇒ 先析构）与 m_windows（自身元素析构循环中）都已进入析构——任何容器改写
+	// （emplace_back/erase）都是 UB（MinGW 实测 0xC0000374 堆损坏）。旗标置位后
+	// OnWindowDestroyed 直返；残留窗口由 ~Application 显式排水（容器仍存活时）。
+	bool m_shuttingDown = false;
 };
 
 }

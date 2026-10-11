@@ -50,6 +50,28 @@ Application::Application()
 
 Application::~Application(){
 
+	// ★★ Phase 32/#57 修复（deferred-destroy 挂账的兑现——ProcessDeferredDestroy 注
+	// 「~Application 残留窗口隐患另案记账」）：**析构期容器改写 UB**。机制（MinGW 实测
+	// 0xC0000374，栈 = ~Application → ~Window → DestroyWindow → WM_DESTROY →
+	// OnWindowDestroyed → RtlFreeHeap）：
+	// ① 成员析构序 = 声明序的**逆序** ⇒ m_deferredDestroy（声明在 m_windows 后）先亡，
+	//    其堆块已释放；② m_windows 析构逐元素 ~Window → DestroyWindow → **同步
+	//    WM_DESTROY** → OnWindowDestroyed → `m_deferredDestroy.emplace_back(...)` 写入
+	//    **已析构 vector 的悬垂块**（0xC0000374 的直接来源）；③ `m_windows.erase(it)`
+	//    又发生在 m_windows 自身元素析构循环中 ⇒ erase 收缩 finish 到循环指针之后，
+	//    libstdc++ 的 `first != last` 永不再相等 ⇒ 循环越过数组尾销毁垃圾 unique_ptr
+	//    （第二重 UB）。触发条件 = Application **析构时仍有存活窗口**（M1 的
+	//    DesktopNestApp 按 C-M1-20 由基类容器持有窗口 ⇒ M1 全套测试必现；生产 App
+	//    正常退出时最后窗口已关 ⇒ m_windows 空 ⇒ 不触发——#57 只在测试链暴露的原因）。
+	// 修复 = 析构体**第一件事**置位（此刻所有成员仍存活），随后**显式排水**两个容器
+	// （WM_DESTROY 照常同步派发，但 OnWindowDestroyed 见旗标直返——容器不再被改写）。
+	m_shuttingDown = true;
+
+	m_deferredDestroy.clear();   // 延迟列表：HWND 已销毁，~Window→Release 幂等（C32/#57 前已验证）
+
+	m_windows.clear();           // 残留窗口：逐个 ~Window → DestroyWindow → WM_DESTROY
+	                             // （OnWindowDestroyed 旗标直返——不再 erase/emplace）
+
 	// Phase 14 O-1：先断托盘事件上行，再让 m_platformApplication 析构——
 	// 防止宿主窗口销毁过程中的 Shell 回调访问已析构的 Application（谁注册谁清理）
 	m_platformApplication->SetTrayEventSink(nullptr);
@@ -126,6 +148,16 @@ void Application::OnWindowCreated(
 
 void Application::OnWindowDestroyed(
 	const WindowDestroyedEvent& event){
+
+	// ★ Phase 32/#57：析构期直返——~Application 已置位 m_shuttingDown 并显式排水，
+	// 此后每个 ~Window 的同步 WM_DESTROY 都会到达这里；若继续执行，
+	// `m_deferredDestroy.emplace_back`（已析构 vector 的悬垂块）与 `m_windows.erase`
+	// （析构循环中）都是 UB（#57 的精确机制，详见 ~Application 处注释）。
+	if (m_shuttingDown)
+	{
+		return;
+	}
+
 	// 将已销毁的 Window 从活跃列表移到延迟销毁列表
 	auto it = std::find_if(
 		m_windows.begin(),
