@@ -1,7 +1,7 @@
-﻿# Phase 32 · 窗口雾面衬底（Frosted Backdrop）—— 详细设计（v1.0）
+﻿# Phase 32 · 窗口雾面衬底（Frosted Backdrop）—— 详细设计（v1.1）
 
 > 来源：初设 `phase32-frosted-backdrop-preliminary-design.md` **v1.1（进详设）** §8 移交十项 + **探针 8**（`.workbuddy/tmp/dn_acrylic/probe8/`，零仓库侵入）。
-> 状态：**v1.0 待评审**（本文档钉死修补语义、逐文件 △、T32 精确断言与批次；实施回填留 §10）
+> 状态：**v1.1（外部评审「有条件通过」五项已吸收）⇒ 进实施**（本文档钉死修补语义、逐文件 △、T32 精确断言与批次；实施回填落 §10）
 > 定位：把初设 D32-A..J 落到**函数级**——「三层修补语义 + 后缓冲 DIB 化 + 模式分支提交」的实现契约。
 
 ---
@@ -60,8 +60,8 @@
 |---|---|---|---|
 | **K①** | `DrawRect`（实心、无 AA） | 矩形级 A=255 | probe7 Z1 误差 0.00 |
 | **K②** | `DrawRoundedRect`（含 AA 覆盖度路径） | **覆盖率后处理 = 预乘改写**：绘制后沿 `CornerCoverageMask` 遍历其区域——`cov==1` ⇒ A=255（RGB 已是 color）；`0<cov<1` ⇒ **RGB=color×cov、A=255×cov**（覆写 GDI 的对背景混色）；`cov==0` ⇒ A=0 且 RGB=tint（GDI 若写过混色须还原） | probe8 RC2 全 0.00 + AL1 保真 |
-| **K③** | `DrawText` / `DrawLine` / `DrawFocusRect` | 命令矩形 ∩ `GetClipBox` 内**哨兵扫描**（A=0 且 RGB≠清屏 ⇒ A=255） | probe7 Z1/T2 + probe8 L1；碰撞 = 已知限制（TC1：0/38400） |
-| **K④** | `DrawImage` | **保留源 alpha**——禁矩形级（初设 v1.1 已钉）。执行端现状 = Phase 8 链路（32bpp 顶降 DIB + AlphaBlend，`GDIBackend.cpp:633`）：AlphaBlend 对缓冲的 dst-alpha 写入不可靠 ⇒ 批三实测后二选一：**(a)** 图像解码位若预乘 ⇒ 手工预乘 over 写入（沿 K② 家族）；**(b)** 退化为「合成结果 A=255 + 已知限制『半透明图像按不透明合成』」。**第一版按 (b) 兜底 + (a) 为目标**，批三以实测裁决（无真实半透明图像消费者前不追加机制——条 22） | 初设 v1.1 P1-1 + 本轮勘察 |
+| **K③** | `DrawText` / `DrawLine` / `DrawFocusRect` | 命令矩形 ∩ `GetClipBox` 内**哨兵扫描**（A=0 且 RGB≠清屏 ⇒ A=255）。★ **v1.1 定位（外部评审 P1-2）= 二值 alpha 近似修补**：A 改 255 的 AA 边缘像素以「不透明混色」呈现——**覆盖率未被重建**（0.3 覆盖率的边缘会以混色色整体盖在材质上），非通用 AA 重建算法；字形核心精确、字缝透材质、边缘近似 = 其保证边界 | probe7 Z1/T2 + probe8 L1；碰撞 = 已知限制（TC1：0/38400——证明无精确碰撞，**不证明覆盖率已恢复**） |
+| **K④** | `DrawImage` | ★ **v1.1 范围决策（外部评审 P1-3——二选一钉死，消除契约自相矛盾）**：「**按源 alpha 与材质合成**」= **Phase 32 明确不支持（挂账 #56）**；本 Phase 验收 = **不透明图像像素精确** + 半透明像素按「先与清屏色合成、再不透明盖上」呈现（**已知限制**写入 API 契约与 §7 A8 目视项）。执行端现状 = Phase 8 链路（32bpp 顶降 DIB + AlphaBlend，`GDIBackend.cpp:633`）——批三验证不透明路径精确；手工预乘 over（K② 家族，解码位 32bpp 现成）= **#56 重启时的实现方向**。「保留源 alpha 禁矩形级」收窄为底线规则：**禁把图像矩形无差别 A=255** | 评审 P1-3 + deferred #56 |
 | — | `PushClip`/`PopClip` | 无像素，不修补 | — |
 
 ★ **修补与裁剪的交含（C32-3 落地）**：修补矩形 = 命令矩形 ∩ `GetClipBox(memoryDC)`（D28-C 已证 GDIBackend 裁剪 = SaveDC 栈，`GetClipBox` 读有效裁剪）——不引入第二裁剪真相。
@@ -75,12 +75,13 @@
 - `WindowBackdropState { BackdropMode requested; BackdropMode actual; bool applied; }`——**轻量 applied 标记**（不新增公共枚举值）。
 - `Show()` 前：`applied = false`、`actual = None`（**未应用 ≠ 应用失败**——调用方先查 `applied`）；`Show()` 后 `applied = true` 且 actual = 最近一次应用结果。
 - `SetWindowBackdrop(Degraded, …)` ⇒ **完全忽略且不改变既有请求态**（Warning 一次）。
+- ★ **v1.1 补（外部评审 P2-6）**：`PlatformWindow` 默认实现（no-op + `{None, None, false}`）的语义 = **「该平台未实现此能力」**，**不是**「该平台已成功应用 None」——写入 `WindowBackdrop.h` 契约注释；未来第二平台接入时调用方据 `applied` 区分二者。
 
 ### D32-N 失败注入缝（初设 §8③ 关闭）
 
 两级注入，**零公共 API 污染**：
 1. **Window 级状态机**：`TestPlatformWindow`（既有测试替身）override 新虚函数模拟 `actual = Degraded`——测 `Window` 的查询/转发逻辑，无需触碰 Win32。
-2. **Win32 解析/调用级**：`Win32PlatformWindow.cpp` 文件内静态 `s_backdropForceFail`（**internal linkage**）+ 文件内自由函数 `SetBackdropForceFailForTests(bool)` 声明于同目录内部头 `Win32PlatformWindowInternal.h`（**新增内部头，不入公共头计数**）——测试 include 之（`WindowBackgroundTests.cpp:11` 先例：测试可含库内内部头）。T32-5 用它。grep 锚 = `backdropForceFail`。
+2. **Win32 解析/调用级**：`Win32PlatformWindow.cpp` 文件内静态 `s_backdropInjection`（**internal linkage**，枚举 `enum class BackdropInjection { None, FailResolve, FailCall }`——**两类故障分开模拟**）+ `SetBackdropInjectionForTests(BackdropInjection)` 声明于同目录内部头 `Win32PlatformWindowInternal.h`（**新增内部头，不入公共头计数**）——测试 include 之（`WindowBackgroundTests.cpp:11` 先例）。grep 锚 = `backdropInjection`。★ **v1.1 注入 × 分支覆盖矩阵（外部评审 P2-4）**：`FailResolve` ⇒ 验证「解析失败**不调用未解析函数** + 直接进 Degraded」；`FailCall` ⇒ 验证「调用返回失败 ⇒ 状态翻转 + 无材质残留 + renderer 收到 Degraded 清屏语义」；「Acrylic→Degraded 后提交路径切换」由 T32-4 缓冲级 commit 分支断言覆盖；「解析成功但系统不支持」与 FailCall 同路径。★ **全局开关的串行假设**：注入标志为进程级——注册表模型串行执行，T32-5 注释钉明**不得**用于多窗口并行场景。
    - 拒绝的候选：公共静态 setter（污染公共面）/ friend（Phase 18 红线 6 同族禁令）/ 环境变量（非确定性）。
 
 ### D32-O 重应用触发全集（初设 §8② 关闭）
@@ -96,7 +97,7 @@
 ### D32-P AA 边缘验收判据（初设 §8① 关闭）
 
 - **缓冲级（机检，T32-3）**：文字矩形内全体像素满足「A∈{0,255} 且 (A=255 ⇔ RGB≠清屏)」——哨兵语义的精确不变式。
-- **端到端（抓屏，批四探针）**：① 字形核心精确数 > 200（probe7/8 实测 682）；② 字带内**哨兵色残留 = 0**（字缝透材质）；③ **碰撞率基线**：TC1 型双底色差分 collisions = 0（本配置实测）——A2 判据按「三同时」落判。
+- **端到端（抓屏，批四探针）**：① 字形核心精确数 > 200（probe7/8 实测 682）；② 字带内**哨兵色残留 = 0**（字缝透材质）；③ **碰撞率基线**：TC1 型双底色差分 collisions = 0（本配置实测）——A2 判据按「三同时」落判；④ ★ **v1.1 新增（外部评审 P1-2）AA 边缘观感矩阵**：多背景 × 多 tint × 多文字颜色下的抓屏目视——**哨兵不变式通过 ≠ 边缘视觉合格**，两者分开判。
 - **K② 边缘（机检，T32-2b）**：mask 区域内 A = 255×cov ±1、RGB = color×cov ±1（对 mask 逐像素复核）。
 
 ### D32-Q tint 契约措辞（初设 §8⑥ 关闭）
@@ -113,7 +114,7 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | **△2** | `include/ECDI/Window/Window.h` + `src/Window/Window.cpp` | +成员（requested/tint）· `SetWindowBackdrop`（配置期闸门沿 `SetChromeMode` 同款「Show 后 Warning+忽略」；Degraded 请求 = 忽略不改状态；**转发平台**）· `GetWindowBackdropState`（requested 取本地、actual/applied 取平台）——状态真源分工 = 决策层在 `Window`、应用事实在平台（Phase 18 同构） |
 | **△3** | `include/ECDI/Platform/PlatformWindow.h` | **+2 带默认实现 virtual**：`SetWindowBackdrop(BackdropMode, const Color&) {}`（no-op）· `GetWindowBackdropState() const { return {None, None, false}; }`——`TestPlatformWindow`×2 / 未来平台**零改动**（S7/C32-8） |
 | **△4** | `src/Platform/Win32/Win32PlatformWindow.{h,cpp}` ★ | 存 mode/tint · `Show()` 尾部 `ApplyBackdrop()` · override 两虚函数 · **动态解析**（lazy + 缓存；`GetModuleHandleW(L"user32.dll")` + `GetProcAddress`——全仓首例，失败容忍沿 R6）· tint → `nColor = (a8<<24)`（**RGB 分量 = 黑**——D32-F：tint RGB 由缓冲清屏承载，防双重 tint；C32-5 修订）· `ApplyBackdrop`：None ⇒ 已应用过则 `state=0` 移除（SW1 证）；Acrylic ⇒ 设 policy + `actual=Acrylic`；解析/调用失败 ⇒ **立即切换 Degraded 语义**（通知 renderer，见 △5）`actual=Degraded` · `WM_DPICHANGED` 追加重应用 + 新增 `WM_DWMCOMPOSITIONCHANGED` case · 注入缝（D32-N） |
-| **△5** | `include/ECDI/Render/RenderingBackend.h` + `src/Render/Renderer.h` | `RenderingBackend` **+1 带默认实现 virtual**：`SetBackdropSurface(const BackdropSurfaceState&) {}`；`BackdropSurfaceState { bool active; std::uint32_t clearABGR; bool commitViaAlphaBlend; }`（**内部结构**，定义在 `src/Render/` 内部头 `BackdropSurface.h`——不入公共头）· `Renderer` +1 单行转发（**不持有状态**——Phase 18 红线 7 不破：状态存于 backend）· `GLRenderer`/`RecordingBackend` **零改动** |
+| **△5** | `include/ECDI/Render/RenderingBackend.h` + `src/Render/Renderer.h` | ★ **v1.1 重定（外部评审 P1-1——公共头签名不得引用内部类型，前置声明亦构成公共依赖）**：`RenderingBackend` **+1 带默认实现 virtual**：`SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR) {}`——**签名只用既有公共枚举 + 原语**：零新公共类型、零内部类型泄漏、零 GDI 名词（第二后端可实现，A9② 保持）；提交机制抉择（Acrylic→BitBlt / Degraded→AlphaBlend）= **GDIBackend 私有**（actual→提交映射在其内部）· v1.0 的内部头 `BackdropSurface.h` 与 `BackdropSurfaceState` **取消**（边界冲突源）· `Renderer` +1 同签名单行转发（不持有状态——Phase 18 红线 7 不破）· `GLRenderer`/`RecordingBackend` **零改动** |
 | **△6** | `src/Render/GDIBackend.{h,cpp}` ★ | `EnsureBackBuffer` → **CreateDIBSection 32bpp top-down**（尺寸自检重建逐字保留；+`m_dibBits`）· `BeginFrame` 清屏三分支（None = 既有 FillRect 逐位不变；Acrylic = DWORD 填 tint-A0；Degraded = memset 204）· `EndFrame` 提交分支（BitBlt / AlphaBlend）· **每命令修补**（K①..K④；`GetClipBox` 交含）· `DrawRoundedRect` 雾面分支 = mask 后处理预乘改写（K②）· **内部观测缝** `DebugBackBufferBits() const`（内部头可达——`WindowBackgroundTests.cpp:11` 先例；零公共 API）· 失败容忍姿态沿决策 30 |
 | **△7** | `src/Platform/Win32/Win32PlatformWindowInternal.h` **新内部头** | `SetBackdropForceFailForTests(bool)` 声明（D32-N；不入公共头计数） |
 | **△8** | `src/Tests/WindowBackdropTests.cpp` **新测试文件** | T32-1..8（§5）；TEST_SOURCES 走 GLOB（CMakeLists:153）⇒ **CMake 0** |
@@ -124,10 +125,10 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | # | 用例 | 装置 | 断言（精确） |
 |---|---|---|---|
 | T32-1 | 默认零回归 | 直构 `GDIBackend`（隐藏窗口） | `BeginFrame(Color::White)` 后 bits：RGB=(255,255,255) 逐位、**A=0**；`DrawRect` 后矩形 RGB=绘制色——与 Phase 31 基线逐位同（A6①） |
-| T32-2 | Acrylic 缓冲语义 | 同上 + `SetBackdropSurface({active, tint, false})` | 清屏后全缓冲 = (tintRGB, A=0)；`DrawRect` 后矩形内 A=255 且 RGB=绘制色；矩形外 (tint, 0) |
+| T32-2 | Acrylic 缓冲语义 | 同上 + `SetBackdropSurface(BackdropMode::Acrylic, tintABGR)` | 清屏后全缓冲 = (tintRGB, A=0)；`DrawRect` 后矩形内 A=255 且 RGB=绘制色；矩形外 (tint, 0) |
 | T32-2b | 圆角预乘改写 | 同上 + `DrawRoundedRect`（有 mask 路径） | mask 域逐像素：A = 255×cov ±1 且 RGB = color×cov ±1；cov=0 处 = (tint, 0)（D32-P） |
-| T32-3 | 文字哨兵不变式 | 同上 + NONAA `DrawText` | 文字矩形内全体像素：A∈{0,255} 且 A=255 ⇔ RGB≠tint；A=255 计数 > 0 且 A=0 计数 > 0（字缝） |
-| T32-4 | Degraded 缓冲语义 | `SetBackdropSurface({true, 0xCCCCCC, true})` | 清屏后全缓冲 = 204；`DrawRect` 后矩形 A=255；commit 标志 = AlphaBlend 分支（内部 accessor） |
+| T32-3 | 文字**哨兵修补**不变式（v1.1 更名定位） | 同上 + NONAA `DrawText` | 文字矩形内全体像素：A∈{0,255} 且 A=255 ⇔ RGB≠tint；A=255 计数 > 0 且 A=0 计数 > 0（字缝）。★ **本断言 = 哨兵算法的实现不变式，不承担 AA 边缘视觉正确性验收**（后者 = 批四端到端矩阵，D32-P④） |
+| T32-4 | Degraded 缓冲语义 | `SetBackdropSurface(BackdropMode::Degraded, 0xCCCCCCCCu)` | 清屏后全缓冲 = 204；`DrawRect` 后矩形 A=255；提交分支断言（Acrylic→BitBlt / Degraded→AlphaBlend 的映射 = GDIBackend 私有，经内部 accessor 验证 Degraded 走 AlphaBlend） |
 | T32-5 | 失败注入状态机 | **真窗口** + `SetBackdropForceFailForTests(true)` → `Show()` | `GetWindowBackdropState()` = `{Acrylic, Degraded, true}`；日志含降级 Warning |
 | T32-6 | 配置期契约 | 真窗口 | Show 后 `SetWindowBackdrop` ⇒ Warning + 状态不变；`SetWindowBackdrop(Degraded,…)` ⇒ 状态不变（完全忽略） |
 | T32-7 | 模式切换无残留 | 直构 backend | Acrylic 清屏 → bits=(tint,0)；切 None 清屏 → bits=(底色, A=0) **全缓冲无旧值**；再切回 Acrylic 同理（SW1 的缓冲级形态） |
@@ -140,7 +141,7 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 - **批一 = 缓冲地基**：△1△2△3△5△7 + △6 的 DIB 切换/清屏三分支/提交分支 + T32-1/4/7（纯缓冲级，无 DWM 依赖）——**零 DWM 风险先落地**。
 - **批二 = 材质应用与状态机**：△4 全部 + T32-5/6/8。
 - **批三 = 修补**：△6 的 K①..K④ + T32-2/2b/3（含 DrawImage 实测裁决 K④）。
-- **批四 = 阶段 B 收口**：库外 E2E 探针 + A8 + 五处台账收口回写（§10）。
+- **批四 = 阶段 B 收口**：库外 E2E 探针 + **AA 边缘端到端观感矩阵**（多背景 × tint × 文字颜色——D32-P④；若现明显色偏 ⇒ 启动覆盖率重建评估，不自动默认全帧扫描）+ A8 + 五处台账收口回写（§10）。
 
 ## §7 契约增补与 A8 目视矩阵
 
@@ -153,4 +154,24 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 
 ## §9 修订记录
 
+- **v1.1**（2026-10-11）**外部评审吸收（v1.0 评审结论：有条件通过）⇒ 进实施**。★ 评审保留项（不推翻）：正交 API / DIB 统一 / mask 圆角 / 双提交 / 四批。★ **五项修订处置**：
+  · **P1-1（公共接口 × 内部类型边界）** ✅ 采纳且取**更干净解**——公共虚函数签名改为 `SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR)`（**既有公共枚举 + 原语**：零新公共类型、零内部类型泄漏、零 GDI 名词，第二后端可实现）；内部头 `BackdropSurface.h` 与 `BackdropSurfaceState` **取消**；提交机制抉择（BitBlt/AlphaBlend）收归 GDIBackend 私有（actual→提交映射）。
+  · **P1-2（文字 AA 保证范围）** ✅ 采纳——K③ 定位为「**二值 alpha 近似修补**」（A=255 的边缘像素以不透明混色呈现、覆盖率未重建，非通用 AA 重建算法）；T32-3 更名「文字哨兵修补不变式」= **实现不变式，不承担视觉验收**；AA 边缘端到端观感矩阵（多背景 × tint × 文字颜色）入批四（D32-P④）；现明显色偏 ⇒ 启动覆盖率重建评估（TC1 证明的是无精确碰撞，**不是**覆盖率已恢复——评审原话入档）。
+  · **P1-3（DrawImage 契约自相矛盾）** ✅ 采纳——**范围决策钉死**：「按源 alpha 与材质合成」= **Phase 32 明确不支持（挂账 #56）**；本 Phase 验收 = 不透明图像像素精确 + 半透明像素按「先与清屏色合成、再不透明盖上」呈现（已知限制入 API 契约与 A8 目视项）；「保留源 alpha 禁矩形级」收窄为「禁整矩形无差别 A=255」的底线。
+  · **P2-4（注入覆盖矩阵）** ✅ 采纳——注入升级为枚举 `{ None, FailResolve, FailCall }`（两类故障分开模拟）+ **注入 × 分支覆盖矩阵**（FailResolve ⇒ 不调用未解析函数；FailCall ⇒ 状态翻转 + 无残留 + renderer 收到 Degraded 语义；提交路径切换由 T32-4 缓冲级断言）+ 全局开关**串行测试假设**钉明。
+  · **P2-5（T32-3 定位）** ✅ 采纳（并入 P1-2 处置）。**P2-6（默认实现语义）** ✅ 采纳——`PlatformWindow` 默认实现 = 「该平台未实现此能力」而非「已成功应用 None」，写入 `WindowBackdrop.h` 契约。**P2-7（§10 缺失）** ✅ 采纳——补 §10 实施回填模板（偏差/测试/验证/限制/台账五栏）。
+  ★ 评审为静态文档评审；其指出的边界冲突真实成立（公共头签名引用内部类型，即使前置声明也构成公共依赖）——回源核验后采纳。
+
 - **v1.0**（2026-10-11）详设初稿。**输入**：初设 v1.1 §8 十项 + **探针 8**（TC1 碰撞 0/38400 · RC1/RC2 角外/内部/背景三项全 0.00 · **AL1 中间 alpha BitBlt 精确保真**（预测误差 ≈0.1）· AL2 dst 垃圾参与再证 Acrylic 必 BitBlt · L1/DG1 线与降级 AA 成立 · SW1 state-0 移除零残留）。**§3** D32-K（三层修补：rect-A255 / **mask 预乘改写** / 哨兵；DrawImage 保留源 alpha 批三裁决）· D32-L（C32-9 BitBlt 保真全域 [0,255]）· D32-M（applied 标记）· D32-N（两级注入缝，internal linkage + 内部头）· D32-O（触发全集 + state-0 移除）· D32-P（判据量化）· D32-Q（tint 契约措辞）。**§4** △1..△9（公共头 95→96 · API +2 方法 +1 枚举 +1 值类型 +1 bool 字段 · 实现者 7 零改动 · CMake 0 · 用例 366→374）· **§5** T32 精确断言 · **§6** 四批。★ 方法论勘误入档：哨兵通道映射（probe8 揭出）+ 角外采样区修正。★ 未改框架代码。
+
+---
+
+## §10 实施回填（v1.1 建模板——批一..批四逐批回写，外部评审 P2-7）
+
+| 项 | 回写内容 |
+|---|---|
+| **偏差** | 实际实现与本设计的逐条偏差（含勘误编号 E-…） |
+| **测试** | T32-1..8 结果 + 运行链（MinGW / Clang / ClangCL / MSVC）+ 用例总数 |
+| **验证** | 库外 E2E 探针读数（D6 阶段 B）+ A8 目视矩阵结果 |
+| **限制** | 已知限制清单的最终状态（文字 AA 近似 / DrawImage 半透明[#56] / tint 碰撞） |
+| **台账** | 五处台账收口状态（本文件 §10 + framework-defect-audit + roadmap-deferred + docs/README + 根 README） |
