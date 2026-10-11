@@ -281,17 +281,20 @@ WindowBackdropState Window::GetWindowBackdropState() const noexcept {
 //   None/未应用 = 不下发（后端保持既有清屏路径——逐位同 Phase 18，A6①）。
 // 轮询式（每帧一次虚调用）而非事件回调：无新接缝、重应用天然跟随（详设 §4 △2 注）。
 
-namespace {   // Window.cpp 局部：tint → 缓冲清屏色（AABBGGRR，A=0——C32-12）
+namespace {   // Window.cpp 局部：tint → 缓冲清屏色（**0x00RRGGBB**，A=0——C32-12）
 
-std::uint32_t ComposeTintClearABGR(const Color& tint)
+std::uint32_t ComposeTintClearRGB(const Color& tint)
 {
 	const auto toByte = [](float v)
 	{
 		const float clamped = std::clamp(v, 0.0f, 1.0f);
 		return static_cast<std::uint32_t>(clamped * 255.0f + 0.5f);
 	};
-	// 内存序 BGRA（byte0=B）⇒ AABBGGRR：A=0（材质区透出）、BB/GG/RR = tint
-	return (toByte(tint.b) << 16) | (toByte(tint.g) << 8) | toByte(tint.r);
+	// ★ E-B2-4（批四实测勘误）：缓冲字节序 BGRA（byte0=B）+ 小端 DWORD ⇒
+	// **byte0 = 值的 bits 0-7 = B**、byte2 = bits 16-23 = R ⇒ 布局 = **0x00RRGGBB**。
+	// 首版按「AABBGGRR」组装成 (b<<16)|(g<<8)|r ⇒ R/B 互换（E2E 抓屏定位：
+	// SBS clear=002B2E38 而期望 00382E2B）。A 通道恒 0（材质区透出）。
+	return (toByte(tint.r) << 16) | (toByte(tint.g) << 8) | toByte(tint.b);
 }
 
 }   // namespace
@@ -309,7 +312,7 @@ void Window::SyncBackdropSurface()
 		if (state.applied && state.actual == BackdropMode::Acrylic){
 
 			mode = BackdropMode::Acrylic;
-			clear = ComposeTintClearABGR(m_backdropTint);   // tint RGB 承载观感（C32-12）
+			clear = ComposeTintClearRGB(m_backdropTint);      // tint RGB 承载观感（C32-12；0x00RRGGBB——E-B2-4）
 
 		} else if (state.applied && state.actual == BackdropMode::Degraded){
 

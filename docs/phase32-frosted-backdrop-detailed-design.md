@@ -176,6 +176,16 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | **限制** | 已知限制清单的最终状态（文字 AA 近似 / DrawImage 半透明[#56] / tint 碰撞） |
 | **台账** | 五处台账收口状态（本文件 §10 + framework-defect-audit + roadmap-deferred + docs/README + 根 README） |
 
+### §10.4 批四（2026-10-11，库外 E2E + A8——**部分判定 + #58 关键发现**）
+
+| 项 | 内容 |
+|---|---|
+| **落地** | 库外探针 `.workbuddy/spike/p32/e2e.cpp`（MinGW g++ 链 HEAD `libECDI.a` + 纯公共头 + `CreateDefaultRenderServices`——T29-6 消费同构；真实 `Application/Window/Button/Label` + probe8 式底衬窗/抓屏/双区差分/区域统计）· A8 可自动化面（Maximize/Restore 循环 + 状态稳定断言）· AA 边缘 crop 存档（`p32_e2e_after.bmp`） |
+| **测试** | **ClangCL / Clang 381/381 全绿**（MinGW 待 #57）· E2E：**J1/J3a/J4a/J5/J7 PASS；J2/J3b/J4b/J6 FAIL（被 #58 阻塞）** |
+| **偏差** | ★ **E-B2-4（clear 布局）**：`ComposeTintClear` 的缓冲布局 = **0x00RRGGBB**（小端 BGRA：byte0 = 值低字节 = B）——首版按「AABBGGRR」组装成 (b<<16) ⇒ **R/B 互换**（E2E 的 SBS 抓屏 `clear=002B2E38` vs 期望 `00382E2B` 定位）；★ **发现 #58（视觉整合缺口）**：accent 调用真机成功（J1c）+ 下发链逐站验证到位（Window→renderer→backend 的 SYNCD/SBS 诊断）**但框架窗口的合成视觉 = 白**——同调用在手工 Win32 探针（6/7/8）上可见 ⇒ 差异在框架窗口形态（DPI 缩放尺寸/主题/窗口形状）的某处，**未定位** |
+| **限制** | ① 视觉整合 = **#58**（雾面端到端视觉验收——A1/A2 的端到端面、AA 观感矩阵的通过判定一并挂起）；② MinGW 链 = **#57** |
+| **台账** | 本行 + audit v1.82 + deferred v2.16（#58 登记）+ docs/README + 根 README（同批提交） |
+
 ### §10.3 批三（2026-10-11，每命令 alpha 修补）
 
 | 项 | 内容 |

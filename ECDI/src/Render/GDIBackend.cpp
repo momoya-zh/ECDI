@@ -7,6 +7,7 @@
 #include "Render/CoverageRaster.h"
 #include "Render/LineCoverage.h"
 
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
