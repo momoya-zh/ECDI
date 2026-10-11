@@ -257,6 +257,193 @@ void GDIBackend::SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR
 	m_backdropClearABGR = clearABGR;
 }
 
+// ── Phase 32 批三：每命令 alpha 修补原语（K①..K④）────────────────────────
+// ★ 修补总闸：m_backdropActual == None ⇒ 全部直返（既有路径逐位同 Phase 18，A6①）。
+
+bool GDIBackend::IntersectClipBoxForFixup(RECT& rect) const noexcept
+{
+	// C32-3：修补矩形 = 命令矩形 ∩ 当前裁剪栈顶（GetClipBox 读**有效**裁剪——
+	// D28-C 已证 GDIBackend 裁剪 = SaveDC 栈；NULLREGION/ERROR = 无可修补区域）
+	RECT clip{};
+	const int result = GetClipBox(m_memoryDC, &clip);
+	if (result == NULLREGION || result == ERROR)
+	{
+		return false;
+	}
+	RECT intersection{};
+	if (!IntersectRect(&intersection, &rect, &clip))
+	{
+		return false;
+	}
+	rect = intersection;
+	return true;
+}
+
+void GDIBackend::ForceRectAlphaFrosted(const RECT& rect)
+{
+	if (m_backdropActual == BackdropMode::None || !m_dibBits)
+	{
+		return;
+	}
+	RECT rc = rect;
+	if (!IntersectClipBoxForFixup(rc))
+	{
+		return;
+	}
+	BYTE* base = static_cast<BYTE*>(m_dibBits);
+	const std::size_t stride = static_cast<std::size_t>(m_bitmapWidth) * 4;
+	for (LONG y = rc.top; y < rc.bottom; ++y)
+	{
+		BYTE* row = base + static_cast<std::size_t>(y) * stride;
+		for (LONG x = rc.left; x < rc.right; ++x)
+		{
+			row[x * 4 + 3] = 255;   // 只写 A 通道——RGB 已由 FillRect 写足
+		}
+	}
+}
+
+void GDIBackend::FixupSentinelFrosted(const RECT& rect)
+{
+	if (m_backdropActual == BackdropMode::None || !m_dibBits)
+	{
+		return;
+	}
+	RECT rc = rect;
+	if (!IntersectClipBoxForFixup(rc))
+	{
+		return;
+	}
+	// 哨兵 = 清屏色（C32-11：**按缓冲字节序 B,G,R 比对**——probe8 通道映射勘误红线）
+	const BYTE sentinelB = static_cast<BYTE>(m_backdropClearABGR & 0xFFu);
+	const BYTE sentinelG = static_cast<BYTE>((m_backdropClearABGR >> 8) & 0xFFu);
+	const BYTE sentinelR = static_cast<BYTE>((m_backdropClearABGR >> 16) & 0xFFu);
+	BYTE* base = static_cast<BYTE*>(m_dibBits);
+	const std::size_t stride = static_cast<std::size_t>(m_bitmapWidth) * 4;
+	for (LONG y = rc.top; y < rc.bottom; ++y)
+	{
+		BYTE* row = base + static_cast<std::size_t>(y) * stride;
+		for (LONG x = rc.left; x < rc.right; ++x)
+		{
+			BYTE* p = row + x * 4;
+			if (p[3] != 0)
+			{
+				continue;   // 已有不透明 alpha（前序命令或 K① 修补）——不动
+			}
+			if (p[0] == sentinelB && p[1] == sentinelG && p[2] == sentinelR)
+			{
+				continue;   // 哨兵像素 = 背景留空（材质透出）
+			}
+			p[3] = 255;     // ★ 二值近似（K③ 已知限制：AA 边缘以不透明混色呈现，覆盖率未重建）
+		}
+	}
+}
+
+void GDIBackend::WriteRoundedRectPremultiplied(const Rect& rect, int R, const Color& color,
+                                               const CornerCoverageMask& mask)
+{
+	// K②：覆盖率**预乘直写**——不跑 GDI 绘制（缓冲在清屏态上直接写目标像素）。
+	// 预乘公式（详设 D32-K②/E-B2 定案）：RGB = color×cov×a、A = 255×cov×a ——
+	// a<1 的半透明填充在预乘表示下与材质**天然正确合成**（材质按比例透过）。
+	const LONG x = static_cast<LONG>(rect.x);
+	const LONG y = static_cast<LONG>(rect.y);
+	const LONG w = static_cast<LONG>(rect.width);
+	const LONG h = static_cast<LONG>(rect.height);
+	const float alphaFactor = std::clamp(color.a, 0.0f, 1.0f);
+
+	// C32-3：裁剪盒（None 不进此路；无有效裁剪/空盒 ⇒ 全部跳过）
+	RECT clip{};
+	const int clipResult = GetClipBox(m_memoryDC, &clip);
+	if (clipResult == NULLREGION || clipResult == ERROR)
+	{
+		return;
+	}
+
+	const auto toByte = [](float v)
+	{
+		return static_cast<BYTE>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
+	};
+	// 预乘通道字节（cov=1 的带内值）；哨兵 = 清屏色（C32-11）
+	// ⚠️ toByte 输入域 = [0,1]——A 通道喂 alphaFactor（**不是** 255×…，否则 clamp 成
+	// 1 ⇒ 非零像素全 255（首版实测：角区 sum = nonzero 计数 329 而非 314.26））
+	const BYTE preB = toByte(color.b * alphaFactor);
+	const BYTE preG = toByte(color.g * alphaFactor);
+	const BYTE preR = toByte(color.r * alphaFactor);
+	const BYTE preA = toByte(alphaFactor);
+	const BYTE sentinelB = static_cast<BYTE>(m_backdropClearABGR & 0xFFu);
+	const BYTE sentinelG = static_cast<BYTE>((m_backdropClearABGR >> 8) & 0xFFu);
+	const BYTE sentinelR = static_cast<BYTE>((m_backdropClearABGR >> 16) & 0xFFu);
+
+	BYTE* base = static_cast<BYTE*>(m_dibBits);
+	const std::size_t stride = static_cast<std::size_t>(m_bitmapWidth) * 4;
+	const auto writePixel = [&](LONG px, LONG py, BYTE b, BYTE g, BYTE r, BYTE a)
+	{
+		BYTE* p = base + static_cast<std::size_t>(py) * stride + static_cast<std::size_t>(px) * 4;
+		p[0] = b; p[1] = g; p[2] = r; p[3] = a;
+	};
+
+	// ① 三条实心带（cov = 1）——几何与 DrawRoundedRectOpaqueAA 逐字同源
+	const RECT bands[3] = {
+		{ x,     y + R,     x + w,     y + h - R },
+		{ x + R, y,         x + w - R, y + R     },
+		{ x + R, y + h - R, x + w - R, y + h     }
+	};
+	for (const RECT& band : bands)
+	{
+		// C32-3：带 ∩ 裁剪盒（轴对齐 ⇒ 矩形交保持有效）
+		RECT rc = band;
+		if (!IntersectRect(&rc, &band, &clip))
+		{
+			continue;
+		}
+		for (LONG py = rc.top; py < rc.bottom; ++py)
+		{
+			for (LONG px = rc.left; px < rc.right; ++px)
+			{
+				writePixel(px, py, preB, preG, preR, preA);
+			}
+		}
+	}
+
+	// ② 四角（mask 覆盖度 + 索引变换——同 CornerCoverageMask.h 的 canonical 映射；
+	// 循环范围按裁剪盒钳制——角内像素的位置仍走 canonical 索引，C32-3 不破坏几何）
+	const struct { LONG x; LONG y; CornerId corner; } corners[4] = {
+		{ x,         y,         CornerId::TopLeft     },
+		{ x + w - R, y,         CornerId::TopRight    },
+		{ x,         y + h - R, CornerId::BottomLeft  },
+		{ x + w - R, y + h - R, CornerId::BottomRight }
+	};
+	for (const auto& c : corners)
+	{
+		const LONG iBegin = (std::max)(c.x, clip.left) - c.x;
+		const LONG iEnd = (std::min)(c.x + R, clip.right) - c.x;
+		const LONG jBegin = (std::max)(c.y, clip.top) - c.y;
+		const LONG jEnd = (std::min)(c.y + R, clip.bottom) - c.y;
+		for (LONG j = (std::max)(jBegin, 0L); j < (std::min)(jEnd, static_cast<LONG>(R)); ++j)
+		{
+			for (LONG i = (std::max)(iBegin, 0L); i < (std::min)(iEnd, static_cast<LONG>(R)); ++i)
+			{
+				const float cov = static_cast<float>(
+					mask.At(MaskIndexX(static_cast<int>(i), R, c.corner),
+					        MaskIndexY(static_cast<int>(j), R, c.corner))) / 255.0f;
+				if (cov <= 0.0f)
+				{
+					continue;   // 弧外 = 缓冲仍是清屏态（tint A=0）——不触碰
+				}
+				const BYTE a = toByte(alphaFactor * cov);   // ⚠️ [0,1] 域（E-B2-3：首版喂 255×cov 被 clamp）
+				if (a == 0)
+				{
+					continue;   // 退化（a 极小）——保持背景
+				}
+				writePixel(c.x + i, c.y + j,
+					toByte(color.b * alphaFactor * cov),
+					toByte(color.g * alphaFactor * cov),
+					toByte(color.r * alphaFactor * cov),
+					a);
+			}
+		}
+	}
+}
+
 void GDIBackend::BeginFrame(const Color& background)
 {
 	// 决策 32：Begin/End 严格配对
@@ -382,6 +569,36 @@ void GDIBackend::ReleaseBackBuffer()
 
 void GDIBackend::DrawRect(const Rect& rect, const Color& color)
 {
+	// ── Phase 32 批三：衬底模式的预乘直写（K①/K② 的 a 维统一）────────────
+	// a < 1 的半透明填充：RGB=color×a、A=255×a 预乘直写 ⇒ 材质按比例透过（正确合成，
+	// 非「合成结果不透明」的 #56 限制族）；a == 1 ⇒ 原 GDI 快速路径 + K① 矩形级修补。
+	if (m_backdropActual != BackdropMode::None)
+	{
+		RECT rc{};
+		rc.left = static_cast<LONG>(rect.x);
+		rc.top = static_cast<LONG>(rect.y);
+		rc.right = rc.left + static_cast<LONG>(rect.width);
+		rc.bottom = rc.top + static_cast<LONG>(rect.height);
+		if (color.a < 1.0f)
+		{
+			// R = 0 ⇒ 三带合并为全矩形 = 预乘直写（cov=1 全覆盖；mask 取空——零角循环）
+			static const CornerCoverageMask kEmptyMask{};
+			WriteRoundedRectPremultiplied(rect, 0, color, kEmptyMask);
+		}
+		else
+		{
+			const COLORREF colorRef = ToColorRef(color);
+			HBRUSH brush = CreateSolidBrush(colorRef);
+			if (brush)
+			{
+				FillRect(m_memoryDC, &rc, brush);
+				DeleteObject(brush);
+			}
+			ForceRectAlphaFrosted(rc);   // K①：外接矩形 = 覆盖域 ⇒ 矩形级 A=255
+		}
+		return;
+	}
+
 	// 9.5 Alpha 补强：a < 1 → 半透明合成（预乘 DIB + AlphaBlend）；a == 1 → 原 GDI 快速路径（零开销不回归）
 	if (color.a < 1.0f)
 	{
@@ -422,6 +639,37 @@ COLORREF GDIBackend::ToColorRef(const Color& color)
 
 void GDIBackend::DrawText(const Point& pos, const std::string& text,
                           const Color& color, const Font& font)
+{
+	DrawTextImpl(pos, text, color, font);
+
+	// ── Phase 32 批三（K③）：文字哨兵修补（仅衬底模式；实现不变式见 T32-3）────
+	// 文字矩形 = pos + extent（±2px 容差——字形覆盖hang/负 bearing）∩ 裁剪盒；
+	// AA 边缘以「不透明混色」呈现 = 已知限制（K③ 二值近似，D32-P④ 端到端另判）。
+	if (m_backdropActual == BackdropMode::None)
+	{
+		return;
+	}
+	const std::wstring wideText = UTF8ToWide(text);
+	if (wideText.empty())
+	{
+		return;
+	}
+	SIZE extent{};
+	if (!GetTextExtentPoint32W(m_memoryDC, wideText.c_str(),
+	                          static_cast<int>(wideText.size()), &extent))
+	{
+		return;   // 决策 30：测量失败 ⇒ 跳过修补（本帧该文字按现状呈现）
+	}
+	RECT textRect{};
+	textRect.left = static_cast<LONG>(pos.x) - 2;
+	textRect.top = static_cast<LONG>(pos.y) - 2;
+	textRect.right = textRect.left + extent.cx + 4;
+	textRect.bottom = textRect.top + extent.cy + 4;
+	FixupSentinelFrosted(textRect);
+}
+
+void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
+                              const Color& color, const Font& font)
 {
 	// D6：公共层 UTF-8 → Win32 UTF-16（复用 Core/String.h，封闭在平台层）
 	const std::wstring wideText = UTF8ToWide(text);
@@ -519,9 +767,28 @@ void GDIBackend::DrawLine(const Point& start, const Point& end,
 	    (color.a >= 1.0f && IsAxisAlignedAfterRound(start.x, start.y, end.x, end.y)))
 	{
 		DrawLineLegacy(start, end, width, color);
-		return;
 	}
-	DrawLineCoverage(start, end, width, color);
+	else
+	{
+		DrawLineCoverage(start, end, width, color);
+	}
+
+	// ── Phase 32 批三（K③）：线 bbox 哨兵修补（部分覆盖命令；margin = 线宽 + 2——
+	// 端帽/覆盖度边缘的越界余量）────────────────────────────────────────────
+	if (m_backdropActual != BackdropMode::None)
+	{
+		const float margin = std::clamp(width, 1.0f, 64.0f) + 2.0f;
+		const float minX = (std::min)(start.x, end.x) - margin;
+		const float minY = (std::min)(start.y, end.y) - margin;
+		const float maxX = (std::max)(start.x, end.x) + margin;
+		const float maxY = (std::max)(start.y, end.y) + margin;
+		RECT bbox{};
+		bbox.left = static_cast<LONG>(minX);
+		bbox.top = static_cast<LONG>(minY);
+		bbox.right = static_cast<LONG>(maxX);
+		bbox.bottom = static_cast<LONG>(maxY);
+		FixupSentinelFrosted(bbox);
+	}
 }
 
 void GDIBackend::DrawLineLegacy(const Point& start, const Point& end,
@@ -597,6 +864,26 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	if (R == 0 || !m_antiAliasing)
 	{
 		DrawRoundedRectLegacy(rect, cornerRadius, color);   // ⚠️ 传原始 cornerRadius（内部自行钳制）
+		// Phase 32 批三（K③）：legacy = GDI RoundRect 硬边 —— 哨兵修补（形状像素 ≠ 清屏
+		// ⇒ A=255；弧外 = 清屏 ⇒ 保持 A=0 透材质）；a<1 的 legacy 语义同入已知限制（#56 族）
+		if (m_backdropActual != BackdropMode::None)
+		{
+			RECT bbox{};
+			bbox.left = static_cast<LONG>(rect.x);
+			bbox.top = static_cast<LONG>(rect.y);
+			bbox.right = bbox.left + static_cast<LONG>(rect.width);
+			bbox.bottom = bbox.top + static_cast<LONG>(rect.height);
+			FixupSentinelFrosted(bbox);
+		}
+		return;
+	}
+
+	// ── Phase 32 批三（K②）：衬底模式 = 覆盖率**预乘直写**（不跑 GDI、不需要 PatchSurface；
+	// a<1 的半透明填充在预乘表示下与材质天然正确合成）────────────────────────
+	if (m_backdropActual != BackdropMode::None)
+	{
+		const CornerCoverageMask& frostedMask = m_cornerMaskCache.Get(R);
+		WriteRoundedRectPremultiplied(rect, R, color, frostedMask);
 		return;
 	}
 
@@ -740,6 +1027,19 @@ void GDIBackend::DrawImage(const Rect& dest, const Image& image)
 	SelectObject(dibDC, oldBitmap);
 	DeleteObject(dibBitmap);
 	DeleteDC(dibDC);
+
+	// ── Phase 32 批三（K④）：图像哨兵修补——首版把合成结果按不透明呈现（**已知限制
+	// #56**：半透明图像像素先与清屏色合成再整体盖上，与「按源 alpha 与材质合成」不等价；
+	// 底线 = 禁把整矩形无差别 A=255——哨兵扫描天然尊重「恰好等于清屏色」的像素）────
+	if (m_backdropActual != BackdropMode::None)
+	{
+		RECT destRect{};
+		destRect.left = std::lround(dest.x);
+		destRect.top = std::lround(dest.y);
+		destRect.right = destRect.left + std::lround(dest.width);
+		destRect.bottom = destRect.top + std::lround(dest.height);
+		FixupSentinelFrosted(destRect);
+	}
 }
 
 void GDIBackend::PushClip(const Rect& rect)
@@ -906,6 +1206,18 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 
 	SelectObject(m_memoryDC, oldPen);
 	DeleteObject(pen);
+
+	// ── Phase 32 批三（K③）：焦点框哨兵修补（点线边界——线像素 ≠ 清屏 ⇒ A=255，
+	// 空隙 = 清屏 ⇒ 透材质；框外/内部不动）────────────────────────────────
+	if (m_backdropActual != BackdropMode::None)
+	{
+		RECT bbox{};
+		bbox.left = static_cast<LONG>(rect.x) - 2;
+		bbox.top = static_cast<LONG>(rect.y) - 2;
+		bbox.right = bbox.left + static_cast<LONG>(rect.width) + 4;
+		bbox.bottom = bbox.top + static_cast<LONG>(rect.height) + 4;
+		FixupSentinelFrosted(bbox);
+	}
 }
 
 HFONT GDIBackend::GetOrCreateFont(const Font& font)

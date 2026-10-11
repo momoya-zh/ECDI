@@ -18,7 +18,6 @@
 #include "Render/RecordingBackend.h"
 
 #include <cstddef>
-#include <cstdio>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -394,6 +393,174 @@ void Test32StructuralSignatures()
     EXPECT_TRUE(true);   // 主断言在编译期
 }
 
+// ── T32-2：Acrylic 缓冲语义 + DrawRect（K①）────────────────────────────────
+// 判据：① 清屏 = 全缓冲 (tint, A=0)；② DrawRect(红) 后矩形内 = 绘制色 + **A=255**
+// （K① 矩形级修补）、矩形外 = (tint, A=0)。哨兵字节序 = B,G,R（C32-11）。
+void Test32AcrylicDrawRectSemantics()
+{
+    TestWindow window;
+    GDIBackend backend;
+    backend.Initialize(Win32RenderContext(window.hwnd));
+
+    RECT client{};
+    GetClientRect(window.hwnd, &client);
+
+    backend.SetBackdropSurface(BackdropMode::Acrylic, 0x00382F2Bu);   // tint RGB(56,47,43) A=0
+    backend.BeginFrame(Color::White());
+
+    const BitsView bits{
+        static_cast<BYTE*>(backend.DebugBackBufferBits()),
+        client.right, client.bottom };
+    EXPECT_TRUE(bits.base != nullptr);
+
+    // ① 清屏：全缓冲 = BGRA(43,47,56,0)
+    for (std::size_t i = 0; i < bits.Count(); ++i)
+    {
+        EXPECT_EQ(bits.B(i), 43);
+        EXPECT_EQ(bits.G(i), 47);
+        EXPECT_EQ(bits.R(i), 56);
+        EXPECT_EQ(bits.A(i), 0);
+    }
+
+    // ② DrawRect(红) —— K① 矩形级 A=255
+    backend.DrawRect(Rect{ 16.0f, 16.0f, 64.0f, 48.0f }, Color(1.0f, 0.0f, 0.0f));
+    backend.EndFrame();
+
+    for (int y = 0; y < bits.height; ++y)
+    {
+        for (int x = 0; x < bits.width; ++x)
+        {
+            const std::size_t i = static_cast<std::size_t>(y) * bits.width + x;
+            const bool inside = (x >= 16 && x < 80 && y >= 16 && y < 64);
+            if (inside)
+            {
+                EXPECT_EQ(bits.R(i), 255);
+                EXPECT_EQ(bits.G(i), 0);
+                EXPECT_EQ(bits.B(i), 0);
+                EXPECT_EQ(bits.A(i), 255);   // ★ K①
+            }
+            else
+            {
+                EXPECT_EQ(bits.B(i), 43);
+                EXPECT_EQ(bits.G(i), 47);
+                EXPECT_EQ(bits.R(i), 56);
+                EXPECT_EQ(bits.A(i), 0);
+            }
+        }
+    }
+}
+
+// ── T32-2b：圆角矩形覆盖率预乘直写（K②）——sum(A)/255 ≈ 覆盖面积不变式 ──────
+// 几何：Rect{40,40,160,120} R=20 ⇒ 覆盖面积 = 160×120 − (4−π)×20² ≈ 18856.6；
+// 角外 = (tint, A=0)；带内 = 原色 A=255（a=1）；另抽 a=0.5 圆角矩形 ⇒ 带内 A≈128
+//（预乘：材质按比例透过——K② 的 a 维统一）。
+void Test32RoundedPremultipliedCoverage()
+{
+    TestWindow window;
+    GDIBackend backend;
+    backend.Initialize(Win32RenderContext(window.hwnd));
+
+    RECT client{};
+    GetClientRect(window.hwnd, &client);
+
+    backend.SetBackdropSurface(BackdropMode::Acrylic, 0x00382F2Bu);
+    backend.BeginFrame(Color::White());
+    const BitsView bits{
+        static_cast<BYTE*>(backend.DebugBackBufferBits()),
+        client.right, client.bottom };
+    EXPECT_TRUE(bits.base != nullptr);
+
+    backend.DrawRoundedRect(Rect{ 40.0f, 40.0f, 160.0f, 120.0f }, 20.0f, Color(0.0f, 0.0f, 1.0f));
+    backend.EndFrame();
+
+    // ① 覆盖率 sum 不变式（bbox = 圆角矩形外接矩形）
+    double coverageSum = 0.0;
+    for (int y = 40; y < 160; ++y)
+    {
+        for (int x = 40; x < 200; ++x)
+        {
+            const std::size_t i = static_cast<std::size_t>(y) * bits.width + x;
+            coverageSum += bits.A(i) / 255.0;
+        }
+    }
+    const double expected = 160.0 * 120.0 - (4.0 - 3.14159265358979) * 20.0 * 20.0;
+    EXPECT_TRUE(coverageSum > expected - 16.0);
+    EXPECT_TRUE(coverageSum < expected + 16.0);
+
+    // ② 带内点 = 原色 A=255；角外点 = (tint, A=0)
+    {
+        const std::size_t inner = static_cast<std::size_t>(100) * bits.width + 120;
+        EXPECT_EQ(bits.B(inner), 255);
+        EXPECT_EQ(bits.A(inner), 255);
+    }
+    {
+        const std::size_t corner = static_cast<std::size_t>(41) * bits.width + 41;
+        EXPECT_EQ(bits.B(corner), 43);
+        EXPECT_EQ(bits.A(corner), 0);
+    }
+
+    // ③ a=0.5 圆角矩形（另一区域）——带内 A≈128、RGB≈预乘（K② 的 a 维）
+    backend.BeginFrame(Color::White());
+    backend.DrawRoundedRect(Rect{ 20.0f, 20.0f, 60.0f, 40.0f }, 8.0f, Color(1.0f, 1.0f, 1.0f, 0.5f));
+    backend.EndFrame();
+    {
+        const std::size_t inner = static_cast<std::size_t>(40) * bits.width + 50;
+        EXPECT_TRUE(bits.A(inner) >= 126 && bits.A(inner) <= 130);   // 255×0.5 ±1
+        EXPECT_TRUE(bits.R(inner) >= 126 && bits.R(inner) <= 130);   // 预乘 RGB = 255×0.5
+    }
+}
+
+// ── T32-3：文字哨兵修补不变式（K③——实现不变式，非视觉验收）────────────────
+// 判据（文字扫描带内）：① 全体像素 A∈{0,255}；② A=255 ⇔ RGB≠tint；③ A=255 计数 > 0
+//（有字形）且 A=0 计数 > 0（有字缝）。★ AA 边缘的视觉正确性 = 批四端到端（D32-P④）。
+void Test32TextSentinelInvariant()
+{
+    TestWindow window;
+    GDIBackend backend;
+    backend.Initialize(Win32RenderContext(window.hwnd));
+
+    RECT client{};
+    GetClientRect(window.hwnd, &client);
+
+    backend.SetBackdropSurface(BackdropMode::Acrylic, 0x00382F2Bu);
+    backend.BeginFrame(Color::White());
+    const BitsView bits{
+        static_cast<BYTE*>(backend.DebugBackBufferBits()),
+        client.right, client.bottom };
+    EXPECT_TRUE(bits.base != nullptr);
+
+    Font font;
+    font.size = 24.0f;
+    font.family = "Segoe UI";
+    backend.DrawText(Point{ 20.0f, 20.0f }, "AaBb 09", Color(1.0f, 1.0f, 1.0f), font);
+    backend.EndFrame();
+
+    int opaque = 0;
+    int gaps = 0;
+    int bad = 0;
+    for (int y = 18; y < 90; ++y)
+    {
+        for (int x = 18; x < 220; ++x)
+        {
+            const std::size_t i = static_cast<std::size_t>(y) * bits.width + x;
+            const bool isSentinel = (bits.B(i) == 43 && bits.G(i) == 47 && bits.R(i) == 56);
+            if (bits.A(i) != 0 && bits.A(i) != 255) { ++bad; continue; }
+            if (bits.A(i) == 255)
+            {
+                if (isSentinel) { ++bad; continue; }   // A=255 ⇔ RGB≠tint 的逆否
+                ++opaque;
+            }
+            else if (isSentinel)
+            {
+                ++gaps;   // 字缝/背景 = 哨兵透材质
+            }
+        }
+    }
+    EXPECT_EQ(bad, 0);        // 不变式：无第三态、无 A=255 的哨兵色
+    EXPECT_TRUE(opaque > 0);  // 有字形
+    EXPECT_TRUE(gaps > 0);    // 有字缝（材质透出）
+}
+
 void ECDI::Test::RegisterWindowBackdropTests()
 {
     GetTestRegistry().Add("WindowBackdrop.ZeroRegression", &Test32DefaultZeroRegression);              // T32-1
@@ -402,4 +569,7 @@ void ECDI::Test::RegisterWindowBackdropTests()
     GetTestRegistry().Add("WindowBackdrop.FailureInjectionStateMachine", &Test32FailureInjectionStateMachine); // T32-5
     GetTestRegistry().Add("WindowBackdrop.ConfigGateAndDegradedIgnore", &Test32ConfigGateAndDegradedIgnore);   // T32-6
     GetTestRegistry().Add("WindowBackdrop.StructuralSignatures", &Test32StructuralSignatures);         // T32-8
+    GetTestRegistry().Add("WindowBackdrop.AcrylicDrawRectSemantics", &Test32AcrylicDrawRectSemantics);       // T32-2
+    GetTestRegistry().Add("WindowBackdrop.RoundedPremultipliedCoverage", &Test32RoundedPremultipliedCoverage); // T32-2b
+    GetTestRegistry().Add("WindowBackdrop.TextSentinelInvariant", &Test32TextSentinelInvariant);              // T32-3
 }

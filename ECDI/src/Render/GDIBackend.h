@@ -40,7 +40,9 @@ public:
 	void BeginFrame(const Color& background) override;   ///< 决策 16（18 修订）清屏用本帧背景色 + 17 BeginPaint + 15/26 EnsureBackBuffer
 	void DrawRect(const Rect& rect, const Color& color) override;   ///< 决策 21-25
 	void DrawText(const Point& pos, const std::string& text,
-	              const Color& color, const Font& font) override;   ///< D5/D6：TextOutW
+	              const Color& color, const Font& font) override;   ///< D5/D6：TextOutW；Phase 32 K③ 哨兵修补
+	void DrawTextImpl(const Point& pos, const std::string& text,
+	                  const Color& color, const Font& font);        ///< Phase 32：原 DrawText 本体（批三拆出——K③ 尾部修补）
 	void DrawLine(const Point& start, const Point& end,
 	              float width, const Color& color) override;        ///< Phase 8 §8.1：lround + 1px 下限
 	void DrawRoundedRect(const Rect& rect, float cornerRadius,
@@ -77,6 +79,22 @@ private:
 	void ReleaseBackBuffer();              ///< 决策 20/31：SelectObject(old)→DeleteObject→DeleteDC
 	HFONT GetOrCreateFont(const Font& font);   ///< D1+D3+Phase20：缓存取/建 HFONT（键 = size+family+**dpi**；按**窗口 DPI** 把 DIP 字号换算为**物理** lfHeight）
 	static COLORREF ToColorRef(const Color& color);   ///< 决策 21/23：ToByte Clamp（DrawRect/DrawText 共用）
+
+	// ── Phase 32 批三：每命令 alpha 修补（K①..K④——仅衬底模式激活，None 零开销直返）──
+
+	/// @brief 修补矩形 = 命令矩形 ∩ 当前裁剪盒（C32-3；无效/空交集返回 false）
+	bool IntersectClipBoxForFixup(RECT& rect) const noexcept;
+
+	/// @brief K①：矩形级 A=255（实心填充——外接矩形 = 覆盖域的唯一命令族）
+	void ForceRectAlphaFrosted(const RECT& rect);
+
+	/// @brief K③：哨兵扫描（A=0 且 RGB≠清屏 ⇒ A=255——**按 B,G,R 字节序比对**，C32-11）
+	void FixupSentinelFrosted(const RECT& rect);
+
+	/// @brief K②：圆角矩形覆盖率**预乘直写**（三带 cov=1 + 四角 mask；RGB=color×cov×a、
+	/// A=255×cov×a——a<1 的半透明填充在预乘表示下与材质天然正确合成；不跑 GDI 绘制）
+	void WriteRoundedRectPremultiplied(const Rect& rect, int R, const Color& color,
+	                                   const CornerCoverageMask& mask);
 
 	HWND m_hwnd = nullptr;
 	PAINTSTRUCT m_ps{};                    ///< 决策 17：帧状态（BeginPaint/EndPaint 配对）

@@ -176,6 +176,16 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 | **限制** | 已知限制清单的最终状态（文字 AA 近似 / DrawImage 半透明[#56] / tint 碰撞） |
 | **台账** | 五处台账收口状态（本文件 §10 + framework-defect-audit + roadmap-deferred + docs/README + 根 README） |
 
+### §10.3 批三（2026-10-11，每命令 alpha 修补）
+
+| 项 | 内容 |
+|---|---|
+| **落地** | K①（`ForceRectAlphaFrosted`——DrawRect a=1 的 FillRect 后矩形级 A=255）· K②（`WriteRoundedRectPremultiplied`——三带 cov=1 + 四角 mask 索引变换的**预乘直写**，跳过 GDI 绘制；R=0 退化 = 全矩形预乘填充，DrawRect a<1 复用之）· K③（`FixupSentinelFrosted`——DrawText[经 `DrawTextImpl` 拆分，extent ±2px]/DrawLine[margin = 线宽+2]/DrawFocusRect[±2] 的哨兵扫描，按 B,G,R 字节序比对清屏色）· K④（DrawImage 尾部哨兵——首版合成结果按不透明呈现，#56 已知限制）· 全部挂点以 `m_backdropActual == None` 直返（A6①）· 裁剪交含 = C32-3（`GetClipBox` ∩ 命令矩形；圆角角的循环范围按裁剪钳制，canonical 索引不破坏） |
+| **测试** | **ClangCL / Clang 381/381 全绿**（378 + T32-2/2b/3；MinGW 待 #57）· T32-2（Acrylic 清屏全缓冲 (tint,A=0) + DrawRect 红矩形内 RGB/A=255/255 矩形外 (tint,0)）· T32-2b（**覆盖率 sum 不变式**：Σ A/255 = 18857.04 vs 理论 18856.64[误差 0.4 = 掩码 S=8 采样误差；角区各 314.3 = 掩码自身 314.26] + 带内原色 A=255 + 角外 (tint,0) + a=0.5 预乘带内 A≈128）· T32-3（文字带内哨兵不变式：A∈{0,255} 且 A=255 ⇔ RGB≠tint、bad=0、字形/字缝计数均 > 0） |
+| **偏差** | ★ **E-B2-3（toByte 输入域）**：K② 的 A 通道首版喂 `toByte(255×cov×a)`——**toByte 输入域是 [0,1]**，0..255 的输入被 clamp 成 1 ⇒ 非零像素全 255（角区 sum = nonzero 计数 329 而非 314.26——区域诊断 + 掩码直测定位）；修 = A 通道喂 `alphaFactor×cov`（[0,1] 域）。★ 实现注记：`WriteRoundedRectPremultiplied` 在衬底模式**跳过 GDI 绘制直接写 DIB**（缓冲处于清屏态，弧外不触碰即可） |
+| **限制** | 同批二（真机 Acrylic 成功路径留批四 E2E；文字 AA 边缘视觉 = 批四端到端矩阵） |
+| **台账** | 本行 + audit v1.81 + deferred v2.15 + docs/README + 根 README（同批提交） |
+
 ### §10.2 批二（2026-10-11，材质应用与状态机）
 
 | 项 | 内容 |
