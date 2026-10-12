@@ -180,9 +180,13 @@ void AnimationManager::Tick(std::chrono::milliseconds elapsed){
 
 		const bool finished = entry.animation->Advance(elapsed);
 
-		// ③ 推进期间被 Cancel（含自身 onValue 内）——移除，不调 onFinished
-		//（推进后立即检查：非完成路径的自身取消也要当帧出清，HasActive 即时反映）
-		if (entry.cancelled){
+		// ③ 推进期间被 Cancel（含自身 onValue 内）或 **token 失效**——移除，不调 onFinished
+		//（推进后立即检查：非完成路径的自身取消也要当帧出清，HasActive 即时反映。
+		// ★ Phase 32/#61（审计 C2）：alive 检查与 ① 同源——onValue 内析构 token 宿主
+		// 且该帧恰为完成帧时，原代码落到 ④ 把 onFinished 打在死对象上（违
+		// AnimationToken.h:30「回调永不打在死对象上」契约）。TestCancelSelfInOnValue
+		// 只覆盖 Cancel 路径故未抓到——补 TestDestroyTokenOnCompletionFrame）
+		if (entry.cancelled || !entry.state->alive){
 
 			EraseAt(i);
 

@@ -2,6 +2,7 @@
 #include "TestFramework.h"
 
 #include "ECDI/Platform/ChildProcess.h"
+#include "Platform/Win32/Win32ChildProcess.h"   // Phase 32/#64（审计 H9）：QuoteArgForTests 测试缝（内部头）
 
 #include <chrono>
 #include <string>
@@ -55,9 +56,19 @@ void TestChildProcessTerminateTimeout()
 
 } // anonymous namespace
 
+// ── Phase 32/#64（审计 H9）：QuoteArg 转义（MSDN 规则②③）────────────────────
+void TestQuoteArgEscaping(){
+	EXPECT_EQ(QuoteArgForTests(L"C:\\dir"), L"\"C:\\dir\"");                    // 无尾反斜杠：原样
+	EXPECT_EQ(QuoteArgForTests(L"C:\\dir\\"), L"\"C:\\dir\\\\\"");              // ★ 尾反斜杠加倍（修复判据）
+	EXPECT_EQ(QuoteArgForTests(L"a\"b"), L"\"a\\\"b\"");                        // 引号转义
+	EXPECT_EQ(QuoteArgForTests(L"a\\\"b"), L"\"a\\\\\\\"b\"");                  // 反斜杠+引号：加倍 + 转义
+}
+
+
 void ECDI::Test::RegisterChildProcessTests()
 {
 	GetTestRegistry().Add("ChildProcess.StartReadEcho",      &TestChildProcessStartReadEcho);
 	GetTestRegistry().Add("ChildProcess.EofExit",            &TestChildProcessEofExit);
+	GetTestRegistry().Add("ChildProcess.QuoteArgEscaping",   &TestQuoteArgEscaping);   // Phase 32/#64（审计 H9）
 	GetTestRegistry().Add("ChildProcess.TerminateTimeout",   &TestChildProcessTerminateTimeout);
 }

@@ -296,7 +296,7 @@ float GDITextMeasurer::LineHeight(const Font& font)
 			alignas(OUTLINETEXTMETRICW) BYTE stackBuf[1024];
 			BYTE* buf = stackBuf;
 			std::unique_ptr<BYTE[], void(*)(BYTE*)> heapBuf(
-				nullptr, [](BYTE* p){ ::operator delete(p); });
+				nullptr, [](BYTE* p){ ::operator delete(p, std::align_val_t(alignof(OUTLINETEXTMETRICW))); });   // ★ Phase 32/#64（审计 H5）：对齐分配必须配对齐释放（UB）
 
 			if (otmSize > sizeof(stackBuf))
 			{

@@ -10,6 +10,11 @@
 
 namespace ECDI{
 
+/// @brief 命令行参数引号包裹（Phase 32/#64 审计 H9 测试缝——实现匿名于 .cpp）
+/// @details 规则 = MSDN「Parsing C++ Command-Line Arguments」：引号前的反斜杠成对
+/// 加倍 + 引号转义；**收尾引号前的尾反斜杠同样加倍**（`C:\dir\` ⇒ `"C:\dir\\"`）。
+std::wstring QuoteArgForTests(const std::wstring& arg);
+
 /// @brief Win32 子进程实现（匿名管道——CreateProcess + PeekNamedPipe 非阻塞读）
 /// @details 句柄继承矩阵（GPT 评审冻结）：stdin 管道子 Read 可继承/父 Write 不可继承；
 /// stdout 管道子 Write 可继承/父 Read 不可继承——父侧两端 SetHandleInformation 清标志，

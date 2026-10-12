@@ -4,23 +4,35 @@
 
 namespace ECDI{
 
-namespace{
-
 /// @brief Windows command line 参数引号包裹（含空格/内嵌引号安全——quoting 是 Win32 实现职责）
+/// @details ★ Phase 32/#64（审计 H9）修复：按 MSDN「Parsing C++ Command-Line Arguments」
+/// 规则处理**引号前的反斜杠**（成对加倍）与**收尾引号前的尾反斜杠**（同样加倍）——
+/// 首版只转义引号本身 ⇒ `C:\dir\` 产出 `"C:\dir\"`（尾反斜杠转义收尾引号 ⇒ 参数未闭合）。
 std::wstring QuoteArg(const std::wstring& arg){
 	std::wstring q = L"\"";
+	std::size_t backslashes = 0;
 	for (wchar_t c : arg){
-		if (c == L'"'){
-			q += L"\\\"";
+		if (c == L'\\'){
+			++backslashes;
+			q += c;
+		}
+		else if (c == L'"'){
+			q.append(backslashes, L'\\');   // 规则②：引号前已累积的反斜杠成对加倍
+			q += L"\\\"";                   // 再转义引号本身
+			backslashes = 0;
 		}
 		else{
+			backslashes = 0;
 			q += c;
 		}
 	}
+	q.append(backslashes, L'\\');           // 规则③：收尾引号前的尾反斜杠同样加倍
 	q += L"\"";
 	return q;
 }
 
+std::wstring QuoteArgForTests(const std::wstring& arg){
+	return QuoteArg(arg);   // Phase 32/#64 测试缝（声明在 Win32ChildProcess.h——测试 include 内部头）
 }
 
 Win32ChildProcess::~Win32ChildProcess(){

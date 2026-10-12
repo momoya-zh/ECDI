@@ -708,7 +708,11 @@ void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
 		}
 
 		// 分支 2/3：一次 GetTextExtentExPointW 同时拿 fit 数与整串高度（含 cy）
-		const LONG maxSpan = clip.right - (drawX > clip.left ? drawX : clip.left);
+		// ★ Phase 32/#64（审计 H8）：可见跨度 = clip.right - drawX——drawX 可为负
+		// （水平滚动正是此态）；首版 `drawX > clip.left ? drawX : clip.left` 在该态退化为
+		// 裁剪区宽 ⇒ 接受的前缀在 drawX + clipW 处截止 ⇒ 可见行最右侧 scrollOffsetX
+		// 像素永不绘制且随滚动变宽。下游 `(std::max)(0L, maxSpan)` 守卫保留。
+		const LONG maxSpan = clip.right - drawX;
 		SIZE extent{};
 		INT fit = 0;
 		const BOOL extentOk = GetTextExtentExPointW(m_memoryDC, wideText.c_str(),

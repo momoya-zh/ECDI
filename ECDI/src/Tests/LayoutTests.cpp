@@ -1347,6 +1347,25 @@ void Test30HorizontalCVis(){
 	}
 }
 
+// ── Phase 32/#64（审计 H1）：GridLayout(0) 的 Release 除零——构造钳制兜底 ────
+// 修复判据：columns 钳为 1 ⇒ Arrange 不 SIGFPE、子按单列排布（列宽照常）。
+void TestGridLayoutZeroColumnsClamped(){
+	Panel panel;
+	panel.SetSize(200, 100);
+	panel.SetLayout(std::make_unique<GridLayout>(0, 50, 40));   // 非法列数（Release 断言为空）
+
+	auto cell = std::make_unique<Widget>();
+	cell->SetSize(40, 30);
+	Widget* cellPtr = cell.get();
+	panel.AddChild(std::move(cell));
+
+	panel.Arrange();   // 修复前：slot % 0 = SIGFPE
+
+	EXPECT_EQ(cellPtr->GetX(), 0);   // 钳为 1 列 ⇒ 首列 x=0
+	EXPECT_EQ(cellPtr->GetY(), 0);
+}
+
+
 void ECDI::Test::RegisterLayoutTests()
 {
     GetTestRegistry().Add("Layout.HorizontalLayout", &TestHorizontalLayout);
@@ -1379,5 +1398,6 @@ void ECDI::Test::RegisterLayoutTests()
     GetTestRegistry().Add("Layout.ArrangeKeepsChildSize", &TestArrangeKeepsChildSize);
     GetTestRegistry().Add("Layout.ExtentNegativeClamp", &TestExtentNegativeClamp);
     GetTestRegistry().Add("Layout.ListEmptyOrAllHidden", &TestListLayoutEmptyOrAllHidden);
+    GetTestRegistry().Add("Layout.GridZeroColumnsClamped", &TestGridLayoutZeroColumnsClamped);   // Phase 32/#64（审计 H1）
     GetTestRegistry().Add("Layout.ListNonUniformChildSizes", &TestListLayoutNonUniformChildSizes);
 }

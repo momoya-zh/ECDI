@@ -1,4 +1,4 @@
-#include "RunAllTests.h"
+﻿#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include "ECDI/Animation/AnimationManager.h"
@@ -397,6 +397,32 @@ void TestZeroDuration(){
 
 } // anonymous namespace
 
+// ── Phase 32/#61（审计 C2）：onValue 内析构 token 宿主 + 该帧恰为完成帧 ──────
+// 修复判据：③ 处 alive 检查与 ① 同源 ⇒ token 已死即移除、**不调 onFinished**
+//（修复前落到 ④ 打在死对象上——TestCancelSelfInOnValue 只覆盖 Cancel 路径）。
+void TestDestroyTokenOnCompletionFrame(){
+	TestPlatformWindow platform;
+	AnimationManager manager(platform);
+
+	auto token = std::make_unique<AnimationToken>();
+	bool finished = false;
+	bool callbackRan = false;
+
+	manager.Start(*token, 0.0f, 10.0f, 100ms, Easing::Linear,
+		[&](float){
+			callbackRan = true;
+			token.reset();   // ★ onValue 内销毁 token 宿主（本帧 = 完成帧——Advance 含最终帧）
+		},
+		[&]{ finished = true; });
+
+	manager.Tick(100ms);   // 单帧直达完成（onValue 与完成同帧——C2 的精确触发态）
+
+	EXPECT_TRUE(callbackRan);        // onValue（含最终帧）确实执行
+	EXPECT_FALSE(finished);          // ★ token 已死 ⇒ 不得调 onFinished
+	EXPECT_FALSE(manager.HasActive());
+}
+
+
 void ECDI::Test::RegisterAnimationTests()
 {
     GetTestRegistry().Add("Animation.EasingEndpoints", &TestEasingEndpoints);
@@ -410,6 +436,7 @@ void ECDI::Test::RegisterAnimationTests()
     GetTestRegistry().Add("Animation.CancelSelfInOnValue", &TestCancelSelfInOnValue);
     GetTestRegistry().Add("Animation.ColorEndpoints", &TestColorAnimationEndpoints);
     GetTestRegistry().Add("Animation.ManagerDiesBeforeToken", &TestManagerDiesBeforeToken);
+    GetTestRegistry().Add("Animation.DestroyTokenOnCompletionFrame", &TestDestroyTokenOnCompletionFrame);   // Phase 32/#61（审计 C2）
     GetTestRegistry().Add("Animation.ZeroDuration", &TestZeroDuration);
 }
 

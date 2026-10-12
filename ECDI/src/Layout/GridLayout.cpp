@@ -6,9 +6,12 @@
 namespace ECDI{
 
 GridLayout::GridLayout(int columns, int cellWidth, int cellHeight, int spacing)
-	: m_columns(columns), m_cellWidth(cellWidth), m_cellHeight(cellHeight), m_spacing(spacing)
+	: m_columns(columns >= 1 ? columns : 1), m_cellWidth(cellWidth), m_cellHeight(cellHeight), m_spacing(spacing)
 {
-	FRAMEWORK_ASSERT(columns >= 1);
+	// ★ Phase 32/#64（审计 H1）：`columns >= 1` 的断言已移除——m_columns 是**除数**，
+	// Release 断言为空 ⇒ 非法列数直接 SIGFPE；钳制（初始化列表）即契约本体，与
+	// V/H 布局的 padding 钳制同形（V/H 无断言）。cellWidth/cellHeight/spacing 只参与
+	// 乘法，断言保留为 Debug 契约诊断。
 	FRAMEWORK_ASSERT(cellWidth >= 1);
 	FRAMEWORK_ASSERT(cellHeight >= 1);
 	FRAMEWORK_ASSERT(spacing >= 0);

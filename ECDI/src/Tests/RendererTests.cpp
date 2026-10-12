@@ -280,6 +280,57 @@ void TestGDIBackendAlphaBlend()
 }
 
 // ── 9.5 Alpha Primitive 补强：DrawRect 半透明（Color.a < 1 → 预乘 DIB + AlphaBlend）──
+// ── Phase 32/#64（审计 H8）：长文本前缀截断的水平滚动跨度 ────────────────────
+// 300 个 W（≈ 数千 px）从 clip.left − 100 起画：修复前 maxSpan 退化为裁剪区宽，
+// 前缀在 drawX + clipW 处截止 ⇒ 最右 ~100px 无墨；修复后墨迹到达 clip.right。
+void TestLongTextScrollClipPrefixSpan()
+{
+    const int screenW = GetSystemMetrics(SM_CXSCREEN);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    const wchar_t* kClassName = L"ECDI_TestH8Class";
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kClassName;
+    if (!RegisterClassW(&wc))
+    {
+        EXPECT_EQ(GetLastError(), ERROR_CLASS_ALREADY_EXISTS);
+    }
+
+    HWND hwnd = CreateWindowExW(0, kClassName, L"ECDI_H8Test", WS_POPUP,
+                                screenW - 210, screenH - 210, 200, 200,
+                                nullptr, nullptr, wc.hInstance, nullptr);
+    EXPECT_TRUE(hwnd != nullptr);
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+    GDIBackend backend;
+    backend.Initialize(Win32RenderContext(hwnd));
+    backend.BeginFrame(Color::Black());
+    Font font;
+    font.size = 16.0f;
+    font.family = "";
+    backend.DrawText(Point{ -100, 40 }, std::string(300, 'W'), Color::White(), font);
+    backend.EndFrame();
+
+    // clip.right 附近（窗口 200px 宽 → 取 x∈[130,190]）应有白墨——修复前该区域恒为黑。
+    // 注意不能贴到 x=199：分支 6 前缀 = fit+1 守卫字符，其右缘只保证越过 clip.right
+    // 一个字符宽，最后几个像素可能无墨；130..190 距右缘 10px，两态区分依然显著。
+    HDC dc = GetDC(hwnd);
+    int ink = 0;
+    for (int x = 130; x < 190; ++x)
+    {
+        for (int y = 40; y < 70; ++y)
+        {
+            if (GetPixel(dc, x, y) == RGB(255, 255, 255)) { ++ink; }
+        }
+    }
+    ReleaseDC(hwnd, dc);
+    EXPECT_TRUE(ink > 0);
+
+    DestroyWindow(hwnd);
+}
+
+
 void TestDrawRectAlpha()
 {
     // 无窗口契约测试验证"命令转发"，本测试验证"渲染结果"：
@@ -526,5 +577,6 @@ void ECDI::Test::RegisterRendererTests()
     GetTestRegistry().Add("Renderer.ScaleRectAndClip", &TestRendererScaleRectAndClip);
     GetTestRegistry().Add("Renderer.ScaleAllGeometryFields", &TestRendererScaleAllGeometryFields);
     GetTestRegistry().Add("Renderer.ScaleTextPositionOnly", &TestRendererScaleTextPositionOnly);
+    GetTestRegistry().Add("Renderer.LongTextScrollClipPrefixSpan", &TestLongTextScrollClipPrefixSpan);   // Phase 32/#64（审计 H8）
     GetTestRegistry().Add("Renderer.ScaleLeavesBufferIntact", &TestRendererScaleLeavesBufferIntact);
 }
