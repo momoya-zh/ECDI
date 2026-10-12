@@ -1,4 +1,4 @@
-﻿#include "ECDI/Theme/DefaultTheme.h"
+#include "ECDI/Theme/DefaultTheme.h"
 
 namespace ECDI{
 
@@ -20,6 +20,11 @@ ButtonStyle DefaultTheme::GetButtonStyle() const{
 	s.pressedBackground.value  = Color::FromRGBA8(60, 90, 180);     // 迁移前 Button 按下深蓝
 	s.hoverBackground.value    = Color::FromRGBA8(80, 120, 220);   // P1：hover 默认 = background（零视觉变化；demo 改底色须同设 hover 色）
 	s.textAlignment.value      = TextAlignment::Center;            // ★ Phase 30 △4：对齐缺省 = Center（与 Phase 30 前硬编码行为逐位一致——C30-3：禁依赖枚举零值 Left）
+	// ★ 审计 H10（#66）：Button 文字色**归主题**——白字叠蓝底是 Button 视觉身份，
+	//   但它是**主题默认值**（可经 GetButtonStyle / SetStyle(ButtonStyleOverride) 改），
+	//   不再是 Button::ApplyTheme 里的硬编码常量。修复前该常量在 `TextWidget::ApplyTheme`
+	//   之后覆盖注入 ⇒ 本结构若设 foreground 也无效、且与 GetTextStyle 的黑字互相冲突。
+	s.foreground.value         = Color::White();                   // ★ 值与原硬编码逐位相同 ⇒ 默认观感零变化
 	return s;
 }
 

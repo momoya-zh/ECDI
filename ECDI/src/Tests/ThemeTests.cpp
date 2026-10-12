@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 #include "ECDI/Theme/StyleField.h"
 #include "ECDI/Theme/DefaultTheme.h"
@@ -157,6 +157,124 @@ void TestButtonTextAndButtonStyleIndependent()
 
 } // anonymous namespace
 
+// ══════════════════════════════════════════════════════════════════════
+// 审计 H10（#66）：Button 文字色主题通路（契约变更 = 方案 B）
+// ══════════════════════════════════════════════════════════════════════
+// ★ 缺陷（变更前）：`Button::ApplyTheme` 在 `TextWidget::ApplyTheme` 之后**硬编码**注入
+//   `Color::White()` ⇒ ① 自定义主题的 `GetTextStyle().foreground` 对 Button **恒被盖掉**
+//   （主题侧死值）；② 同一属性两个互相冲突的默认值（Black 立刻被 White 盖）；
+//   ③ `GetButtonStyle().foreground` 即使设了也无效。
+// ★ 修法（方案 B · 改契约）：Button 文字色**归主题**——`ButtonStyle` 增 `foreground`
+//   字段（`DefaultTheme` 给 White = 原硬编码值，默认观感零变化），`Button::ApplyTheme`
+//   改注 `ButtonStyle.foreground`；`TextStyle.foreground` 保留为**单点覆盖**通路。
+//   两通路写的是同一个字段（`TextWidget::m_style.foreground`）⇒ D7 语义不变。
+// ★ 用户拍板（2026-10-12）：「目前我们还没正式成库，改契约其实没什么问题」。
+
+namespace{
+
+/// @brief 自定义主题：Button 文字色 = 红（用于证明**主题通路真的生效**）
+/// @details ★ 这是本组用例的核心装置——变更前这个主题对 Button 文字色**完全无效**。
+struct RedButtonTextTheme : public Theme{
+	TextStyle GetTextStyle() const override{
+		TextStyle s;
+		s.foreground.value = Color::Black();   // 全局文本默认（Label/TextBox）
+		s.font.value = Font{};
+		return s;
+	}
+	ButtonStyle GetButtonStyle() const override{
+		ButtonStyle s = DefaultTheme{}.GetButtonStyle();
+		s.foreground.value = Color::Red();     // ★ 本主题的 Button 文字色
+		return s;
+	}
+	TextBoxStyle GetTextBoxStyle() const override{ return DefaultTheme{}.GetTextBoxStyle(); }
+	PanelStyle GetPanelStyle() const override{ return DefaultTheme{}.GetPanelStyle(); }
+	CheckBoxStyle GetCheckBoxStyle() const override{ return DefaultTheme{}.GetCheckBoxStyle(); }
+	RadioStyle GetRadioStyle() const override{ return DefaultTheme{}.GetRadioStyle(); }
+	ProgressBarStyle GetProgressBarStyle() const override{ return DefaultTheme{}.GetProgressBarStyle(); }
+	ScrollBarStyle GetScrollBarStyle() const override{ return DefaultTheme{}.GetScrollBarStyle(); }
+};
+
+/// @brief 读 Button 的**实际文字视觉字段**（`TextWidget::m_style.foreground`）
+/// @details ★ 关键：不能读 `Button::m_style.foreground`（那是 ButtonStyle 的主题副本）。
+///          `OnPaint` 经 `DrawTextContent` 消费的是 **TextWidget** 的那个字段 ⇒
+///          本探针读的才是「用户真正看到的文字色」。
+///          `GetTextColor()` 正是该字段的公共只读入口（TextWidget.cpp:64-68）。
+struct ButtonProbe : public Button{
+	using Button::Button;
+	const ButtonStyle& ButtonStyleForTest() const{ return m_style; }
+};
+
+} // anonymous namespace
+
+// ── H10-①：自定义主题的 Button 文字色**真的生效**（变更前的核心失效面）──────
+void Test66ThemeButtonForegroundHonored()
+{
+	ButtonProbe button("Test");
+	button.ApplyTheme(GetDefaultTheme());
+	EXPECT_EQ(button.GetTextColor(), Color::White());   // 缺省：白字（与原硬编码值逐位一致）
+
+	// ★ 换自定义主题 ⇒ Button 文字色必须跟随（变更前**恒为 White**、本断言必红）
+	button.ApplyTheme(RedButtonTextTheme{});
+	EXPECT_EQ(button.GetTextColor(), Color::Red());
+
+	// ★ 且主题通路不只影响「首次」——再次应用别的主题仍跟随（无粘滞）
+	button.ApplyTheme(GetDefaultTheme());
+	EXPECT_EQ(button.GetTextColor(), Color::White());
+}
+
+// ── H10-②：默认观感零变化（契约变更不得改默认视觉）──────────────────────
+void Test66DefaultButtonTextUnchanged()
+{
+	// ① 构造即注入（Button 构造体调 ApplyTheme(GetDefaultTheme())）
+	ButtonProbe constructed("Test");
+	EXPECT_EQ(constructed.GetTextColor(), Color::White());
+
+	// ② DefaultTheme 的 ButtonStyle **确实**携带 White（不再是死值）
+	EXPECT_EQ(DefaultTheme{}.GetButtonStyle().foreground.value, Color::White());
+
+	// ③ 与 TextStyle 的全局默认（Black）**有意不同**——证明两个默认值不再互相覆盖：
+	//    Label/TextBox 走 TextStyle=Black；Button 走 ButtonStyle=White。
+	EXPECT_EQ(DefaultTheme{}.GetTextStyle().foreground.value, Color::Black());
+}
+
+// ── H10-③：D7 Override 在两通路上都成立（各自 Set 后不被主题覆盖）────────
+void Test66ButtonForegroundOverrideBothPaths()
+{
+	// 通路 ①：ButtonStyleOverride.foreground（Button 侧入口）
+	{
+		ButtonProbe button("Test");
+		ButtonStyleOverride o;
+		o.foreground = Color::Green();
+		button.SetStyle(o);
+		button.ApplyTheme(RedButtonTextTheme{});          // 主题换成红
+		EXPECT_EQ(button.GetTextColor(), Color::Green());  // ★ Override 保留（D7）
+	}
+
+	// 通路 ②：TextStyleOverride.foreground（基类通用入口——经 using 暴露）
+	{
+		ButtonProbe button("Test");
+		TextStyleOverride o;
+		o.foreground = Color::Blue();
+		button.SetStyle(o);
+		button.ApplyTheme(RedButtonTextTheme{});
+		EXPECT_EQ(button.GetTextColor(), Color::Blue());   // ★ 同款保留
+	}
+
+	// 交叉：两条通路写同一字段 ⇒ 后写者赢
+	{
+		ButtonProbe button("Test");
+		ButtonStyleOverride b;
+		b.foreground = Color::Green();
+		button.SetStyle(b);
+		TextStyleOverride t;
+		t.foreground = Color::Blue();
+		button.SetStyle(t);                                // 后写 ⇒ 蓝赢
+		EXPECT_EQ(button.GetTextColor(), Color::Blue());
+		button.ApplyTheme(RedButtonTextTheme{});
+		EXPECT_EQ(button.GetTextColor(), Color::Blue());    // 仍是 Override 值
+	}
+}
+
 void ECDI::Test::RegisterThemeTests()
 {
     GetTestRegistry().Add("Theme.StyleFieldInitial",         &TestStyleFieldInitial);
@@ -169,4 +287,8 @@ void ECDI::Test::RegisterThemeTests()
     GetTestRegistry().Add("Theme.SetStyleThenApply",         &TestSetStyleThenApplyTheme);
     GetTestRegistry().Add("Theme.DefaultThemeConsistent",    &TestDefaultThemeConsistency);
     GetTestRegistry().Add("Theme.ButtonTextAndButtonStyle",  &TestButtonTextAndButtonStyleIndependent);
+    // ── 审计 H10（#66）：Button 文字色主题通路（契约变更 = 方案 B）──
+    GetTestRegistry().Add("Theme.ButtonForegroundThemeHonored",      &Test66ThemeButtonForegroundHonored);
+    GetTestRegistry().Add("Theme.ButtonForegroundDefaultUnchanged",  &Test66DefaultButtonTextUnchanged);
+    GetTestRegistry().Add("Theme.ButtonForegroundOverrideBothPaths", &Test66ButtonForegroundOverrideBothPaths);
 }

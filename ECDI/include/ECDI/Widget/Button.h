@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Core/Point.h"
 #include "ECDI/Animation/AnimationToken.h"
@@ -38,7 +38,9 @@ public:
 
 	void ApplyTheme(const Theme& theme) override;   // 扩展：先 TextStyle（基类）再 ButtonStyle
 
-	/// @brief Button 专属样式覆盖（文字颜色/字体经 TextWidget::SetStyle(TextStyleOverride)）
+	/// @brief Button 专属样式覆盖
+	/// @details ★ 审计 H10/#66：`foreground` 亦在此可设（与 `TextStyleOverride.foreground` 同一落点）。
+	///          基类 `SetStyle(TextStyleOverride)` 经 `using` 保留（`using TextWidget::SetStyle`）。
 	void SetStyle(ButtonStyleOverride override);
 
 	// ── 回调注册（7.5 新增：业务便利层）────────────────
@@ -71,7 +73,11 @@ protected:
 
 	void OnPaint(PaintContext& ctx,int x,int y) override;
 
-	/// @brief Button 专属样式（protected——测试派生类 TestableButton 可访问；不含 foreground——TextStyle 是文字唯一来源）
+	/// @brief Button 专属样式（protected——测试派生类 TestableButton 可访问）
+	/// @details ★ 审计 H10/#66：**本结构隐藏了基类的 `TextWidget::m_style`（TextStyle）**——
+	///          访问 `m_style.foreground` 得到的是 **ButtonStyle 的主题默认**（White），
+	///          而**文字视觉的唯一字段**是 `TextWidget::m_style.foreground`
+	///          （`OnPaint` 经 `DrawTextContent` 消费它）。`ApplyTheme` 负责把前者注入后者。
 	ButtonStyle m_style;
 
 	/// @brief 背景呈现值（9.6 S1 动画 onValue 写入；OnPaint 唯一消费——单一视觉真相）

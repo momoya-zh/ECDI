@@ -1,4 +1,4 @@
-﻿#include "ECDI/Widget/Button.h"
+#include "ECDI/Widget/Button.h"
 
 #include "ECDI/Animation/AnimationManager.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
@@ -37,10 +37,6 @@ Button::Button(std::string&& text): TextWidget(std::move(text)){
 void Button::ApplyTheme(const Theme& theme){
 
 	TextWidget::ApplyTheme(theme);   // ① 先注入 TextStyle（全局默认 foreground=Black——Label/TextBox 用）
-	// ⚠️ 设计补正（2026-08-25 实现期）：Button 文字默认白（迁移前 m_textColor = White——白字叠蓝底是
-	// Button 视觉身份，非全局主题值）。Apply(White) 语义 = "未覆盖时注入默认值"——用户
-	// SetStyle(TextStyleOverride.foreground) 后 overridden=true → 不再覆盖（D7）。
-	TextWidget::m_style.foreground.Apply(Color::White());
 	ButtonStyle defaults = theme.GetButtonStyle();   // ② 再注入 ButtonStyle
 	m_style.background.Apply(defaults.background.value);
 	m_style.border.Apply(defaults.border.value);
@@ -49,6 +45,22 @@ void Button::ApplyTheme(const Theme& theme){
 	m_style.pressedBackground.Apply(defaults.pressedBackground.value);
 	m_style.hoverBackground.Apply(defaults.hoverBackground.value);
 	m_style.textAlignment.Apply(defaults.textAlignment.value);   // ★ Phase 30 △6（C30-3）：缺省 Center——与硬编码居中期逐位一致
+	m_style.foreground.Apply(defaults.foreground.value);         // ③ ★ 审计 H10：Button 文字色归主题（缺省 White）
+
+	// ★★ 审计 H10（#66）契约变更——**文字色通路**
+	// 变更前：本处硬编码 `TextWidget::m_style.foreground.Apply(Color::White())`。三条后果：
+	//   ① 用户在自定义主题里改 `GetTextStyle().foreground` 对 Button **完全无效**（恒被盖掉）
+	//      —— 与 `Theme.h`「Style 是唯一视觉属性来源」的契约矛盾；
+	//   ② 同一属性存在**两个互相冲突的默认值**（TextStyle 注入 Black → 紧接着被 White 覆盖）；
+	//   ③ `DefaultTheme::GetButtonStyle()` 即使设了 foreground 也**没有任何效果**（主题侧死值）。
+	// 变更后：Button 文字色**只**来自 `ButtonStyle.foreground`（主题缺省 White）。
+	// ★ 关键：文字视觉仍落在**同一个字段** `TextWidget::m_style.foreground`
+	//   （单一视觉真相不变、`OnPaint` 的 `DrawTextContent` 零改动）——变的只是它的
+	//   **主题来源**：从「硬编码常量」改为「ButtonStyle.foreground 主题值」。
+	// ★ D7 语义完整保留（两处 `Apply` 都只在 `!overridden` 时生效）：
+	//   用户经**任一**通路 Set 过（`TextStyleOverride.foreground` 或
+	//   `ButtonStyleOverride.foreground`）⇒ 该字段 overridden=true ⇒ 本行不覆盖。
+	TextWidget::m_style.foreground.Apply(m_style.foreground.value);
 
 	// 9.6 S1：背景呈现值与主题同步（构造/换主题 = 即时到位；运行期状态变化才走过渡）。
 	// 换主题 = 即时重置语义——若背景动画仍在跑则取消（防旧动画写回旧色）。
@@ -85,6 +97,10 @@ void Button::SetStyle(ButtonStyleOverride override){
 	if (override.pressedBackground)  m_style.pressedBackground.Set(*override.pressedBackground);
 	if (override.hoverBackground)    m_style.hoverBackground.Set(*override.hoverBackground);
 	if (override.textAlignment)      m_style.textAlignment.Set(*override.textAlignment);   // ★ Phase 30 △6
+	// ★ 审计 H10：Button 侧文字色覆盖——写的是**文字视觉唯一字段**
+	//   （`TextWidget::m_style.foreground`），不是 ButtonStyle 的影子副本
+	//   ⇒ 与 `using TextWidget::SetStyle(TextStyleOverride)` 通路**同一落点**（后写者赢）。
+	if (override.foreground)         TextWidget::m_style.foreground.Set(*override.foreground);
 	Invalidate();
 
 }
