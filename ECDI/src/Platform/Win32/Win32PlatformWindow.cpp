@@ -942,6 +942,19 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		m_host.OnIMECompositionCommit({});
 		break;   // 继续 DefWindowProcW（IME 内部状态机必需）
 
+	// ★ 审计 M12：吞字计数器**焦点变化即清零**。
+	// 背景：`m_imeResultPendingChars` 只在 GCS_RESULTSTR 处置位（上方 :928）、只靠逐个
+	//   WM_CHAR 递减（下方 :949-955）。序列被中途打断（失焦 / 输入法少发 / 窗口销毁前）
+	//   ⇒ 余数会**吞掉之后真正输入的字符**，且原实现无超时、无焦点复位。
+	// 修法：焦点离开/重新进入本窗口都清零——两处都安全：
+	//   ① 失焦后本窗口不应再吞任何字符（IME 状态已交还系统）；
+	//   ② 重新得焦时旧序列必然已终结（IME 状态机按 focus 归属）。
+	// ⚠️ 不动「未失焦但输入法少发」的残余——那需要超时机制，属另一条设计题（记账）。
+	case WM_KILLFOCUS:
+	case WM_SETFOCUS:
+		m_imeResultPendingChars = 0;
+		break;   // 继续 DefWindowProcW（焦点语义由系统维护）
+
 	}
 
 	// 8.5.1 双写修复：IME 结果 WM_CHAR 拦截（GCS_RESULTSTR 已提交框架——系统随后重复发送

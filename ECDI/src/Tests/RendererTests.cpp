@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include <Windows.h>
@@ -561,10 +561,98 @@ void TestRendererScaleLeavesBufferIntact()
     EXPECT_FALSE(backend.clipOps[1].isPush);
 }
 
+// ── 审计 M18：长文本前缀截断不得劈开 UTF-16 代理对 ────────────────────────────
+// 构造：>256 wchar 的 ASCII 前缀 + 一个 emoji（代理对 2 wchar）+ ASCII 后缀。
+// 用**窄裁剪区**让 `fit` 落在 emoji 的高代理之后 ⇒ `prefix = fit + 1` 正停在代理对中间。
+//   修复前：`TextOutW(..., prefix)` 收到**孤立高代理** ⇒ 该字符丢失（渲染成 notdef/方框）；
+//   修复后：prefix 后退一位 ⇒ ASCII 前缀完整、emoji 不被劈开。
+// ★ 可观测判据：emogi 之前的 ASCII 墨迹**不受影响**（后退只影响边界那一个字符），
+//   且**不出现**「代理对位置画出方框」的特征墨团（方框 = 边缘闭合的矩形轮廓，与 ASCII 笔画不同）。
+// ⚠️ 这条的精确断言是「ASCII 段墨量与无 emoji 对照逐位相同」——见下方双场景对照。
+void TestLongTextPrefixSurrogateRetreat()
+{
+    const int screenW = GetSystemMetrics(SM_CXSCREEN);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    const wchar_t* kClassName = L"ECDI_TestM18Class";
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kClassName;
+    if (!RegisterClassW(&wc))
+    {
+        EXPECT_EQ(GetLastError(), ERROR_CLASS_ALREADY_EXISTS);
+    }
+
+    HWND hwnd = CreateWindowExW(0, kClassName, L"ECDI_M18Test", WS_POPUP,
+                                screenW - 210, screenH - 210, 200, 200,
+                                nullptr, nullptr, wc.hInstance, nullptr);
+    EXPECT_TRUE(hwnd != nullptr);
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+    // 构造串：260 个 'A'（> 256 阈值）+ "😀" + "BCDEFGH"
+    std::string text;
+    for (int i = 0; i < 260; ++i) { text += 'A'; }
+    text += "\xF0\x9F\x98\x80";            // 😀（U+1F600 = 4 字节 UTF-8 = 2 wchar）
+    text += "BCDEFGH";
+
+    const Font font{ 16.0f, "" };
+    const Color white = Color::White();
+
+    // ① 场景 A：完整串（无截断压力——走分支 5 整串原路径）⇒ 作为「墨量基准」
+    //    取 emoji 之前的 ASCII 区域（x ∈ [0,120]）统计白墨。
+    {
+        GDIBackend backend;
+        backend.Initialize(Win32RenderContext(hwnd));
+        backend.BeginFrame(Color::Black());
+        backend.DrawText(Point{ 0, 40 }, text, white, font);
+        backend.EndFrame();
+    }
+
+    HDC dc = GetDC(hwnd);
+    int asciiInk = 0;
+    for (int x = 0; x < 120; ++x)
+    {
+        for (int y = 40; y < 70; ++y)
+        {
+            if (GetPixel(dc, x, y) == RGB(255, 255, 255)) { ++asciiInk; }
+        }
+    }
+    ReleaseDC(hwnd, dc);
+
+    // ② 场景 B：同样串 + 窄裁剪（PushClip 到 [0,150]）⇒ 触发分支 6 前缀截断，
+    //    且 fit 边界落在 emoji 区域内 ⇒ 触发代理对判据。
+    {
+        GDIBackend backend;
+        backend.Initialize(Win32RenderContext(hwnd));
+        backend.BeginFrame(Color::Black());
+        backend.PushClip(Rect{ 0.0f, 0.0f, 150.0f, 200.0f });
+        backend.DrawText(Point{ 0, 40 }, text, white, font);
+        backend.PopClip();
+        backend.EndFrame();
+    }
+
+    dc = GetDC(hwnd);
+    int clippedInk = 0;
+    for (int x = 0; x < 120; ++x)          // 同一 ASCII 区域
+    {
+        for (int y = 40; y < 70; ++y)
+        {
+            if (GetPixel(dc, x, y) == RGB(255, 255, 255)) { ++clippedInk; }
+        }
+    }
+    ReleaseDC(hwnd, dc);
+
+    // ★ 判据：ASCII 前缀区墨量两场景**相同**——代理对后退只吞掉边界那一个字符，
+    //   不得影响其前的 ASCII（修复前孤立高代理会被 GDI 渲染成方框，墨量显著不同）。
+    EXPECT_EQ(clippedInk, asciiInk);
+    EXPECT_TRUE(asciiInk > 0);              // 基准本身非空（防「两场景都空」的假绿）
+
+    DestroyWindow(hwnd);
+}
+
 } // anonymous namespace
 
-void ECDI::Test::RegisterRendererTests()
-{
+void ECDI::Test::RegisterRendererTests(){
     GetTestRegistry().Add("Renderer.Forwarding", &TestRendererForwarding);
     GetTestRegistry().Add("Renderer.LongTextCommandStream", &TestRendererLongTextCommandStream);   // T28-6
     GetTestRegistry().Add("Renderer.UTF8Utility", &TestUTF8Utility);
@@ -578,5 +666,6 @@ void ECDI::Test::RegisterRendererTests()
     GetTestRegistry().Add("Renderer.ScaleAllGeometryFields", &TestRendererScaleAllGeometryFields);
     GetTestRegistry().Add("Renderer.ScaleTextPositionOnly", &TestRendererScaleTextPositionOnly);
     GetTestRegistry().Add("Renderer.LongTextScrollClipPrefixSpan", &TestLongTextScrollClipPrefixSpan);   // Phase 32/#64（审计 H8）
+    GetTestRegistry().Add("Renderer.LongTextPrefixSurrogateRetreat", &TestLongTextPrefixSurrogateRetreat);   // 审计 M18
     GetTestRegistry().Add("Renderer.ScaleLeavesBufferIntact", &TestRendererScaleLeavesBufferIntact);
 }

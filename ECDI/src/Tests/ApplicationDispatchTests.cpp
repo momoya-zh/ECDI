@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include <Windows.h>
@@ -7,6 +7,8 @@
 #endif
 
 #include "ECDI/Application/Application.h"
+#include "ECDI/Animation/AnimationManager.h"   // 审计 M1：kAnimationTickTimer
+#include "ECDI/EventSystem/Window/TimerEvent.h"   // 审计 M1：TimerEvent(nullptr, id)
 #include "Platform/Win32/Win32PlatformApplication.h"   // 唤醒注入缝（内部头——seam 不出实现层）
 
 #include <atomic>
@@ -558,6 +560,26 @@ void Test23RunOnOwnerThreadOnly(){
 
 }   // anonymous namespace
 
+// ── 审计 M1：`Application::OnTimer` 焦点分支判空（与动画分支对称）──────────────
+// 背景：同函数内**动画分支**判了 `event.GetWindow() != nullptr`，**焦点分支**却直接
+//   `*event.GetWindow()`。`TrayEvent::GetWindow()` 恒为 nullptr ⇒ 今天靠「托盘事件
+//   不走 OnTimer」侥幸未触发；一旦路由变化即空解引用。
+// ★ 判据：`TimerEvent(nullptr, id)` 走 `EventRouter` 到 `OnTimer` 不得崩、不得派发。
+//   ⚠️ 这里用 `OnEvent` 公开入口（`OnTimer` 是 protected override）——与生产同路径。
+void TestApplicationTimerNullWindowIsSafe()
+{
+	TestApp app;
+
+	// ① 动画分支（timerId = kAnimationTickTimer）——原已判空，本用例钉住不回归
+	app.OnEvent(TimerEvent(nullptr, AnimationManager::kAnimationTickTimer));
+
+	// ② 焦点分支（任意非动画 id）——★ 修复前在此空解引用
+	app.OnEvent(TimerEvent(nullptr, 999));
+
+	// ③ 真实窗口缺失时同样安全（GetWindow() 非空但窗口已毁的场景由上层保证，此处只验 null）
+	EXPECT_TRUE(true);   // 到达即通过（不崩）
+}
+
 void ECDI::Test::RegisterApplicationDispatchTests(){
 
 	GetTestRegistry().Add("ApplicationDispatch.SubmitBeforeRun",         &Test23SubmitBeforeRun);
@@ -581,5 +603,7 @@ void ECDI::Test::RegisterApplicationDispatchTests(){
 	GetTestRegistry().Add("ApplicationDispatch.WakeFailureRollsBack",    &Test23WakeFailureRollsBack);
 
 	GetTestRegistry().Add("ApplicationDispatch.RunOwnerThreadOnly",      &Test23RunOnOwnerThreadOnly);
+
+	GetTestRegistry().Add("ApplicationDispatch.TimerNullWindowIsSafe",   &TestApplicationTimerNullWindowIsSafe);   // 审计 M1
 
 }

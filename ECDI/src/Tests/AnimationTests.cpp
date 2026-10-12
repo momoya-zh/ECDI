@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include "ECDI/Animation/AnimationManager.h"
@@ -280,6 +280,42 @@ void TestTimerStartStop(){
 	EXPECT_EQ(platform.startCount, 2);
 }
 
+// ── 7b. ★ 审计 L1（机制订正版）：tick 之外取消最后一个动画 ⇒ 必须停 timer ──────────
+// 失效机制（原实现）：`DetachAnimation` 的非 tick 分支只 `erase` 不 `StopTimer`；而唯一的
+//   StopTimer 在 `Tick` 的 ⑥ 段，`Tick` 开头却有 `if (m_active.empty()) return;` ⇒
+//   **⑥ 永不执行** ⇒ `WM_TIMER` 以 tick 间隔**空转不止**（`HasActive()` 已假、timer 仍 armed），
+//   且下次 `Start` 会看到 `wasEmpty == true` 而**再次 StartTimer**（重启已在跑的定时器 + 重置锚点）。
+// 本用例把上面那条链的三个观测点全钉住。
+void TestCancelLastStopsTimer()
+{
+	TestPlatformWindow platform;
+	AnimationManager manager(platform);
+
+	AnimationToken token;
+
+	manager.Start(token, 0.0f, 1.0f, 1000ms, Easing::Linear, [&](float){});
+	EXPECT_EQ(platform.startCount, 1);
+	EXPECT_TRUE(platform.timerRunning);
+
+	// ★ tick **之外**取消唯一动画（走 DetachAnimation 的 else 分支）
+	manager.Cancel(token);
+	EXPECT_FALSE(manager.HasActive());
+
+	// ① 必须停 timer（修复前 stopCount == 0 ⇒ timer 空转不止）
+	EXPECT_EQ(platform.stopCount, 1);
+	EXPECT_FALSE(platform.timerRunning);
+
+	// ② 空闲后再 Start ⇒ 重新启动（startCount 从 1 → 2，而不是「重启已在跑的」）
+	manager.Start(token, 0.0f, 1.0f, 1000ms, Easing::Linear, [&](float){});
+	EXPECT_EQ(platform.startCount, 2);
+	EXPECT_TRUE(platform.timerRunning);
+
+	// ③ 再次取消 ⇒ 再停一次（幂等链不残留）
+	manager.Cancel(token);
+	EXPECT_EQ(platform.stopCount, 2);
+	EXPECT_FALSE(platform.timerRunning);
+}
+
 // ── 8. 回调重入（d 契约——onFinished 内 Start 下轮才推进；onValue 内 Cancel 不调 onFinished）──
 
 void TestReentrantStartInOnFinished(){
@@ -432,6 +468,7 @@ void ECDI::Test::RegisterAnimationTests()
     GetTestRegistry().Add("Animation.TokenDestruction", &TestTokenDestruction);
     GetTestRegistry().Add("Animation.Cancel", &TestCancel);
     GetTestRegistry().Add("Animation.TimerStartStop", &TestTimerStartStop);
+    GetTestRegistry().Add("Animation.CancelLastStopsTimer", &TestCancelLastStopsTimer);   // ★ 审计 L1（机制订正版）
     GetTestRegistry().Add("Animation.ReentrantStartInOnFinished", &TestReentrantStartInOnFinished);
     GetTestRegistry().Add("Animation.CancelSelfInOnValue", &TestCancelSelfInOnValue);
     GetTestRegistry().Add("Animation.ColorEndpoints", &TestColorAnimationEndpoints);

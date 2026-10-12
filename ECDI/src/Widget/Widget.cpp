@@ -1,4 +1,4 @@
-﻿#include "ECDI/Widget/Widget.h"
+#include "ECDI/Widget/Widget.h"
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
@@ -170,7 +170,17 @@ void Widget::SetLayout(std::unique_ptr<Layout> layout){
 
 Widget* Widget::GetChildAt(size_t index) noexcept{
 
-	FRAMEWORK_ASSERT(index < m_children.size());
+	// ★ 审计 L11：Release 下 `FRAMEWORK_ASSERT(index < m_children.size())` 展开为空
+	//   ⇒ 直接 `m_children[index]` = **越界访问**（vector operator[] 不查边界）。
+	//   与 `Application.cpp:176-178` 对同类场景**保留运行时分支**的做法对齐：
+	//   断言留在 Debug（暴露框架自身缺陷），Release 返回 nullptr 让调用方自行收敛
+	//   ——不把「契约靠断言维护」押在 Release 上（§7.3 同族）。
+	//   ⚠️ 返回值语义变化：越界时由 UB 改为 nullptr。既有调用点全部由 `GetChildCount()`
+	//   定界（Layout / Paint / HitTest / CollectFocusables），不受影响。
+	if (index >= m_children.size()){
+		FRAMEWORK_ASSERT(false);
+		return nullptr;
+	}
 
 	return m_children[index].get();
 
@@ -179,7 +189,10 @@ Widget* Widget::GetChildAt(size_t index) noexcept{
 
 const Widget* Widget::GetChildAt(size_t index) const noexcept{
 
-	FRAMEWORK_ASSERT(index < m_children.size());
+	if (index >= m_children.size()){
+		FRAMEWORK_ASSERT(false);
+		return nullptr;
+	}
 
 	return m_children[index].get();
 

@@ -1,4 +1,4 @@
-﻿#include "ECDI/Application/Application.h"
+#include "ECDI/Application/Application.h"
 
 #include "Platform/Win32/Win32PlatformApplication.h"
 #include "ECDI/Window/Window.h"
@@ -224,6 +224,15 @@ void Application::OnTimer(const TimerEvent& event){
 	}
 
 	// 8.5.1：定时器触发 → 派发给焦点控件（与 OnCharInput 同路径——非坐标事件，无 HitTest）
+	// ★ 审计 M1：与上面的动画分支**对称判空**——`TimerEvent::GetWindow()` 可为 null
+	//（TrayEvent 的 GetWindow() 恒为 nullptr；今天「托盘事件不走 OnTimer」只是巧合，
+	//  不是结构性保证）。动画分支（:216）已判空，本分支原先直接解引用。
+	if (event.GetWindow() == nullptr){
+
+		return;
+
+	}
+
 	Widget* target = FindFocusedWidget(*event.GetWindow());
 
 	if (target == nullptr){

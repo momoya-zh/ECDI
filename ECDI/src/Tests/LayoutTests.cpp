@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 #include "ECDI/Widget/Panel.h"
 #include "ECDI/Widget/Widget.h"
@@ -856,6 +856,59 @@ void TestPaddingNegativeClamped()
 #endif
 }
 
+// ── 审计 M20：负 spacing 钳制（与 padding 同形——Release 侧由初始化列表三元钳 0）──────
+// ★ 为什么要有这条用例：负 spacing 在 Release 下原先是**裸传**（无钳制）⇒
+//   ① `remaining` 因 `- m_spacing * gapCount` 反而变大；② `y += m_spacing` 让游标**往回走**
+//   ⇒ 兄弟控件重叠（几何错误，且与 padding 的既有钳制**纪律不一致**）。
+//   ★ Debug 侧同 padding：`FRAMEWORK_ASSERT(spacing >= 0)` 会终止测试进程 ⇒ 用例只在 NDEBUG 下跑。
+void TestSpacingNegativeClamped()
+{
+#ifdef NDEBUG
+    // ① VerticalLayout：负 spacing ⇒ 等价 spacing = 0（不重叠、不反向增大 remaining）
+    {
+        Panel panel;
+        panel.SetSize(200, 100);
+        panel.SetLayout(std::make_unique<VerticalLayout>(-10, false, 0));
+
+        auto a = std::make_unique<Widget>();
+        a->SetSize(40, 30);
+        auto b = std::make_unique<Widget>();
+        b->SetSize(40, 30);
+        auto* ap = a.get();
+        auto* bp = b.get();
+        panel.AddChild(std::move(a));
+        panel.AddChild(std::move(b));
+        panel.Arrange();
+
+        EXPECT_EQ(ap->GetY(), 0);
+        EXPECT_EQ(bp->GetY(), 30);                 // ★ 钳为 0 间隙 ⇒ b 紧跟 a（而非 -10 回退）
+        EXPECT_EQ(ap->GetHeight(), 30);
+        EXPECT_EQ(bp->GetHeight(), 30);
+    }
+
+    // ② HorizontalLayout：同构（x 轴）
+    {
+        Panel panel;
+        panel.SetSize(200, 100);
+        panel.SetLayout(std::make_unique<HorizontalLayout>(-7, false, 0));
+
+        auto a = std::make_unique<Widget>();
+        a->SetSize(40, 30);
+        auto b = std::make_unique<Widget>();
+        b->SetSize(40, 30);
+        auto* ap = a.get();
+        auto* bp = b.get();
+        panel.AddChild(std::move(a));
+        panel.AddChild(std::move(b));
+        panel.Arrange();
+
+        EXPECT_EQ(ap->GetX(), 0);
+        EXPECT_EQ(bp->GetX(), 40);                 // ★ 钳为 0 间隙 ⇒ b 紧跟 a
+        EXPECT_EQ(bp->GetWidth(), 40);
+    }
+#endif
+}
+
 // ── Phase 25 · ListLayout（T25-1..8 / T25-12 的 List 部分）──────────────────
 
 // T25-1：可见子按序定位（x 恒 0；行距 = rowHeight + spacing）
@@ -1390,6 +1443,7 @@ void ECDI::Test::RegisterLayoutTests()
     GetTestRegistry().Add("Layout.PaddingNested", &TestPaddingNested);
     GetTestRegistry().Add("Layout.PaddingIdempotent", &TestPaddingIdempotent);
     GetTestRegistry().Add("Layout.PaddingNegativeClamped", &TestPaddingNegativeClamped);
+    GetTestRegistry().Add("Layout.SpacingNegativeClamped", &TestSpacingNegativeClamped);   // 审计 M20
     GetTestRegistry().Add("Layout.ListPositions", &TestListLayoutPositions);
     GetTestRegistry().Add("Layout.ListHiddenParked", &TestListLayoutHiddenParked);
     GetTestRegistry().Add("Layout.ListHideRestoreIdempotent", &TestListLayoutHideRestoreIdempotent);

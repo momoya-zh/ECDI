@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // ⚠️ Win32 宏防护必须先于任何 ECDI 头：Windows.h 可能已通过其他路径（如 WindowMessageHandler.h）
 // 先被展开，`#define DrawText DrawTextW` 已生效——若不在 RenderingBackend.h 之前 #undef，

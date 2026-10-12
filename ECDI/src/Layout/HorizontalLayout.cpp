@@ -1,4 +1,4 @@
-﻿#include "ECDI/Layout/HorizontalLayout.h"
+#include "ECDI/Layout/HorizontalLayout.h"
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Widget/Widget.h"
@@ -8,8 +8,10 @@
 namespace ECDI{
 
 HorizontalLayout::HorizontalLayout(int spacing, bool fillCrossAxis, int padding)
-	: m_spacing(spacing), m_fillCrossAxis(fillCrossAxis), m_padding(padding < 0 ? 0 : padding)
+	: m_spacing(spacing < 0 ? 0 : spacing), m_fillCrossAxis(fillCrossAxis), m_padding(padding < 0 ? 0 : padding)
 {
+	// ★ 审计 M20：与 VerticalLayout 同族同形——`spacing` 负值 Release 下无兜底 ⇒
+	//   `remaining` 反向增大 + 游标回退 ⇒ 兄弟重叠；初始化列表钳 0 即契约本体。
 	FRAMEWORK_ASSERT(spacing >= 0);
 	FRAMEWORK_ASSERT(padding >= 0);   // 与 spacing 同型；Release 侧由初始化列表的三元钳 0（17 详设 △1）
 }

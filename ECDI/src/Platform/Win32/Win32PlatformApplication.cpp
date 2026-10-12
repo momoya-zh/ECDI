@@ -1,4 +1,4 @@
-﻿#include "Platform/Win32/Win32PlatformApplication.h"
+#include "Platform/Win32/Win32PlatformApplication.h"
 
 #include "Platform/Win32/Win32WindowClass.h"
 #include "ECDI/Core/Logger.h"
@@ -571,12 +571,14 @@ int Win32PlatformApplication::ShowTrayMenu(const TrayMenu& menu){
 	}
 
 	// 锚点兜底（修正五）：`ShowTrayMenu` 是公共 API，调用方可在**任何时刻**调它
-	//（不一定是响应 TrayEvent）。若此刻尚无任何锚点（缓存仍是 0——从未收过事件），
-	// 取当前光标位置，否则菜单会弹在屏幕左上角 (0,0)。
+	//（不一定是响应 TrayEvent）。若此刻**从未收到过任何锚点**，取当前光标位置，
+	// 否则菜单会弹在屏幕左上角 (0,0)。
+	// ★ 审计 L9：判据由「坐标 == (0,0)」改为**独立的 valid 旗标**——(0,0) 是合法屏幕
+	//   坐标，原判据会把「图标恰在左上角」误判成「未初始化」而误取光标。
 	int anchorX = m_lastAnchorX;
 	int anchorY = m_lastAnchorY;
 
-	if (anchorX == 0 && anchorY == 0){
+	if (!m_lastAnchorValid){
 
 		POINT cursor{};
 
@@ -698,9 +700,12 @@ void Win32PlatformApplication::HandleTrayCallback(WPARAM wParam, LPARAM lParam){
 	// **首次直接右键**时缓存仍是 0（从未收过鼠标事件）⇒ 菜单弹在屏幕**左上角 (0,0)**，
 	// 而"先点一次左键"后缓存被刷新，表现就变成"点了左键才正常"（实测症状）。
 	// 两个分支此刻都已得到**有效坐标**（ContextMenu = GetCursorPos 兜底 / 其余 = v4 锚点），故统一提交。
+	// ★ 审计 L9：同时置 valid 旗标——「已收到锚点」与「坐标值」分离，(0,0) 不再被误判。
 	m_lastAnchorX = x;
 
 	m_lastAnchorY = y;
+
+	m_lastAnchorValid = true;
 
 	if (type == TrayEventType::DoubleClick){
 

@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include <Windows.h>
@@ -190,6 +190,27 @@ void TestWidgetTree()
         auto* child = parent.GetChildAt(0);
         EXPECT_TRUE(child != nullptr);
     }
+
+    // ★ 审计 L11：越界 **Release 侧返 nullptr**（Debug 仍走断言终止——与上一条互补）
+    //   原实现 Release 下裸 `m_children[index]` = vector operator[] 越界访问（UB）。
+    //   修法 = 保留断言（Debug 暴露框架缺陷）+ 运行时分支返 nullptr（Release 不 UB），
+    //   与 `Application.cpp:176-178` 对同类场景的做法一致（「不把契约押在断言上」）。
+    // ⚠️ 只在 NDEBUG 下断言返回值：Debug 下断言会弹 MessageBox 并终止测试进程。
+#ifdef NDEBUG
+    {
+        Widget parent;
+        parent.AddChild(std::make_unique<Widget>());
+
+        EXPECT_TRUE(parent.GetChildAt(0) != nullptr);        // 界内正常
+        EXPECT_TRUE(parent.GetChildAt(1) == nullptr);        // ★ 越界（空树尾）
+        EXPECT_TRUE(parent.GetChildAt(999) == nullptr);      // ★ 越界（远超）
+        EXPECT_TRUE(static_cast<const Widget&>(parent).GetChildAt(1) == nullptr);   // const 重载同守
+
+        Widget empty;
+        EXPECT_TRUE(empty.GetChildAt(0) == nullptr);         // ★ 空树
+        EXPECT_TRUE(empty.GetChildCount() == 0);
+    }
+#endif
 
     // 防环：AddChild 拒绝已挂载的 child（前置条件检查——间接验证）
     {

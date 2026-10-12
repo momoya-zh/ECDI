@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Platform/PlatformApplication.h"
 
@@ -136,6 +136,10 @@ private:
 	std::wstring m_trayTooltip;            ///< 提示文本缓存（UTF-16——MODIFY 重建用）
 	int m_lastAnchorX = 0;                 ///< 最近有效锚点（菜单定位）
 	int m_lastAnchorY = 0;
+	// ★ 审计 L9：原先以 `(0,0)` 当「未初始化」哨兵，把**合法坐标**与未设置混为一谈
+	//   ⇒ 用户真的把图标放在屏幕左上角、或事件恰好落在 (0,0) 时，`ShowTrayMenu` 的
+	//   兜底分支会误判为「无锚点」而去取光标位置。改用独立 bool，坐标恒有效。
+	bool m_lastAnchorValid = false;        ///< 锚点是否已收到过（true = m_lastAnchorX/Y 有效）
 
 	// ── Phase 14 A3 修正四（2026-09-17 实测）：双击序列尾部的 UP 吞除 ──
 	// 实测双击 = `UP` + `DBLCLK` + `UP`（DBLCLK 与尾部 UP 间隔恒 0 ms）⇒ 尾部 UP 属双击序列，

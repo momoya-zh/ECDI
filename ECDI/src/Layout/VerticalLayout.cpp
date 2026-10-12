@@ -1,4 +1,4 @@
-﻿#include "ECDI/Layout/VerticalLayout.h"
+#include "ECDI/Layout/VerticalLayout.h"
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Widget/Widget.h"
@@ -8,8 +8,12 @@
 namespace ECDI{
 
 VerticalLayout::VerticalLayout(int spacing, bool fillCrossAxis, int padding)
-	: m_spacing(spacing), m_fillCrossAxis(fillCrossAxis), m_padding(padding < 0 ? 0 : padding)
+	: m_spacing(spacing < 0 ? 0 : spacing), m_fillCrossAxis(fillCrossAxis), m_padding(padding < 0 ? 0 : padding)
 {
+	// ★ 审计 M20：`spacing < 0` 与 `padding < 0` 同族同处——Release 下断言为空 ⇒
+	//   负 spacing 会让 `remaining` 反而变大（:49-50 的 `- m_spacing * gapCount`）
+	//   且 `y += m_spacing` 让游标**往回走** ⇒ 兄弟控件重叠。钳制（初始化列表）即契约本体，
+	//   与 GridLayout 的 `columns` 钳制 / 本类的 padding 钳制同形（V/H 无断言）。
 	FRAMEWORK_ASSERT(spacing >= 0);
 	FRAMEWORK_ASSERT(padding >= 0);   // 与 spacing 同型；Release 侧由初始化列表的三元钳 0（17 详设 △1）
 }

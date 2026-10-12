@@ -1,4 +1,4 @@
-﻿#include "ECDI/Decode/ImageDecoder.h"
+#include "ECDI/Decode/ImageDecoder.h"
 
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
@@ -111,15 +111,24 @@ bool CalculateImageBufferSize(unsigned int w, unsigned int h,
 /// @brief 共同后段：Frame → FormatConverter(32bppPBGRA) → CopyPixels → Image
 Image DecodeFromDecoder(IWICImagingFactory* factory, IWICBitmapDecoder* decoder)
 {
+	// ★ 审计 M10：`GetFrame` / `GetSize` / `CreateFormatConverter` 三处原先**丢弃真实
+	//   返回值**、改传常量 `E_FAIL`，令 `LogDecoderError` 的 `hr=0x%08lX` 诊断价值归零
+	//   （同仓 ShellImageDecoder.cpp:31-32 明令禁止伪造）。本函数逐处先取 `hr` 再判断，
+	//   透传真实 HRESULT。
+	// ⚠️ 范围边界：另两处 `E_FAIL`（DecodeFileImpl/DecodeMemoryImpl 的 `comScope.usable`
+	//   与 `SHCreateMemStream`）**不是伪造**——二者本就不是 HRESULT 返回（bool / 裸指针），
+	//   无「真实 hr」可透传；`CreateDecoderFrom*` 本就透传。故本次只改这三处。
 	ComPtr<IWICBitmapFrameDecode> frame;
-	if (FAILED(decoder->GetFrame(0, frame.ReleaseAndGetAddressOf()))) {
-		LogDecoderError(L"GetFrame", E_FAIL);
+	HRESULT hr = decoder->GetFrame(0, frame.ReleaseAndGetAddressOf());
+	if (FAILED(hr)) {
+		LogDecoderError(L"GetFrame", hr);
 		return {};
 	}
 
 	unsigned int w = 0, h = 0;
-	if (FAILED(frame->GetSize(&w, &h))) {
-		LogDecoderError(L"GetSize", E_FAIL);
+	hr = frame->GetSize(&w, &h);
+	if (FAILED(hr)) {
+		LogDecoderError(L"GetSize", hr);
 		return {};
 	}
 
@@ -131,13 +140,14 @@ Image DecodeFromDecoder(IWICImagingFactory* factory, IWICBitmapDecoder* decoder)
 	}
 
 	ComPtr<IWICFormatConverter> converter;
-	if (FAILED(factory->CreateFormatConverter(converter.ReleaseAndGetAddressOf()))) {
-		LogDecoderError(L"create format converter", E_FAIL);
+	hr = factory->CreateFormatConverter(converter.ReleaseAndGetAddressOf());
+	if (FAILED(hr)) {
+		LogDecoderError(L"create format converter", hr);
 		return {};
 	}
 
 	// 32bppPBGRA：与 Image::pixels（premultiplied BGRA / top-down / stride=w*4）逐字节同构——直灌零转换
-	HRESULT hr = converter->Initialize(
+	hr = converter->Initialize(
 	    frame.Get(), GUID_WICPixelFormat32bppPBGRA,
 	    WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
 	if (FAILED(hr)) {

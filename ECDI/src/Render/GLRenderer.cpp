@@ -1,4 +1,4 @@
-﻿#include "Render/GLRenderer.h"
+#include "Render/GLRenderer.h"
 
 #include "ECDI/Core/ECDIAssert.h"             // FRAMEWORK_ASSERT（决策 32 同构：Begin/End 严格配对）
 #include "ECDI/Core/Logger.h"
@@ -277,22 +277,33 @@ void GLRenderer::DrawRoundedRect(const Rect& rect, float cornerRadius, const Col
 		return;
 	}
 
-	const float maxRadius = (std::min)(rect.width, rect.height) * 0.5f;
-	const int radius = static_cast<int>(std::lround((std::min)(cornerRadius, maxRadius)));
+	// ★ 审计 M16：半径钳制改**整数口径**（与 GDI `GDIBackend.cpp:861-865` 逐字同式）——
+	//   ① 量化 `lround(cornerRadius)`；② 上界 `min(w,h) / 2`（**整数**除法）；
+	//   ③ clamp；④ effective 整数半径即角掩码键。
+	//   首版用 `min(w,h)*0.5f` + `lround` ⇒ **奇数边长下 2R > min**：如 5×5 得 R=3，
+	//   2R=6 > 5 ⇒ 三条「互不重叠」带（下方 :296-298）实际重叠 ⇒ 半透明色二次混合，
+	//   且 :294 自称的 `2R <= min(w,h)` 不变式为假。整数 `/2` 恒保证 2R <= min。
+	//   ★ 可达消费者：`ProgressBar` 默认 `effectiveRadius = GetHeight()/2`（奇数高即触发）。
+	const int w = static_cast<int>(rect.width);
+	const int h = static_cast<int>(rect.height);
+	const int roundedRadius   = static_cast<int>(std::lround(cornerRadius));
+	const int maxRadius       = (std::min)(w, h) / 2;
+	const int radius          = std::clamp(roundedRadius, 0, maxRadius);
 	if (radius <= 0)
 	{
 		DrawRect(rect, color);
 		return;
 	}
 
-	const float x = rect.x, y = rect.y, w = rect.width, h = rect.height;
+	const float x = rect.x, y = rect.y;
 	const float fr = static_cast<float>(radius);
 	Shade(color);
 
 	// ★ 三条**互不重叠**的实心带（★ 与 GDI 的 `DrawRoundedRectOpaqueAA` 同款几何）——
 	//   原实现的「竖带（全高）+ 横带（全宽）」在**中心区域重叠**，半透明色被二次混合
-	//   ⇒ 实测中心明显变深、外圈偏浅（可见的「回」字形）。★ 因 clamp 保证 `2R <= min(w,h)`，
-	//   三条带的宽高恒 >= 0；零尺寸者自然退化（真圆时三条带全零 ⇒ 仅四角拼成整圆）。
+	//   ⇒ 实测中心明显变深、外圈偏浅（可见的「回」字形）。★ 整数 clamp 保证
+	//   `2R <= min(w,h)`（M16 修复前该不变式为假），三条带的宽高恒 >= 0；
+	//   零尺寸者自然退化（真圆时三条带全零 ⇒ 仅四角拼成整圆）。
 	TexturedQuad(m_solid.x, m_solid.y, 1, 1, x, y + fr, w, h - 2.0f * fr);            // 中带（全宽）
 	TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + fr, y, w - 2.0f * fr, fr);           // 上带
 	TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + fr, y + h - fr, w - 2.0f * fr, fr);  // 下带
@@ -312,6 +323,14 @@ void GLRenderer::DrawRoundedRect(const Rect& rect, float cornerRadius, const Col
 
 void GLRenderer::DrawImage(const Rect& dest, const Image& image)
 {
+	// ★ 审计 L14：dest 非正尺寸**不再绘制**。GL 侧无背面剔除 ⇒ 负尺寸的 quad 顶点顺序
+	//   被翻转 ⇒ 画出**镜像四边形**（可见的鬼影）；GDI 侧 `FillRect`/`AlphaBlend` 对空矩形
+	//   是 no-op。两端行为对齐：非正 dest ⇒ 两端都 no-op。
+	//   ⚠️ 只查 dest，不查 image.width/height —— 那两条是**源数据完整性**校验（见 H3）。
+	if (dest.width <= 0.0f || dest.height <= 0.0f)
+	{
+		return;
+	}
 	if (!m_ready || image.width <= 0 || image.height <= 0)
 	{
 		return;
@@ -692,8 +711,26 @@ void GLRenderer::ApplyScissor()
 	}
 
 	const RECT& rc = m_clipStack.back();
+
+	// ★ 审计 M13：退化/越界守卫。`glScissor` 对负宽高报 `GL_INVALID_VALUE` 且
+	// **保留原 scissor 盒** ⇒ 上一级（父）的大 box 继续生效 ⇒ **欠裁剪**
+	// （内容溢出到不该画的地方）+ 每帧一个 GL 错误。
+	// 可达路径 = M11（TextBox 的 `PushClip` 收到负高文本区，`GetTextAreaHeight()`
+	// = height - padding*2 在 `2*padding > height` 时为负）。
+	// 修法：把 rc 钳进 framebuffer；钳后若为空（完全在外 / 退化）⇒ 宽高归 0
+	// （GL 规定宽高 0 合法且不产错误）——与 GDI 的 `IntersectClipRect` 对空矩形容忍同族语义：
+	// **空裁剪区 = 什么都不画**，而不是「残留父裁剪盒」。
+	// ⚠️ 类型：rc 是 LONG、m_w/m_h 是 int ⇒ 统一升到 long 再比，避免模板推导冲突。
+	const long left   = (std::max)(0L, (std::min)(static_cast<long>(rc.left),   static_cast<long>(m_w)));
+	const long right  = (std::max)(0L, (std::min)(static_cast<long>(rc.right),  static_cast<long>(m_w)));
+	const long bottom = (std::max)(0L, (std::min)(static_cast<long>(m_h) - static_cast<long>(rc.bottom), static_cast<long>(m_h)));
+	const long top    = (std::max)(0L, (std::min)(static_cast<long>(m_h) - static_cast<long>(rc.top),    static_cast<long>(m_h)));
+	const long width  = (std::max)(0L, right - left);
+	const long height = (std::max)(0L, top - bottom);
+
 	glEnable(GL_SCISSOR_TEST);
-	glScissor(rc.left, m_h - rc.bottom, rc.right - rc.left, rc.bottom - rc.top);
+	glScissor(static_cast<GLint>(left), static_cast<GLint>(bottom),
+	          static_cast<GLsizei>(width), static_cast<GLsizei>(height));
 }
 
 }

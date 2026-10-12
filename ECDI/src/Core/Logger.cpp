@@ -1,10 +1,10 @@
-﻿#include "ECDI/Core/Logger.h"
+#include "ECDI/Core/Logger.h"
+#include "ECDI/Core/ECDIAssert.h"
 
 #include <Windows.h>
 
 #include <string>
 #include <stdexcept>
-#include <cassert>
 
 namespace ECDI{
 
@@ -28,7 +28,13 @@ static std::wstring_view ToString(LogLevel level)noexcept {
 	case LogLevel::Fatal:
 		return L"Fatal";
 	}
-	assert(false && "Unknown LogLevel");
+	// ★ 审计 M23：`NDEBUG` 下裸 `assert(false)` 展开为空操作 ⇒ 函数继续走到
+	//   `return L""` ⇒ 空标签静默进日志（无诊断价值）。改用 FRAMEWORK_ASSERT 与全库统一：
+	//   Debug 走 HandleAssertFailure（日志 + MessageBox + 终止），Release 仍静默——
+	//   **但那是全库一致的既有口径**（本项目的「契约靠断言维护」纪律见 ECDIAssert.h）。
+	// ⚠️ 此处**不是**为 Release 补运行时分支：枚举 switch 已穷尽，到达此处意味着
+	//   内存被写坏（强类型 enum 不可能有其它值）——那是不可恢复的框架级错误。
+	FRAMEWORK_ASSERT(false && "Unknown LogLevel");
 	return L"";
 }
 

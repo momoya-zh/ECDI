@@ -1,4 +1,4 @@
-﻿#include "ECDI/Animation/AnimationManager.h"
+#include "ECDI/Animation/AnimationManager.h"
 
 #include "ECDI/Platform/PlatformWindow.h"
 
@@ -128,6 +128,22 @@ void AnimationManager::DetachAnimation(AnimationTokenState& state){
 			else{
 
 				m_active.erase(m_active.begin() + static_cast<std::ptrdiff_t>(i));
+
+				// ★ 审计 L1（机制订正版）：**非 tick 路径排空后必须停定时器**。
+				// 原实现只在 `Tick` 的 ⑥ 段停 timer（:237-243），但 `Tick` 开头有
+				// `if (m_active.empty()) return;`（:148-152）⇒ **永远不会执行到 ⑥**
+				// ⇒ 在 tick 之外取消最后一个动画后，`WM_TIMER` 以 tick 间隔**空转不止**
+				// （`HasActive()` 已假、但 timer 仍 armed），且下一次 `Start` 会看到
+				// `wasEmpty == true` 而**再次 StartTimer**（重启已在跑的定时器 + 重置 elapsed 锚点）。
+				// ⇒ 这是审计 L1 所述现象的真正机制；`m_timerRunning` 本意正是防这个，
+				//   却从未在这条路径上被用来停 timer。
+				if (m_active.empty() && m_timerRunning){
+
+					m_platformWindow.StopTimer(kAnimationTickTimer);
+
+					m_timerRunning = false;
+
+				}
 
 			}
 

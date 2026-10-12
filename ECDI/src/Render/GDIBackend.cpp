@@ -1,4 +1,4 @@
-﻿#include "Render/GDIBackend.h"
+#include "Render/GDIBackend.h"
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Core/Logger.h"
@@ -451,6 +451,20 @@ void GDIBackend::BeginFrame(const Color& background)
 	FRAMEWORK_ASSERT(!m_inFrame);
 	m_inFrame = true;
 
+	// ★ 审计 L6：未 `Initialize` ⇒ `m_hwnd == nullptr` ⇒ `BeginPaint` 失败返回空 DC
+	//   ⇒ 后续 `CreateCompatibleDC(nullptr)` / `SelectObject` / `GetClipBox` 全线失效，
+	//   最终在 `EnsureBackBuffer` 撞 `FRAMEWORK_ASSERT(false)`（**Debug 直接中止**）。
+	// 修法 = 运行时分支（不把契约押在断言上——§7.3 同族纪律，`ScrollView.cpp:154-158` 先例）：
+	//   未注入句柄 ⇒ 本帧整体跳过绘制，`EndFrame` 的配对由 `m_windowDC == nullptr` 守卫。
+	//   ⚠️ **不改 `IsReady()` 的语义**：GDI 的「未 Initialize」本就是良性态（画不出东西而已），
+	//   与 GL 的「WGL context 建失败 ⇒ 全部静默 no-op」不同——`ModelProbeTests.cpp:296`
+	//   正是钉住这个区分（GDI 恒 true / GL 未 Initialize 为 false）。
+	if (m_hwnd == nullptr)
+	{
+		m_windowDC = nullptr;
+		return;   // 无平台句柄：本帧 no-op（EndFrame 见 m_windowDC == nullptr 直返）
+	}
+
 	// 决策 17：帧 DC 从 BeginPaint 获取，EndFrame 严格配对释放
 	m_windowDC = BeginPaint(m_hwnd, &m_ps);
 
@@ -686,7 +700,20 @@ void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
 		return;
 	}
 
-	SelectObject(m_memoryDC, hfont);
+	// ★ 审计 L7：本处原先**不恢复旧字体**，而同文件另三处（DrawLine/DrawFocusRect 的
+	//   SelectObject/HPEN 对）与 GDITextMeasurer.cpp:118,133 都恢复。m_memoryDC 是跨帧复用的
+	//   内存 DC ⇒ 残留字体依赖「下一次 DrawText 必先 SelectObject」这一隐式前提；
+	//   任何未设字体的路径（如只画矩形的帧）都会画在**上一个字体**上。与同文件惯例对齐。
+	// ⚠️ SelectObject 的返回值即「旧字体」——必须由**同一处**选取并保存；
+	//   用一个 RAII 守卫保证下方三条 return 路径（阈值分支 1 / extent 失败回退 / 分支 6）
+	//   都不漏恢复（原实现只有一条 return，没有这个问题）。
+	const HFONT previousFont = static_cast<HFONT>(SelectObject(m_memoryDC, hfont));
+	struct FontRestore {
+		HDC dc;
+		HFONT old;
+		~FontRestore() { if (old) SelectObject(dc, old); }
+	} fontGuard{ m_memoryDC, previousFont };
+
 	SetBkMode(m_memoryDC, TRANSPARENT);           // P5：背景透明（文本叠在控件背景上）
 	SetTextColor(m_memoryDC, ToColorRef(color));  // P8：前景色
 
@@ -749,6 +776,22 @@ void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
 		{
 			prefix = static_cast<INT>(wideText.size());
 		}
+
+		// ★ 审计 M18：前缀不得劈开 UTF-16 **代理对**。
+		// 若 prefix 落在「高位代理之后、低位代理之前」，`TextOutW` 会画出一个孤立高位代理
+		// ⇒ 该字符丢失（同时可能连带后续字符错位）。
+		// 修法与 `GDITextMeasurer.cpp:206-216` 的 `FitText` 契约**同源**（那边已实现后退）：
+		// 判据 = 「prefix 的前一个码元是高位代理」⇒ prefix 正停在代理对中间 ⇒ 后退一位。
+		// ⚠️ 只后退、不前插：前插会画出跨裁剪区的字形（违背「守卫字符」的语义）。
+		if (prefix > 0 && prefix < static_cast<INT>(wideText.size()))
+		{
+			const wchar_t last = wideText[static_cast<std::size_t>(prefix) - 1];
+			if (last >= 0xD800 && last <= 0xDBFF)
+			{
+				--prefix;   // 停在代理对中间 ⇒ 后退一位（宁少一个字符，不可劈开一个字符）
+			}
+		}
+
 		TextOutW(m_memoryDC, drawX, drawY, wideText.c_str(), prefix);
 		return;
 	}
@@ -1298,7 +1341,13 @@ void GDIBackend::EndFrame()
 	}
 
 	// 决策 17：BeginPaint/EndPaint 严格配对
-	EndPaint(m_hwnd, &m_ps);
+	// ★ 审计 L6：`m_windowDC == nullptr` ⇒ BeginFrame 未真取 DC（无平台句柄的 no-op 帧）
+	//   ⇒ 不得调 EndPaint（对 null HWND 是无效调用）。
+	if (m_windowDC != nullptr)
+	{
+		EndPaint(m_hwnd, &m_ps);
+		m_windowDC = nullptr;
+	}
 }
 
 // ── Phase 8.6：圆角覆盖度抗锯齿（详细设计 §5.3–§5.6）────────────────
