@@ -1,11 +1,16 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 #include "ECDI/Widget/CollapsiblePanel.h"
 #include "ECDI/Widget/Label.h"
 #include "ECDI/Render/PaintContext.h"
 #include "ECDI/Render/RenderCommand.h"
 #include "Render/RecordingBackend.h"
+// ── 审计 M7（#67）：真窗口动画路径用例所需（本文件此前无有窗口用例）──
+#include "ECDI/Application/Application.h"
+#include "ECDI/Window/Window.h"
+#include "ECDI/Animation/AnimationManager.h"
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -348,9 +353,182 @@ void Test30CollapseVisibilityPin(){
 	EXPECT_EQ(PaintTexts(*panel.GetContent()).size(), static_cast<std::size_t>(1));
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 审计 M7（#67）：Up/Left 方向位置无界漂移
+// ══════════════════════════════════════════════════════════════════════
+// ★ 缺陷：`ApplyGeometry` 把「上一次自己写过位置」当锚点基准再叠加增量
+//   （`cy + (h0 - s)` / `cx + (w0 - s)`）⇒ 对 Down/Right（位置与 s 无关）无害，
+//   对 **Up/Left（位置随 s 变）逐帧累加 ⇒ 无界漂移**。
+//   数值复现（审计原文）：Up 方向 s 由 0 增到 400 时 y 从 600 漂到 2000、底边从 600 漂到 2400。
+// ★ 为何既有 14 条用例测不到：它们**全部走无窗口瞬时路径**，而瞬时路径只调
+//   `ApplyGeometry` **一次** ⇒ `cy` 尚未被污染、y 恰好正确。**唯一致命的是多次调用**
+//   （动画逐帧 / 有窗口路径）——那时才暴露。故本组必须**多次驱动**。
+// ★ 驱动两条途径（都不依赖真实平台能力）：
+//   ① **无窗口反复跃迁**：SetExpanded(true/false) 反复触发瞬时路径（每轮调一次 ApplyGeometry）；
+//   ② **真窗口动画路径**：Application + Window + 手动 Tick（本文件此前 **0 条**有窗口用例）。
+
+// ── M7-①：Up 方向反复展开/折叠 ⇒ 锚定底边恒定、位置不漂移 ────────────────
+// 判据 = **不变量**：任何时刻 `y + h == 锚定底边`（恒 600）。漂移会让该等式失效。
+void Test67UpNoDriftAcrossToggles()
+{
+	CollapsiblePanel panel;
+	panel.SetExpandDirection(ExpandDirection::Up);
+	panel.SetPosition(100, 200);
+	panel.SetSize(300, 400);
+
+	// 收起态：底边 = 200 + 400 = 600（y 变为 600、h=0）
+	EXPECT_EQ(panel.GetY(), 600);
+	EXPECT_EQ(panel.GetHeight(), 0);
+	EXPECT_EQ(panel.GetY() + panel.GetHeight(), 600);
+
+	// ★ 反复跃迁 8 轮——修复前每轮都把 y 再叠一次，y 会单调增大
+	for (int round = 0; round < 8; ++round)
+	{
+		panel.SetExpanded(true);
+		EXPECT_TRUE(panel.IsExpanded());
+		EXPECT_EQ(panel.GetY(), 200);                       // 展开 ⇒ 回基准左上角
+		EXPECT_EQ(panel.GetHeight(), 400);
+		EXPECT_EQ(panel.GetY() + panel.GetHeight(), 600);   // ★ 底边恒定（不变量）
+
+		panel.SetExpanded(false);
+		EXPECT_FALSE(panel.IsExpanded());
+		EXPECT_EQ(panel.GetY(), 600);                       // 收起 ⇒ y = 底边
+		EXPECT_EQ(panel.GetHeight(), 0);
+		EXPECT_EQ(panel.GetY() + panel.GetHeight(), 600);   // ★ 底边恒定（不变量）
+	}
+}
+
+// ── M7-②：Left 方向同构（右边恒定——x + w == 锚定右边）──────────────────
+void Test67LeftNoDriftAcrossToggles()
+{
+	CollapsiblePanel panel;
+	panel.SetExpandDirection(ExpandDirection::Left);
+	panel.SetPosition(100, 200);
+	panel.SetSize(300, 400);
+
+	// 收起态：右边 = 100 + 300 = 400（x 变为 400、w=0）
+	EXPECT_EQ(panel.GetX(), 400);
+	EXPECT_EQ(panel.GetWidth(), 0);
+	EXPECT_EQ(panel.GetX() + panel.GetWidth(), 400);
+
+	for (int round = 0; round < 8; ++round)
+	{
+		panel.SetExpanded(true);
+		EXPECT_EQ(panel.GetX(), 100);
+		EXPECT_EQ(panel.GetWidth(), 300);
+		EXPECT_EQ(panel.GetX() + panel.GetWidth(), 400);    // ★ 右边恒定
+
+		panel.SetExpanded(false);
+		EXPECT_EQ(panel.GetX(), 400);
+		EXPECT_EQ(panel.GetWidth(), 0);
+		EXPECT_EQ(panel.GetX() + panel.GetWidth(), 400);    // ★ 右边恒定
+	}
+}
+
+// ── M7-③：Down/Right 零回归（位置与 s 无关——修复前后逐位相同）──────────
+// ★ 反向对照：修复不得动「本来就正确」的两个方向（审计原文：Down/Right 无害）。
+void Test67DownRightZeroRegression()
+{
+	{
+		CollapsiblePanel panel;
+		panel.SetExpandDirection(ExpandDirection::Down);
+		panel.SetPosition(100, 200);
+		panel.SetSize(300, 400);
+
+		EXPECT_EQ(panel.GetX(), 100);   // top 锚定 ⇒ 位置恒定不动
+		EXPECT_EQ(panel.GetY(), 200);
+		EXPECT_EQ(panel.GetHeight(), 0);
+
+		for (int round = 0; round < 5; ++round)
+		{
+			panel.SetExpanded(true);
+			EXPECT_EQ(panel.GetX(), 100);
+			EXPECT_EQ(panel.GetY(), 200);
+			EXPECT_EQ(panel.GetHeight(), 400);
+			panel.SetExpanded(false);
+			EXPECT_EQ(panel.GetX(), 100);
+			EXPECT_EQ(panel.GetY(), 200);   // ★ 位置恒为 200（不漂移也不位移）
+			EXPECT_EQ(panel.GetHeight(), 0);
+		}
+	}
+	{
+		CollapsiblePanel panel;
+		panel.SetExpandDirection(ExpandDirection::Right);
+		panel.SetPosition(100, 200);
+		panel.SetSize(300, 400);
+
+		for (int round = 0; round < 5; ++round)
+		{
+			panel.SetExpanded(true);
+			EXPECT_EQ(panel.GetX(), 100);
+			EXPECT_EQ(panel.GetWidth(), 300);
+			panel.SetExpanded(false);
+			EXPECT_EQ(panel.GetX(), 100);
+			EXPECT_EQ(panel.GetY(), 200);
+			EXPECT_EQ(panel.GetWidth(), 0);
+		}
+	}
+}
+
+// ── M7-④：真窗口动画路径（审计点名「当前 0 条」）─────────────────────────
+// ★ 有 Window ⇒ SetExpanded 走 AnimationManager 动画，ApplyGeometry 被**逐帧多次**调用
+//   ——正是漂移的唯一致命场景。手动 Tick 推进动画，逐帧验锚定边不变量。
+void Test67WindowedAnimationKeepsAnchor()
+{
+	Application app;
+	RenderServices services = CreateDefaultRenderServices();
+	Window& window = app.Create("ECDI_M7_Anim", 400, 300, std::move(services));
+
+	CollapsiblePanel* panel = new CollapsiblePanel();
+	panel->SetExpandDirection(ExpandDirection::Up);
+	panel->SetPosition(100, 200);
+	panel->SetSize(300, 400);          // 收起态：y=600、h=0、底边=600
+	window.GetRootWidget().AddChild(std::unique_ptr<CollapsiblePanel>(panel));
+
+	EXPECT_EQ(panel->GetY() + panel->GetHeight(), 600);
+
+	// 启动展开动画（有窗口 ⇒ 走动画而非瞬时路径）
+	panel->SetExpanded(true);
+
+	// 逐帧推进：每帧都验「底边恒定」不变量（漂移会在任一中途帧暴露）
+	AnimationManager& anim = window.GetAnimationManager();
+	for (int frame = 0; frame < 10; ++frame)
+	{
+		anim.Tick(std::chrono::milliseconds(30));   // 10 × 30ms = 300ms > 200ms 时长 ⇒ 走完
+		EXPECT_EQ(panel->GetY() + panel->GetHeight(), 600);   // ★ 每一帧底边都不变
+		EXPECT_TRUE(panel->GetY() >= 200);                    // 不越过基准上边
+		EXPECT_TRUE(panel->GetY() <= 600);                    // 不越过收起位
+	}
+
+	// 终态 = 基准几何
+	EXPECT_TRUE(panel->IsExpanded());
+	EXPECT_EQ(panel->GetX(), 100);
+	EXPECT_EQ(panel->GetY(), 200);
+	EXPECT_EQ(panel->GetHeight(), 400);
+
+	// 折叠动画同理（反向）——逐帧底边不变
+	panel->SetExpanded(false);
+	for (int frame = 0; frame < 10; ++frame)
+	{
+		anim.Tick(std::chrono::milliseconds(30));
+		EXPECT_EQ(panel->GetY() + panel->GetHeight(), 600);
+	}
+
+	EXPECT_FALSE(panel->IsExpanded());
+	EXPECT_EQ(panel->GetY(), 600);
+	EXPECT_EQ(panel->GetHeight(), 0);
+
+	window.Release();
+}
+
 void ECDI::Test::RegisterCollapsiblePanelTests()
 {
     GetTestRegistry().Add("CollapsiblePanel.CollapseVisibilityPin", &Test30CollapseVisibilityPin);   // T30-7（Phase 30 批二）
+    // ── 审计 M7（#67）：Up/Left 位置无界漂移 ──
+    GetTestRegistry().Add("CollapsiblePanel.UpNoDriftAcrossToggles",   &Test67UpNoDriftAcrossToggles);
+    GetTestRegistry().Add("CollapsiblePanel.LeftNoDriftAcrossToggles", &Test67LeftNoDriftAcrossToggles);
+    GetTestRegistry().Add("CollapsiblePanel.DownRightZeroRegression",  &Test67DownRightZeroRegression);
+    GetTestRegistry().Add("CollapsiblePanel.WindowedAnimationKeepsAnchor", &Test67WindowedAnimationKeepsAnchor);
     GetTestRegistry().Add("CollapsiblePanel.DefaultCollapsed",     &TestDefaultCollapsed);
     GetTestRegistry().Add("CollapsiblePanel.DownCollapse",          &TestDownCollapse);
     GetTestRegistry().Add("CollapsiblePanel.UpCollapse",            &TestUpCollapse);
