@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Widget/Widget.h"
 
@@ -26,6 +26,16 @@ public:
 
 	/// @brief 获取当前 Hover 目标（非拥有指针，可能为 nullptr）
 	Widget* GetHoverWidget() const noexcept{ return m_hoverWidget; }
+
+	/// @brief 注销某个子树上的 Hover 目标（★ 审计 #59/H6：摘树时的失效清理）
+	/// @param subtreeRoot 即将脱树的子树根（`nullptr` = no-op）
+	/// @details 若当前 Hover 目标落在 `subtreeRoot` 子树内 ⇒ **置空且不派发 `OnMouseLeave`**。
+	///          ★ 语义 = **契约 C 的直接延伸**（`HoverTracker.cpp:18` 已有同款判据）：
+	///          脱树是「**异常失效**」而非「正常离开」，补发 Leave 会制造语义歧义
+	///          （控件已不在树上，却收到"鼠标离开"）⇒ 一律不补发。
+	///          ⚠️ 必须由**摘树方**在清除父指针**之前**调用——`IsInTree` 依赖父链上溯，
+	///          链一断就无法判定包含关系（这也是本方法存在的根本原因）。
+	void ForgetSubtree(const Widget* subtreeRoot) noexcept;
 
 private:
 

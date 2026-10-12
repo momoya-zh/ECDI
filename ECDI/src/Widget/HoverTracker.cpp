@@ -1,4 +1,4 @@
-﻿#include "ECDI/Widget/HoverTracker.h"
+#include "ECDI/Widget/HoverTracker.h"
 
 namespace ECDI{
 
@@ -53,6 +53,40 @@ bool HoverTracker::IsInTree(Widget* widget) const noexcept{
 	}
 
 	return false;   // 上溯到 null 仍未到树根 = 已脱树
+
+}
+
+void HoverTracker::ForgetSubtree(const Widget* subtreeRoot) noexcept{
+
+	if (m_hoverWidget == nullptr || subtreeRoot == nullptr){
+
+		return;
+
+	}
+
+	// 判据 = 「当前 Hover 目标是否落在该子树内」（含子树根自身）——沿父链上溯即可，
+	// 与 `IsInTree` 同一上溯形式（此处不直接调 `IsInTree`：它判的是"是否仍在**树**"，
+	// 而本方法判的是"是否在该**子树**内"，两者端点不同）。
+	bool inside = false;
+
+	for (Widget* current = m_hoverWidget; current != nullptr; current = current->GetParent()){
+
+		if (current == subtreeRoot){
+
+			inside = true;
+
+			break;
+
+		}
+
+	}
+
+	if (inside){
+
+		// ★ 契约 C：脱树失效**不补发** OnMouseLeave（`Update` 里的同款判据是"正常离开"路径）
+		m_hoverWidget = nullptr;
+
+	}
 
 }
 

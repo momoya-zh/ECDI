@@ -1420,6 +1420,169 @@ void Test65DispatchSkipsDisabled()
 	EXPECT_TRUE(probe.box->GetText().find('z') != std::string::npos);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 审计 #59 / H6：非拥有 Widget 指针的失效清理（摘树时统一注销）
+// ══════════════════════════════════════════════════════════════════════
+// ★ 缺陷：框架有三处非拥有 Widget 指针（Window 的焦点/捕获 + HoverTracker 的 hover），
+//   而 `Widget::RemoveChild` 原只清 `m_parent` ⇒ 丢弃返回值即析构后三处全部悬垂。
+//   三条 UAF 路径（审计原文）：① 焦点；② 捕获；③ hover。
+// ★ 修法：`RemoveChild` 在**清除父指针之前**调 `Window::ForgetSubtree(该子树)`——
+//   判据是「登记是否**落在子树内**」（含深层后代），且**一律不补发**回调。
+// ★ 为什么必须"摘树时刻"注销：判据靠父链上溯；`m_parent = nullptr` 之后链断、
+//   再也找不到所属 Window（`~Widget` 通知方案的根本障碍就在这）。
+// ★ 本组装置：真 Application + Window（清理逻辑挂在 Window 上，纯 Widget 树测不到）。
+
+namespace {
+
+/// @brief 失效清理探针：真 Window + 可摘子树 + 可观测的 hover 目标
+struct DetachProbe {
+
+	Application app;
+
+	Window* window = nullptr;   ///< 非拥有（所有权归 Application）
+
+	/// @brief 可观测 hover 事件的控件（Enter/Leave 计数）
+	struct Probe : public Widget {
+		int enter = 0;
+		int leave = 0;
+		void OnMouseEnter() override { ++enter; }
+		void OnMouseLeave() override { ++leave; }
+	};
+
+	explicit DetachProbe(const char* title) {
+		RenderServices services = CreateDefaultRenderServices();
+		window = &app.Create(title, 400, 300, std::move(services));
+	}
+
+	~DetachProbe() { window->Release(); }
+
+	/// @brief 在父节点下挂一个探针子控件（返非拥有指针）
+	Probe* AddProbe(Widget& parent) {
+		auto w = std::make_unique<Probe>();
+		w->SetSize(50, 20);
+		Probe* raw = w.get();
+		parent.AddChild(std::move(w));
+		return raw;
+	}
+};
+
+}   // namespace
+
+// ── #59-①：焦点目标被摘树 ⇒ 登记清空 + **不补发** OnFocusLost ────────────
+void Test59DetachClearsFocus()
+{
+	DetachProbe probe("ECDI_59_Focus");
+	Widget& root = probe.window->GetRootWidget();
+
+	DetachProbe::Probe* p = probe.AddProbe(root);
+	probe.window->SetFocusedWidget(p);
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == p);
+
+	// 摘树（**丢弃返回值**——审计点名的"最自然写法"；此处刻意持有到作用域结束以便观察）
+	auto removed = root.RemoveChild(p);
+
+	// ★ 修复前：登记仍指向已脱树的 p（并将在析构后悬垂）
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == nullptr);
+}
+
+// ── #59-②：捕获目标被摘树 ⇒ 登记清空 ─────────────────────────────────────
+void Test59DetachClearsCapture()
+{
+	DetachProbe probe("ECDI_59_Capture");
+	Widget& root = probe.window->GetRootWidget();
+
+	DetachProbe::Probe* p = probe.AddProbe(root);
+	probe.window->SetCaptureWidget(p);
+	EXPECT_TRUE(probe.window->GetCaptureWidget() == p);
+
+	auto removed = root.RemoveChild(p);
+
+	EXPECT_TRUE(probe.window->GetCaptureWidget() == nullptr);
+}
+
+// ── #59-③：hover 目标被摘树 ⇒ 登记清空 + **不补发** OnMouseLeave（契约 C）──
+// ★★ 断言纪律（首版假绿，如实记账）：**只断言「不补发 Leave」测不出本修复**——因为
+//   「不补发」在修复前后**都成立**（`HoverTracker::Update` 本来就靠 `IsInTree` 判"脱树不 Leave"），
+//   故首版这条用例在未修代码下**照样通过**（401 passed 里它是绿的）。
+//   ⇒ 必须断言**正向事实**：登记被清空。判据取「登记为空的**可观测后果**」——
+//     摘树后调 `UpdateHoverState(nullptr)`：① 登记已空 ⇒ 无任何回调；
+//     ② 登记未清 ⇒ 走"正常离开"分支 ⇒ 会对**已脱树对象**补发 Leave（这正是缺陷的行为指纹）。
+//   ⚠️ 为能在摘树后继续观察 p，本用例**持有** RemoveChild 的返回值（p 存活）；
+//     悬垂（丢弃返回值）路径由 ①/② 两条用例覆盖。
+void Test59DetachHoverNoLeave()
+{
+	DetachProbe probe("ECDI_59_Hover");
+	Widget& root = probe.window->GetRootWidget();
+
+	DetachProbe::Probe* p = probe.AddProbe(root);
+	probe.window->UpdateHoverState(p);
+	EXPECT_TRUE(p->enter == 1);      // 进入已派发
+	EXPECT_TRUE(p->leave == 0);
+
+	// 摘树但**持有**返回值 ⇒ p 存活（便于观察修复是否清了登记）
+	auto removed = root.RemoveChild(p);
+
+	// ★★ 判别式（首版假绿后重写，如实记账）：**「不补发 Leave」在修复前后两态相同**，
+	//   所以拿它当判据等于没测——摘树后 p 已脱树，`HoverTracker::Update` 的
+	//   `IsInTree(oldHover)` 对「登记仍指 p」与「登记已清空」**都返回 false**
+	//   ⇒ 两条分支的表现完全一致（首版因此 401 passed 里它是绿的）。
+	//   ⇒ 真正的差异在**把同一个指针重新挂回树上**之后：
+	//      · 登记已清（修复后）⇒ `m_hoverWidget == nullptr != p` ⇒ **重新派发 Enter**；
+	//      · 登记未清（修复前）⇒ `m_hoverWidget == p` ⇒ 命中"同目标短路"⇒ **不再派发**。
+	//   这是唯一不依赖新增测试缝、且两态可区分的行为指纹。
+	root.AddChild(std::move(removed));          // 重新挂回（同一指针）
+	probe.window->UpdateHoverState(p);
+
+	EXPECT_TRUE(p->enter == 2);   // ★ 修复前恒为 1（同目标短路吞掉重新进入）
+	EXPECT_TRUE(p->leave == 0);   // 契约 C：脱树是异常失效，**不补发** Leave
+}
+
+// ── #59-④：**深层后代**被摘树 ⇒ 也要清（判据是"落在子树内"而非"等于子树根"）──
+void Test59DetachDeepDescendant()
+{
+	DetachProbe probe("ECDI_59_Deep");
+	Widget& root = probe.window->GetRootWidget();
+
+	// 中间容器 → 叶控件（焦点/捕获挂在**叶**上，摘的是**容器**）
+	auto container = std::make_unique<Widget>();
+	Widget* containerRaw = container.get();
+	root.AddChild(std::move(container));
+
+	DetachProbe::Probe* leaf = probe.AddProbe(*containerRaw);
+	probe.window->SetFocusedWidget(leaf);
+	probe.window->SetCaptureWidget(leaf);
+	probe.window->UpdateHoverState(leaf);
+
+	// 摘**容器**（叶是其后代）——只比"等于子树根"的实现会漏掉这三条
+	auto removed = root.RemoveChild(containerRaw);
+
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == nullptr);
+	EXPECT_TRUE(probe.window->GetCaptureWidget() == nullptr);
+	EXPECT_TRUE(leaf->leave == 0);   // 仍不补发
+}
+
+// ── #59-⑤：正常摘树**不得**误清无关登记（反向对照）──────────────────────
+// ★ 防止「一律清空」的过度修复：摘 A 不能碰 B 的焦点/捕获/hover。
+void Test59DetachDoesNotClearUnrelated()
+{
+	DetachProbe probe("ECDI_59_Unrelated");
+	Widget& root = probe.window->GetRootWidget();
+
+	DetachProbe::Probe* a = probe.AddProbe(root);
+	DetachProbe::Probe* b = probe.AddProbe(root);
+
+	probe.window->SetFocusedWidget(b);
+	probe.window->SetCaptureWidget(b);
+	probe.window->UpdateHoverState(b);
+
+	root.RemoveChild(a);   // 摘**无关的** a
+
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == b);   // ★ b 的登记必须保留
+	EXPECT_TRUE(probe.window->GetCaptureWidget() == b);
+	EXPECT_TRUE(b->leave == 0);
+	EXPECT_TRUE(b->enter == 1);
+}
+
 // ── T31-2b：单行垂直居中位置跟随 LineHeight ──────────────────────────
 void Test31LineHeightDrivesSingleLineCenter()
 {
@@ -1526,4 +1689,11 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("Keyboard.FocusCollectionFiltersInvisible", &Test65FocusCollectionFiltersInvisible);
     GetTestRegistry().Add("Keyboard.FocusCollectionFiltersDisabled",  &Test65FocusCollectionFiltersDisabled);
     GetTestRegistry().Add("Keyboard.DispatchSkipsDisabled",           &Test65DispatchSkipsDisabled);
+
+    // ── 审计 #59 / H6：非拥有 Widget 指针的失效清理 ──
+    GetTestRegistry().Add("Detach.ClearsFocus",              &Test59DetachClearsFocus);
+    GetTestRegistry().Add("Detach.ClearsCapture",            &Test59DetachClearsCapture);
+    GetTestRegistry().Add("Detach.HoverNoLeave",             &Test59DetachHoverNoLeave);
+    GetTestRegistry().Add("Detach.DeepDescendant",           &Test59DetachDeepDescendant);
+    GetTestRegistry().Add("Detach.DoesNotClearUnrelated",    &Test59DetachDoesNotClearUnrelated);
 }

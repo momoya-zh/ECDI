@@ -89,6 +89,24 @@ std::unique_ptr<Widget>Widget::RemoveChild(Widget* child){
 
 	m_children.erase(it);
 
+	// ★★ 审计 #59 / H6：**清除父指针之前**注销该子树上的一切非拥有登记。
+	// 背景：框架有三处非拥有 Widget 指针（Window 的焦点/捕获 + HoverTracker 的 hover），
+	//   而本方法原只清 `m_parent` ⇒ 三条 UAF 路径（丢弃返回值即析构 ⇒ 下次按键/移动/
+	//   悬浮打在死对象上）。
+	// ⚠️ **顺序不可换**：注销判据是「目标是否落在被摘子树内」，靠**父链上溯**实现
+	//   （`Window::ForgetSubtree` → `IsWithinSubtree`）；下面一行清掉 `m_parent` 后
+	//   链即断裂、再也判不出包含关系。这正是必须在"摘树时刻"注销、而不是在 `~Widget`
+	//   里注销的根本原因（那时节点早已脱树，找不到所属 Window）。
+	// ★ **为何不在 `~Widget` 里做**：`m_children` 是 private `vector<unique_ptr>`，
+	//   外部无法在不经本方法的情况下销毁**仍在树上**的节点 ⇒ 本方法与整树析构是仅有的
+	//   两条销毁路径，而整树析构时 Window 自身也在拆（无需清理）。故 `~Widget` 通知是冗余的
+	//   ——这一取舍已记入 `roadmap-deferred.md` #59（含被否决的「每节点常驻 Window*」方案）。
+	if (Window* window = GetWindow()){
+
+		window->ForgetSubtree(result.get());
+
+	}
+
 	// 清除父指针（已脱离树）
 	result->m_parent = nullptr;
 

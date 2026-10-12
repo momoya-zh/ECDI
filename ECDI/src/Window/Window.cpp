@@ -499,6 +499,86 @@ void Window::UpdateHoverState(Widget* newTarget){
 
 }
 
+// ── ★ 审计 #59 / H6：非拥有 Widget 指针的失效清理 ──────────────────────────
+
+namespace{
+
+/// @brief `widget` 是否落在 `subtreeRoot` 子树内（**含子树根自身**）
+/// @details 沿父链上溯到 `subtreeRoot` 即命中。⚠️ 必须在摘树**清除父指针之前**调用——
+///          链一断就无法判定包含关系。
+/// @note 匿名 ns 内部辅助（非 Window 成员）：不读 Window 任何状态，纯粹是「子树包含」判据。
+bool IsWithinSubtree(const Widget* widget, const Widget* subtreeRoot) noexcept{
+
+	for (const Widget* current = widget; current != nullptr; current = current->GetParent()){
+
+		if (current == subtreeRoot){
+
+			return true;
+
+		}
+
+	}
+
+	return false;
+
+}
+
+}
+
+void Window::ForgetSubtree(const Widget* subtreeRoot) noexcept{
+
+	if (subtreeRoot == nullptr){
+
+		return;
+
+	}
+
+	// ① 焦点登记：落在被摘子树内 ⇒ 置空。
+	//    ★ **不补发** `OnFocusLost`——脱树是异常失效（头文件契约段已写明理由）
+	if (m_focusedWidget != nullptr && IsWithinSubtree(m_focusedWidget, subtreeRoot)){
+
+		m_focusedWidget = nullptr;
+
+	}
+
+	// ② 捕获登记：同上（**不补发** Up——置空后 Up 派发自然退化为"按命中测试找目标"，
+	//    语义合理且无回调副作用）
+	if (m_captureWidget != nullptr && IsWithinSubtree(m_captureWidget, subtreeRoot)){
+
+		m_captureWidget = nullptr;
+
+	}
+
+	// ③ hover 登记：委托 HoverTracker（契约 C 同款语义——不补发 Leave）
+	m_hoverTracker.ForgetSubtree(subtreeRoot);
+
+}
+
+bool Window::IsWidgetInTree(const Widget* widget) const noexcept{
+
+	if (widget == nullptr || m_rootWidget == nullptr){
+
+		return false;
+
+	}
+
+	// 沿父链上溯：到达 RootWidget 即「仍在树内」。
+	// ⚠️ 本方法**不防悬垂指针**（上溯即 UAF）——只判「已脱树但**仍存活**」，
+	//    悬垂由 `ForgetSubtree` 在摘树时消除（头文件已写明这条边界）。
+	for (const Widget* current = widget; current != nullptr; current = current->GetParent()){
+
+		if (current == m_rootWidget.get()){
+
+			return true;
+
+		}
+
+	}
+
+	return false;
+
+}
+
 void Window::SetFocusedWidget(Widget* widget){
 
 	// 5.4.3：同控件短路——避免重复设置触发 Lost+Gained 空转
@@ -506,6 +586,19 @@ void Window::SetFocusedWidget(Widget* widget){
 
 		return;
 
+	}
+
+	// ★ 审计 #59 / §7.3：**不得把「属于本窗口」建立在断言上**。
+	//   原实现只有 `FRAMEWORK_ASSERT(current == &GetRootWidget())`——Release 下断言为空
+	//   ⇒ 一个**已脱树**的 widget 会被静默接受为焦点，随即在下一个按键上被解引用
+	//   （正是 H6 的 UAF 路径①的 Release 侧入口）。
+	//   修法用**保留运行时分支**的既有纪律（同 `Application.cpp:176-178`）：
+	//   不属于本树 ⇒ 视为「清除焦点」（与传 nullptr 等价），并保留断言供 Debug 暴露缺陷。
+	if (widget != nullptr && !IsWidgetInTree(widget)){
+
+		FRAMEWORK_ASSERT(false);   // Debug：暴露"给本窗口设了外部控件"这一框架级误用
+
+		widget = nullptr;          // Release：收敛为清除焦点，不解引用可疑指针
 	}
 
 	// 5.4.3：通知旧焦点失去（数据变更前）
@@ -518,18 +611,6 @@ void Window::SetFocusedWidget(Widget* widget){
 	m_focusedWidget = widget;
 
 	if (widget != nullptr){
-
-		// 沿 Parent 链回溯到树根，验证 widget 属于当前窗口的 Widget 树
-		Widget* current = widget;
-
-		while (current->GetParent()){
-
-			current = current->GetParent();
-
-		}
-
-		// 树根必须是当前窗口的 RootWidget
-		FRAMEWORK_ASSERT(current == &GetRootWidget());
 
 		// 5.4.3：通知新焦点获得
 		widget->OnFocusGained();

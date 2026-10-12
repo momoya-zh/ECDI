@@ -276,6 +276,43 @@ class Window : public PlatformWindowHost {
 
 	private:
 
+		// ── ★ 审计 #59 / H6：非拥有 Widget 指针的失效清理（统一注销入口）──────
+		// 背景（`framework-implementation-audit.md` §7.1 / H6）：框架有三处非拥有 Widget 指针
+		// （`m_focusedWidget` / `m_captureWidget` / `m_hoverTracker` 的 `m_hoverWidget`），
+		// 而 `Widget::RemoveChild` 只清 `m_parent`、`~Widget` 是 default ⇒ 三处都可能悬垂。
+		// 三条 UAF 路径（审计原文）：① 丢弃 RemoveChild 返回值 ⇒ 下次按键打在死对象上；
+		// ② 同上且是捕获目标 ⇒ `OnMouseMove` 打在死对象上；③ 同上且是 hover 目标
+		// ⇒ `HoverTracker::IsInTree` 打在其上。
+		// ★ **定线结论（#59，2026-10-12）**：取「**摘树时统一注销**（B）+ 建立时校验（C）」，
+		//   而非「`~Widget` 通知所属 Window」。理由与被否决方案见 `roadmap-deferred.md` #59 行。
+		// ★ **为什么这两个方法是 private + `friend class Widget`**：唯一外部调用者是
+		//   `Widget::RemoveChild`（与 `Widget::SetWindow` 的 private + `friend class Window`
+		//   互为镜像的既有先例）⇒ **公共 API 零新增**（最小 API 面）。
+
+		/// @brief 注销落在某子树内的焦点/捕获/hover 登记（★ 摘树方在清除父指针**之前**调用）
+		/// @param subtreeRoot 即将脱树的子树根（`nullptr` = no-op）
+		/// @details 三个登记各自的清理语义**不同**——这正是必须集中的原因（散落三处必漂移）：
+		///   - `m_focusedWidget`：置空，**不补发** `OnFocusLost`；
+		///   - `m_captureWidget`：置空，**不补发** Up；
+		///   - hover：委托 `HoverTracker::ForgetSubtree`（同样**不补发** Leave——契约 C）。
+		///   ★ **为什么一律不补发**：脱树是「**异常失效**」而非「正常离开/失焦」——对象已不在
+		///     树上，却收到"你失焦了 / 鼠标离开了"只会制造语义歧义；且补发意味着在**析构路径**
+		///     上回调用户代码（可重入树操作 ⇒ 迭代中断）。与 hover 契约 C 的既有先例一致
+		///     （`HoverTracker.cpp:18` 同款判据），故三者统一。
+		///   ⚠️ **判据是「落在子树内」而非「等于子树根」**：焦点/捕获常常是深层后代
+		///     （如 ScrollView 里的 TextBox），只比根指针会漏。
+		friend class Widget;   ///< 授权 `Widget::RemoveChild` 调 ForgetSubtree（镜像 SetWindow 的先例）
+
+		void ForgetSubtree(const Widget* subtreeRoot) noexcept;
+
+		/// @brief 某 Widget 是否仍在当前窗口的 Widget 树内（★ 登记建立时的校验判据）
+		/// @param widget 待判定指针（`nullptr` ⇒ false）
+		/// @details ★ 用途 = 补 Release 下 `SetFocusedWidget` / `SetCaptureWidget` 的**断言洞**
+		///          （§7.3 同族：Debug 有 `FRAMEWORK_ASSERT`、Release 无兜底）。
+		///          ⚠️ **边界（必须写明）**：本方法靠**父链上溯**判定 ⇒ 对**已 free 的悬垂指针
+		///          **无效**（上溯即 UAF）。它防的是「已脱树但**仍存活**」的对象，**不防**悬垂
+		///          ——后者由 `ForgetSubtree` 在摘树时消除（治因）；本判据治果。
+		[[nodiscard]] bool IsWidgetInTree(const Widget* widget) const noexcept;
 
 		// ── 构造权限（B1：所有权契约的编译期基础）────────────────────────────
 		/// @param app      所属 Application（B2：**引用**——「无主窗口」在语法上不存在）
