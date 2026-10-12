@@ -256,7 +256,16 @@ Widget* Application::FindTargetWidget(
 
 Widget* Application::FindFocusedWidget(Window& window)const noexcept {
 
-	return window.GetFocusedWidget();
+	// ★ 审计 H7（#65）：键盘通道的 IsEnabled 门控**收敛在这一处**——四个调用点
+	//   （OnTimer / OnCharInput / OnKeyUp / FindFocusedWidget 自身）全部是「派发给
+	//   焦点控件」的同族路径，没有调用点想要「禁用控件的焦点」⇒ 判据放助手而非散在三处。
+	//   鼠标通道的对应判据在 `Widget::HitTest:124-128`（不可用 ⇒ 不参与命中）。
+	//   ⚠️ 只查 IsEnabled、不查 IsVisible：能成为焦点说明收集时可见
+	//      （`CollectFocusables` 已过滤不可见整棵子树）；运行期被隐藏是「焦点悬空」，
+	//      属 §7.1 统一失效机制线（#59），不在本条范围。
+	Widget* focused = window.GetFocusedWidget();
+
+	return (focused != nullptr && focused->IsEnabled()) ? focused : nullptr;
 
 }
 

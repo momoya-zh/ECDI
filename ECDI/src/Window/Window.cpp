@@ -24,9 +24,23 @@ namespace ECDI{
 namespace {
 
 // 5.4.4：DFS 收集可聚焦控件（树前序：父 → 子；匿名 namespace——Window 内部辅助，非公开能力）
+// ★ 审计 H7（#65）：与 `Widget::HitTest` 的语义对齐——
+//   **不可见的节点 ⇒ 整棵子树跳过**（`HitTest:117-121` 正是如此：入口即 return nullptr，
+//   子节点根本没机会被访问）；**不可用（disabled）的节点 ⇒ 自身不收，但子树仍可聚焦**
+//   （与 `HitTest:124-128` 一致——那里也只 return 自身，不阻止递归）。
+//   修复前只判 `CanFocus()` ⇒ 一个 `SetVisible(false)` 的 TextBox 仍能被 Tab 聚焦并接受键入
+//   （用户看不见内容在变）；一个 `SetEnabled(false)` 的控件仍响应键盘。
+// ⚠️ 「不可见跳整棵子树」是**刻意与 HitTest 对齐**的选择：焦点语义与命中语义必须同源，
+//   否则会出现「Tab 能到、鼠标点不到」的幽灵焦点（比两个通道都不过滤更糟）。
 void CollectFocusables(Widget* node, std::vector<Widget*>& out){
 
-	if (node->CanFocus()){
+	if (!node->IsVisible()){
+
+		return;   // 不可见 ⇒ 整棵子树不可聚焦（同 HitTest 的入口门控）
+
+	}
+
+	if (node->IsEnabled() && node->CanFocus()){
 
 		out.push_back(node);
 
@@ -540,7 +554,16 @@ void Window::HandleKeyDown(const KeyDownEvent& event){
 
 	if (m_focusedWidget){
 
-		m_focusedWidget->OnKeyDown(event);
+		// ★ 审计 H7（#65）：键盘派发前查 IsEnabled——鼠标通道的命中测试**已**过滤禁用
+		//   （`Widget::HitTest:124-128`），键盘通道原先不查 ⇒ 一个 `SetEnabled(false)` 的
+		//   控件仍响应键盘（用户可见的错误行为：按钮看着是灰的、按回车却触发）。
+		//   ⚠️ 只查 IsEnabled、不查 IsVisible：能成为焦点说明收集时可见（CollectFocusables
+		//      已过滤），运行期被隐藏是「焦点悬空」问题（属 §7.1 失效机制线，不在本条）。
+		if (m_focusedWidget->IsEnabled()){
+
+			m_focusedWidget->OnKeyDown(event);
+
+		}
 
 	}
 

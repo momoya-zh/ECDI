@@ -15,6 +15,7 @@
 #include "ECDI/Widget/Panel.h"
 #include "ECDI/Widget/Label.h"
 #include "ECDI/Widget/Button.h"
+#include "ECDI/Widget/TextBox.h"
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Window/Window.h"
 #include "ECDI/Theme/DefaultTheme.h"
@@ -23,6 +24,8 @@
 #include "ECDI/Core/Color.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
+#include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"     // ★ 审计 H7：Tab 驱动焦点导航
+#include "ECDI/EventSystem/Input/KeyBoard/CharInputEvent.h"   // ★ 审计 H7：字符入口门控
 #include "ECDI/Render/RenderCommand.h"
 #include <memory>
 #include <utility>
@@ -1253,8 +1256,171 @@ void Test31LineHeightDrivesMultiLineStep()
 	EXPECT_NEAR(preferred.height, kLine * static_cast<float>(ys.size()), kEpsilon);
 }
 
-// ── T31-2b：单行垂直居中位置跟随 LineHeight ──────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// 审计 H7（#65）：键盘 / 焦点通道与鼠标通道的可见 / 禁用语义对齐
+// ══════════════════════════════════════════════════════════════════════
+// ★ 缺陷：`CollectFocusables` 只判 `CanFocus()`（不查可见/禁用）、键盘派发不查 `IsEnabled`
+//   ⇒ ① 一个 `SetVisible(false)` 的 TextBox 仍能被 Tab 聚焦并接受键入（用户看不见内容在变）；
+//      ② 一个 `SetEnabled(false)` 的控件仍响应键盘。
+//   ★ 而鼠标通道的 `Widget::HitTest:117-128` **两样都过滤** ⇒ 两通道语义不一致。
+// ★ 修法（两处，单一真相源）：
+//   ① `CollectFocusables`（Window.cpp 匿名 ns）——不可见 ⇒ 整棵子树跳过（与 HitTest 入口门控同）；
+//      不可用 ⇒ 自身不收、子树仍可收（与 HitTest 只 return 自身同）。
+//   ② `Application::FindFocusedWidget`（四个调用点的共同助手）——IsEnabled 门控收敛一处。
+//   ⚠️ 只查 IsEnabled、不查 IsVisible：能成为焦点说明收集时可见；运行期被隐藏是「焦点悬空」，
+//      属 §7.1 统一失效机制线（#59），不在本条范围。
+// ★ 装置：真 `Application` + 真 `Window`（焦点语义挂在 Window 上，无窗口无法验证 Tab 导航）。
+//   键盘事件经 **public** `Window::HandleKeyDown` 驱动（`FocusNext` 是 private，不为此提权）。
 
+namespace {
+
+/// @brief 键盘焦点探针：Application + Window + 一棵「按钮 / 文本框」混合树
+struct KeyboardProbe {
+
+	Application app;
+
+	Window* window = nullptr;   ///< 非拥有（所有权归 Application）
+
+	Button* a = nullptr;        ///< 第一个可聚焦控件（始终可见可用）
+	Button* b = nullptr;        ///< 第二个可聚焦控件（始终可见可用）
+	TextBox* box = nullptr;     ///< 第三个可聚焦控件（被隐藏 / 被禁用的被试）
+
+	explicit KeyboardProbe(const char* title) {
+
+		RenderServices services = CreateDefaultRenderServices();
+		window = &app.Create(title, 400, 300, std::move(services));
+
+		a = new Button("A");
+		b = new Button("B");
+		box = new TextBox();
+
+		// 同一父下三个可聚焦控件 ⇒ 树前序 = a, b, box（Tab 的集合顺序）
+		window->GetRootWidget().AddChild(std::unique_ptr<Button>(a));
+		window->GetRootWidget().AddChild(std::unique_ptr<Button>(b));
+		window->GetRootWidget().AddChild(std::unique_ptr<TextBox>(box));
+	}
+
+	~KeyboardProbe() { window->Release(); }
+
+	/// @brief 按一次 Tab（正向导航一步）
+	void PressTab() {
+		window->HandleKeyDown(KeyDownEvent(window, KeyCode::Tab, KeyModifier::None));
+	}
+
+	/// @brief 按一个非 Tab 键（验证派发门控——目标控件若被禁用则不得收到）
+	void PressKey(KeyCode code) {
+		window->HandleKeyDown(KeyDownEvent(window, code, KeyModifier::None));
+	}
+
+	/// @brief 字符输入（经 Application 的公开 OnEvent 入口——与生产同路径）
+	void TypeChar(char32_t cp) {
+		app.OnEvent(CharInputEvent(window, cp));
+	}
+};
+
+}   // namespace
+
+// ── H7-①：不可见控件不进焦点集合（整棵子树跳过）────────────────────────
+// 判据：box 隐藏后，Tab 序列只经 a → b → a ⇒ 永远不落在 box 上；
+//       恢复可见 ⇒ box 重新进入序列（证明是可见性而非布局问题）。
+void Test65FocusCollectionFiltersInvisible()
+{
+	KeyboardProbe probe("ECDI_H7a");
+
+	// ① 全可见：a → b → box → a（三步一轮）
+	probe.PressTab();
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.a);
+	probe.PressTab();
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.b);
+	probe.PressTab();
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.box);
+
+	// ② 隐藏 box ⇒ Tab 不再落到它（一整轮都碰不到）
+	probe.box->SetVisible(false);
+	probe.PressTab();   // box → a
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.a);
+	probe.PressTab();   // a → b
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.b);
+	probe.PressTab();   // b → a（★ 修复前会到 box）
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.a);
+
+	// ③ 恢复可见 ⇒ 重新进入序列（② 末态焦点在 a ⇒ 两步后才到 box）
+	probe.box->SetVisible(true);
+	probe.PressTab();   // a → b
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.b);
+	probe.PressTab();   // b → box（★ 修复前 box 仍不在集合中，会回到 a）
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.box);
+}
+
+// ── H7-②：禁用控件不进焦点集合（子树仍可聚焦——与 HitTest 同）──────────
+void Test65FocusCollectionFiltersDisabled()
+{
+	KeyboardProbe probe("ECDI_H7b");
+
+	// ① 全可用：a → b → box
+	probe.PressTab();
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.a);
+	probe.PressTab();
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.b);
+	probe.PressTab();
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.box);
+
+	// ② 禁用 b ⇒ Tab 跳过它（b 自身不可聚焦）
+	probe.b->SetEnabled(false);
+	probe.PressTab();   // box → a
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.a);
+	probe.PressTab();   // a → box（★ 修复前会停在被禁用的 b 上）
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.box);
+	probe.PressTab();   // box → a
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.a);
+
+	// ③ 恢复可用 ⇒ 重新进入序列
+	probe.b->SetEnabled(true);
+	probe.PressTab();
+	EXPECT_TRUE(probe.window->GetFocusedWidget() == probe.b);
+}
+
+// ── H7-③：已聚焦控件被禁用 ⇒ 键盘派发被门控（字符入口不得再改内容）─────
+// ★ 这是「用户可见错误行为」的直接判据：控件看着是禁用的，却仍响应键盘。
+// ★★ 断言纪律（首版踩坑，如实记账）：**每个观察点只发一次输入**。
+//   首版写「禁用后 TypeChar('y') → Backspace → Delete」再比对文本，结果未修代码下
+//   **假绿**——多余的 `y` 被紧跟的 Backspace 删掉、`x` 恰好回到原位，两个错误相抵。
+//   ⇒ 现在拆成三个**互不抵消**的独立观察点（字符 / 退格 / 删除各一条），
+//     每条只发一次输入、立刻断言，任一条单独失效都会红。
+void Test65DispatchSkipsDisabled()
+{
+	KeyboardProbe probe("ECDI_H7c");
+
+	// ① 正对照：非禁用态下，字符与编辑键都能改内容（证明通路本身是通的）
+	probe.window->SetFocusedWidget(probe.box);
+	probe.TypeChar(U'x');
+	EXPECT_TRUE(probe.box->GetText() == "x");       // ★ 字符进入
+
+	// ② 禁用后**只发一个字符** ⇒ 不得进入（修复前会插入 y ⇒ 红）
+	probe.box->SetEnabled(false);
+	probe.TypeChar(U'y');
+	EXPECT_TRUE(probe.box->GetText() == "x");       // ★ 未被 y 污染
+
+	// ③ 禁用后**只发一个退格** ⇒ 不得删除（修复前会删成空串 ⇒ 红）
+	probe.PressKey(KeyCode::Backspace);
+	EXPECT_TRUE(probe.box->GetText() == "x");       // ★ 未被删除
+
+	// ④ 禁用后**只发一个 Del**：把 caret 移到中间，使 Delete 有可删对象
+	//    （`DeleteForward` 在 caret 处于末尾时本就是 no-op，不构成判据 ⇒ 必须先移 caret）
+	probe.box->SetText("xy");               // 重建可达中间态（SetText 是程序调用，不经键盘门控）
+	probe.window->SetFocusedWidget(probe.box);
+	probe.PressKey(KeyCode::Home);          // Home 也是键盘路径——禁用态下应同样被门控
+	probe.PressKey(KeyCode::Delete);
+	// ⚠️ 上两条都被门控 ⇒ 文本与 caret 均不变（"xy" 保持不变即为通过）
+	EXPECT_TRUE(probe.box->GetText() == "xy");
+
+	// ⑤ 恢复可用 ⇒ 键盘通路恢复（证明 ②③④ 是禁用门控，不是事件链断了）
+	probe.box->SetEnabled(true);
+	probe.TypeChar(U'z');
+	EXPECT_TRUE(probe.box->GetText().find('z') != std::string::npos);
+}
+
+// ── T31-2b：单行垂直居中位置跟随 LineHeight ──────────────────────────
 void Test31LineHeightDrivesSingleLineCenter()
 {
 	const float kLineA = 16.0f;
@@ -1355,4 +1521,9 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.LineHeightMultiLineStep", &Test31LineHeightDrivesMultiLineStep);   // T31-2a
     GetTestRegistry().Add("TextWidget.LineHeightSingleLineCenter", &Test31LineHeightDrivesSingleLineCenter); // T31-2b
     GetTestRegistry().Add("TextWidget.LineHeightEmptyLine",     &Test31LineHeightEmptyLineOccupies);   // T31-2c
+
+    // ── 审计 H7（#65）：键盘/焦点通道与鼠标通道的可见/禁用语义对齐 ──
+    GetTestRegistry().Add("Keyboard.FocusCollectionFiltersInvisible", &Test65FocusCollectionFiltersInvisible);
+    GetTestRegistry().Add("Keyboard.FocusCollectionFiltersDisabled",  &Test65FocusCollectionFiltersDisabled);
+    GetTestRegistry().Add("Keyboard.DispatchSkipsDisabled",           &Test65DispatchSkipsDisabled);
 }
