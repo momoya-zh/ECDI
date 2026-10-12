@@ -942,17 +942,49 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		m_host.OnIMECompositionCommit({});
 		break;   // 继续 DefWindowProcW（IME 内部状态机必需）
 
-	// ★ 审计 M12：吞字计数器**焦点变化即清零**。
+	// ★ 审计 M12：吞字计数器**焦点变化即清零**（WM_SETFOCUS / WM_KILLFOCUS 两处）。
 	// 背景：`m_imeResultPendingChars` 只在 GCS_RESULTSTR 处置位（上方 :928）、只靠逐个
-	//   WM_CHAR 递减（下方 :949-955）。序列被中途打断（失焦 / 输入法少发 / 窗口销毁前）
+	//   WM_CHAR 递减（下方 :966-972）。序列被中途打断（失焦 / 输入法少发 / 窗口销毁前）
 	//   ⇒ 余数会**吞掉之后真正输入的字符**，且原实现无超时、无焦点复位。
 	// 修法：焦点离开/重新进入本窗口都清零——两处都安全：
 	//   ① 失焦后本窗口不应再吞任何字符（IME 状态已交还系统）；
 	//   ② 重新得焦时旧序列必然已终结（IME 状态机按 focus 归属）。
 	// ⚠️ 不动「未失焦但输入法少发」的残余——那需要超时机制，属另一条设计题（记账）。
-	case WM_KILLFOCUS:
 	case WM_SETFOCUS:
 		m_imeResultPendingChars = 0;
+		break;   // 继续 DefWindowProcW（焦点语义由系统维护）
+
+	// ── ★★ 审计 #60 / C3：鼠标捕获失效上报（缺陷的第二个后果）────────────────
+	// 捕获会被**系统或第三方**单方面夺走，此时系统发 `WM_CAPTURECHANGED`。
+	// 框架若不获知 ⇒ `m_captureWidget` 一直指着上次 Down 的目标 ⇒ 后续 Move 全直派它、
+	//   跳过 HitTest ⇒ 整窗 hover/命中失效，且该控件**永远等不到 Up**（卡在按下态）。
+	//   修复前唯一自愈出口 = 用户下一次任意点击（`OnMouseButtonDown` 无条件重设捕获）。
+	// ★ 三处入口一并收口（覆盖"捕获不再属于本窗口"的全部既有路径）：
+	//   · `WM_CAPTURECHANGED`——捕获被明确移交/夺走（最直接、必到）；
+	//   · `WM_CANCELMODE`——系统要求取消模态状态（弹菜单/拖动等，捕获随之失效）；
+	//   · `WM_KILLFOCUS`——窗口失去键盘焦点（Alt+Tab 等，捕获语义上不再成立）。
+	// ⚠️ **只上报、不调 `::ReleaseCapture`**：此时捕获已被别人拿走，再去释放会误伤对方
+	//   （或触发二次 `WM_CAPTURECHANGED` 回环）——清理收敛在框架侧。
+	// ⚠️ **本组不动 `m_imeResultPendingChars`**（`WM_KILLFOCUS` 除外，见下条）：
+	//   M12 的清零只属于**焦点**语义。若在捕获/模态变化时也清，恰逢 IME 提交序列中途
+	//   ⇒ 余数不再吞后续 `WM_CHAR` ⇒ **二次插入那个 bug 会被重新引入**（"你好你好"）。
+	//   ⇒ 两类事件刻意分开，不做"顺手统一"。
+	case WM_CAPTURECHANGED:
+	case WM_CANCELMODE:
+		// ★ 我方主动释放触发的 `WM_CAPTURECHANGED` 跳过上报（`m_releasingCapture` 置位期间）
+		//   ——系统消息无法区分"主动释放"与"被夺走"，由本守卫提供该因果。
+		if (!m_releasingCapture){
+
+			m_host.OnCaptureLost();   // C3
+
+		}
+
+		break;   // 继续 DefWindowProcW（捕获/模态语义由系统维护）
+
+	// `WM_KILLFOCUS` = 上两条**共同**的入口 ⇒ 两件事都必须做（M12 清零 + C3 上报）
+	case WM_KILLFOCUS:
+		m_imeResultPendingChars = 0;
+		m_host.OnCaptureLost();
 		break;   // 继续 DefWindowProcW（焦点语义由系统维护）
 
 	}
@@ -1169,6 +1201,50 @@ void Win32PlatformWindow::StopTimer(int timerId){
 	if (m_hwnd)
 
 		KillTimer(m_hwnd, timerId);
+
+}
+
+// ── ★ 审计 #60 / C3：真实鼠标捕获（全库首次调用 ::SetCapture / ::ReleaseCapture）──
+
+void Win32PlatformWindow::SetMouseCapture(bool capture){
+
+	if (m_hwnd == nullptr){
+
+		return;   // 句柄未就绪（构造期/已销毁）——无捕获可设
+
+	}
+
+	if (capture){
+
+		// ★ 唯一真实捕获落点：此后**所有**鼠标消息（含客户区外）都路由到本窗口
+		//   ⇒ 「拖拽/滚条越出客户区仍跟手」由 OS 保证（修复前纯框架记账做不到）。
+		::SetCapture(m_hwnd);
+
+	}
+	else{
+
+		// ⚠️ 只在本窗口**当前确实持有**捕获时释放——否则会误释放别人刚建立的捕获。
+		//   （`::ReleaseCapture` 的既有语义是"释放**本线程**的捕获"，跨窗口场景下
+		//     无条件调用可能踩到其它窗口；`GetCapture()` 判据把作用域收敛到本窗口。）
+		if (::GetCapture() == m_hwnd){
+
+			// ★ 抑制自触发上报：`::ReleaseCapture` 会**同步或异步**投递 `WM_CAPTURECHANGED`
+			//   到本窗口（系统无法区分"主动释放"与"被夺走"——消息不带这个因果）。
+			//   置位期间 `WM_CAPTURECHANGED` 分支跳过 `OnCaptureLost`，避免
+			//   「一次主动释放 ⇒ 一次伪失捕上报」令该回调失去诊断价值。
+			//   ⚠️ 用**作用域守卫**（而非手动复位）——`::ReleaseCapture` 可能同步重入
+			//   `HandleMessage`，任何提前 return 都会把标志永久留在置位态。
+			struct ReleasingGuard{
+				bool& flag;
+				explicit ReleasingGuard(bool& f) : flag(f){ flag = true; }
+				~ReleasingGuard(){ flag = false; }
+			} guard(m_releasingCapture);
+
+			::ReleaseCapture();
+
+		}
+
+	}
 
 }
 

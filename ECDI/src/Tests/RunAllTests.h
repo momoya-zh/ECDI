@@ -42,5 +42,6 @@ void RegisterFontEngineTests();   ///< Phase 26：FreeType 共享底层（T26-1.
 void RegisterGLBackendTests();   ///< Phase 26：GL 后端（T26-7 图集 shelf 分配 / T26-8 初始化失败 no-op）
 void RegisterDesktopNestTests();   ///< M1：DesktopNest（T-M1-1..T-M1-6——模型/浮层/折叠/拖动路由/关闭路径）
 void RegisterWindowBackdropTests();   ///< Phase 32：窗口衬底（T32-1 零回归 / T32-4 Degraded / T32-7 切换无残留——批一）
+void RegisterMouseCaptureTests();     ///< ★ 审计 #60 / C3：真实鼠标捕获（::SetCapture/ReleaseCapture + 失捕上报）
 
 } // namespace ECDI::Test

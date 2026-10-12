@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <string>
 
@@ -62,6 +62,24 @@ public:
 	/// RootWidget::HitTest → Widget::ConsumesMouseInput。
 	/// **纯虚**：遗漏实现 = 编译期暴露（与 Phase 12 的 7 个纯虚同规格）。
 	virtual bool IsClientInteractiveAt(int x, int y) const noexcept = 0;
+
+	/// @brief 系统鼠标捕获已被夺走（★ 审计 #60 / C3：`WM_CAPTURECHANGED` 上报）
+	/// @details ★★ **为什么必须上报（缺陷的第二个后果）**：捕获可能被**系统或第三方**
+	///   单方面夺走——Alt+Tab 切走、弹出系统菜单、别的窗口调 `SetCapture`、窗口被禁用等，
+	///   此时系统发 `WM_CAPTURECHANGED`。**框架若不获知**，`m_captureWidget` 会一直指着
+	///   上次 Down 的目标 ⇒ 后续 Move 全部直派它、跳过 HitTest ⇒ **整窗 hover 与命中失效**，
+	///   且该控件永远收不到 Up（卡在按下态）。修复前唯一的自愈出口是「用户下一次任意点击」。
+	///   ⇒ 平台层收到 `WM_CAPTURECHANGED` 后调本方法，框架据此**清空捕获登记**。
+	/// ★ **默认实现 = 空实现**（**非纯虚**——同 `SetWindowBackdrop` 先例）：
+	///   既有 4 个实现者（`Window` + `EventTests::FakeHost` / `DropFilesTests::DropHost` /
+	///   `DesktopLayerTests::LayerHost`）**零改动**；三个测试 Host 不驱动真实消息循环，
+	///   保持空实现即语义正确。
+	/// @note ★ **与 `SetCapture(false)` 的区别**：那个是「框架主动释放」，本回调是
+	///   「**捕获已被别人拿走**」——此时**不得**再调 `::ReleaseCapture`（会释放别人的捕获
+	///   ／或触发二次 `WM_CAPTURECHANGED` 回环），只需清框架侧登记。
+	virtual void OnCaptureLost()
+	{
+	}
 };
 
 }

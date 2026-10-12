@@ -48,6 +48,13 @@ public:
 	void StartTimer(int timerId, unsigned int intervalMs) override;   ///< 8.5.1：通用定时器（SetTimer）
 	void StopTimer(int timerId) override;   ///< 8.5.1：StopTimer（KillTimer，幂等）
 
+	/// @brief 建立/释放**系统级鼠标捕获**（★ 审计 #60 / C3：`::SetCapture` / `::ReleaseCapture`）
+	/// @details 修复前全库从未调用这两个 Win32 API（审计全仓 grep 0 命中）⇒「隐式捕获」只是
+	///          框架记账，拖拽越出客户区即失效。本 override 是**唯一**的真实捕获落点。
+	///          ⚠️ 只在句柄有效时调用；`false` 时若本窗口并未持有捕获，`::ReleaseCapture`
+	///          是安全的 no-op（系统语义）。
+	void SetMouseCapture(bool capture) override;
+
 	// ── Phase 12：WindowChrome / 窗口层级（配置期——Window 构造后 / Show() 前）──
 	void SetChromeMode(ChromeMode mode) override;
 	void SetCaptionHeight(int height) override;
@@ -253,6 +260,12 @@ private:
 
 	int m_imeResultPendingChars = 0;	///< 待吞掉的 IME 结果 WM_CHAR 数（8.5.1：GCS_RESULTSTR 已提交框架——
 	///< 系统随后仍发结果 WM_CHAR（DefWindowProc 通道），吞掉防双写；UTF-16 码元计数 = WM_CHAR 消息数）
+
+	/// @brief 正在执行**我方主动**释放捕获（★ 审计 #60：抑制自触发上报）
+	/// @details `::ReleaseCapture` 同样会让系统投递 `WM_CAPTURECHANGED` ⇒ 若不设防，
+	///          「主动释放」会被当成「捕获被夺走」上报一次，令 `OnCaptureLost` 的计数失去
+	///          诊断价值（一次释放、两次清理）。置位期间跳过上报（详见 `.cpp` 的释放分支）。
+	bool m_releasingCapture = false;
 
 	// ── Phase 16：桌面驻留层状态 ────────────────────────────────────────
 

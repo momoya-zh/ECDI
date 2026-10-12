@@ -482,13 +482,47 @@ AnimationManager& Window::GetAnimationManager() noexcept{
 void Window::SetCaptureWidget(Widget* widget){
 
 	// 5.4.2：隐式捕获——Down 命中设置、Up 后释放；非拥有指针（生命周期随 Widget 树）
+	// ★★ 审计 #60 / C3：**同一次调用的两半**——框架登记 + 真实系统捕获。
+	//   修复前本函数**只赋值**（「隐式捕获」纯框架记账，OS 层从未被告知）⇒ 拖拽/滚条
+	//   越出客户区收不到 `WM_MOUSEMOVE` ⇒ 不跟手（**无自愈路径**，C3 的核心后果）。
+	//   ⇒ 现在两半同步：`m_captureWidget`（框架路由判据）+ `PlatformWindow::SetMouseCapture`
+	//     （OS 路由判据）。**必须有捕获目标才向 OS 申请捕获**——无目标却抓系统捕获会让
+	//     本窗口吞掉全部鼠标消息而框架无人可派发（比不捕获更糟）。
+	// ⚠️ 幂等：同目标重复设置时**不重复调** OS API（避免 `::SetCapture` 重入与无谓系统调用）。
+	const bool wasCaptured = (m_captureWidget != nullptr);
+	const bool willCapture = (widget != nullptr);
+
 	m_captureWidget = widget;
+
+	if (willCapture == wasCaptured){
+
+		return;   // 状态未跨「无捕获 ⇄ 有捕获」边界 ⇒ OS 侧无需变更
+
+	}
+
+	if (m_platformWindow != nullptr){
+
+		m_platformWindow->SetMouseCapture(willCapture);
+
+	}
 
 }
 
 Widget* Window::GetCaptureWidget() const noexcept{
 
 	return m_captureWidget;
+
+}
+
+void Window::OnCaptureLost(){
+
+	// ★ 审计 #60 / C3：捕获被系统/第三方夺走时的框架侧清理（平台层经 Host 契约上报）。
+	// ⚠️ **只清框架登记，不再回调平台**——此时捕获已不在本窗口，任何 `::ReleaseCapture`
+	//   都会误伤对方（详见 `PlatformWindowHost::OnCaptureLost` 契约段）。
+	// ⚠️ **不补发 Up**：与 #59 的摘树注销同族语义——「异常失效」不等于「正常抬起」，
+	//   补发会让控件以为用户松了手（可能触发点击/提交等业务后果）。
+	//   若控件自身有按下态需要复位，由它在下一次 Down 时自愈（既有 F1 语义：Down 永远重走 HitTest）。
+	m_captureWidget = nullptr;
 
 }
 

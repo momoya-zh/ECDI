@@ -83,6 +83,27 @@ public:
 	/// @brief 停止定时器（幂等——未启动/已停止返回无动作）
 	virtual void StopTimer(int timerId) = 0;
 
+	// ── ★ 审计 #60 / C3：真实鼠标捕获（Win32 `::SetCapture` / `::ReleaseCapture`）────
+
+	/// @brief 建立 / 释放**系统级鼠标捕获**（★ Critical 缺陷 C3 的修复落点）
+	/// @param capture `true` = `::SetCapture`（后续鼠标消息全部路由到本窗口，**含客户区外**）；
+	///                `false` = `::ReleaseCapture`
+	/// @details ★★ **为什么需要它（缺陷本体）**：修复前框架的「隐式捕获」是**纯框架记账**
+	///   （`Window::SetCaptureWidget` 只赋值一个指针），**OS 层从未被告知** ⇒ 两个后果：
+	///   ① **拖拽/滚条越出客户区即失效**（收不到 `WM_MOUSEMOVE`）——**无自愈路径**，是本条核心；
+	///   ② 丢 Up（Alt+Tab / 右键菜单抢捕获等）后框架卡在按下态，直到**下一次任意点击**才自愈
+	///      （`OnMouseButtonDown` 无条件重设捕获）。
+	/// ★ **默认实现 = no-op**（**非纯虚**——沿 Phase 32 `SetWindowBackdrop` 的 S7 先例）：
+	///   既有实现者**零改动**（`Win32PlatformWindow` override；`AnimationTests` /
+	///   `ProgressBarTests` 两个测试替身不感知鼠标捕获，保持 no-op 即语义正确
+	///   ——它们不产生真实鼠标消息）。
+	/// ★ **职责边界**：本方法只「告诉 OS」。**框架侧登记**（`Window::m_captureWidget`）
+	///   仍由 `Window::SetCaptureWidget` 维护——两者是**同一次调用的两半**（见其实现）。
+	virtual void SetMouseCapture(bool capture)
+	{
+		(void)capture;
+	}
+
 	// ── Phase 12：WindowChrome / 窗口层级（配置期——Window 构造后 / Show() 前）──
 
 	/// @brief 设置窗口 chrome 形态（R1）
