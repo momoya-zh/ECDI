@@ -245,6 +245,27 @@ void Widget::SetSize(int w, int h){
 
 }
 
+void Widget::SetVisible(bool v){
+
+	// ★★ 同值守卫（★ 审计 M9 修复的正确性前提，条 134 同族形态）：
+	// 本 setter 被 `TextBox::SyncScrollBar` 在 `OnPaint` 起始**每帧**调用（`TextBox.cpp:562`）。
+	// 若在此处无条件 `Invalidate()` ⇒ 每帧请求重绘 ⇒ **自激励重绘循环**（永远等不到空闲队列）。
+	// ⇒ 「值变化才失效」是**正确性要求**，不是优化。重复 `SetVisible(true)` 零副作用
+	//   （同族先例 `TextWidget::SetWordWrap:102-105`）。
+	if (m_state.visible == v){
+		return;
+	}
+
+	m_state.visible = v;
+
+	// ★ 请求重绘：可见性是**绘制门控**（`Widget.cpp:135`/`:281` 的 Paint 前置）⇒
+	//   状态变化必须让新状态上屏。此前的「裸赋值」与 `SetStyle`/`ApplyTheme`（内建 Invalidate）
+	//   不同族 ⇒ 应用侧改可见性常静默不刷新（= 审计 M9 本体）。
+	// ⚠️ 无窗口（无头测试 / 构造期）时 `Invalidate()` 内部上溯取不到 Window ⇒ 自然 no-op。
+	Invalidate();
+
+}
+
 void Widget::SetStretch(int stretch) noexcept{
 
 	FRAMEWORK_ASSERT(stretch >= 0);   // 负值无合理权重语义（详设 §2.1）

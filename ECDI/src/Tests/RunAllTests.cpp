@@ -42,6 +42,7 @@ int ECDI::Test::RunAllTests()
     RegisterWindowBackdropTests();   // Phase 32：窗口衬底（T32-1 / T32-4 / T32-7）
     RegisterMouseCaptureTests();     // ★ 审计 #60 / C3：真实鼠标捕获（::SetCapture / 失捕上报）
     RegisterBackendContractTests();  // ★ 审计 #62 / §7.2：后端契约（H3 图像守卫 / M17 边量化）
+    RegisterVisibilityRepaintTests();   // ★ 审计 M9：可见性变化的重绘归属（SetVisible Invalidate + 同值守卫）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

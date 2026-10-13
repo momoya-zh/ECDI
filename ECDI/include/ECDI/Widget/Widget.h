@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Rect.h"
@@ -145,10 +145,31 @@ public:
 
 	bool IsVisible() const noexcept { return m_state.visible; }
 
-	void SetVisible(bool v) { m_state.visible = v; }
+	/// @brief 设置可见性（★ 审计 M9 修复：内建 `Invalidate()`）
+	/// @details ★★ **为何从「裸赋值」改为「同值守卫 + Invalidate」**（修复前 = `m_state.visible = v;`）：
+	///   修复前本 setter **只赋值、不请求重绘**，而同族 setter（`SetStyle` / `ApplyTheme` /
+	///   `TextWidget::SetWordWrap`）**全都内建 `Invalidate()`** ⇒ 应用侧
+	///   `SetVisible(false)` 后视觉不消失、`SetVisible(true)` 后不出现——**静默不刷新**。
+	///   这与条 65 记录的 `SetText` 陷阱**同族**（非鼠标事件驱动的 UI 更新漏了 Invalidate）。
+	///   ★ 三条关键设计：
+	///   ① ★★ **同值守卫是正确性要求、不是优化**（条 134 同族）：`TextBox::SyncScrollBar`
+	///      在 `OnPaint` 起始**每帧**调用 `m_vBar->SetVisible(need)`（`TextBox.cpp:562`）——
+	///      若无同值守卫，内建的 `Invalidate` 会让**每帧都请求重绘** ⇒ **自激励重绘循环**
+	///      （该处已有「四元组值比较」守卫，本处再补一层是为了让**任何**调用方都安全）。
+	///   ② **不扩大到 `SetEnabled`**：实测 `IsEnabled()` **无任何绘制消费者**——全库只 gate
+	///      命中（`Widget.cpp:142`）/ 焦点收集（`Window.cpp:43`）/ 键派发（`Window.cpp:677`）⇒
+	///      给它加 `Invalidate` 只是**语义为空的重绘请求**（如实记账：审计原文将两者并列）。
+	///   ③ **不扩大到 `SetSize` / `SetPosition` / `SetText`**——那些是**另一类契约**：
+	///      几何 setter 由 `Layout` 逐帧批量调用（加了会每帧重绘）；`SetText` 是**有意契约**
+	///      （`Widget.h` 明写「布局/重绘由调用方负责」）。M9 只管**可见性**这一条。
+	///   ⚠️ **窗口外（无头）为 no-op**：`Widget::Invalidate()` 沿父链上溯取 Window，
+	///      取不到即什么都不做（测试/构造期路径零副作用）。
+	void SetVisible(bool v);
 
 	bool IsEnabled() const noexcept { return m_state.enabled; }
 
+	/// @brief 设置启用状态（**故意不内建 `Invalidate`**——见 `SetVisible` 注释 ②：
+	///        `IsEnabled()` 无任何绘制消费者，加它只会产生语义为空的重绘请求）
 	void SetEnabled(bool e) { m_state.enabled = e; }
 
 	// ── Event Handling（子类 override 以响应事件）────
