@@ -57,11 +57,22 @@ public:
 	/// @param child 子 Widget 的 unique_ptr，不能为 null
 	/// @pre child 不能已有父节点（禁多父）
 	/// @pre child 的子树中不能包含 this（防环）
+	/// @details ★ 审计 #63 / §7.3：三条 @pre 在 **Release 侧均有运行时分支**——
+	///          不满足即**拒绝执行**（返回 void，传入的 unique_ptr 随之析构），
+	///          Debug 侧仍 `FRAMEWORK_ASSERT` 弹框终止。
+	///          ⚠️ **Release 下的真实后果**（为什么不能只留断言）：空指针 ⇒ 写空指针崩；
+	///          多父 ⇒ **两树各持一份所有权 ⇒ double-free**；成环 ⇒ Arrange/Paint/
+	///          HitTest **无限递归 ⇒ 栈溢出**。
+	///          ⚠️ 签名保持 void（**不改签名** ⇒ 既有调用点零改动）；「静默丢弃」是
+	///          有意的两难取舍，详见 `Widget.cpp` 内注释的「返回值语义」段。
 	void AddChild(std::unique_ptr<Widget> child);
 
 	/// @brief 移除指定子 Widget，返回其所有权
 	/// @param child 要移除的子 Widget 指针
-	/// @return 被移除的子 Widget（调用方可继续使用或销毁）
+	/// @return 被移除的子 Widget（调用方可继续使用或销毁）；**nullptr = child 为空 / 不是直接子节点**
+	/// @details ★ 审计 #63 / §7.3：未命中在 Release 侧**返回 nullptr**
+	///          （原实现对 `end()` 解引用 = UB），与 `GetChildAt` 越界返 nullptr
+	///          的先例一致。Debug 侧仍断言暴露。
 	std::unique_ptr<Widget> RemoveChild(Widget* child);
 
 	/// @brief 获取父 Widget 指针（RootWidget 返回 nullptr）
@@ -91,6 +102,9 @@ public:
 
 	/// @brief 设置剩余空间分配权重（9.7——0 = 不参与分配，保持当前尺寸；>0 = 主轴尺寸由父 Layout 分配）
 	/// @pre stretch >= 0（debug assert；负值无合理权重语义）
+	/// @details ★ 审计 #63 / §7.3：负值在 Release 侧**钳为 0**（与 `Layout` 的
+	///          spacing/padding 钳 0 同型；选钳 0 而非拒绝，因为「0 = 不参与分配」
+	///          是有定义且正确的语义）。Debug 断言保留以暴露调用方错误。
 	void SetStretch(int stretch) noexcept;
 
 	/// @brief 剩余空间分配权重只读查询（默认 0——不参与分配，向后兼容锚点）

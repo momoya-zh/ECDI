@@ -46,14 +46,53 @@ bool Widget::Contains(const Widget* widget) const noexcept{
 
 void Widget::AddChild(std::unique_ptr<Widget> child){
 
-	// 前置条件：child 非空
-	FRAMEWORK_ASSERT(child);
+	// ★★ 审计 #63 / §7.3：三条前置条件**全部补 Release 侧运行时分支**。
+	//   背景：`FRAMEWORK_ASSERT` 在 Release 下展开为 `((void)0)`（`ECDIAssert.h:41`）
+	//   ⇒ 只写断言 = Release 下契约完全失守。本项目已在两处确立
+	//   「**不把契约建立在断言上**」的纪律——`ScrollView::SetScrollStep:154-158`
+	//   （负步长 return）与 `Widget::GetChildAt:198-201`（越界返 nullptr，审计 L11）。
+	//   本条把同一条纪律补到 `Widget` 的树维护入口。
+	//
+	// ★★ **三条为何不能只留断言**（Release 下的真实后果，逐条不同）：
+	//   ① **child 非空**：空指针 ⇒ `child->m_parent = this` 直接崩（写空指针地址）。
+	//   ② **无父（禁多父）**：同一个节点挂进两棵树 ⇒ **两棵树各持一份所有权**
+	//      ⇒ 双重释放（double-free）——这是三条里最重的：**内存损坏**，且症状
+	//      远离触发点（极难定位）。
+	//   ③ **子树不含 this（防环）**：树成环 ⇒ `ArrangeInternal` / `Paint` /
+	//      `HitTest` / `Contains` 四处**无限递归** ⇒ 栈溢出崩溃。
+	//
+	// ★ **返回值语义（如实记账）**：本方法返回 void ⇒ 拒绝时**静默丢弃传入的
+	//   unique_ptr**（child 在此析构）。这是**有意的两难取舍**：改签名会让
+	//   每一个调用点都要处理返回值（违背「加能力 ≠ 改已有调用点」），而非法
+	//   调用本身是框架级误用（app 需持同一节点指针才能构造出多父/环）。
+	//   ⇒ Debug 侧仍由 FRAMEWORK_ASSERT **暴露**（弹框 + 终止），Release 侧
+	//   **拒绝执行**（不崩、不损坏内存）。这与 `GetChildAt` 「Debug 断言 +
+	//   Release 返 nullptr」的双轨形态一致。
+	//
+	// ⚠️ **顺序不可换**：三条检查须在 `m_children.emplace_back(std::move(child))`
+	//   之前——早退时 child 必须仍是**本函数的栈上对象**（否则 move 后无权释放它）。
 
-	// 前置条件：child 尚无父节点（禁止多父）
-	FRAMEWORK_ASSERT(child->m_parent == nullptr);
+	// 前置条件 ①：child 非空（Release 下同样拒绝——空指针写 m_parent 会崩）
+	if (!child){
+		FRAMEWORK_ASSERT(false);
+		return;   // 静默丢弃（见上方「返回值语义」记账）
+	}
 
-	// 前置条件：child 的子树中不能包含 this（防环）
-	FRAMEWORK_ASSERT(!child->Contains(this));
+	// 前置条件 ②：child 尚无父节点（禁止多父）
+	//   ⚠️ 必须先于 ③：`Contains` 走子链，若 child 已有父则它不可能是 this 的后代，
+	//      顺序不影响正确性；但把「多父」放在前面，其诊断信息更贴近根因。
+	if (child->m_parent != nullptr){
+		FRAMEWORK_ASSERT(false);
+		return;
+	}
+
+	// 前置条件 ③：child 的子树中不能包含 this（防环）
+	//   ⚠️ 这是 O(child 子树) 的遍历——与原先断言内的 `Contains(this)` **同一次遍历**，
+	//      没有新增复杂度（原先算一次，现在还是一次）。
+	if (child->Contains(this)){
+		FRAMEWORK_ASSERT(false);
+		return;
+	}
 
 	child->m_parent = this;
 
@@ -63,7 +102,23 @@ void Widget::AddChild(std::unique_ptr<Widget> child){
 
 std::unique_ptr<Widget>Widget::RemoveChild(Widget* child){
 
-	FRAMEWORK_ASSERT(child);
+	// ★★ 审计 #63 / §7.3：两条前置条件补 Release 侧运行时分支。
+	//   Release 下的真实后果（原实现只写断言 ⇒ 断言为空 ⇒ 直接踩 UB）：
+	//   ① **child 为 null**：`std::find_if` 拿 nullptr 去比 ⇒ 必然不命中 ⇒ `it == end()`，
+	//      接着 `std::move(*it)` 对 `end()` 解引用 = **未定义行为**（实际常表现崩溃）。
+	//   ② **child 不是本节点的直接子节点**：同上，`it == end()` ⇒ `*it` UB。
+	//   ⇒ 修法 = 「**先判后解引用**」：两态合并为一次 `it == end()` 检查
+	//   （null 天然不会命中），Debug 侧断言仍区分具体是哪一条。
+	//
+	// ★ **返回 nullptr 的语义**（与 `GetChildAt` 越界返 nullptr 的先例一致）：
+	//   「没有可移除的东西」是**可表示的结果**，调用方本就要检查
+	//   （既有用法 `auto removed = root.RemoveChild(p);` 随后用 `removed`）。
+	//   ⚠️ 不抛异常：框架全库无异常契约（`noexcept` 邻域），抛会改变错误模型。
+
+	if (child == nullptr){
+		FRAMEWORK_ASSERT(false);             // Debug：区分「空指针」
+		return nullptr;
+	}
 
 	// 在子节点列表中查找目标
 	auto it = std::find_if(
@@ -76,13 +131,11 @@ std::unique_ptr<Widget>Widget::RemoveChild(Widget* child){
 		}
 	);
 
-
-	FRAMEWORK_ASSERT(
-
-		it != m_children.end()
-
-	);
-
+	// ★ 审计 #63：未命中 ⇒ Release 下不得对 end() 解引用（`std::move(*it)` = UB）
+	if (it == m_children.end()){
+		FRAMEWORK_ASSERT(false);             // Debug：区分「非直接子节点」
+		return nullptr;
+	}
 
 	// 取出 unique_ptr 所有权并从列表中删除
 	std::unique_ptr<Widget> result=std::move(*it);
@@ -268,9 +321,17 @@ void Widget::SetVisible(bool v){
 
 void Widget::SetStretch(int stretch) noexcept{
 
+	// ★★ 审计 #63 / §7.3：补 Release 侧钳制（原实现只有断言 ⇒ Release 下负值直落 `m_stretch`）。
+	// ★ **选「钳 0」而非「拒绝」**——三条同族先例的形态按语义各取其宜：
+	//   `ScrollView::SetScrollStep`（负步长 **return**：该值是"一次滚动多少"，
+	//   负步长无替代语义 ⇒ 拒绝保留旧值）；`Layout` 的 spacing/padding（**三元钳 0**：
+	//   0 有明确语义="无间隙/无内边距"）；本处的 **stretch** 同样——**0 = 不参与分配**
+	//   是有定义、且正确的语义（`GetStretch() > 0` 才是参与条件）。
+	//   ⇒ 钳 0 后：既不让负权重污染分配算法，也保持「调用即生效」的 setter 语义。
+	// ★ **Debug 侧断言保留**：暴露"传了负值"这一调用方错误（框架自身不会传负值）。
 	FRAMEWORK_ASSERT(stretch >= 0);   // 负值无合理权重语义（详设 §2.1）
 
-	m_stretch = stretch;
+	m_stretch = (stretch > 0) ? stretch : 0;
 
 }
 

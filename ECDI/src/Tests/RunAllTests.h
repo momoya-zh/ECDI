@@ -45,5 +45,6 @@ void RegisterWindowBackdropTests();   ///< Phase 32：窗口衬底（T32-1 零�
 void RegisterMouseCaptureTests();     ///< ★ 审计 #60 / C3：真实鼠标捕获（::SetCapture/ReleaseCapture + 失捕上报）
 void RegisterBackendContractTests();  ///< ★ 审计 #62 / §7.2：后端契约（H3 图像守卫 / M17 边量化——两端共用的纯函数判据）
 void RegisterVisibilityRepaintTests();   ///< ★ 审计 M9：可见性变化的重绘归属（SetVisible 内建 Invalidate + 同值守卫 + 范围边界）
+void RegisterAssertDisciplineTests();    ///< ★ 审计 #63 / §7.3：断言纪律推广（AddChild/RemoveChild/SetStretch 补 Release 运行时分支）
 
 } // namespace ECDI::Test
