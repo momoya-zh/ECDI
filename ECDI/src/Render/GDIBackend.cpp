@@ -4,6 +4,7 @@
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
 #include "Platform/Win32/Win32RenderContext.h"
+#include "Render/BackendContract.h"   // ★ 审计 #62：共享契约件（H3 图像可用性守卫）
 #include "Render/CoverageRaster.h"
 #include "Render/LineCoverage.h"
 
@@ -1011,20 +1012,22 @@ void GDIBackend::DrawRoundedRectLegacy(const Rect& rect, float cornerRadius,
 
 void GDIBackend::DrawImage(const Rect& dest, const Image& image)
 {
-	// Phase 8 §8.3：空图像 no-op（width == 0 || height == 0 → 不绘制，契约层确定边界）
-	if (image.width == 0 || image.height == 0)
+	// ★ 审计 #62 / H3：图像可用性守卫**收敛到共享契约件**（`Render/BackendContract.h`）。
+	//   修复前本处**自己写了一套**（下面原注释保留），而 `GLRenderer::DrawImage` **一套都没有**
+	//   ⇒ 同一命令「GDI 安全 no-op / GL 越界读」——**后端决定内存安全**（§7.2 唯一的内存安全问题）。
+	//   ⇒ 现在两端**调用同一个符号**（`BackendContract::ImageIsDrawable`）：
+	//     判据只有一份实现，结构上不可能漂移（这比"两端各写一条等价断言"更强——审计 §7.2
+	//     原建议"抽成共享可测断言"，实测后收窄为「**共享代码优先**」）。
+	//   ★ 原注释（保留作语义溯源）：空图像 no-op（width == 0 || height == 0 → 不绘制，
+	//     契约层确定边界）+ 契约防御：stride >= width*4 且 pixels >= stride*height（§3.1）
+	//     ——不满足 = 数据损坏，跳过。
+	if (!BackendContract::ImageIsDrawable(image))
 	{
 		return;
 	}
 
-	// 契约防御：stride >= width*4 且 pixels >= stride*height（§3.1）——不满足 = 数据损坏，跳过
 	const int width = image.width;
 	const int height = image.height;
-	if (image.stride < width * 4 ||
-	    image.pixels.size() < static_cast<size_t>(image.stride) * static_cast<size_t>(height))
-	{
-		return;
-	}
 
 	// 32bpp 顶向下 DIB：biHeight 取负 → DIB row 0 = 图像顶行（无需行翻转，§8.3）
 	BITMAPINFO bmi{};

@@ -1,4 +1,4 @@
-﻿#include "RunAllTests.h"
+#include "RunAllTests.h"
 #include "TestFramework.h"
 
 #include "Platform/Win32/Win32FontSource.h"   // 字体源（平台实现——测试可直接 include 内部件）
@@ -384,6 +384,99 @@ void Test29FontEngineFitTextBoundaries()
 	EXPECT_EQ(engine->AdvanceMemoMissCount(), missesBefore);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ★ 审计 #62 / H2：缺字形也必须给出 advance（测宽与画宽同源的接缝）
+// ══════════════════════════════════════════════════════════════════════
+// 缺陷：`GLRenderer::DrawText` 见 `glyphIndex == 0` 就 `continue`（笔位不推进），
+//   而测量链 `Impl::AdvanceOf` 对 gid==0 **仍真加载 `.notdef`** 并返回其**非零** advance
+//   ⇒「画出来的宽」比「测出来的宽」少一个 `.notdef` advance ⇒
+//   **该字符之后的所有字形整体左移、互相重叠；TextBox 光标与已绘制文字错位**。
+//   GDI 无此问题（`TextOutW` 真画 `.notdef` 并推进，与 `GetTextExtentPoint32W` 同源）。
+// ★ 本测的**判别力**（为什么必须单独写）：断言的是 `AdvancePx` 对**缺字形**返回
+//   **true** 且 advance **> 0** ——这正是修复前 `AdvanceOf` 不对外暴露、
+//   且 GL 侧无法取到的值。若 `AdvancePx` 不复刻该行为（例如预判 gid==0 直接返 false），
+//   本用例**必红**（判据与 GL 侧修复点一一对应，不是通用恒真式）。
+
+// ── H2-①：缺字形 ⇒ `AdvancePx` 返回 true 且 advance > 0（★ 核心判别式）──────
+void Test62AdvancePxForUnmappedGlyph()
+{
+	const Font font{};   // 空 family ⇒ SimSun（Phase 26 对齐）
+	auto engine = MakeEngine(120);
+
+	// ★ U+1F600（😀）：SimSun **完全不含** ⇒ glyphIndex == 0（真正的缺字形路径）
+	const char32_t emoji = static_cast<char32_t>(0x1F600);
+	EXPECT_TRUE(engine->GlyphIndex(font, emoji) == 0);   // 前置：确认它确实 unmapped
+
+	long advance = 0;
+	const bool ok = engine->AdvancePx(font, emoji, advance);
+
+	// ★★ 修复前的行为 = 无法接通（`AdvanceOf` 私有、GL 无入口）⇒ 本用例随 `AdvancePx`
+	//   的被删/降级立即红。两件事分别钉住：
+	EXPECT_TRUE(ok);          // ① 缺字形不是"取不到 advance"——它必须给出 .notdef advance
+	EXPECT_TRUE(advance > 0); // ② .notdef advance 非零（否则推进也无意义）
+}
+
+// ── H2-②：缺字形与已映射字形的 advance **同源**（与 `MeasureText` 一致）────────
+//   ★ 这条是 H2 的**回归锚**：测宽链路已包含 .notdef advance；
+//     本用例直接证明该 advance 正是 `MeasureText` 计进去的那一个
+//     ⇒ 将来若有人改 `AdvanceOf`（如对 gid==0 也返 false），**本批与测宽侧同时红**。
+void Test62AdvancePxConsistentWithMeasure()
+{
+	const Font font{};
+	auto engine = MakeEngine(120);
+
+	// 单字符串「A」 + 缺字形串：测「A😀」宽度 − 测「A」宽度 = 缺字形 advance（物理像素）
+	const std::string base = WideToUTF8(L"A");
+	const std::string withEmoji = WideToUTF8(L"A\U0001F600");
+
+	const Size withoutIt = engine->MeasureText(font, base);
+	const Size withIt = engine->MeasureText(font, withEmoji);
+
+	long emojiAdvancePx = 0;
+	EXPECT_TRUE(engine->AdvancePx(font, static_cast<char32_t>(0x1F600), emojiAdvancePx));
+
+	// MeasureText 返回 DIP ⇒ 折算：px = dip · dpi / 96
+	const float dpiToPx = 120.0f / 96.0f;
+	const float deltaDip = withIt.width - withoutIt.width;
+	const long deltaPx = static_cast<long>(deltaDip * dpiToPx);
+
+	// ✓ 允许 1px 舍入差（DIP 折回 px 的 round-trip 误差，非语义差）
+	EXPECT_TRUE(deltaPx >= emojiAdvancePx - 1 && deltaPx <= emojiAdvancePx + 1);
+	EXPECT_TRUE(emojiAdvancePx > 0);   // 且 advance 确实非零（不是"零宽占位"的巧合）
+}
+
+// ── H2-③：**两个不同**缺字形 ⇒ 各自给出相同 advance（同一 .notdef）────────────
+//   ★ 反向对照：证明 H2-① 的 `advance > 0` 不是"碰巧某个码点的字形刚好缺失但 TTF 的
+//     `load` 走了别的路径"。两个互不相关的缺字形都应是同一个 `.notdef` 前进量。
+void Test62AdvancePxSameNotdefForDifferentUnmapped()
+{
+	const Font font{};
+	auto engine = MakeEngine(120);
+
+	long a = 0, b = 0;
+	const bool okA = engine->AdvancePx(font, static_cast<char32_t>(0x1F600), a);   // 😀 emoji
+	const bool okB = engine->AdvancePx(font, static_cast<char32_t>(0x10FFFD), b);  // 私用区码点
+
+	EXPECT_TRUE(okA && okB);
+	EXPECT_TRUE(a > 0 && b > 0);
+	EXPECT_EQ(a, b);   // ★ 同一 .notdef ⇒ 同一 advance（SimSun 下两者均 unmapped）
+}
+
+// ── H2-④：已映射字形 ⇒ `AdvancePx` 正常工作（正向基线，防止"只测缺字形"片面）──
+void Test62AdvancePxForMappedGlyph()
+{
+	const Font font{};
+	auto engine = MakeEngine(96);   // 96 ⇒ 像素数 = 逻辑点数（无换算，断言更直接）
+
+	long a = 0;
+	const bool ok = engine->AdvancePx(font, static_cast<char32_t>(L'A'), a);
+	EXPECT_TRUE(ok);
+	EXPECT_TRUE(a > 0);
+	// 96 DPI 下与 `MeasureText` 的 DIP 值应当一致（同一链路）
+	const Size w = engine->MeasureText(font, WideToUTF8(L"A"));
+	EXPECT_TRUE(a >= static_cast<long>(w.width) - 1 && a <= static_cast<long>(w.width) + 1);
+}
+
 void ECDI::Test::RegisterFontEngineTests()
 {
 	GetTestRegistry().Add("FontEngine.PixelSize",          &Test26PixelSize);                      // T26-1
@@ -397,4 +490,10 @@ void ECDI::Test::RegisterFontEngineTests()
 	GetTestRegistry().Add("FontEngine.AdvanceMemoOverflow", &Test28AdvanceMemoOverflowClear);          // T28-2
 	GetTestRegistry().Add("FontEngine.FitTextMatchesMeasure", &Test29FontEngineFitTextMatchesMeasure);   // T29-FIT-3
 	GetTestRegistry().Add("FontEngine.FitTextBoundaries",     &Test29FontEngineFitTextBoundaries);       // T29-FIT-4
+
+	// ── ★ 审计 #62 / H2：缺字形 advance（测宽与画宽同源）──
+	GetTestRegistry().Add("FontEngine.AdvancePxUnmapped",     &Test62AdvancePxForUnmappedGlyph);
+	GetTestRegistry().Add("FontEngine.AdvancePxConsistentMeasure", &Test62AdvancePxConsistentWithMeasure);
+	GetTestRegistry().Add("FontEngine.AdvancePxSameNotdef",   &Test62AdvancePxSameNotdefForDifferentUnmapped);
+	GetTestRegistry().Add("FontEngine.AdvancePxMapped",       &Test62AdvancePxForMappedGlyph);
 }

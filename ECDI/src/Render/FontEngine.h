@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Core/Font.h"
 #include "ECDI/Core/Size.h"
@@ -97,6 +97,21 @@ public:
 	/// @details ★ **带 metrics 缓存**（键含 text + size + family + **dpi**）——
 	///          消掉「每帧 × 每行」的重复度量（性能方向②）。
 	std::size_t MeasureTextCacheMissCount() const noexcept;
+
+	/// @brief 单码点 advance（★ 审计 #62 / H2 的修复接缝）——**物理像素**，与测量链同源
+	/// @param font 字体描述符
+	/// @param cp   码点
+	/// @param out  该码点 advance（**物理像素**，`advance.x >> 6`）
+	/// @return false = 该 face 无此字形 / 加载失败（`out` 不变）
+	/// @details ★★ **为什么需要它**：H2 的根因是「**测量链推进、绘制链不推进**」——
+	///          `GLRenderer::DrawText` 见 `glyphIndex == 0` 就 `continue`（笔位不动），
+	///          而 `Impl::AdvanceOf` 对 gid==0 **仍真加载 `.notdef`** 并返回其**非零** advance
+	///          ⇒ 绘制比测量少推一个 `.notdef` ⇒ 其后字形整体左移、互相重叠。
+	///          修复要点 = 让绘制链**走同一条 advance 求值路径**（而不是自己再算一套）。
+	///          ★ 本方法是 `Impl::AdvanceOf` 的**唯一对外出口**——它**不改变** memo 策略
+	///          （gid==0 仍永不入 memo），只把结果暴露给渲染侧（审计 M15 的硬要求）。
+	/// @note **非公共 API**（本头在 `src/Render/`，不进 `include/ECDI`）⇒ 最小 API 面不受影响。
+	bool AdvancePx(const Font& font, char32_t cp, long& out);
 
 	/// @brief advance memo miss 计数（Phase 28 批一观测缝——T28-1「真命中」断言）
 	/// @details 仅统计「gid ≠ 0 且 advanceCache miss ⇒ 实际 `FT_Load_Char`」的次数（成败均计）；

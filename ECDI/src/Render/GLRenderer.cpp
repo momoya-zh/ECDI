@@ -3,6 +3,7 @@
 #include "ECDI/Core/ECDIAssert.h"             // FRAMEWORK_ASSERT（决策 32 同构：Begin/End 严格配对）
 #include "ECDI/Core/Logger.h"
 #include "Platform/Win32/Win32RenderContext.h"   // ★ 取 HWND（同 GDIBackend / GDITextMeasurer 先例）
+#include "Render/BackendContract.h"               // ★ 审计 #62：共享契约件（H3 守卫 / M17 吸附）
 #include "Render/FontEngine.h"                   // 诊断用（RasterizeCount）
 #include "Render/Utf8Decode.h"
 
@@ -19,9 +20,12 @@ namespace ECDI{
 //    （实测：贴边控件的焦点框被侧边控件盖住、按钮边框残留深色分数细线）。
 //    顶点坐标一律 floor 后，quad 恰好覆盖 `[floor(x), floor(x+w))` 的整数像素列——
 //    与 GDI 逐位一致 ⇒ 共享边的像素归属唯一确定。
+// ★ 审计 #62 / M17：改走**共享契约件**——`BackendContract::SnapVertex`（单一真相源）。
+//   修复前本处自写 `std::floor`，与 GDI 的四套取整口径各自独立（审计 M17：「同一矩形四种口径」）。
+//   两端从此共用 `QuantizeEdge` 的边规则（详见 `BackendContract.h` 的口径段与已知偏差记账）。
 static float Snap(float v)
 {
-	return std::floor(v);
+	return BackendContract::SnapVertex(v);
 }
 
 GLRenderer::GLRenderer(std::shared_ptr<FontEngine> fontEngine)
@@ -159,6 +163,29 @@ void GLRenderer::BeginFrame(const Color& background)
 	m_w = rc.right - rc.left;
 	m_h = rc.bottom - rc.top;
 
+	// ★★ 审计 #62 / H4：**每帧刷新共享 `FontEngine` 的 DPI**（修复前永不刷新）。
+	//   缺陷：本链的 DPI 只在 `FreeTypeTextMeasurer::Initialize` 注入**一次**
+	//     （`FreeTypeTextMeasurer.cpp:30` 是全库唯一的生产 `SetDpi` 调用点）⇒ 把窗口拖到
+	//     不同 DPI 的显示器后（`WM_DPICHANGED` 只更新了翻译器/几何），**几何按新 DPI 缩放、
+	//     字号与 advance 停在旧 DPI** ⇒ 每行 advance 与缩放后布局不匹配
+	//     （裁剪 / 光标漂移 / 字形大小错），**直到重启**。
+	//   ★ **对照 GDI**：`GDIBackend.cpp:875` 与 `GDITextMeasurer.cpp:89` **每次调用**都读
+	//     `GetDpiForWindow` ⇒ GDI 无此缺陷。本处是 GL 侧的对等实现。
+	//   ★ **落点选择**：`BeginFrame` 是每帧唯一必经点（与上面 `GetClientRect` 的 per-frame
+	//     自省同款）——不新增接缝、不改 `WM_DPICHANGED` 链（那里只更新翻译器，是既有契约）。
+	//   ★ **`FontEngine` 是共享对象**（`CreateGLRenderServices` 里 renderer 与 measurer 共用
+	//     同一个）⇒ 在此刷新**同时**修正了渲染链与测量链，正是 Phase 26「同源」目标
+	//     （S6）的落地；且 `FontEngine` 的各级缓存**键含 dpi**（`GlyphKey.pixelSize` /
+	//     `measureCache` 的 dpi 维）⇒ 换 DPI 自然不命中旧缓存，**无需显式清理**。
+	if (m_fontEngine)
+	{
+		const int dpi = GetDpiForWindow(m_hwnd);
+		if (dpi > 0)
+		{
+			m_fontEngine->SetDpi(dpi);   // 幂等赋值；同值调用零代价（缓存键不变 ⇒ 全命中）
+		}
+	}
+
 	glViewport(0, 0, m_w, m_h);
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
@@ -222,7 +249,25 @@ void GLRenderer::DrawText(const Point& pos, const std::string& text,
 		const std::uint32_t glyphIndex = m_fontEngine->GlyphIndex(font, cp);
 		if (glyphIndex == 0)
 		{
-			continue;                    // 该 face 无此字形
+			// ★★ 审计 #62 / H2：**缺字形也必须推进笔位**（与测量链同源）。
+			//   修复前本处直接 `continue` ⇒ **不推进**；而测量链（`FontEngine::AdvanceOf`）
+			//   对 gid==0 **仍真加载** `.notdef` 并返回其**非零** advance（见 `AdvanceOf`
+			//   的 `glyphIndex != 0` 只门控 **memo**、不门控 `FT_Load_Char`）⇒
+			//   「测出来的宽」比「画出来的宽」多一个 `.notdef` advance ⇒
+			//   **该字符之后的所有字形整体左移、互相重叠；TextBox 光标与已绘制文字错位**。
+			//   ★ GDI **无此问题**：`TextOutW` 会真画 `.notdef` 并推进，与
+			//     `GetTextExtentPoint32W` 同源。
+			//   ★ 触发人群：任何 face 不覆盖的码点——emoji、生僻 CJK、SimSun 里的 `✔`/方框字符。
+			//   ★★ **必须只改绘制侧**：`FontEngine::AdvanceOf` 的 memo 策略
+			//      （「gid = 0 永不入 memo」，`FontEngine.cpp:93-94` 有意为之）**一字不动**——
+			//      动它会改掉测量基准（审计 M15 明确要求「修 H2 时保持本处不动」）。
+			//   ★ 取法 = `AdvancePx`（走**同一个** `Impl::AdvanceOf`）⇒ 「测」与「画」同源。
+			long advancePx = 0;
+			if (m_fontEngine->AdvancePx(font, cp, advancePx))
+			{
+				pen += static_cast<float>(advancePx);   // ★ 位置推进（不绘制——face 确实无此字形）
+			}
+			continue;
 		}
 
 		const GlyphKey key{ faceId, glyphIndex, pixelSize,
@@ -261,7 +306,23 @@ void GLRenderer::DrawLine(const Point& start, const Point& end, float width, con
 	const GlyphSlot slot = LineSlot(grid, start.x, start.y, end.x, end.y, width);
 	if (!slot.valid)
 	{
-		return;                          // 图集满 ⇒ 跳过（不崩）
+		// ★★ 审计 #62 / L10：图集满 ⇒ 走 **legacy 实心降级**（不整线消失）。
+		//   缺陷（修复前）：本处直接 `return` ⇒ 图集满时**整条线不画**——
+		//   可达消费者：勾选标记 `✔`（`DrawLine` 画）、进度条刻度、分隔线。表现为
+		//   「勾选标记凭空消失」。⚠️ 这是**可用性缺陷**（不是崩溃）——图集满本身就罕见，
+		//   但「稀有资源耗尽 ⇒ UI 部件消失」是**静默失效**，无日志、无告警、无从诊断。
+		//   ★ **GDI 同款哲学**（`GDIBackend.cpp:876` 原文）：「**宁可无 AA，不可缺绘制**」——
+		//     GDI 在 `DrawLineAA` 的补丁面分配失败时**降级**到 `DrawLineLegacy`（无 AA 实心线），
+		//     而不是跳过。本处是 GL 侧的对等实现。
+		//   ★ 实现 = 复用 `SolidSegment`（**既有**件——`DrawFocusRect` 已在用，零新增 API）：
+		//     以起点-终点为轴、半宽 `max(0.5, lround(width)/2)` 的实心线段四边形。
+		//   ⚠️ 与 AA 路径的**非等价性如实记账**：AA 路径走图集覆盖度（亚像素边界平滑），
+		//     降级路径是硬边 ⇒ **slope/粗细与正常路径略有差异**。这是有意的取舍：
+		//     「画出一条粗一点的实线」优于「什么都不画」。
+		const float halfWidth = std::max (0.5f, static_cast<float>(std::lround(width)) * 0.5f);
+		Shade(color);
+		SolidSegment(start.x, start.y, end.x, end.y, halfWidth);
+		return;
 	}
 
 	Shade(color);
@@ -311,7 +372,19 @@ void GLRenderer::DrawRoundedRect(const Rect& rect, float cornerRadius, const Col
 	const GlyphSlot corner = CornerSlot(radius);
 	if (!corner.valid)
 	{
-		return;                          // 图集满：中心/条带已画，四角留白（不崩）
+		// ★★ 审计 #62 / L10（第二个落点）：图集满 ⇒ 补上四角的**实心降级**，不留四个黑洞。
+		//   缺陷（修复前）：本处 `return` ⇒ 三条带已画、**四角留白** ⇒ 视觉 =「**十字形**」
+		//   （四角四个洞）。可达消费者：`ProgressBar` 半胶囊、圆角面板、圆角按钮。
+		//   ★ 修法沿用 GDI 的同一哲学（`GDIBackend.cpp:936-940`「**宁可无 AA，不可缺绘制**」：
+		//     `DrawRoundedRect` 的 a==1 分支在补丁面取不到时**降级**到 `RoundRect`）——
+		//     四角各补一个 `R×R` 的实心方块（走 1×1 全亮单元，`DrawRect` 走的同一 texel）。
+		//   ⚠️ **非等价性如实记账**：降级后四角是**方块**而非圆角 ⇒ 视觉从「胶囊」变
+		//     「带四个方角的圆角矩形」。同 L10 线降级的取舍：有形状 > 无形状。
+		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x,         y,         fr, fr);   // TL
+		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + w - fr, y,         fr, fr);   // TR
+		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x,         y + h - fr, fr, fr);   // BL
+		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + w - fr, y + h - fr, fr, fr);   // BR
+		return;
 	}
 
 	// 四角复用**同一份 canonical 掩码**，靠 UV 翻转取向（分 4 次调用 —— 与 GDI 的角索引变换等价）
@@ -326,12 +399,17 @@ void GLRenderer::DrawImage(const Rect& dest, const Image& image)
 	// ★ 审计 L14：dest 非正尺寸**不再绘制**。GL 侧无背面剔除 ⇒ 负尺寸的 quad 顶点顺序
 	//   被翻转 ⇒ 画出**镜像四边形**（可见的鬼影）；GDI 侧 `FillRect`/`AlphaBlend` 对空矩形
 	//   是 no-op。两端行为对齐：非正 dest ⇒ 两端都 no-op。
-	//   ⚠️ 只查 dest，不查 image.width/height —— 那两条是**源数据完整性**校验（见 H3）。
 	if (dest.width <= 0.0f || dest.height <= 0.0f)
 	{
 		return;
 	}
-	if (!m_ready || image.width <= 0 || image.height <= 0)
+
+	// ★★ 审计 #62 / H3：**源数据完整性**守卫——与 `GDIBackend::DrawImage` **同一个符号**
+	//   （`BackendContract::ImageIsDrawable`）。修复前 GL **完全无此校验**，而下面立即
+	//   按 `pixels.data() + j * stride` 逐行读取 ⇒ 应用自造一个 `stride`/`pixels` 不自洽的
+	//   `Image`（`PaintContext::DrawImage` 是**公开 API**）即**越界读**（UB）。
+	//   审计原文定性：「同一命令：GDI 安全 no-op，GL 越界读 —— **后端决定内存安全**」。
+	if (!m_ready || !BackendContract::ImageIsDrawable(image))
 	{
 		return;
 	}

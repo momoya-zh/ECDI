@@ -1,4 +1,4 @@
-﻿#include "Render/FontEngine.h"
+#include "Render/FontEngine.h"
 
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"   // UTF8ToWide（告警消息用）
@@ -434,6 +434,25 @@ float FontEngine::Ascent(const Font& font)
 
 	impl.ascentCache.emplace(std::make_pair(FaceIdFor(font.family), px), ascent);
 	return ascent;
+}
+
+bool FontEngine::AdvancePx(const Font& font, char32_t cp, long& out)
+{
+	// ★ 审计 #62 / H2：`Impl::AdvanceOf` 的**唯一对外出口**——渲染侧（GL）与测量侧
+	//   （`MeasureText` / `FitText`）因此走**完全同一条** advance 求值路径
+	//   （同 GlyphKey / 同 load flags / 同哨兵语义）⇒「画出来的宽」与「测出来的宽」同源。
+	//   ⚠️ **不触碰 memo 策略**：`AdvanceOf` 内 gid==0 仍永不入 memo（`FontEngine.cpp:93-94`
+	//      有意为之，审计 M15 要求修 H2 时保持该处不动）——本方法只是把结果外传。
+	Impl& impl = *m_impl;
+	const int px = PixelSize(font);
+	const FaceId faceId = FaceIdFor(font.family);
+	FT_Face face = impl.FaceOf(faceId);
+	if (face == nullptr)
+	{
+		return false;   // 无可用 face（与 MeasureText 的空结果同族）
+	}
+	FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
+	return impl.AdvanceOf(face, faceId, px, cp, out);
 }
 
 bool FontEngine::Glyph(const Font& font, char32_t cp, GlyphBitmap& out)
