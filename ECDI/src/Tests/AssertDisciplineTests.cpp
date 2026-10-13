@@ -1,7 +1,23 @@
 // ★ 审计 #63 / §7.3：FRAMEWORK_ASSERT 纪律推广的测试
 //
-// 本文件**故意**在 include 之前 `#undef _DEBUG` —— 见下方「为什么这样做」的大段说明。
-#undef _DEBUG
+// ★★ **本文件不写 `#undef _DEBUG`**——这是本批踩到并已移除的一个**真实构建故障**，
+//    连同"为何曾想这么做"一并记账，防后来者重复踩：
+//      ① **动机**：想"在 Debug 构建里直接测到 Release 侧分支"，于是试过在
+//         本 TU 顶部 `#undef _DEBUG`（`FRAMEWORK_ASSERT` 是宏，展开取决于使用它的 TU）。
+//      ② **为何无效**：被测断言在**库侧**（`Widget.cpp`，用 `_DEBUG` 编译）⇒
+//         它在**库编译时**就已展开成真调用，与消费方 TU 的宏状态无关
+//         ⇒ 关掉本 TU 的断言**根本救不了进程**（实测照样 `assert(false)` 终止）。
+//      ③ **为何必须移除**：`#undef _DEBUG` 会让本 TU 在包含 MSVC CRT/STL 头时
+//         按 **Release 语义**展开（`_ITERATOR_DEBUG_LEVEL=0` / `RuntimeLibrary=MD`），
+//         而同一构建其余 TU 都是 Debug（=2 / `MDd`）⇒ **MSVC 链接期炸**：
+//         `error LNK2038: 检测到"_ITERATOR_DEBUG_LEVEL"的不匹配项: 值"0"不匹配值"2"`
+//         + `RuntimeLibrary 的值"MD_DynamicRelease"不匹配"MDd_DynamicDebug"`
+//         ⇒ `LNK1319: 检测到 2 个不匹配项`（用户侧 VS Debug 实测）。
+//         ★ **MinGW 构建测不出来**（GNU ABI 无这两个 detect_mismatch 机制）
+//           ⇒ 又一条"本机全绿 ≠ 四工具链全绿"的实证（同族：条 128/129 跨工具链差异）。
+//      ④ **正确形态 = 与 `LayoutTests.cpp:816-821` 同款的 `#ifdef NDEBUG`**
+//         （见下方注释块）：Release 构建下跑到 Release 分支；Debug 下体为空但
+//         用例在册。判别力落在 Release 构建（本仓库另建了 Release 构建验证）。
 
 #include "RunAllTests.h"
 #include "TestFramework.h"
@@ -15,7 +31,7 @@
 using namespace ECDI;
 
 // ══════════════════════════════════════════════════════════════════════
-// 为什么本文件要在 include 之前 `#undef _DEBUG`
+// 为什么本组用例用 `#ifdef NDEBUG` 包住
 // ══════════════════════════════════════════════════════════════════════
 // `FRAMEWORK_ASSERT` 在 Release 下展开为 `((void)0)`（`ECDIAssert.h:41`）⇒
 // 「契约靠断言维护」的几处在 Release 下**没有第二道防线**。
@@ -32,28 +48,18 @@ using namespace ECDI;
 //    ⇒ **测试进程被终止**（`LayoutTests.cpp:816-821` 已就此留下同款说明：
 //    「该分支**必须**留空——Debug 侧没有（也不该有）运行时用例」）。
 //
-// ★★ **本文件的办法（比 `#ifdef NDEBUG` 强）**：`FRAMEWORK_ASSERT` 是**宏**，
-//    其展开取决于**使用它的那个 TU**编译时的 `_DEBUG`，而不是库的构建配置。
-//    ⇒ 在本 TU 里 `#undef _DEBUG`（在 include 之前）即可让本 TU 内的
-//    `FRAMEWORK_ASSERT` 展开为 `((void)0)`，从而**在 Debug 构建里真正跑到**
-//    `AddChild` / `RemoveChild` / `SetStretch` 的 Release 侧分支。
-//    ★ 这不是绕过被测代码：被测的**运行时分支**（`if (!child) return;` 等）就在
-//      库里（库是用 `_DEBUG` 编的，所以那些 `FRAMEWORK_ASSERT(false)` 在库侧
-//      仍是真断言——这正是「Debug 暴露、Release 收敛」的双轨语义），
-//      而本 TU 只是让**触发它的那次调用**不至于杀死进程——不对，且慢：
-//
-//      ⚠️ **重要更正（实测事实）**：库侧的 `FRAMEWORK_ASSERT(false)` 是在
-//      **`Widget.cpp` 编译时**就展开好的——库是用 `_DEBUG` 编的 ⇒ 那些调用
-//      **仍然会**走 `HandleAssertFailure` ⇒ 进程照样终止。
-//      ⇒ **「TU 内关掉断言」对本用例无效**（它只影响本 TU 内书写的断言）。
-//
-// ★★ **因此本组用例的真实形态 = 与 `LayoutTests` 同款的 `#ifdef NDEBUG`**：
-//    Release 构建（`NDEBUG` 已定义 ⇒ 库侧断言整体为 `((void)0)`）下跑到
-//    Release 分支；本仓库的 MinGW Debug 验证里这些用例**体内为空、但用例存在**
-//    （注册了、名字在册、计数在册），与 `LayoutTests` 既有先例完全一致。
+// ★★ **已试过并移除的两条错路（如实记账）**：
+//    ① **在本 TU 顶部 `#undef _DEBUG`** —— 双重无效：既救不了进程
+//       （断言在库编译时已展开），又炸 MSVC 链接（`_ITERATOR_DEBUG_LEVEL` /
+//       `RuntimeLibrary` 不匹配 ⇒ LNK2038 ×2 + LNK1319）。详见文件头三条教训。
+//    ② 因此本组采用 `LayoutTests` 既有先例的 **`#ifdef NDEBUG`**：
+//       Release 构建（`NDEBUG` 已定义 ⇒ 库侧断言整体为 `((void)0)`）下跑到
+//       Release 分支；MinGW Debug 验证里这些用例**体内为空、但用例存在**
+//       （注册了、名字在册、计数在册）。
 //    ★ 诚实地讲：本组用例的**判别力落在 Release 构建**上（用户侧 VS Release
 //      与将来任何 NDEBUG 配置），本机 MinGW Debug 只保证「它编译通过、且
-//      正向对照（合法路径）仍然绿」。
+//      正向对照（合法路径）仍然绿」。⇒ 本批**另建 Release 构建**让它们真跑
+//      （`cmake-build-release-mingw`），而非只写不跑。
 
 namespace {
 

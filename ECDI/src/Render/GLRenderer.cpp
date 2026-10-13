@@ -319,7 +319,7 @@ void GLRenderer::DrawLine(const Point& start, const Point& end, float width, con
 		//   ⚠️ 与 AA 路径的**非等价性如实记账**：AA 路径走图集覆盖度（亚像素边界平滑），
 		//     降级路径是硬边 ⇒ **slope/粗细与正常路径略有差异**。这是有意的取舍：
 		//     「画出一条粗一点的实线」优于「什么都不画」。
-		const float halfWidth = std::max (0.5f, static_cast<float>(std::lround(width)) * 0.5f);
+		const float halfWidth = (std::max)(0.5f, static_cast<float>(std::lround(width)) * 0.5f);
 		Shade(color);
 		SolidSegment(start.x, start.y, end.x, end.y, halfWidth);
 		return;
