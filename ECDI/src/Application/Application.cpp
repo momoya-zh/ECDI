@@ -286,6 +286,11 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 
 			current->OnMouseMove(event);
 
+			// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
+			if (event.IsHandled()) {
+				break;
+			}
+
 			current = current->GetParent();
 
 		}
@@ -314,6 +319,11 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 	while (current != nullptr){
 
 		current->OnMouseMove(event);
+
+		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
+		if (event.IsHandled()) {
+			break;
+		}
 
 		current = current->GetParent();
 
@@ -347,6 +357,11 @@ void Application::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 		current->OnMouseButtonDown(event);
 
+		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
+		if (event.IsHandled()) {
+			break;
+		}
+
 		current = current->GetParent();
 
 	}
@@ -370,6 +385,11 @@ void Application::OnMouseButtonUp(const MouseButtonUpEvent& event){
 	while (current != nullptr) {
 
 		current->OnMouseButtonUp(event);
+
+		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
+		if (event.IsHandled()) {
+			break;
+		}
 
 		current = current->GetParent();
 
@@ -395,6 +415,14 @@ void Application::OnMouseWheel(const MouseWheelEvent& event){
 	while (current != nullptr) {
 
 		current->OnMouseWheel(event);
+
+		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
+		// ⚠️ **滚轮冒泡的边界**（条 135 同族）：子控件不 SetHandled 时事件继续
+		//   落到父控件滚内容 = **期望行为**；本检查只让「已显式消费」的子控件
+		//   阻止冒泡，不改变默认的冒泡语义。
+		if (event.IsHandled()) {
+			break;
+		}
 
 		current = current->GetParent();
 
@@ -476,6 +504,12 @@ void Application::OnDropFiles(const DropFilesEvent& event){
 	while (current != nullptr){
 
 		current->OnDropFiles(event);
+
+		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释；
+		//   原注释「不查 IsHandled」正是 M22 描述的"死状态"现象，本批订正）
+		if (event.IsHandled()) {
+			break;
+		}
 
 		current = current->GetParent();
 

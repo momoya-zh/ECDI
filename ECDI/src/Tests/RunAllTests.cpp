@@ -44,6 +44,7 @@ int ECDI::Test::RunAllTests()
     RegisterBackendContractTests();  // ★ 审计 #62 / §7.2：后端契约（H3 图像守卫 / M17 边量化）
     RegisterVisibilityRepaintTests();   // ★ 审计 M9：可见性变化的重绘归属（SetVisible Invalidate + 同值守卫）
     RegisterAssertDisciplineTests();    // ★ 审计 #63 / §7.3：断言纪律推广（Release 运行时分支）
+    RegisterAuditRemainderTests();      // ★ 审计 #68 余量批：M22 / L4 / M14 / L2
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

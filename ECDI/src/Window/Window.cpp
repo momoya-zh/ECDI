@@ -21,6 +21,22 @@
 
 namespace ECDI{
 
+// ★★ 审计 M3 / M4（仅订正注释——不改行为）：本类的判空风格**故意不统一**，
+//   理由是两个成员的存在性保证**不同**：
+//     · `m_platformWindow`：**初始化列表里必建**（见 `Window.h` 成员声明与构造器）
+//       ⇒ 对象一旦构造完成，它恒非空 ⇒ 转发型方法（`SetChromeMode` /
+//         `SetCaptionHeight` / `SetResizeInset` / `SetWindowLayer` / `SetBounds` /
+//         `GetPlatformWindow`）**无需判空**；少数方法（`Invalidate` /
+//         `GetDpiScale` / `SetFileDropEnabled`）仍判空是**防御性冗余**
+//         （保留不动——不是缺陷，删掉反而增加风险）。
+//     · `m_rootWidget`：构造期**确实可能为 null**（它在 Window 构造体里创建，
+//       而 `WM_PAINT` 等回调可在构造完成前到达——条 108）⇒ `PaintFrame`
+//       对它的判空是**必需**的。
+//   ⇒ 审计 M3（两类风格并存）与 M4（`PaintFrame` 判了 root 不判 platform）
+//     都**不是缺陷**，而是上述两成员存在性差异的正确反映。
+//     ★ 「统一风格」在此处是**反向操作**：给 platform 转发补判空是死代码，
+//       去掉 root 判空会引入 UB。故只订正注释、说明口径。
+
 namespace {
 
 // 5.4.4：DFS 收集可聚焦控件（树前序：父 → 子；匿名 namespace——Window 内部辅助，非公开能力）

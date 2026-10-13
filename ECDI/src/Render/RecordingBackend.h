@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifdef DrawText
 #undef DrawText   // 防御性 undef（2026-08-16）：本头声明 DrawText override——自包含防护
@@ -108,9 +108,28 @@ namespace ECDI {
 		void EndFrame() override {}
 
 		// TextMeasurer：固定值（测试断言"测量被调用"，不关心精度——那是 GDIBackend 真实 GDI 的事）
-		Size MeasureText(const Font&, const std::string&) override { return { 10.0f, 14.0f }; }
+		//
+		// ★★ 审计 M14：**空串返回 {0,0}**（与两个真实测量器对齐）。
+		//   修复前对空串也返回 {10,14}，而 `FontEngine::MeasureText`（空码点序列不迭代 ⇒
+		//   默认 `Size{}`）与 `GDITextMeasurer::MeasureText`（同族空循环）都返回 **{0,0}**
+		//   ⇒ 替身与真实语义分裂，且「空串宽度」这条契约**从未被测过**。
+		//   ★ 非空串仍返回固定 {10,14}（本替身的既有定位：让断言「测量被调用」，
+		//     不模拟真实字形宽度）——只有**空串**这一档需要与真实对齐。
+		Size MeasureText(const Font&, const std::string& text) override
+		{
+			return text.empty() ? Size{ 0.0f, 0.0f } : Size{ 10.0f, 14.0f };
+		}
 
 		float LineHeight(const Font&) override { return 14.0f; }
+
+	private:
+
+		/// @brief clip 配对深度（★ 审计 M14：令 `PopClip` 在栈空时**不记录**——与两个真实后端对齐）
+		/// @details 真实后端（`GDIBackend.cpp:1119` / `GLRenderer.cpp:489`）栈空时直接返回；
+		///          修复前本替身无条件记录 ⇒ 用例会断言「真实后端不会发出的命令」。
+		///          ★ 只需这一个计数（**不是**完整栈）：本替身是**命令流记录器**而非状态模拟器，
+		///          真实后端的 clip 栈是其私有实现细节，替身只需在「是否记录」上同构。
+		int m_clipDepth = 0;
 	};
 
 

@@ -78,9 +78,17 @@ void VerticalLayout::Arrange(Widget& parent){
 
 		if (child->GetStretch() > 0){
 			++stretchSeen;
+			// ★★ 审计 L2：`remaining × GetStretch()` 用 **long long** 承积。
+			//   `remaining` 可达 ~2^31（父高 − padding − fixedTotal）、`GetStretch()` 是调用方
+			//   给的任意 int ⇒ **int × int 可溢出**（UB）。同族先例：`ScrollBar.cpp:121`
+			//   「中间乘积一律 long long 防溢出」（详设 §3.4）。
+			//   ★ 零行为变化：合法范围内的值（|remaining|、|stretch| 均 < 2^16 时）
+			//   int 与 long long 运算逐位相同；溢出只可能发生在**极端输入**上，
+			//   而那里的旧行为本身就是 UB ⇒ 改后是"从 UB 变为确定值"，不是改行为。
 			int height = (stretchSeen == visibleStretchCount)   // ★ 盯防②：比较对象 = **可见**计数
 				? remaining - allocated                                  // 末位**可见** stretch 吃余数——Σ == remaining
-				: remaining * child->GetStretch() / totalStretch;        // 整数除法截断（既有 D2 不变）
+				: static_cast<int>(
+					static_cast<long long>(remaining) * child->GetStretch() / totalStretch);  // 整数除法截断（既有 D2 不变）
 			allocated += height;
 			child->SetSize(m_fillCrossAxis ? cross : child->GetWidth(), height);
 		}

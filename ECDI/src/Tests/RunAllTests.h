@@ -46,5 +46,6 @@ void RegisterMouseCaptureTests();     ///< ★ 审计 #60 / C3：真实鼠标捕
 void RegisterBackendContractTests();  ///< ★ 审计 #62 / §7.2：后端契约（H3 图像守卫 / M17 边量化——两端共用的纯函数判据）
 void RegisterVisibilityRepaintTests();   ///< ★ 审计 M9：可见性变化的重绘归属（SetVisible 内建 Invalidate + 同值守卫 + 范围边界）
 void RegisterAssertDisciplineTests();    ///< ★ 审计 #63 / §7.3：断言纪律推广（AddChild/RemoveChild/SetStretch 补 Release 运行时分支）
+void RegisterAuditRemainderTests();      ///< ★ 审计 #68 余量批：M22 冒泡早退 / L4 缓动值域 / M14 替身契约对齐 / L2 乘积保护
 
 } // namespace ECDI::Test

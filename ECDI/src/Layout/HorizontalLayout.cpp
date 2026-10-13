@@ -78,9 +78,13 @@ void HorizontalLayout::Arrange(Widget& parent){
 
 		if (child->GetStretch() > 0){
 			++stretchSeen;
+			// ★★ 审计 L2：`remaining × GetStretch()` 用 **long long** 承积
+			//   （int × int 可溢出 = UB；同族先例 `ScrollBar.cpp:121`「中间乘积一律 long long」）。
+			//   合法范围内与旧行为逐位相同；极端输入下由 UB 变为确定值。
 			int width = (stretchSeen == visibleStretchCount)   // ★ 盯防②：比较对象 = **可见**计数
 				? remaining - allocated                                 // 末位**可见** stretch 吃余数——Σ == remaining
-				: remaining * child->GetStretch() / totalStretch;       // 整数除法截断（既有 D2 不变）
+				: static_cast<int>(
+					static_cast<long long>(remaining) * child->GetStretch() / totalStretch);  // 整数除法截断（既有 D2 不变）
 			allocated += width;
 			child->SetSize(width, m_fillCrossAxis ? cross : child->GetHeight());
 		}
