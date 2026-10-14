@@ -52,13 +52,29 @@ PFN_SetWCA g_setWca = nullptr;          ///< 解析结果（lazy；**失败也�
 bool g_setWcaResolved = false;          ///< 是否已尝试解析
 BackdropInjection g_backdropInjection = BackdropInjection::None;   ///< D32-N 注入（测试专用）
 
-/// @brief tint alpha → DWM nColor（C32-12：**RGB 分量 = 黑**——tint 观感由缓冲清屏色承载，
-/// 防「DWM tint + 缓冲泄漏」双重 tint；alpha 分量 = 材质浓淡。ToByte 语义沿决策 21/23）
+/// @brief tint → DWM nColor（★ #58 修订版 C32-12：**RGB 必须携带 tint**，不是黑）
+/// @details
+/// - **alpha 分量 = 材质浓淡**（tint.a；ToByte 语义沿决策 21/23）。
+/// - ★★ **RGB 分量 = tint 的 RGB**——原设计（C32-12 v1）写「RGB = 黑」以防「DWM tint +
+///   缓冲清屏色」双重 tint，**经实测证否**：RGB=0 并不是「中性」，而是「60% 黑 tint」，
+///   会把材质压成**单色**（`.workbuddy/spike/p58/p58r.cpp` 单变量实测，margins 固定
+///   `{0,0,1,0}`：`0x99000000` ⇒ 跨区差 **3.88**（材质不可见）vs `0x992B2F38` ⇒ **45.68**
+///   （材质可见））；且 RGB=tint 的读数与 probe8 的已知良好参照 `EMP` 格几乎逐项相同
+///   （最大偏差 7.6/255）⇒ **不存在叠加**（DWM 的 nColor RGB 是设定 tint，非叠加）。
+/// - ★★ **通道序 = `AABBGGRR`**（byte0 = **R**）—— **与缓冲清屏色的 `0x00RRGGBB`
+///   （byte0 = B，E-B2-4）恰好互为镜像**，两者极易写反。此序经实测定案
+///   （`p58s`：中性灰底衬下 `0x99FF0000` ⇒ 偏蓝 R−B=−136.3 / `0x990000FF` ⇒ 偏红
+///   R−B=+114.0 / 绿色对照两序一致）⇒ 即 probe8 所用的 `0x992B2F38`
+///   （R=0x38, G=0x2F, B=0x2B = 其 `TINT_RGB`）形态。
 int ComposeAccentColor(const Color& tint)
 {
-	const float clamped = std::clamp(tint.a, 0.0f, 1.0f);
-	const unsigned alpha = static_cast<unsigned>(clamped * 255.0f + 0.5f) << 24;
-	return static_cast<int>(alpha);
+	const auto toByte = [](float v)
+	{
+		const float clamped = std::clamp(v, 0.0f, 1.0f);
+		return static_cast<unsigned>(clamped * 255.0f + 0.5f);
+	};
+	const unsigned alpha = toByte(tint.a) << 24;
+	return static_cast<int>(alpha | (toByte(tint.b) << 16) | (toByte(tint.g) << 8) | toByte(tint.r));
 }
 
 }   // namespace（Phase 32 衬底辅助——匿名 namespace 块结束）
@@ -1788,10 +1804,17 @@ void Win32PlatformWindow::ApplyDwmEnhancements(HWND hwnd){
 	// 本函数整体属「Win32 实现细节」——数值参数不是公共 API 语义。
 	// （老系统优雅降级：视觉层次缺失，功能完整）
 
-	// ① 保留系统阴影/层次：minimal frame extension（MARGINS{1,1,1,1}——起步值；
-	//    全 0 失去系统阴影，过大则玻璃延伸进客户区。真机标定观察项：
-	//    [a] 阴影是否保留 [b] 客户区顶部是否出现玻璃条 [c] Win10 / Win11 各一遍）
-	MARGINS margins{ 1, 1, 1, 1 };
+	// ① 保留系统阴影/层次：minimal frame extension。
+	//    ⚠️ 必须**仅顶边 1px** `{0,0,1,0}`（★ MARGINS 字段序 = {cxLeftWidth, cxRightWidth,
+	//    cyTopHeight, cyBottomHeight}，**不是** {左,上,右,下}——写错会把「仅顶」变成「仅底」）。
+	//    ★★ 为什么不能是 {1,1,1,1}（原「起步值」）：左/右/底任一边非 0 ⇒ DWM 把客户区当
+	//    **玻璃延伸区**合成 ⇒ **A=0 的背景像素被填成系统主题色**（浅色主题 = 纯白），而
+	//    A=255 的控件照常精确 ⇒ 现象 = 「背景纯白 + 控件正常」。这正是 Phase 32 衬底在
+	//    真机上不可见的根因（deferred #58；2026-10-14 单变量实测 `.workbuddy/spike/p58/`：
+	//    **仅顶 ⇒ 材质可见且阴影保留**；左/右/底任一边 ⇒ 纯白；**全 0 ⇒ 四边阴影梯度归零**）。
+	//    保留项：系统阴影（实测 `{0,0,1,0}` 与 `{1,1,1,1}` 的四边阴影读数逐位相同）+
+	//    客户区第 0 行 1px 玻璃带（**现状即有**，非本次引入）。
+	MARGINS margins{ 0, 0, 1, 0 };
 
 	const HRESULT hrExtend = DwmExtendFrameIntoClientArea(hwnd, &margins);
 
