@@ -630,6 +630,15 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | [phase32-frosted-backdrop-detailed-design.md](phase32-frosted-backdrop-detailed-design.md) | 详细设计（**§2 探针 8 五问** · **§3 D32-K..Q**：三层修补语义[实心矩形 rect-A255 / 圆角 mask 预乘改写 RGB=color×cov·A=255×cov / 文字·线哨兵] · C32-9 BitBlt 保真全域 · applied 标记 · 两级注入缝 · 触发全集 · AA 判据量化 · tint 契约措辞 · **§4 △1..△9** 逐文件（含 GDIBackend 内部观测缝 DebugBackBufferBits / 新内部头 Win32PlatformWindowInternal.h）· **§5 T32-1..8 精确断言**（366→374）· **§6 四批** · §7 契约增补 C32-9..12 + A8 目视矩阵） | 🆕 **v1.0（2026-10-11）⇒ ★ v1.1（同日，详设评审五项吸收：BackdropMode+原语签名 / 哨兵二值近似定位 / DrawImage 挂账 #56 / 注入枚举化 / §10 模板）——进实施** ⇒ 🔧 **批一/批二/批三已落地 + 批四 E2E 部分判定（机制链全验证；视觉整合 = #58 阻塞）——ClangCL/Clang 381/381，MinGW 待 #57** ⇒ ★ **v1.2（2026-10-14）：#58 关闭（§10.5 回填）+ C32-12 修订（nColor RGB = tint，通道序 `AABBGGRR`）+ §10.4 限制①解除；#57 已于 2026-10-12 关闭 ⇒ 收口仅剩回写与其余三链复跑** |
 
 
+## Phase 33 圆弧绘制原语（DrawArc）与环形进度控件（RingProgressBar）（🆕 **需求稿 v1.0 待评审**，2026-10-14 立项）
+
+> **来源**：`ECDI_fake_harness` 账本 **REQ-08**（环形进度条 / 圆弧原语缺失）——harness 侧四轮归属反转后的**第 5 条候选、第 1 条「先查了源码仓且 ECDI 已自认挂账」的条目**（前 4 条全部反转为 harness 侧）。
+> **挂账前提已变**：`roadmap-deferred.md:5` 自 v1.1 起登记 `DrawArc`，理由是「无消费者不动」（`phase9.6-progressbar-requirements.md:27`）；现在真实消费者出现（上下文占用环 / 将来的 spinner）。
+
+| 文档 | 内容 | 状态 |
+|------|------|------|
+| [phase33-draw-arc-requirements.md](phase33-draw-arc-requirements.md) | 职责确认（**§1 动机 + 勘察 K1–K17**（全部实测带行号）：★ **三处一致无圆弧**（公共接口 6 原语 / 命令 variant 8 个 / GL 侧同集）· ★ **实现者 3 个在库内 + 第 4 个在库外**（harness `PaintProbe`——它**不 override `SetBackdropSurface`**，Phase 32 S7 靠默认实现让它零改动）· ★★ **`DrawArc` 已三处登记为挂账** · ★ **Phase 8.6/24 的两层覆盖度机制 + 共享合成件 `RasterizeMask` 已就位** · ★ **全库无任何「角度」概念**（grep 零命中）⇒ 角度单位/起点是本 Phase 的新公共契约。**§2 范围内 R1–R8**（`DrawArc` 描边弧原语 · 覆盖度 AA · 命令层贯通 · 两端实现 · RecordingBackend 记录 · `RingProgressBar` 控件 · 默认零回归 · 测试）。**§3 决策点 D1–D7**（★ **D1 只做描边弧**——环形进度/spinner/仪表盘全是弧；不引 `DrawPie`/`DrawRing` 第二个词 · ★ **D2 角度 = 度、3 点钟 = 0°、顺时针为正**（与 GDI `AngleArc`/屏幕坐标一致，后端零转换）；控件层 12 点钟起点**不进原语契约**（条 23）· ★ **D4 AA = 圆弧 stadium 带覆盖度**（`GenerateLineCoverage` 直系姊妹：点到线段距离 ≤ hw ⇒ 点到圆心距离 ∈ [r−hw, r+hw] ∧ 角度 ∈ 区间）· ★ **D5 纯虚**（本 Phase 唯一涉及破坏面的决策——两条路代价都写明）· ★ **D6 `RingProgressBar : public Widget`**（**不**继承 `ProgressBar`——那个 OnPaint 是水平语义；**不**为此抽共享基类，条 22）· D7 控件默认 12 点钟起顺时针）。**§4 范围外 N1–N10**（楔形/贝塞尔/椭圆弧/线帽/虚线/`PushTransform`/indeterminate/基类重构/后端执行端/harness 侧改动）。**§5 约束对齐表**（条 16/19/20/22/95/97/103/104/34）。**§6 修订记录** | 🆕 **v1.0（2026-10-14）——初稿待评审**。★ **用户已拍板五项**：范围取「原语 + 环形控件」· 角度 = 度 + 3 点钟起顺时针 · AA = 圆弧 stadium 带覆盖度 · 控件命名 `RingProgressBar` 直接继承 `Widget` · **`DrawArc` 用纯虚**（接受「harness `PaintProbe` 需同批加转发 override」这一跨仓库协调代价） |
+
 ## Window 所有权与生命周期（✅ 初设 v1.1 → 详设 v1.2 **已实施**）
 
 > **独立契约文档**——不属任何 Phase，故不用 `phaseN-*` 命名（阶段由文档头部 / §8 跟踪）。
