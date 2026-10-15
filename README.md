@@ -19,7 +19,7 @@ ECDI is a **teaching-first** framework: it exists so that anyone can learn how a
 
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 182 design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 183 design documents in Chinese).
 
 ## How this was built
 
@@ -146,7 +146,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ECDI/       framework sources (include/ = 96 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest; DesktopNest (desktop organizer -- app-side M1: requirements v1.1 review passed, preliminary design v1.3 (all five open questions settled) and detailed design v1.3 filed 2026-10-09 -- three documents in place, three review rounds absorbed, ready for implementation)
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       design documents (182 files; requirements → preliminary → detailed, per phase)
+docs/       design documents (183 files; requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/README.md](docs/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.
