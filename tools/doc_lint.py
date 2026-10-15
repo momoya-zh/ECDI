@@ -475,14 +475,36 @@ def check_metrics(report, rel, lines, opts):
 # --------------------------------------------------------------------------
 
 def measure(report):
+    # Test-case count.  The registry is global (`GetTestRegistry()`), but
+    # registrations reach it through two syntactic forms:
+    #   (a) `GetTestRegistry().Add(...)`            -- most files
+    #   (b) `TestRegistry& registry = GetTestRegistry();` then `registry.Add(...)`
+    #       -- DesktopNestTests.cpp:654-661 (6 cases)
+    # A third form must NOT be counted: `EventTests.cpp:448-499` builds **local**
+    # `Test::TestRegistry registry;` instances for the TestFramework self-tests
+    # (`Self.*` names).  Those never reach the global registry, so counting them
+    # would over-report.
+    # => count every `.Add("` and drop `Self.`-prefixed ones, and assert that
+    #    `Self.` names only ever appear in EventTests.cpp (the sole local-registry
+    #    site) so a future second local registry cannot silently skew the count.
     tests = 0
     tests_dir = os.path.join(REPO, "ECDI", "src", "Tests")
-    pattern = "GetTestRegistry().Add"
+    add_pattern = re.compile(r'\.Add\(\s*"([^"]*)"')
+    self_prefix_files = set()
     for name in sorted(os.listdir(tests_dir)):
         if not name.endswith(".cpp"):
             continue
         with open(os.path.join(tests_dir, name), "rb") as handle:
-            tests += handle.read().count(pattern.encode("ascii"))
+            text = handle.read().decode("utf-8", "replace")
+        for match in add_pattern.finditer(text):
+            if match.group(1).startswith("Self."):
+                self_prefix_files.add(name)
+                continue
+            tests += 1
+    if self_prefix_files - {"EventTests.cpp"}:
+        report.add("STYLE", "L13b", "tools/doc_lint.py", 0,
+                   "local test registries outside EventTests.cpp: %s -- the "
+                   "test-case count may be wrong" % ", ".join(sorted(self_prefix_files)))
 
     header_root = os.path.join(REPO, "ECDI", "include", "ECDI")
     headers = 0

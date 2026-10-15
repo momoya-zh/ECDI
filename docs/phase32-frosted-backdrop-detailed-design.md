@@ -1,7 +1,7 @@
 ﻿# Phase 32 · 窗口雾面衬底（Frosted Backdrop）—— 详细设计（v1.1）
 
 > 来源：初设 `phase32-frosted-backdrop-preliminary-design.md` **v1.1（进详设）** §8 移交十项 + **探针 8**（`.workbuddy/tmp/dn_acrylic/probe8/`，零仓库侵入）。
-> 状态：**v1.1（外部评审「有条件通过」五项已吸收）⇒ 进实施**（本文档钉死修补语义、逐文件 △、T32 精确断言与批次；实施回填落 §10）
+> 状态：**v1.2（2026-10-14 · #58 关闭 ⇒ Phase 32 收口）**——v1.1 外部评审「有条件通过」五项已吸收 ⇒ 进实施；**批一–批四 + #57/#58 均已关闭**（§10.1–§10.5）；★ 本版新增 **§10.5**（#58 双触发量定案）与 **C32-12 修订**（nColor RGB = tint）；四链 445/445。
 > 定位：把初设 D32-A..J 落到**函数级**——「三层修补语义 + 后缓冲 DIB 化 + 模式分支提交」的实现契约。
 
 ---
@@ -154,6 +154,7 @@ API 文档（`WindowBackdrop.h` 注释）原文：「**tint 是雾面色调的�
 
 ## §9 修订记录
 
+- **v1.2**（2026-10-14）**#58 关闭 ⇒ Phase 32 全链收口**。① ★★ **新增 §10.5**（#58 双触发量定案：`DwmExtendFrameIntoClientArea` 左/右/底边必须为 0 · `nColor` RGB 必须携带 tint）。② ★ **C32-12 修订**：「nColor RGB = 黑」→「**nColor RGB = tint（通道序 `AABBGGRR`）**」——原「防双重 tint」的担忧经实测不成立（dwm nColor RGB 是**设定** tint，非叠加；RGB=tint 与 probe8 已知良好参照 `EMP` 格最大偏差仅 7.6/255）。③ ★ **初设稿 DWM tint 行加事后注记**（`phase32-frosted-backdrop-preliminary-design.md` D32-F 表内）——保留 v1.0/v1.1 历史决策记录，同时标明现行契约，避免后来者误引。④ ★ **`Win32PlatformWindow.cpp:136` 的过期注释订正**（原写「nColor = (alpha << 24)，RGB = 黑」，与修复后的代码不符——条 80）。⑤ ★ **E2E 探针三处判据缺陷如实登记**（J4a 亮字形方向写反 = 原有假绿 / J2 before 抓屏竞态 / J5·J6 底衬覆盖不足）——均为**库外探针缺陷，非框架回归**。⑥ ★ **验证**：MinGW `ecdi_tests` **445/445**（Debug，本机实测）· MSVC Debug+Release 445/445 · Clang / ClangCL 445/445（用户侧实测）· Acrylic 窗跨区差 **0.00 → 45.20** · 控件 Δ=0.0 · None 窗逐像素 A/B（噪声底 = 0）差异仅最外 1px 边带（≤15/255）。⑦ **`roadmap-deferred.md` v2.30** · `framework-defect-audit.md` v1.86 · 两份 README 索引同步。
 - **v1.1**（2026-10-11）**外部评审吸收（v1.0 评审结论：有条件通过）⇒ 进实施**。★ 评审保留项（不推翻）：正交 API / DIB 统一 / mask 圆角 / 双提交 / 四批。★ **五项修订处置**：
   · **P1-1（公共接口 × 内部类型边界）** ✅ 采纳且取**更干净解**——公共虚函数签名改为 `SetBackdropSurface(BackdropMode actual, std::uint32_t clearABGR)`（**既有公共枚举 + 原语**：零新公共类型、零内部类型泄漏、零 GDI 名词，第二后端可实现）；内部头 `BackdropSurface.h` 与 `BackdropSurfaceState` **取消**；提交机制抉择（BitBlt/AlphaBlend）收归 GDIBackend 私有（actual→提交映射）。
   · **P1-2（文字 AA 保证范围）** ✅ 采纳——K③ 定位为「**二值 alpha 近似修补**」（A=255 的边缘像素以不透明混色呈现、覆盖率未重建，非通用 AA 重建算法）；T32-3 更名「文字哨兵修补不变式」= **实现不变式，不承担视觉验收**；AA 边缘端到端观感矩阵（多背景 × tint × 文字颜色）入批四（D32-P④）；现明显色偏 ⇒ 启动覆盖率重建评估（TC1 证明的是无精确碰撞，**不是**覆盖率已恢复——评审原话入档）。

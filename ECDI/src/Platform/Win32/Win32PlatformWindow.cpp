@@ -133,7 +133,9 @@ void ApplyBackdropImpl(HWND hwnd, BackdropMode requested, const Color& tint,
 
 	if (requested == BackdropMode::Acrylic && materialAvailable)
 	{
-		// 尝试 Acrylic：nColor = (alpha << 24)，RGB = 黑（C32-12）
+		// 尝试 Acrylic：nColor 由 ComposeAccentColor 组装（alpha<<24 | RGB=tint，AABBGGRR）
+		// ★ C32-12 修订（2026-10-14，#58）：RGB **必须携带 tint**，不能是黑——RGB=0 不是
+		//   「中性」而是 60% 黑 tint，会把材质压成单色（详见该函数头注释与详设 §10.5）。
 		AccentPolicy policy{};
 		policy.nAccentState = kAccentEnableAcrylicBlurBehind;
 		policy.nFlags = 2;
