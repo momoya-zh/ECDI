@@ -630,7 +630,7 @@ Phase 12 R5 推迟项解锁立项——Borderless 窗口的「看得见摸得着
 | [phase32-frosted-backdrop-detailed-design.md](phase32-frosted-backdrop-detailed-design.md) | 详细设计（**§2 探针 8 五问** · **§3 D32-K..Q**：三层修补语义[实心矩形 rect-A255 / 圆角 mask 预乘改写 RGB=color×cov·A=255×cov / 文字·线哨兵] · C32-9 BitBlt 保真全域 · applied 标记 · 两级注入缝 · 触发全集 · AA 判据量化 · tint 契约措辞 · **§4 △1..△9** 逐文件（含 GDIBackend 内部观测缝 DebugBackBufferBits / 新内部头 Win32PlatformWindowInternal.h）· **§5 T32-1..8 精确断言**（366→374）· **§6 四批** · §7 契约增补 C32-9..12 + A8 目视矩阵） | 🆕 **v1.0（2026-10-11）⇒ ★ v1.1（同日，详设评审五项吸收：BackdropMode+原语签名 / 哨兵二值近似定位 / DrawImage 挂账 #56 / 注入枚举化 / §10 模板）——进实施** ⇒ 🔧 **批一/批二/批三已落地 + 批四 E2E 部分判定（机制链全验证；视觉整合 = #58 阻塞）——ClangCL/Clang 381/381，MinGW 待 #57** ⇒ ★ **v1.2（2026-10-14）：#58 关闭（§10.5 回填）+ C32-12 修订（nColor RGB = tint，通道序 `AABBGGRR`）+ §10.4 限制①解除；#57 已于 2026-10-12 关闭 ⇒ 收口仅剩回写与其余三链复跑** |
 
 
-## Phase 33 圆弧绘制原语（DrawArc）与环形进度控件（RingProgressBar）（🔄 **在研**——需求稿 **v1.1**（吸收外部评审「有条件通过」；C33-1..10 契约冻结）· **初设稿 v1.0 待评审**，2026-10-14 立项）
+## Phase 33 圆弧绘制原语（DrawArc）与环形进度控件（RingProgressBar）（🔄 **在研**——需求稿 **v1.2**（两轮评审吸收；★ C33-1 去掉「弧中心线」歧义 ⇒ 权威表述 = 到**有限弧段**距离 · ★ C33-5 面积式补**度→弧度**换算）· **初设稿 v1.1 待复核**（第二轮评审五项 P1 + 四项补齐项**全部采纳**：端点判据改单一「到弧段距离」式 · 负扫角起点 · 面积式 · 预过滤变量命名 · 扇形退化与 T33-7 断言 · 共享契约与生成器接线 · 关 AA 取二值化 · 缓存键量化单位 · 批次数订正），2026-10-14 立项）
 
 > **来源**：`ECDI_fake_harness` 账本 **REQ-08**（环形进度条 / 圆弧原语缺失）——harness 侧四轮归属反转后的**第 5 条候选、第 1 条「先查了源码仓且 ECDI 已自认挂账」的条目**（前 4 条全部反转为 harness 侧）。
 > **挂账前提已变**：`roadmap-deferred.md:5` 自 v1.1 起登记 `DrawArc`，理由是「无消费者不动」（`phase9.6-progressbar-requirements.md:27`）；现在真实消费者出现（上下文占用环 / 将来的 spinner）。
