@@ -20,6 +20,17 @@ namespace ECDI {
 		lineCalls.emplace_back(LineDraw{ start, end, width, color });
 	}
 
+	void RecordingBackend::DrawArc(const Point& center, float radius,
+	                               float startAngleDeg, float sweepAngleDeg,
+	                               float width, const Color& color)
+	{
+		// ★★ C33-9：**逐字段直拷入参，绝不调 `NormalizeArc`**。
+		//    若在此归一化，`sweep = 450` 会被记成 `360`——「断言原样转发」即刻失去意义
+		//    （本替身是**测试观测缝**：它悄悄改参数，就等于替被测对象作弊）。
+		arcDraws.emplace_back(ArcDraw{ center, radius, startAngleDeg,
+		                               sweepAngleDeg, width, color });
+	}
+
 	void RecordingBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	                                       const Color& color)
 	{

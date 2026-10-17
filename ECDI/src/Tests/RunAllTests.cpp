@@ -45,6 +45,9 @@ int ECDI::Test::RunAllTests()
     RegisterVisibilityRepaintTests();   // ★ 审计 M9：可见性变化的重绘归属（SetVisible Invalidate + 同值守卫）
     RegisterAssertDisciplineTests();    // ★ 审计 #63 / §7.3：断言纪律推广（Release 运行时分支）
     RegisterAuditRemainderTests();      // ★ 审计 #68 余量批：M22 / L4 / M14 / L2
+    RegisterArcCoverageTests();         // Phase 33 批一：圆弧原语（T33-1..T33-9b）
+    RegisterArcCommandTests();          // Phase 33 批二：命令层贯通（T33-10..T33-12）
+    RegisterRingProgressBarTests();     // Phase 33 批三：环形进度控件（T33-13..T33-18）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

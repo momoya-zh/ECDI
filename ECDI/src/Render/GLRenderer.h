@@ -11,6 +11,7 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Image.h"
 #include "ECDI/Render/RenderingBackend.h"
+#include "Render/BackendContract.h"      // ★ Phase 33：`ArcParams`（`ArcSlot` 形参类型）
 #include "Render/CornerCoverageMask.h"
 #include "Render/GLGlyphAtlas.h"
 #include "Render/LineCoverage.h"
@@ -60,6 +61,12 @@ public:
 	              const Color& color, const Font& font) override;
 	void DrawLine(const Point& start, const Point& end,
 	              float width, const Color& color) override;
+	/// @details ★ Phase 33：覆盖度网格 → `ArcSlot` → `TexturedQuad`（同 `DrawLine` 的管线）。
+	///          ★★ **图集满时不得退回 `SolidSegment`**（C33-7——那是**直线段**四边形，
+	///          会把弧降级成直线）：先试二值化槽位，仍未命中则**不画 + 一次 Warning**（L33-6）。
+	void DrawArc(const Point& center, float radius,
+	             float startAngleDeg, float sweepAngleDeg,
+	             float width, const Color& color) override;
 	void DrawRoundedRect(const Rect& rect, float cornerRadius,
 	                     const Color& color) override;
 	void DrawImage(const Rect& dest, const Image& image) override;
@@ -90,6 +97,18 @@ private:
 
 	/// @brief 圆角：取（或生成并上传）半径 R 的角覆盖度槽位
 	GlyphSlot CornerSlot(int radius);
+	/// @brief 弧：取（或生成并上传）覆盖度网格槽位（★ 键含角度——与 `LineSlot` 的关键差异）
+	/// @details ★★ **键 = 11 元组**，比 `LineSlot` 多两处：
+	///          ① **角度**（`QA` = 1/8°）——同一对端点的弧有无数条，不含角度必然串味；
+	///          ② **`originX/originY`**——键里的几何量是**量化**的，两次调用可以同键而
+	///             bbox 原点差 1 px（`floor(cx ± pad)` 在量化窗内跨整数），而位图是**按
+	///             网格局部坐标**栅格化的 ⇒ 原点不同即内容不同。不含原点则「同键 ⇒ 同位图」
+	///             不成立（会把缓存的弧画偏 1 px）。★ `LineSlot` 未含原点，属既有形态，
+	///             同类风险已如实登记为 Phase 33 的**范围外观察**。
+	/// @param binarize true = 上传前把覆盖度二值化（关 AA / 图集满重试）
+	GlyphSlot ArcSlot(const LineCoverageGrid& grid, const BackendContract::ArcParams& p,
+	                  bool binarize);
+
 	/// @brief 线段：取（或生成并上传）覆盖度网格槽位（★ 几何量化到 1/8 px 作键）
 	GlyphSlot LineSlot(const LineCoverageGrid& grid,
 	                   float x0, float y0, float x1, float y1, float width);
@@ -118,6 +137,7 @@ private:
 	CornerMaskCache m_cornerMasks;              ///< 覆盖度掩码缓存（键 = effective 整数半径）
 	std::map<int, GlyphSlot> m_cornerSlots;     ///< 半径 → 图集槽位
 	std::map<std::tuple<int, int, int, int, int, int, int>, GlyphSlot> m_lineSlots;  ///< 线段几何 → 槽位
+	std::map<std::tuple<int, int, int, int, int, int, int, int, int, int, int>, GlyphSlot> m_arcSlots;  ///< 弧几何+角度+原点 → 槽位（★ 11 元键，见 `ArcSlot`）
 };
 
 }

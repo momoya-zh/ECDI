@@ -79,6 +79,20 @@ namespace ECDI {
 		                   ScaleLength(cmd.width, scale), cmd.color);
 	}
 
+	void Renderer::ExecuteCommand(const DrawArcCommand& cmd, float scale)
+	{
+		// ★★ 盯防①：**两个角度不折 scale**——角度无量纲，150% 下把 90° 折成 135° 会错得离谱。
+		//    这是 `ScaleLength` 家族里第一个「float 但**不可折**」的形参；同族先例 = `Font::size`
+		//    不折（见本文件 :28-34 的注释：字号由后端按窗口 DPI 换算，此处再折即双重缩放）。
+		//    ⇒ 只折 3 个**有量纲**的量：center / radius / width。
+		m_backend.DrawArc(ScalePoint(cmd.center, scale),
+		                  ScaleLength(cmd.radius, scale),
+		                  cmd.startAngleDeg,      // ← 原样（不折）
+		                  cmd.sweepAngleDeg,      // ← 原样（不折）
+		                  ScaleLength(cmd.width, scale),
+		                  cmd.color);
+	}
+
 	void Renderer::ExecuteCommand(const DrawRoundedRectCommand& cmd, float scale)
 	{
 		// ★ `rect` 与 `cornerRadius` 都要折——`cornerRadius` 是最易漏的那一个（盯防 ③）

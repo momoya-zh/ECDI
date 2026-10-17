@@ -40,6 +40,7 @@ namespace ECDI {
 		void ExecuteCommand(const DrawRectCommand& cmd, float scale);   // 决策 9：重载集，未来加命令只加重载
 		void ExecuteCommand(const DrawTextCommand& cmd, float scale);   // D5：文本命令转发（穷尽性由 std::visit 保证）
 		void ExecuteCommand(const DrawLineCommand& cmd, float scale);          // Phase 8
+		void ExecuteCommand(const DrawArcCommand& cmd, float scale);          // Phase 33（★★ 两个角度**不折 scale**——盯防①）
 		void ExecuteCommand(const DrawRoundedRectCommand& cmd, float scale);  // Phase 8
 		void ExecuteCommand(const DrawImageCommand& cmd, float scale);        // Phase 8
 		void ExecuteCommand(const PushClipCommand& cmd, float scale);         // Phase 8（状态命令）

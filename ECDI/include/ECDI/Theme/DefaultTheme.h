@@ -19,6 +19,7 @@ public:
 	RadioStyle    GetRadioStyle() const override;      ///< 6.2
 	ProgressBarStyle GetProgressBarStyle() const override;   ///< 9.6
 	ScrollBarStyle GetScrollBarStyle() const override;       ///< Phase 15
+	RingProgressBarStyle GetRingProgressBarStyle() const override;   ///< Phase 33
 };
 
 /// @brief 获取当前默认主题实例（static local = 首次调用构造，非程序启动）

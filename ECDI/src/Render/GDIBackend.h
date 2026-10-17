@@ -45,6 +45,9 @@ public:
 	                  const Color& color, const Font& font);        ///< Phase 32：原 DrawText 本体（批三拆出——K③ 尾部修补）
 	void DrawLine(const Point& start, const Point& end,
 	              float width, const Color& color) override;        ///< Phase 8 §8.1：lround + 1px 下限
+	void DrawArc(const Point& center, float radius,
+	             float startAngleDeg, float sweepAngleDeg,
+	             float width, const Color& color) override;    ///< Phase 33：覆盖度网格 → PatchSurface（无 legacy 弧降级——L33-1 有意）
 	void DrawRoundedRect(const Rect& rect, float cornerRadius,
 	                     const Color& color) override;              ///< Phase 8 §8.2：NULL_PEN + RoundRect
 	void DrawImage(const Rect& dest, const Image& image) override;  ///< Phase 8 §8.3：DIB + AlphaBlend

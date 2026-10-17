@@ -192,6 +192,7 @@ struct RedButtonTextTheme : public Theme{
 	RadioStyle GetRadioStyle() const override{ return DefaultTheme{}.GetRadioStyle(); }
 	ProgressBarStyle GetProgressBarStyle() const override{ return DefaultTheme{}.GetProgressBarStyle(); }
 	ScrollBarStyle GetScrollBarStyle() const override{ return DefaultTheme{}.GetScrollBarStyle(); }
+	RingProgressBarStyle GetRingProgressBarStyle() const override{ return DefaultTheme{}.GetRingProgressBarStyle(); }
 };
 
 /// @brief 读 Button 的**实际文字视觉字段**（`TextWidget::m_style.foreground`）

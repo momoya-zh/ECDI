@@ -8,6 +8,7 @@
 #include "ECDI/Theme/RadioStyle.h"
 #include "ECDI/Theme/ProgressBarStyle.h"
 #include "ECDI/Theme/ScrollBarStyle.h"
+#include "ECDI/Theme/RingProgressBarStyle.h"
 
 namespace ECDI{
 
@@ -27,6 +28,7 @@ public:
 	virtual RadioStyle    GetRadioStyle() const = 0;      ///< 6.2 Radio 专属样式
 	virtual ProgressBarStyle GetProgressBarStyle() const = 0;   ///< 9.6 ProgressBar 专属样式
 	virtual ScrollBarStyle GetScrollBarStyle() const = 0;       ///< Phase 15 ScrollBar 专属样式
+	virtual RingProgressBarStyle GetRingProgressBarStyle() const = 0;   ///< Phase 33 RingProgressBar 专属样式（第 9 个纯虚）
 };
 
 }

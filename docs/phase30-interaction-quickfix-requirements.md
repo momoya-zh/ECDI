@@ -1,7 +1,7 @@
-﻿# Phase 30 · 文本 / 交互快修小轮 —— 需求确认（v1.0）
+﻿# Phase 30 · 文本 / 交互快修小轮 —— 需求确认（v1.2）
 
 > 来源：`roadmap-deferred.md` **#51**（2026-10-05 登记，2026-10-06 用户拍板「排 Phase 29 之后」）——harness 高保真模型评估的 4 项快修打包 + Phase 29 收口后的顺位兑现。
-> 状态：**v1.1**（2026-10-07）——**✅ 评审通过（PASS → Preliminary Design）**（外部评审 2026-10-07：需求目标/范围控制/三处衔接全 ✅；**评审明示「不建议继续给需求文档加东西」**⇒ 本版只做轻量吸收：D2 定案 + 初设必钉清单移交； absorption 明细见 §7 v1.1）
+> 状态：**v1.2**（2026-10-16）——**✅ 事实勘察勘误已同步**（K2 控件文本定位职责已按当前源码订正；评审通过状态沿用 v1.1，历史记录保留）
 > 定位：**快修小轮**（三处小改 + 一处验证钉住）——非能力型 Phase；单文档走需求 → 初设 → 详设仍按五阶段纪律，但每阶段应短。
 
 ---
@@ -23,7 +23,7 @@ harness 高保真模型仿制评估（2026-10-05，9 项能力缺口 + 2 bug）�
 ## 2. 现状勘察（K1–K6，全部带行号实测 2026-10-07）
 
 - **K1 光标颜色硬编码**：`TextBox.cpp:1351` —— `ctx.DrawRect(Rect{…, m_style.caretWidth.value, lineH}, Color::Black())`——光标**宽**已是样式项（`TextBoxStyle.h:16` `StyleField<float> caretWidth`），**颜色**却写死 `Color::Black()`。`TextBoxStyle`（`TextBoxStyle.h:8-19`）共 9 字段无 `caretColor`；主题默认注入点 = `DefaultTheme.cpp:25-33`（`caretWidth.value = 2.0f` 在 :33）。同文件选区色（`selection`）、组合串下划线色（`composition`）均已样式化——**唯独光标漏网**，属同族补齐非新能力。
-- **K2 Button 文字对齐写死**：`Button.cpp:92-99` —— `Button::CalculateTextPosition` 水平**恒居中**（`offsetX = (GetWidth() - textWidth) / 2`）。基类 `TextWidget::CalculateTextPosition`（`TextWidget.cpp:96-105`）默认**左对齐** + 垂直居中（P7 定案）——全库**唯独 Button 覆写并写死**。`ButtonStyle`（`ButtonStyle.h:8-18`）6 字段无对齐项。消费者诉求（harness）：左对齐文本的按钮（如菜单项形态）无路可走。
+- **K2 文本位置策略现状（勘误）**：`Label` **没有 override** `CalculateTextPosition`，继承 `TextWidget` 的默认**水平左对齐 + 垂直居中**。`Button` 是全库唯一为文本做**水平对齐**的 override；当前 `Button::CalculateTextPosition` 按 `ButtonStyle::textAlignment` 实现 Left / Center / Right 三态，默认 Center（与原先硬编码居中逐位等价）。`CheckBox` / `Radio` 虽然也 override 该方法，但显式忽略 `textWidth`，水平仍左对齐；它们只把文字垂直对齐到各自的状态框 / 外圆。**历史基线**是 Button 旧实现（原 `Button.cpp:92-99`）硬编码 Center；当前实现见 `Button.cpp:110-124`。
 - **K3 H/V 布局完全无 IsVisible 处理**：`VerticalLayout.cpp:20-27`（第一遍求和：隐藏子的尺寸**照常计入** `fixedTotal`/`totalStretch`）、`:39`（`m_spacing * (count - 1)`——**隐藏子也吃间隙**）、`:44-60`（第二遍分配：隐藏子**照常占槽**）。`HorizontalLayout.cpp:20-27/39/44-60` 同构。后果：`SetVisible(false)` 的子在 H/V 布局下**仍占槽位 + 仍产生间隙**——语义上「隐藏了却留着空洞」。对照 `ListLayout.cpp:17-30`：Phase 25 已落 **C-VIS 四层契约**（不可见子跳过 + 停泊自身 bbox 负区 `(−w, −h)` + 连续槽位）——**同为布局层，行为却不一致**。
 - **K4 CollapsiblePanel 收起可见性——框架侧已具备（勘误 #51 登记项）**：`CollapsiblePanel.cpp:191-197` `SetContentVisible` = `m_content->SetVisible(visible)`；调用点全覆盖——构造默认收起（:22）/ 展开开始（:42）/ 无窗口瞬时折叠（:85）/ **折叠动画 onFinished**（:104，动画期间靠父 Clip 裁切——设计如此）。子树隐藏经 `Widget` **入口门控**（`Widget.cpp:114-121` 命中 + `Widget::Paint` 入口）整体生效。`SetContentVisible` 自 **81037ed（2026-09-04，Phase 9.5）** 即存在——早于 harness 评估（2026-10-05）。**结论：harness 报告的 bug2 针对其自研仿制模型，非 ECDI HEAD**（同 viewport-cull 报告教训：外部报告先查版本）。处置见 §3.1（验证钉住，不立项改码）。
 - **K5 主题管线的既有形态**（①② 的接入面）：样式字段三件套 = `StyleField<T>`（声明）+ `std::optional<T>`（Override）+ `DefaultTheme` 注入 + `ApplyTheme` 只更新未 Override 属性（D7 契约）——①② 各加一个字段即沿既有四点接线，无新机制。
@@ -82,5 +82,6 @@ harness 高保真模型仿制评估（2026-10-05，9 项能力缺口 + 2 bug）�
 
 ## 7. 修订记录
 
+- **v1.2**（2026-10-16）**事实勘察勘误**：订正 K2 的控件职责表述——`Label` 不 override `CalculateTextPosition`，继承基类左对齐 + 垂直居中；`Button` 是唯一执行水平文本对齐的 override（当前为 `TextAlignment` 三态，默认 Center）；`CheckBox` / `Radio` 的 override 只负责相对各自指示器的垂直位置，水平仍左对齐。保留 v1.0/v1.1 历史记录中的旧实现口径，不将历史基线改写为当前实现。
 - **v1.1**（2026-10-07）**评审吸收（PASS → Preliminary Design）**。**评审总判**：需求目标 ✅ / Scope 控制 ✅（「三处小改 + 一处验证钉住」定位准确——不机械地把 4 项都当 bug）· 与 Phase 25/29 衔接 ✅ · caretColor/Button 对齐/H-V C-VIS/CollapsiblePanel 四项处置全 ✅ · **④ 的「验证钉住不改码」判断被评审核准**（追溯 SetContentVisible 2026-09-04 既有 + 外部报告先查版本的流程被认可）。**评审明示「不建议继续给需求文档加东西」**⇒ 本版仅两处实体改动：**D2 定案 = 独立头 `Core/TextAlignment.h`**（依赖方向论证）+ 初设必钉 5 件事移交（① TextAlignment 独立头 ② Button Left/Right 的内容区公式——**初设必须先摊清 Button 现有 padding/borderWidth 语义**防三模式内容区不一致 ③ H/V 四层契约逐项映射 ListLayout ④ 全可见 H/V 专测（不只靠存量）⑤ 明示 Phase 30 只建枚举不实现 O1 multiline——防「枚举有了顺便接上」的范围膨胀）。**附加认可**：测试数不硬凑 +6（初设按语义需要 355→357 可接受）；A2 建议显式加全可见 H/V 专测（→ 初设 T30 落实）；`(-w,-h)` 停泊位不在 Phase 30 重新讨论。
 - **v1.0**（2026-10-07）初稿。**输入**：#51 登记（roadmap v1.87 / audit v1.53，2026-10-05）+ 用户拍板排期（2026-10-06）+ 四项带行号勘察（2026-10-07，K1–K6）。**★ 勘察修正 #51 登记项**：④ CollapsiblePanel **框架侧已具备**（`SetContentVisible` 自 81037ed / 2026-09-04 即全路径同步 `SetVisible`；子树经 Widget 入口门控整体隐藏）——harness bug2 针对其自研仿制模型而非 ECDI HEAD（同 viewport-cull 报告「先查版本」教训），处置 = 验证钉住 + 台账勘误，不改码。范围 = ① caretColor（同族补齐，默认 Black）· ② TextAlignment 枚举 + Button 消费（默认 Center；O1 复用面）· ③ H/V 补 C-VIS（照搬 ListLayout 四层契约；全可见逐位不变红线）· ④ 验证钉住。K1–K6 带行号 · D1–D4 倾向已给 · A1–A4 · 影响面 94→95 / API +1 类型 +4 字段 / 用例 349→~355 / CMake 0 / 风险 低。

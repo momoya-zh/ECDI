@@ -88,6 +88,29 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		virtual void DrawLine(const Point& start, const Point& end,
 		                      float width, const Color& color) = 0;
 
+
+		/// @brief 绘制圆弧描边（★ Phase 33——框架**首个曲线原语**；D5 裁决 = **纯虚**）
+		/// @param center        圆心（最终坐标）
+		/// @param radius        半径（**<= 0 ⇒ 不绘制**）
+		/// @param startAngleDeg 起始角（**度**；`0°` = **3 点钟方向**）
+		/// @param sweepAngleDeg 有向扫角（**度**；正 = **顺时针**、负 = 逆时针；`0 ⇒ 不绘制`；
+		///                      `|sweepAngleDeg| > 360 ⇒ 钳制到 ±360`）
+		/// @param width         线宽（**<= 0 ⇒ 不绘制**；后端 `lround` + 下限 1px）
+		/// @param color         线色
+		/// @details 绘制区域 = **到「有限弧段」的距离 <= hw** 的点集（C33-1 的单一式子）：
+		///          · **端点固定圆头**（该定义的自然推论——不是两个额外特性）；
+		///          · `|sweep| = 360°` ⇒ 完整圆环（同一式子自然给出，接缝**不重不漏**）；
+		///          · `radius <= width/2` ⇒ `hw` 钳制为 `radius` ⇒ **几何退化为扇形**
+		///            （C33-4 的**已知语义**——钳制的几何后果，不是「宽度 0 = 实心」的后门）。
+		///          ★ 单位后缀 `Deg` 是**有意的**：全库首个角度 API，让单位在**调用点**可见（条 95①）。
+		///          ★★ **为什么取纯虚**（D5）：与 6 个既有绘制原语**同形**——后端是能力提供者，
+		///          接口不含默认实现即不可能出现「某后端悄悄不画」的静默分歧。
+		/// @note ★ **参数不被裁剪/归一化**：`PaintContext` 原样入命令（C33-9），
+		///       钳制与退化判定一律在**执行端**（生成器内 `NormalizeArc`）。
+		virtual void DrawArc(const Point& center, float radius,
+		                     float startAngleDeg, float sweepAngleDeg,
+		                     float width, const Color& color) = 0;
+
 		/// @brief 绘制圆角矩形（Phase 8，详细设计 §8.2）
 		/// @param rect         边界矩形（最终坐标）
 		/// @param cornerRadius 圆角半径（后端钳制到 [0, min(w,h)/2]，保证 GDI 行为确定）

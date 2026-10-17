@@ -4,6 +4,7 @@
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
 #include "Platform/Win32/Win32RenderContext.h"
+#include "Render/ArcCoverage.h"       // ★ Phase 33：弧覆盖度生成器（与 LineCoverage 同族）
 #include "Render/BackendContract.h"   // ★ 审计 #62：共享契约件（H3 图像可用性守卫）
 #include "Render/CoverageRaster.h"
 #include "Render/LineCoverage.h"
@@ -886,6 +887,60 @@ void GDIBackend::DrawLineCoverage(const Point& start, const Point& end,
 	RasterizeMask(static_cast<std::uint8_t*>(m_patchSurface.bits),
 	              m_patchSurface.width * 4, grid, color);
 	BlendPatch(m_memoryDC, grid.originX, grid.originY, grid.width, grid.height);
+}
+
+void GDIBackend::DrawArc(const Point& center, float radius,
+                         float startAngleDeg, float sweepAngleDeg,
+                         float width, const Color& color)
+{
+	// ★ C33-4 全表（含数值安全带）在 `NormalizeArc` 内一次判完（**唯一实现**）。
+	//   本函数只关心「画 / 不画」。
+	const BackendContract::ArcParams p =
+		BackendContract::NormalizeArc(center.x, center.y, radius,
+		                              startAngleDeg, sweepAngleDeg, width);
+	if (!p.drawable)
+	{
+		return;
+	}
+
+	// S 来源 = 角缓存的同一旋钮（契约 C9 / O33-1：全框架 coverage AA 单一精度）
+	const int samples = m_cornerMaskCache.GetSamples();
+	const LineCoverageGrid grid = GenerateArcCoverage(center.x, center.y, radius,
+	                                                  startAngleDeg, sweepAngleDeg,
+	                                                  width, samples);
+	if (grid.Empty())
+	{
+		return;   // 第二层退化防线（第一层 = NormalizeArc；与 DrawLineCoverage 同形）
+	}
+
+	// ★★ 关 AA ⇒ 二值化（PD33-C）。★★ **数据流必须闭合**：二值化做在**局部拷贝**上，
+	//    并且光栅化 / BlendPatch **一律吃那份拷贝**（`*raster`）——若照 v1.0 的伪码在第 7 步
+	//    仍传原 `grid`，则「关 AA」这个语义被**静默丢弃**（弧仍然按 AA 画，只是白做一次拷贝）。
+	LineCoverageGrid binary;
+	const LineCoverageGrid* raster = &grid;
+	if (!m_antiAliasing)
+	{
+		binary = grid;
+		for (std::uint8_t& c : binary.coverage)
+		{
+			c = (c > 0) ? 255 : 0;
+		}
+		raster = &binary;
+	}
+
+	// fail-safe 沿 DrawLineCoverage 先例：**宁可无 AA，不可缺绘制**。但弧**没有** legacy
+	// 原语可退（C33-7 明令不得退回 `SolidSegment` 直线——那会把弧降级成直线）⇒ 此处
+	// **只能不画 + 一次可诊断告警**（L33-1：两端资源失败下行为**有意不对称**）。
+	if (!m_patchSurface.Ensure(m_memoryDC, raster->width, raster->height))
+	{
+		Logger::Log(LogLevel::Warning,
+		            L"GDIBackend: patch surface unavailable - arc skipped");
+		return;
+	}
+
+	RasterizeMask(static_cast<std::uint8_t*>(m_patchSurface.bits),
+	              m_patchSurface.width * 4, *raster, color);
+	BlendPatch(m_memoryDC, raster->originX, raster->originY, raster->width, raster->height);
 }
 
 void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,

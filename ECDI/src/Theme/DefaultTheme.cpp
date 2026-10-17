@@ -116,6 +116,16 @@ ScrollBarStyle DefaultTheme::GetScrollBarStyle() const{
 
 }
 
+RingProgressBarStyle DefaultTheme::GetRingProgressBarStyle() const{
+	// Phase 33 默认视觉：浅灰轨道 + 主题蓝进度（与 ProgressBarStyle 同值——同族控件同色，条 95① 视觉一致性）
+	// thickness 6.0f：环宽默认值（详设 △11——「不设主题也能看见」的灰阶选值依据同 9.6）
+	RingProgressBarStyle s;
+	s.trackColor.value = Color::FromRGBA8(230, 230, 235);
+	s.fillColor.value  = Color::FromRGBA8(80, 120, 220);
+	s.thickness.value  = 6.0f;
+	return s;
+}
+
 const DefaultTheme& GetDefaultTheme(){
 	static DefaultTheme instance;   // static local = 首次调用构造，非程序启动
 	return instance;

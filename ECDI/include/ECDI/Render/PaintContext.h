@@ -43,6 +43,15 @@ namespace ECDI {
 		void DrawLine(const Point& start, const Point& end,
 		              float width, const Color& color);
 
+		/// @brief 绘制圆弧描边（★ Phase 33：原样进命令——钳制/归一化封在生成器与后端）
+		/// @param startAngleDeg 起始角（度；`0°` = 3 点钟）
+		/// @param sweepAngleDeg 有向扫角（度；正 = 顺时针；`|sweep| > 360` ⇒ 执行端钳制）
+		/// @details ★ **本方法不做任何角度归一化**（C33-9）：`RecordingBackend` 要靠「原样」
+		///          才能证明转发正确——若此处悄悄取模，那条断言就失去意义。
+		void DrawArc(const Point& center, float radius,
+		             float startAngleDeg, float sweepAngleDeg,
+		             float width, const Color& color);
+
 		/// @brief 绘制圆角矩形（Phase 8：实心填充，半径钳制封在后端）
 		void DrawRoundedRect(const Rect& rect, float cornerRadius,
 		                     const Color& color);

@@ -3,6 +3,7 @@
 #include "ECDI/Core/ECDIAssert.h"             // FRAMEWORK_ASSERT（决策 32 同构：Begin/End 严格配对）
 #include "ECDI/Core/Logger.h"
 #include "Platform/Win32/Win32RenderContext.h"   // ★ 取 HWND（同 GDIBackend / GDITextMeasurer 先例）
+#include "Render/ArcCoverage.h"                   // ★ Phase 33：弧覆盖度生成器（与 LineCoverage 同族）
 #include "Render/BackendContract.h"               // ★ 审计 #62：共享契约件（H3 守卫 / M17 吸附）
 #include "Render/FontEngine.h"                   // 诊断用（RasterizeCount）
 #include "Render/Utf8Decode.h"
@@ -323,6 +324,56 @@ void GLRenderer::DrawLine(const Point& start, const Point& end, float width, con
 		Shade(color);
 		SolidSegment(start.x, start.y, end.x, end.y, halfWidth);
 		return;
+	}
+
+	Shade(color);
+	TexturedQuad(slot.x, slot.y, grid.width, grid.height,
+	             static_cast<float>(grid.originX), static_cast<float>(grid.originY),
+	             static_cast<float>(grid.width), static_cast<float>(grid.height));
+}
+
+void GLRenderer::DrawArc(const Point& center, float radius,
+                         float startAngleDeg, float sweepAngleDeg,
+                         float width, const Color& color)
+{
+	// ★ C33-4 全表在 `NormalizeArc` 内一次判完（**唯一实现**——两端同符号调用）
+	const BackendContract::ArcParams p =
+		BackendContract::NormalizeArc(center.x, center.y, radius,
+		                              startAngleDeg, sweepAngleDeg, width);
+	if (!p.drawable || !m_ready)
+	{
+		return;   // 非就绪 = 全部绘制静默 no-op（既有形态）
+	}
+
+	// ★ 覆盖度复用：与 GDI 侧**同一个平台无关生成器**（`Render/ArcCoverage.h`）。
+	//   GL 侧采样密度固定 8 = `GenerateLineCoverage` 的既有默认（`GLRenderer` 没有
+	//   角缓存旋钮）⇒ 与 `DrawLine` 的既有一致性状态**相同**，非本 Phase 新引入的分歧（O33-1）。
+	const LineCoverageGrid grid = GenerateArcCoverage(center.x, center.y, radius,
+	                                                  startAngleDeg, sweepAngleDeg,
+	                                                  width);
+	if (grid.Empty())
+	{
+		return;
+	}
+
+	// ★ **GL 侧没有 AA 开关**（实测：本类无 `m_antiAliasing` 之类的成员，也没有
+	//   `SetAntiAliasing`——`GLRenderer` 全部绘制都走图集覆盖度，AA 是它的**唯一**形态）。
+	//   ⇒ PD33-C 在 GL 侧**无对应物**，`binarize` 在此的**唯一真实用途 = 图集满重试**
+	//   （详设 △7 的 E33-1 已如实登记这处「初设 PD33-C 对 GL 不适用」）。
+	GlyphSlot slot = ArcSlot(grid, p, /*binarize=*/false);
+	if (!slot.valid)
+	{
+		// ★★ 降级（PD33-D / C33-7）：图集满 ⇒ **先试二值化槽位**（硬边弧体积不变，
+		//   但内容更简、且**可能命中既有的硬边缓存**），**绝不**退回 `SolidSegment`——
+		//   那是**直线段四边形**，会把弧降级成直线（C33-7 明令禁止）。
+		slot = ArcSlot(grid, p, true);
+		if (!slot.valid)
+		{
+			// 图集真的没有空间：**不画 + 一次 Warning**（L33-6——如实登记为有意的能力边界）
+			Logger::Log(LogLevel::Warning,
+			            L"GLRenderer: glyph atlas full - arc skipped");
+			return;
+		}
 	}
 
 	Shade(color);
@@ -775,6 +826,54 @@ GlyphSlot GLRenderer::LineSlot(const LineCoverageGrid& grid,
 	{
 		m_atlas->Upload(slot, grid.coverage);
 		m_lineSlots.emplace(key, slot);
+	}
+	return slot;
+}
+
+GlyphSlot GLRenderer::ArcSlot(const LineCoverageGrid& grid,
+                              const BackendContract::ArcParams& p, bool binarize)
+{
+	// ★★ 键 = 11 元组（见头注释）。角度用 `QA` = 1/8°；`startDeg` 先 `Mod360`——
+	//    既免疫超范围入参的 `lround`（§3.3 N4），又让 `10°` 与 `370°` 命中**同一槽位**
+	//    （两者几何等价：`Mod360(a-10)` 与 `Mod360(a-370)` 恒等）。
+	float startMod = std::fmod(p.startDeg, 360.0f);
+	if (startMod < 0.0f)
+	{
+		startMod += 360.0f;
+	}
+
+	const auto key = std::make_tuple(
+		grid.width, grid.height, grid.originX, grid.originY,
+		static_cast<int>(std::lround(p.cx * 8.0f)),
+		static_cast<int>(std::lround(p.cy * 8.0f)),
+		static_cast<int>(std::lround(p.radius * 8.0f)),
+		static_cast<int>(std::lround(startMod * 8.0f)),
+		static_cast<int>(std::lround(p.sweepDeg * 8.0f)),
+		static_cast<int>(std::lround(p.halfWidth * 2.0f * 8.0f)),
+		binarize ? 1 : 0);
+
+	const auto cached = m_arcSlots.find(key);
+	if (cached != m_arcSlots.end())
+	{
+		return cached->second;
+	}
+
+	// ★ 二值化在 **Upload 之前**、作用于**局部拷贝**——`grid` 是值参但拷贝贵，
+	//   且**不可**污染调用方语义（盯防⑨：拷贝必须被**消费**，否则等于没做）
+	std::vector<std::uint8_t> pixels = grid.coverage;
+	if (binarize)
+	{
+		for (std::uint8_t& c : pixels)
+		{
+			c = (c > 0) ? 255 : 0;
+		}
+	}
+
+	const GlyphSlot slot = m_atlas->Allocate(grid.width, grid.height);
+	if (slot.valid)
+	{
+		m_atlas->Upload(slot, pixels);
+		m_arcSlots.emplace(key, slot);
 	}
 	return slot;
 }

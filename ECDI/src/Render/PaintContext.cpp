@@ -44,6 +44,17 @@ namespace ECDI {
 
 	}
 
+	void PaintContext::DrawArc(const Point& center, float radius,
+	                          float startAngleDeg, float sweepAngleDeg,
+	                          float width, const Color& color){
+
+		// ★ 原样进命令：钳制/归一化封在生成器（`NormalizeArc`）与后端；
+		//   契约层只保证「参数被传递」——与 DrawLine 的 width 同族（C33-9）
+		m_commands.emplace_back(DrawArcCommand{ center, radius, startAngleDeg,
+		                                        sweepAngleDeg, width, color });
+
+	}
+
 	void PaintContext::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	                                   const Color& color){
 

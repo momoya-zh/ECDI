@@ -47,6 +47,17 @@ namespace ECDI {
 			Color color;
 		};
 
+		/// @brief DrawArc 记录（Phase 33）——与命令字段**一一对应**，验证原样转发
+		struct ArcDraw
+		{
+			Point center;
+			float radius = 0.0f;
+			float startAngleDeg = 0.0f;   ///< ★ **原样**（不做归约/钳制——C33-9）
+			float sweepAngleDeg = 0.0f;   ///< ★ **原样**（同上）
+			float width = 1.0f;
+			Color color;
+		};
+
 		struct RoundedRectDraw
 		{
 			Rect rect;
@@ -78,6 +89,7 @@ namespace ECDI {
 		std::vector<TextDraw> textDraws;   ///< DrawText 记录（公开，测试断言）
 
 		std::vector<LineDraw> lineCalls;            ///< DrawLine 记录（Phase 8）
+		std::vector<ArcDraw> arcDraws;              ///< DrawArc 记录（Phase 33——★ 原样，不归一化）
 		std::vector<RoundedRectDraw> roundedRectCalls;   ///< DrawRoundedRect 记录（Phase 8）
 		std::vector<ImageDraw> imageCalls;          ///< DrawImage 记录（Phase 8）
 		std::vector<ClipOp> clipOps;                ///< Push/Pop 共列保序（Phase 8）
@@ -93,6 +105,10 @@ namespace ECDI {
 
 		void DrawLine(const Point& start, const Point& end,
 		              float width, const Color& color) override;         // Phase 8
+
+		void DrawArc(const Point& center, float radius,
+		             float startAngleDeg, float sweepAngleDeg,
+		             float width, const Color& color) override;      // Phase 33（原样记录）
 
 		void DrawRoundedRect(const Rect& rect, float cornerRadius,
 		                     const Color& color) override;               // Phase 8

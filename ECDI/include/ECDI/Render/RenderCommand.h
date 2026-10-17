@@ -42,6 +42,20 @@ namespace ECDI {
 		Color color;          ///< 线色
 	};
 
+	/// @brief 绘制圆弧命令（纯数据，Phase 33）
+	/// @details 死数据：圆心 + 半径 + 起始角 + 有向扫角 + 线宽 + 颜色。
+	/// ★★ **两个角度不随 DPI 缩放**——角度是**无量纲**量，`Renderer` 展开时**只折**
+	/// `center` / `radius` / `width`；150% 下把 90° 折成 135° 会错得离谱（盯防①）。
+	struct DrawArcCommand
+	{
+		Point center;                 ///< 圆心（最终坐标）
+		float radius = 0.0f;          ///< 半径
+		float startAngleDeg = 0.0f;   ///< 起始角（度；★ **不缩放**）
+		float sweepAngleDeg = 0.0f;   ///< 有向扫角（度；★ **不缩放**）
+		float width = 1.0f;           ///< 线宽
+		Color color;                  ///< 线色
+	};
+
 	/// @brief 绘制圆角矩形命令（纯数据，Phase 8）
 	/// @details 死数据：边界矩形 + 圆角半径 + 填充色。仅实心填充（无边框）；
 	/// cornerRadius 由后端钳制到 [0, min(w,h)/2]（详细设计 §8.2）。
@@ -92,7 +106,7 @@ namespace ECDI {
 	/// PushClip/PopClip 为状态命令（无像素输出）；其余为绘制命令。
 	using RenderCommand = std::variant<
 		DrawRectCommand, DrawTextCommand,
-		DrawLineCommand, DrawRoundedRectCommand, DrawImageCommand,
+		DrawLineCommand, DrawArcCommand, DrawRoundedRectCommand, DrawImageCommand,
 		PushClipCommand, PopClipCommand, DrawFocusRectCommand>;
 
 	/// @brief 命令缓冲 = vector（决策 4，Window 持有跨帧复用，读写靠引用形态分离）
