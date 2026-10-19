@@ -30,7 +30,19 @@ public:
 	bool CanFocus() const noexcept override { return true; }
 
 	// Phase 13 D9：交互控件消费鼠标输入——命中本控件时 caption 区返回 HTCLIENT（默认 false 见 Widget.h）
+	// ⚠️ 与「事件消费（`Event::SetHandled`）」是**两件事**：
+	//   · 本方法 = **命中测试**层（WM_NCHITTEST：控件"吃"鼠标输入，不让它落到 caption 拖拽区）；
+	//   · 事件消费 = **冒泡**层（`OnMouseButtonDown/Up` 里 `event.SetHandled()` 停止向祖先冒泡）。
+	//   同名"消费"不同层——见 `docs/规范/事件消费与安全销毁规范.md` §1.3 对照表。
 	bool ConsumesMouseInput() const noexcept override { return true; }
+
+	// ★★ Phase 35：Button **自动消费**一次有效点按的 Down 与 Up（需求稿 F1「哪些内建控件自动消费」的定案）。
+	//   规则：Down **总是**消费（宣告这次点按归本按钮，父容器因此不会进入按下态）；
+	//        Up **总是**消费（无论是否触发 OnClick——拖出后松开同样没收，避免父控件收到孤立的 Up）。
+	//   为什么不能"事后取消消费"：消费语义必须在 Down 时刻就确定；若允许 OnClick 里反悔，
+	//   父控件就会「收到 Up 没收到 Down」——正是需求稿 F2③ 要消灭的状态异常。
+	//   ✅ 「父行要能切换、子按钮要能删除」的正解见规范 §2.3：父行切换放进**子按钮回调**，
+	//      或把父容器做成非点击容器——**不要**在父容器的点击回调里做业务动作。
 
 	// ── Phase 9：主题与样式（using 防名字隐藏——保留基类 SetStyle(TextStyleOverride)，可分别设置两 Style）──
 

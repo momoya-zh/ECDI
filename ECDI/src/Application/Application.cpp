@@ -27,6 +27,21 @@
 
 namespace ECDI{
 
+// ★ Phase 35：跨类访问桥（定义处才拥有 friend 权限——clang-cl/GCC/MSVC 三链一致）
+//   定义体放 .cpp ⇒ 头文件无需包含 Widget 的完整定义（`unique_ptr<Widget>` 参数类型在
+//   `Application.h` 里已有前置声明 + 显式析构约定）。
+bool ApplicationAccess::IsDispatching(const Application& application) noexcept{
+
+	return application.IsDispatching();
+
+}
+
+void ApplicationAccess::DeferDestroy(Application& application, std::unique_ptr<Widget> widget){
+
+	application.DeferDestroy(std::move(widget));
+
+}
+
 Application::Application()
 	: m_platformApplication(std::make_unique<Win32PlatformApplication>()){
 
@@ -71,6 +86,12 @@ Application::~Application(){
 
 	m_windows.clear();           // 残留窗口：逐个 ~Window → DestroyWindow → WM_DESTROY
 	                             // （OnWindowDestroyed 旗标直返——不再 erase/emplace）
+
+	// ★ Phase 35：延迟移除的控件收尾——**必须在 m_windows 之后**（队列里的控件已脱树，
+	// 本可先析构；但排在窗口之后可保证「控件析构函数里访问所属 Window」的既有惯用法不失效）。
+	// 正常路径下队列此时已空（每次派发结束都会排水），这里只兜底「应用层在 ~Application 前
+	// 留下了未排空的请求」——不做延迟，直接析构。
+	m_deferredWidgets.clear();
 
 	// Phase 14 O-1：先断托盘事件上行，再让 m_platformApplication 析构——
 	// 防止宿主窗口销毁过程中的 Shell 回调访问已析构的 Application（谁注册谁清理）
@@ -138,6 +159,78 @@ void Application::ProcessDeferredDestroy() {
 	// 「窗口关闭后 Window 对象立即析构」。
 	// 注：以上是**当前实现路径**，非「设计保证的固定顺序」（~Application 残留窗口隐患另案记账）。
 	m_deferredDestroy.clear();
+
+	// ★ Phase 35：控件级延迟移除的兜底排水。正常路径下每次派发结束（最外层）已排空，
+	// 这里是「应用层在非派发上下文里留下了请求队列」的唯一兜底（当前 API 面产生不了这种状态，
+	// 防御性保留——幂等，代价是一次空 vector 检查）。
+	DrainDeferredRemoval();
+}
+
+// ── ★ Phase 35：事件派发语义（消费 + 存活保护 + 延迟移除）──────────────────
+
+void Application::DeferDestroy(std::unique_ptr<Widget> widget){
+
+	if (!widget){
+
+		return;
+
+	}
+
+	// ⚠️ 不复用 m_deferredDestroy（窗口队列）：语义不同（控件 vs 窗口）、生命周期锚点不同
+	//    （派发结束 vs 消息循环轮次）。共用会让「派发结束冲掉窗口队列」这种耦合凭空出现。
+	m_deferredWidgets.push_back(std::move(widget));
+
+}
+
+void Application::DrainDeferredRemoval(){
+
+	// 逆序析构：后入队者先亡。典型入队序 = 子 → 父（子回调里先删自己、再删父），
+	// 逆序 ⇒ 父后亡 —— 与「子树自上而下析构」的自然顺序一致。
+	// 循环到空：析构函数里若再走 Widget::RequestRemove（此时已不在派发中 ⇒ 走立即分支），
+	// 不会写入本队列；但若某控件析构函数经 PostToUi/直接派发再次入队，也一并排空。
+	while (!m_deferredWidgets.empty()){
+
+		m_deferredWidgets.pop_back();   // unique_ptr 析构 ⇒ ~Widget（此处是唯一析构点）
+
+	}
+
+}
+
+std::vector<Widget*> Application::BuildDispatchChain(Widget* target, Widget* root){
+
+	// ★ 冻结祖先链：target → ... → root（root 为 nullptr 时上溯到真正的树根）。
+	//   为什么在**派发开始时**一次性算好（而不是在循环里 `current->GetParent()`）：
+	//   ① 回调里摘树会断父链 —— 上溯会**提前终止**（父控件收不到它本应收到的 Up），
+	//      而「已消费 ⇒ 停止冒泡」只是**一个**停止条件，不该被「树结构变了」这种副作用冒充；
+	//   ② 回调里对被摘节点的任何访问（`GetParent()` 本身）都可能是 UAF。
+	//   冻结后的链 = 「本次派发**还该向谁派发**」的集合：之后挂上的新祖先**本次收不到**事件
+	//   （可测试、可解释：一次点击的接收者集合在点击**开始时**就已确定）。
+	//   ⚠️ 链上的节点由 DispatchWithChain 的 Prepare/Release 钉住存活（RequestRemove 只摘树）。
+	std::vector<Widget*> chain;
+
+	if (target == nullptr){
+
+		return chain;   // 空链：调用方据此跳过派发（与既有 `target == nullptr` 早返语义一致）
+
+	}
+
+	chain.push_back(target);
+
+	// ★ 注意根边界：`window.GetRootWidget()` **本身也在链上**（= 链尾）——点击空白区时
+	//   RootWidget 就是唯一接收者（既有行为；Phase 5 回顾 R1：不可聚焦区域清焦点）。
+	//   故上溯终止条件是 `node == nullptr`；`root` 只用于 Debug 断言。
+	for (Widget* node = target->GetParent(); node != nullptr; node = node->GetParent()){
+
+		chain.push_back(node);
+
+	}
+
+	// Debug 校验：链尾理应就是 window 的 RootWidget。仅断言不修链——异常形态下
+	//   「按父链走完」仍是安全选择（宁可多派发一级，也不丢事件）。
+	FRAMEWORK_ASSERT(root == nullptr || chain.back() == root);
+
+	return chain;
+
 }
 
 void Application::OnWindowCreated(
@@ -270,6 +363,14 @@ Widget* Application::FindFocusedWidget(Window& window)const noexcept {
 }
 
 // ── 鼠标事件处理（HitTest → Target Dispatch → Bubbling）────────────
+//
+// ★★ Phase 35 起，本区块**所有**冒泡派发都走同一套骨架（与「兄弟路径参数化」同一方法论）：
+//      chain = BuildDispatchChain(target, &window.GetRootWidget());
+//      DispatchWithChain(chain, [&]{ BubbleAlongChain(chain, event, [&](Widget& w){ w.OnXxx(event); }); });
+//   为什么必须统一：契约要的是「Down/Up/Move/Wheel/Drop **行为一致**」——
+//   三个循环各自实现 ⇒ 迟早出现「只拦 Up 不拦 Down」的漂移（本需求稿第 2 条明确禁止）。
+//   ★ 骨架同时提供：① 祖先链**冻结**（摘树不断链）；② 派发期间**钉住**（RequestRemove 只摘树）；
+//   ③ 已移除节点**跳过**；④ 已消费**停止冒泡**；⑤ 最外层派发结束统一**排水**（延迟析构）。
 
 void Application::OnMouseMove(const MouseMoveEvent& event){
 
@@ -280,20 +381,15 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 
 	if (captureTarget != nullptr){
 
-		Widget* current = captureTarget;
+		// ★ 捕获通道与命通道骨架完全相同（只是目标来源不同）——
+		//   捕获者可能在派发中被移除：链照样冻结，已移除则跳过其自身回调。
+		std::vector<Widget*> chain = BuildDispatchChain(captureTarget, &window.GetRootWidget());
 
-		while (current != nullptr){
+		DispatchWithChain(chain, [&]{
 
-			current->OnMouseMove(event);
+			BubbleAlongChain(chain, event, [&](Widget& w){ w.OnMouseMove(event); });
 
-			// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
-			if (event.IsHandled()) {
-				break;
-			}
-
-			current = current->GetParent();
-
-		}
+		});
 
 		return;   // 冻结：不进入 hover 状态机
 	}
@@ -313,21 +409,14 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 
 	}
 
-	// 3. Bubbling：沿 Parent 链逐级调用 OnMouseMove
-	Widget* current = newTarget;
+	// 3. Bubbling：沿**冻结链**逐级调用 OnMouseMove（消费 / 已移除 两种停止条件见头文件）
+	std::vector<Widget*> chain = BuildDispatchChain(newTarget, &window.GetRootWidget());
 
-	while (current != nullptr){
+	DispatchWithChain(chain, [&]{
 
-		current->OnMouseMove(event);
+		BubbleAlongChain(chain, event, [&](Widget& w){ w.OnMouseMove(event); });
 
-		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
-		if (event.IsHandled()) {
-			break;
-		}
-
-		current = current->GetParent();
-
-	}
+	});
 
 }
 
@@ -351,20 +440,15 @@ void Application::OnMouseButtonDown(const MouseButtonDownEvent& event){
 	// 5.4.2：隐式捕获——命中即捕获（后续 Move/Up 直接派发给它，跳过 HitTest）
 	window.SetCaptureWidget(target);
 
-	Widget* current = target;
+	// ★ Phase 35：捕获/焦点已在**派发之外**建立（不进入钉住区——它们只改 Window 状态，
+	//   不访问控件树）；下面才是控件回调区。
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
 
-	while (current != nullptr) {
+	DispatchWithChain(chain, [&]{
 
-		current->OnMouseButtonDown(event);
+		BubbleAlongChain(chain, event, [&](Widget& w){ w.OnMouseButtonDown(event); });
 
-		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
-		if (event.IsHandled()) {
-			break;
-		}
-
-		current = current->GetParent();
-
-	}
+	});
 
 }
 
@@ -374,35 +458,48 @@ void Application::OnMouseButtonUp(const MouseButtonUpEvent& event){
 
 	Widget* target = window.GetCaptureWidget();
 
+	if (target != nullptr && target->GetWindow() != &window){
+
+		// ★ Phase 35 防御：捕获指针属于**另一个**窗口（理论上不该发生——SetCaptureWidget 只在
+		//   Down 里按本窗口 HitTest 结果设置，摘树也会清；但一旦发生，跨窗口上溯会派发到
+		//   无关的控件树上）。降级为按坐标重新命中，而不是信任陈旧指针。
+		target = nullptr;
+
+	}
+
 	if (target == nullptr) {
 
 		target = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
 
 	}
 
-	Widget* current = target;
+	if (target == nullptr){
 
-	while (current != nullptr) {
-
-		current->OnMouseButtonUp(event);
-
-		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
-		if (event.IsHandled()) {
-			break;
-		}
-
-		current = current->GetParent();
+		return;   // 防御：RootWidget 覆盖整个客户区，正常不会到这
 
 	}
 
 	// 5.4.2：先派发再释放（GPT 修正——控件 Up 里 GetCaptureWidget 仍能拿自身状态）
-	window.SetCaptureWidget(nullptr);
+	//   ★ 放在 DispatchWithChain **之后**（而非 bubble 循环之后、排水之前）：
+	//     排水析构发生在派发结束的同一时机，capture 指针若在排水期被读就是悬垂。
+	//     摘树路径已由 `Window::ForgetSubtree` 清空 capture——这里只处理「没摘树、单纯结束」的常态。
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+
+	DispatchWithChain(chain, [&]{
+
+		BubbleAlongChain(chain, event, [&](Widget& w){ w.OnMouseButtonUp(event); });
+
+	});
+
+	window.SetCaptureWidget(nullptr);   // 先派发再释放；摘树路径已由 ForgetSubtree 清空（幂等）
 
 }
 
 void Application::OnMouseWheel(const MouseWheelEvent& event){
 
-	Widget* target = FindTargetWidget(*event.GetWindow(), event.GetMouseX(), event.GetMouseY());
+	Window& window = *event.GetWindow();
+
+	Widget* target = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
 
 	if (target == nullptr) {
 
@@ -410,29 +507,24 @@ void Application::OnMouseWheel(const MouseWheelEvent& event){
 
 	}
 
-	Widget* current = target;
+	// ⚠️ **滚轮冒泡的边界**（条 135 同族）：子控件不 SetHandled 时事件继续
+	//   落到父控件滚内容 = **期望行为**；`BubbleAlongChain` 只让「已显式消费」的子控件
+	//   阻止冒泡，不改变默认的冒泡语义。
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
 
-	while (current != nullptr) {
+	DispatchWithChain(chain, [&]{
 
-		current->OnMouseWheel(event);
+		BubbleAlongChain(chain, event, [&](Widget& w){ w.OnMouseWheel(event); });
 
-		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释）
-		// ⚠️ **滚轮冒泡的边界**（条 135 同族）：子控件不 SetHandled 时事件继续
-		//   落到父控件滚内容 = **期望行为**；本检查只让「已显式消费」的子控件
-		//   阻止冒泡，不改变默认的冒泡语义。
-		if (event.IsHandled()) {
-			break;
-		}
-
-		current = current->GetParent();
-
-	}
+	});
 
 }
 
 void Application::OnCharInput(const CharInputEvent&event){
 
-	Widget* target = FindFocusedWidget(*event.GetWindow());
+	Window& window = *event.GetWindow();
+
+	Widget* target = FindFocusedWidget(window);
 
 	if (target == nullptr) {
 
@@ -440,20 +532,71 @@ void Application::OnCharInput(const CharInputEvent&event){
 
 	}
 
-	target->OnCharInput(event);
+	// ★ Phase 35：单收件人派发也走同一骨架——**不是为了冒泡**（CharInput 不冒泡），
+	//   而是为了「回调里 RequestRemove()」同样安全：目标被钉住 ⇒ 摘树后延迟析构。
+	//   链 = target → 祖先（BubbleAlongChain 只取**第一个未移除**节点 = target 本身；
+	//   若 target 在本次派发的更早一步里已被移除，则向它的祖先降级派发——见下方 BubbleAlongChain 语义）。
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+
+	DispatchWithChain(chain, [&]{
+
+		// CharInput 的契约是「只给焦点控件」⇒ 只取链首；链首已移除时直接不发（不降级到祖先）。
+		Widget* head = chain.front();
+
+		if (!head->IsRemovedDuringDispatch()){
+
+			head->OnCharInput(event);
+
+		}
+
+	});
 
 }
 
 void Application::OnKeyDown(const KeyDownEvent& event) {
 
 	// 5.4.4：键盘入口统一走 Window（Tab 拦截 + 焦点控件派发）——焦点属于 Window
-	event.GetWindow()->HandleKeyDown(event);
+	// ★ Phase 35：Window::HandleKeyDown 内含焦点控件的派发（Tab 导航 + OnKeyDown），
+	//   它自己**不开钉住区**；若按键回调里 RequestRemove 焦点控件，摘树即安全
+	//   （ForgetSubtree 清焦点、对象进延迟队列）。见 Window.cpp 的 HandleKeyDown 注释。
+	//   ⚠️ **必须**在本入口开钉住区：`RequestRemove` 只在 IsDispatching()（最外层派发计数 >0）
+	//      时才延迟；若只派发 Up/Char/Drop 而不派发 Down，计数在 Up 之后已归零，
+	//      孤立的 `HandleKeyDown`（测试/自定义消息泵直接调用）就会把焦点控件**立即析构**
+	//      ⇒ 回调体内后续语句踩已析构对象（实测 0xC0000005）。
+	//      此处的「链」= 焦点控件 → 根（窗口没有焦点时为空链，无副作用）。
+	Widget* keyboardTarget = FindFocusedWidget(*event.GetWindow());
+
+	if (keyboardTarget == nullptr) {
+
+		event.GetWindow()->HandleKeyDown(event);   // Tab 导航等窗口级处理照常
+
+		return;
+
+	}
+
+	// 键盘是**单收件人**语义（不冒泡）：链只用于钉住存活与「同一 Application::OnKeyDown 在
+	// 回调内被重入派发」时的移除标记，HandleKeyDown 自身只摸窗口的焦点成员。
+	std::vector<Widget*> chain = BuildDispatchChain(keyboardTarget, &event.GetWindow()->GetRootWidget());
+
+	DispatchWithChain(chain, [&]{
+
+		if (chain.front()->IsRemovedDuringDispatch()) {
+
+			return;   // 外层已移除该焦点控件 ⇒ 不再派发（与 BubbleAlongChain 条件 3 一致）
+
+		}
+
+		event.GetWindow()->HandleKeyDown(event);
+
+	});
 
 }
 
 void Application::OnKeyUp(const KeyUpEvent& event) {
 
-	Widget* target = FindFocusedWidget(*event.GetWindow());
+	Window& window = *event.GetWindow();
+
+	Widget* target = FindFocusedWidget(window);
 
 	if (target == nullptr) {
 
@@ -461,7 +604,20 @@ void Application::OnKeyUp(const KeyUpEvent& event) {
 	
 	}
 
-	target->OnKeyUp(event);
+	// ★ Phase 35：与 CharInput 同款——单收件人 + 钉住（回调里可安全 RequestRemove）
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+
+	DispatchWithChain(chain, [&]{
+
+		Widget* head = chain.front();
+
+		if (!head->IsRemovedDuringDispatch()){
+
+			head->OnKeyUp(event);
+
+		}
+
+	});
 
 }
 
@@ -498,22 +654,14 @@ void Application::OnDropFiles(const DropFilesEvent& event){
 
 	}
 
-	// 3. Bubbling：沿 Parent 链逐级调用（与 OnMouseMove 同款——不查 IsHandled）
-	Widget* current = target;
+	// 3. Bubbling：沿**冻结链**逐级调用（与 OnMouseMove 同款——消费即停、已移除即跳过）
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
 
-	while (current != nullptr){
+	DispatchWithChain(chain, [&]{
 
-		current->OnDropFiles(event);
+		BubbleAlongChain(chain, event, [&](Widget& w){ w.OnDropFiles(event); });
 
-		// ★ 审计 M22：已置位则停止冒泡（契约接上——见 Event.h 类注释；
-		//   原注释「不查 IsHandled」正是 M22 描述的"死状态"现象，本批订正）
-		if (event.IsHandled()) {
-			break;
-		}
-
-		current = current->GetParent();
-
-	}
+	});
 
 }
 

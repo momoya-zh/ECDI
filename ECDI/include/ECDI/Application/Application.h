@@ -145,8 +145,124 @@ protected:
 
 private:
 
+	// ── ★ Phase 35：事件派发语义（消费 + 存活保护 + 延迟移除）────────────
+	// 详见 docs/规范/事件消费与安全销毁规范.md。本区块**全部为框架内部实现**，不进公共契约面：
+	//   公共入口只有 `Widget::RequestRemove()`（+ 既有 `Event::SetHandled()`/`IsHandled()`）。
+	// ⚠️ **访问权限（实测口径）**：`Widget` 虽声明为 friend，但 clang-cl 下
+	//   **不**据此授予 Widget **成员函数体**访问本类私有成员（GCC 会，MSVC/clang-cl 不会——
+	//   友元声明时 Widget 尚未完整定义）。故 `Widget::RequestRemove` 统一经下面的
+	//   `ApplicationAccess` 访问；**新增跨类访问一律走它**，不要恢复 `app->Xxx()` 直调
+	//   （否则另一个编译器链会红）。
+
+	/// @brief 是否处在事件派发中（冒泡循环进行中；`Application` 单线程，故不需要线程同步）
+	[[nodiscard]] bool IsDispatching() const noexcept{ return m_dispatchDepth > 0; }
+
+	/// @brief 把一个**已脱离父节点**的控件交给本 Application 延迟析构
+	/// @pre `widget` 已被 `RemoveChild` 摘树（父指针为空）；由 `Widget::RequestRemove` 保证
+	/// @details 入 `m_deferredWidgets`；实际析构发生在**最外层**派发结束（`DrainDeferredRemoval`）
+	///          或下一轮消息循环（`ProcessDeferredDestroy`）。嵌套派发内也**不**提前析构——
+	///          外层派发栈仍可能持有该控件或其祖先的指针。
+	void DeferDestroy(std::unique_ptr<Widget> widget);
+
 	/// @brief 在消息循环末尾处理延迟销毁的窗口
 	void ProcessDeferredDestroy();
+
+	/// @brief 析构全部延迟移除的控件（最外层派发结束处 / 消息循环每轮调用；幂等）
+	/// @details 顺序：**逆序**（后入队者先析构）——与「子控件通常晚于祖先入队」的实际形态无关，
+	///          但保证「A 的析构函数里再请求删除 B」时 B 也被排空（循环到队列为空）。
+	/// @warning 析构函数里**不得**再回调本 Application 的派发（如 `SendEvent`）——与 `~Application`
+	///          的排水期口径一致（见 `m_shuttingDown` 注释）。
+	void DrainDeferredRemoval();
+
+	// ★ Phase 35：`Widget::RequestRemove` 的桥（访问口径见上方备注）。
+	friend struct ApplicationAccess;
+
+	/// @brief 冒泡循环（★ `DispatchWithChain` 的派发体；也是冒泡语义的**唯一**形状）
+	/// @param chain 已冻结的祖先链（target → root；链上节点均钉住，**逐个**调用 `onNode`）
+	/// @param onNode 逐节点回调（`current->OnMouseButtonUp(event)` 之类）
+	/// @details 循环**三个**终止条件（★ Phase 35 起，三者缺一不可）：
+	///          1. 链走完（正常）；
+	///          2. 事件已被消费（`event.IsHandled()`）—— **消费语义**；
+	///          3. 节点已在本次派发中被移除（`IsRemovedDuringDispatch()`）—— **存活保护**：
+	///             它的任务是把这一刻已经发生的「脱树」交给栈上的调用者安全处理，不再交给它；
+	///             其祖先**继续**收到事件（与「子控件不消费 ⇒ 冒泡照常」一致）。
+	///          ⚠️ 为什么是「链」而不是 `current->GetParent()` 上溯：摘树会让父链断裂，
+	///             且被摘节点可能在派发期间就被移除 ⇒ 必须用**派发开始时冻结**的链。
+	///          ⚠️ 被移除节点的**祖先**若也随之被移除，同样由条件 3 跳过（链上逐个判定）——
+	///             这正是「删除包含自身的祖先子树」的安全路径。
+	template<typename OnNode>
+	void BubbleAlongChain(const std::vector<Widget*>& chain, const Event& event, OnNode&& onNode){
+
+		for (Widget* node : chain){
+
+			if (node->IsRemovedDuringDispatch()){
+
+				continue;   // 条件 3：本次派发中已被摘掉（用户已放弃这个控件）
+
+			}
+
+			onNode(*node);
+
+			if (event.IsHandled()){
+
+				break;      // 条件 2：消费
+
+			}
+
+		}
+
+	}
+
+	/// @brief 执行一次「有存活保护的事件派发」（★ 所有控件事件派发的唯一入口）
+	/// @param chain 本次派发路径上的控件（命中目标 → 根，按派发顺序）
+	/// @param fn     实际派发体（冒泡循环）
+	/// @details 语义（三段式，与 `docs/规范/事件消费与安全销毁规范.md` §3 一一对应）：
+	///          ① **冻结**：`PrepareDispatchChain(chain)` —— 链上每个节点 `m_dispatchRefCount+1`，
+	///             在此后整个派发期间 `RequestRemove` 只摘树、不析构；
+	///          ② **派发**：`fn()`（冒泡循环内逐节点检查 `IsHandled()` / `IsRemovedDuringDispatch()`）；
+	///          ③ **解冻 + 排水**：`ReleaseDispatchChain(chain)`；若本层是**最外层**
+	///             （`m_dispatchDepth` 归零）⇒ `DrainDeferredRemoval()`。
+	///          ⚠️ 异常安全：`fn` 抛异常时仍执行 ③（RAII `DispatchGuard`）。
+	template<typename Fn>
+	void DispatchWithChain(const std::vector<Widget*>& chain, Fn&& fn){
+
+		// ★ RAII：异常也保证「解冻 + 排水」（与既有 `ProcessDeferredDestroy` 的异常口径无关——
+		//   派发体本身不抛，但应用层回调可能抛；抛了也不能把控件钉死或泄漏）。
+		struct DispatchGuard{
+
+			Application& app;
+			const std::vector<Widget*>& chain;
+
+			DispatchGuard(Application& a, const std::vector<Widget*>& c) : app(a), chain(c){
+
+				++app.m_dispatchDepth;
+				Widget::PrepareDispatchChain(chain);   // ① 冻结：链上节点钉住
+
+			}
+
+			~DispatchGuard(){
+
+				Widget::ReleaseDispatchChain(chain);   // ③-a 解冻：与 ① 严格配对
+
+				--app.m_dispatchDepth;
+
+				if (app.m_dispatchDepth == 0){
+
+					app.DrainDeferredRemoval();   // ③-b ★ 唯一析构点：**最外层**派发结束
+
+				}
+
+			}
+
+		} guard(*this, chain);
+
+		fn();   // ② 派发（冒泡循环）
+
+	}
+
+	/// @brief 收集「命中目标 → 根」的祖先链（含 target 自身；root 边界不含 Window 本身）
+	/// @return 顺序：target, parent, ..., root（target 为 nullptr 时返回空链）
+	static std::vector<Widget*> BuildDispatchChain(Widget* target, Widget* root);
 
 	/// @brief 通过坐标在 Widget 树中查找目标 Widget
 	/// @param window 目标窗口
@@ -156,8 +272,6 @@ private:
 	Widget* FindTargetWidget(Window& window,int x,int y)const noexcept;
 
 	Widget* FindFocusedWidget(Window&window) const noexcept;
-
-private:
 
 	// 7.1.5：m_windowClass 已下沉——窗口系统资源归平台层 WindowClass::Instance()（Application 不再认识窗口类）
 
@@ -177,6 +291,38 @@ private:
 	// （emplace_back/erase）都是 UB（MinGW 实测 0xC0000374 堆损坏）。旗标置位后
 	// OnWindowDestroyed 直返；残留窗口由 ~Application 显式排水（容器仍存活时）。
 	bool m_shuttingDown = false;
+
+	// ── ★ Phase 35：事件派发语义的状态 ───────────────────────────────
+	// ⚠️ 声明在 m_shuttingDown **之后** ⇒ 析构时**最先**亡（逆序）——恰好是安全的：
+	//    它们只在 `~Application` 已完成 `m_windows.clear()`（控件树随之消亡）之后
+	//    才被析构，那时队列必空（见 ~Application 的显式排水）。
+
+	/// @brief 当前事件派发嵌套深度（`>0` = 派发中；int 而非无符号——深度上限即调用栈深度）
+	int m_dispatchDepth = 0;
+
+	/// @brief 延迟移除的控件（★ Phase 35）：**已脱树**、等派发结束后析构
+	/// @details 由 `Widget::RequestRemove`（派发中分支）填充，`DrainDeferredRemoval` 排空。
+	///          顺序 = 入队序；排水 = 逆序析构（后入队先亡——与「先删子后删父」的自然调用序一致）。
+	std::vector<std::unique_ptr<Widget>> m_deferredWidgets;
+};
+
+/// @brief ★ Phase 35：`Application` 私有派发状态的**唯一**跨类访问点
+/// @details 动机：应用代码没有任何「直接改派发状态」的正当理由，故这些成员保持 private；
+///          但 `Widget::RequestRemove` 必须读「是否在派发中」并把所有权交给延迟队列，
+///          而 `friend class Widget` 在 MSVC/clang-cl 下对 Widget 的成员函数体不生效
+///          （实测 `'IsDispatching' is a private member of 'ECDI::Application'`）。
+///          该结构的成员是**私有**的、只向 `Widget` 开放，所以「能构造它」本身就是权限。
+/// @warning 框架外部代码无法构造本类型 ⇒ 这三条不是公共 API。
+struct ApplicationAccess{
+
+private:
+
+	friend class Widget;
+
+	static bool IsDispatching(const Application& application) noexcept;
+
+	static void DeferDestroy(Application& application, std::unique_ptr<Widget> widget);
+
 };
 
 }

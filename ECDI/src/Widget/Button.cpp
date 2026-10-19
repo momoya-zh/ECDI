@@ -123,7 +123,7 @@ Point Button::CalculateTextPosition(int x, int y, float textWidth, float lineHei
 
 }
 
-void Button::OnMouseButtonDown(const MouseButtonDownEvent&){
+void Button::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 	// 5.4.5：按下态 + 重绘（Invalidate 机制 5.4.1；Capture 保证 Up 必达 5.4.2）
 	// 9.6 S1：状态翻转（事件驱动）→ 色过渡（表现层）——动画只平滑到达状态、不产生状态
@@ -132,6 +132,20 @@ void Button::OnMouseButtonDown(const MouseButtonDownEvent&){
 	AnimateBackgroundTo(GetTargetBackground());
 
 	Invalidate();
+
+	// ★★ Phase 35 / 需求稿 F1：Button **消费**它走完的整条鼠标点按序列。
+	// 为什么 Down 也要消费（不只是 Up）：需求稿 F2③「按下与释放阶段的消费行为应保持一致，
+	//   避免只拦截 Up 或只拦截 Down 所造成的状态异常」——
+	//   · 只消费 Up 的后果：Down 已冒泡到父控件（父按下态点亮）→ Up 被 Button 吞掉 →
+	//     **父控件永远等不到 Up**（`m_pressed` 卡在 true、跨点击残留）；
+	//   · 只消费 Down 的后果：Up 冒泡到父控件 → 父在「自己没收到 Down」的情况下收到 Up，
+	//     若父按「Down∧Up」判定则正常，但父若按「Up 即点」判定就会误触发。
+	//   ⇒ 两个阶段都消费：按钮按下即宣告「这次点按归我」，整条序列在 Button 处截止。
+	// ⚠️ **零行为变化**的论证：`SetHandled` 此前全库无调用点（`Event.h` M22 注释：全库 0 个），
+	//   既有界面里「Button 之上没有再套一个可点击容器」的形态不受影响（冒泡链路在 Button 处
+	//   本来就只剩那些「不点击、只可能透传」的父容器——它们收到的 Down/Up 也没有可观测效果：
+	//   Panel/ScrollView 不覆写鼠标点击回调）。
+	event.SetHandled();
 
 }
 
@@ -155,6 +169,12 @@ void Button::OnMouseButtonUp(const MouseButtonUpEvent& event){
 	AnimateBackgroundTo(GetTargetBackground());
 
 	Invalidate();
+
+	// ★★ Phase 35：**本轮点按序列归本按钮**——无论 inside 与否，Up 一律消费。
+	// 为什么「拖出后松开（inside == false）」也消费：Down 已经消费 ⇒ 父控件从未进入按下态，
+	//   Up 若冒泡到父控件，父就收到了一条「无 Down 的 Up」——正是 F2③ 要排除的状态异常。
+	//   消费 = 「这次点按在 Button 处已完整结束（含取消）」，与它是否触发 OnClick 无关。
+	event.SetHandled();
 
 	if (inside){
 

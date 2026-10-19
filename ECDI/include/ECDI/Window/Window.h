@@ -73,6 +73,13 @@ class Window : public PlatformWindowHost {
 		/// @brief 获取 RootWidget（Widget 树的根节点，代表窗口客户区）
 		Widget& GetRootWidget() noexcept;
 
+		/// @brief 所属 Application（★ Phase 35：`Widget::RequestRemove` 需要判断「是否在派发中」）
+		/// @details B2 引用成员（窗口必有主）⇒ 恒非空、无生命周期悬空问题。
+		///          对外暴露为公共只读访问器，是为了让「控件 → 应用」这条既有关系显式化
+		///          （此前无访问器——`Widget::FindApplication` 曾因此拿不到 Application）。
+		///          ⚠️ 只返回引用、非拥有；**不在任何派发/析构回调里缓存它**。
+		Application& GetApplication() const noexcept;   // 定义在 Window.cpp（Application 完整类型处）
+
 		/// @brief 销毁底层窗口句柄（转调 m_platformWindow->Release——幂等）
 		/// @details **仅释放平台窗口资源**（销毁 HWND）；**不销毁 Window 对象**——
 		/// 对象所有权归 Application（见类注释「所有权与生命周期契约」段）。

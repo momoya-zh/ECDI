@@ -1,5 +1,6 @@
 #include "ECDI/Widget/Widget.h"
 
+#include "ECDI/Application/Application.h"   // ★ Phase 35：RequestRemove 需要 IsDispatching/DrainDeferredRemoval
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseMoveEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
@@ -163,7 +164,132 @@ std::unique_ptr<Widget>Widget::RemoveChild(Widget* child){
 	// 清除父指针（已脱离树）
 	result->m_parent = nullptr;
 
+	// ★ Phase 35：本次派发内的摘树 —— 相关节点**已钉住**（Application 派发开始时登记了
+	//   命中目标 → 根 的整条祖先链），故此处绝不析构（`result` 由 RemoveChild 的返回值持有者
+	//   负责释放：正常情况是 `RequestRemove` 的延迟队列，最终由 DrainDeferredRemoval 析构）。
+	//   ⚠️ 这里只打标记、不动 `m_dispatchRefCount`——本次派发栈仍可能上溯到它，
+	//   计数必须由 `ReleaseDispatchChain` 在派发真正结束时统一平衡。
+	if (result->m_dispatchRefCount > 0){
+
+		result->m_removedDuringDispatch = true;
+
+	}
+
 	return result;
+}
+
+// ── ★ Phase 35：派发期间的存活保护 + 子方安全删除入口 ──────────────────────
+
+void Widget::PrepareDispatchChain(const std::vector<Widget*>& chain) noexcept{
+
+	// 每个节点 +1：本次派发期间 `RequestRemove` 只摘树不析构
+	for (Widget* node : chain){
+
+		if (node != nullptr){
+
+			++node->m_dispatchRefCount;
+
+			node->m_removedDuringDispatch = false;   // 新一轮派发：标记复位（防御——正常已由 Release 清）
+
+		}
+
+	}
+
+}
+
+void Widget::ReleaseDispatchChain(const std::vector<Widget*>& chain) noexcept{
+
+	// 与 Prepare 严格配对（同一份 chain 指针列表，顺序无关——每次都作用在同一组节点上）
+	for (Widget* node : chain){
+
+		if (node == nullptr){
+
+			continue;
+
+		}
+
+		if (node->m_dispatchRefCount > 0){
+
+			--node->m_dispatchRefCount;
+
+		}
+
+		node->m_removedDuringDispatch = false;
+
+	}
+
+}
+
+Application* Widget::FindApplication() noexcept{
+
+	if (Window* window = GetWindow()){
+
+		return &window->GetApplication();
+
+	}
+
+	return nullptr;
+
+}
+
+bool Widget::RequestRemove(){
+
+	// RootWidget：无父可摘、且是 Window 的拥有对象 —— 拒绝（不崩、不静默析构整棵树）
+	if (m_parent == nullptr){
+
+		FRAMEWORK_ASSERT(false);   // Debug 暴露调用方错误（摘根应走 Window::Release）
+		return false;
+
+	}
+
+	// ⚠️ Application 的私有派发状态**只能**经 `ApplicationAccess` 访问（见 `Application.h` 的
+	//   访问权限备注）：`friend class Widget` 在 clang-cl 下不覆盖 Widget 的成员函数体。
+	Application* app = FindApplication();
+
+	// ① 不在派发中（含无窗口/无头控件）：立即脱树（与既有 RemoveChild 语义一致）
+	if (app == nullptr || !ApplicationAccess::IsDispatching(*app)){
+
+		DetachFromParentNow();
+
+		return false;   // ★ 返回后 this 已析构
+
+	}
+
+	// ② 派发中：摘树 + 把所有权交给延迟队列（★ 此刻**不析构**）
+	//    为何先摘树再入队：`RemoveChild` 是唯一的脱树原语（负责 ForgetSubtree 注销焦点/捕获/hover），
+	//    且它会把 `m_removedDuringDispatch` 打好 ⇒ 本次派发栈跳过本节点。
+	//    ⚠️ **入队失败（bad_alloc）**：`removed` 在异常展开中析构 ⇒ 对象已脱树并销毁。
+	//    此时派发栈持有的 `current` 已失效（本次派发随即异常退出），属「内存耗尽」下的
+	//    最后手段——框架其余分配失败同样不吞 `bad_alloc`（口径一致）。
+	std::unique_ptr<Widget> removed = m_parent->RemoveChild(this);
+
+	if (!removed){
+
+		return false;   // 防御：父指针与子列表不一致（不应发生）——对象未脱树、也未析构
+
+	}
+
+	ApplicationAccess::DeferDestroy(*app, std::move(removed));
+
+	return true;
+
+}
+
+void Widget::DetachFromParentNow(){
+
+	Widget* parent = m_parent;
+
+	if (parent == nullptr){
+
+		return;   // 根/已脱树：无事可做（调用方已在上游拦根）
+
+	}
+
+	// ★ `res` 是本函数的局部对象：函数返回时析构 ⇒ 调用方（`RequestRemove`）返回后 this 已失效
+	std::unique_ptr<Widget> res = parent->RemoveChild(this);
+
+	(void)res;
+
 }
 
 bool Widget::ContainsPoint(int x, int y) const noexcept{

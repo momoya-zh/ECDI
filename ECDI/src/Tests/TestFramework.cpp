@@ -8,6 +8,8 @@
 #endif
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <utility>
 
@@ -57,8 +59,18 @@ void TestContext::RecordFailure(const char* expression, const char* file, int li
 void TestRunner::Run(const TestRegistry& registry)
 {
     m_results.clear();
+    // ★ 诊断缝（Phase 35 引入）：`ECDI_TEST_FILTER` 环境变量 = 只跑名称含该子串的用例。
+    //   动机：崩溃类缺陷（AV/栈溢出）会击杀整个进程、无 stdout ⇒ 只能靠单用例复现定位。
+    //   生产/CI 不设该变量 ⇒ 行为与修复前完全一致（全跑）。
+    const char* filter = std::getenv("ECDI_TEST_FILTER");
     for (const TestCase& testCase : registry.GetCases())
     {
+        if (filter != nullptr && filter[0] != '\0' && std::string(testCase.name).find(filter) == std::string::npos)
+        {
+            continue;
+        }
+        std::fprintf(stdout, "[RUN ] %s\n", testCase.name);
+        std::fflush(stdout);   // ★ 崩溃前的最后一行 = 崩溃用例名（无缓冲则丢失）；仅在诊断缝下输出
         RunOne(testCase);
     }
 }

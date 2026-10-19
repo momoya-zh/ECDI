@@ -50,5 +50,6 @@ void RegisterAuditRemainderTests();
 void RegisterArcCoverageTests();   ///< Phase 33 批一：圆弧原语（T33-1..T33-9b——覆盖度生成层，零窗口依赖）
 void RegisterArcCommandTests();    ///< Phase 33 批二：命令层贯通（T33-10..T33-12——原样转发 / 不归一化 / 两角度不折 scale）
 void RegisterRingProgressBarTests();   ///< Phase 33 批三：环形进度控件（T33-13..T33-18——Theme 契约 / 值 / 动画 / 命令流 / 尺寸 / 真窗口 E2E）
+void RegisterEventConsumptionTests();  ///< Phase 35：事件消费 + 嵌套点击 + 派发期安全销毁（需求稿验收 1..5）
 
 } // namespace ECDI::Test

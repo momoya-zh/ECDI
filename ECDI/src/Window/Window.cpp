@@ -155,6 +155,13 @@ Widget& Window::GetRootWidget() noexcept {
 
 }
 
+// ★ Phase 35：Application 访问器（实现在此——头文件只前置声明 Application，避免 Header 环）
+Application& Window::GetApplication() const noexcept {
+
+	return m_application;
+
+}
+
 void Window::PaintFrame()
 {
 	// ★ Phase 20（崩溃修复）：**构造期防御**。本函数可经 `WM_PAINT → OnPaint` 进入，
@@ -692,7 +699,15 @@ void Window::HandleKeyDown(const KeyDownEvent& event){
 		//      已过滤），运行期被隐藏是「焦点悬空」问题（属 §7.1 失效机制线，不在本条）。
 		if (m_focusedWidget->IsEnabled()){
 
-			m_focusedWidget->OnKeyDown(event);
+			// ★★ Phase 35：键盘是**单收件人**派发（不冒泡）——但要防「回调里删掉自己」：
+			//   这里先取一份**局部副本**，回调里 `RequestRemove()` 摘树/清焦点都只改成员，
+			//   不会把局部副本变成悬垂（对象已进 Application 的延迟队列，派发结束才析构）。
+			//   ⚠️ 为什么不经 Application 的钉住区：窗口的焦点是控件回调的**唯一**入口，
+			//      而 `m_focusedWidget->OnKeyDown` 之后这里**不再访问** `m_focusedWidget`
+			//      ——局部副本已足够，无需把 Application 拖进 Window 的派发路径。
+			Widget* target = m_focusedWidget;
+
+			target->OnKeyDown(event);
 
 		}
 

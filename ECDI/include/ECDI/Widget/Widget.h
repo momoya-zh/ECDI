@@ -8,11 +8,13 @@
 
 #include <vector>
 #include <memory>
+#include <algorithm>
 
 namespace ECDI{
 
 // 前向声明：避免头文件循环依赖
 class Window;
+class Application;
 class TimerEvent;
 class MouseMoveEvent;
 class MouseButtonUpEvent;
@@ -74,6 +76,28 @@ public:
 	///          （原实现对 `end()` 解引用 = UB），与 `GetChildAt` 越界返 nullptr
 	///          的先例一致。Debug 侧仍断言暴露。
 	std::unique_ptr<Widget> RemoveChild(Widget* child);
+
+	/// @brief 请求移除自身（★ Phase 35：事件派发期间安全的「删除自身」入口）
+	/// @details **为什么需要它**：事件派发栈（`Application::OnMouseButtonUp` 的冒泡循环）
+	///          在回调返回后仍要读 `current->GetParent()`；若回调里 `parent->RemoveChild(this)`
+	///          并丢弃返回值 ⇒ 回调返回的那一刻 `current` **已经析构** ⇒ 父链访问 = UAF。
+	///          本方法把「**析构**」从回调的栈帧里搬出去：
+	///          ① 若 `Application` 正处在事件派发中 ⇒ 入**延迟移除队列**，返回 `true`，
+	///             **此刻不析构**——对象在本次派发栈完全展开（所有回调返回）后被 `DrainDeferredRemoval`
+	///             析构，或在 `ProcessDeferredDestroy`（消息循环每轮）里析构；
+	///          ② 否则（不在派发中——含无窗口/无头控件）⇒ 立即脱树，返回 `false`。
+	/// @return `true` = **已入延迟队列**：对象此刻**已脱离父节点**
+	///         （`GetParent()==nullptr`、不再参与后续 HitTest/Paint/焦点），但**保证存活到
+	///         本次派发结束**（派发结束即析构）；`false` = 已立即脱树并**析构**
+	///         （返回之后 `this` 已失效，调用方不得再访问）。
+	/// @warning **两态都禁止**在返回后继续使用 `this` 的**语义状态**（父链/焦点/capture 均已不成立）；
+	///          唯一区别是「本次派发栈是否安全」——`true` 时安全，`false` 时调用栈已离开对象。
+	/// @note ★ 与 `RemoveChild` 的分工：`RemoveChild` 是**父方**的树维护原语（立即脱树 + 交回所有权），
+	///       是延迟机制**内部**的实现者；`RequestRemove` 是**子方**在回调里的安全出口。
+	/// @note 返回值**刻意不标注 `[[nodiscard]]`**：最常见用法是回调末尾一句
+	///       `RequestRemove();` 后直接返回——强制检查返回值会让这一行变得啰嗦且无收益
+	///       （两态下调用方都不该继续用 `this`）。
+	bool RequestRemove();
 
 	/// @brief 获取父 Widget 指针（RootWidget 返回 nullptr）
 	Widget* GetParent() const noexcept{
@@ -304,12 +328,47 @@ public:
 
 	void Paint(PaintContext& ctx,int offsetX,int offsetY);
 
+	// ── 派发链（★ Phase 35：事件派发期间祖先链的存活保证）────────────
+	// 背景：`Application` 的冒泡循环每次都经 `current->GetParent()` 上溯。若某回调请求移除
+	//   祖先/自身，摘树后父链即断（或更糟：对象已析构）⇒ 派发栈读父指针 = UAF。
+	// ★ 方案 = 「命中目标 → 根」的祖先链各节点**钉住这一次派发**：
+	//   ① 链在**派发开始时**一次性冻结（`PrepareDispatchChain`）——之后摘树/挂树都不改变本次
+	//      「还该向谁派发」的集合（可测试：派发开始后挂上的新祖先本次收不到事件）；
+	//   ② 每个节点 `m_dispatchRefCount>0` 期间，`RequestRemove` **只摘树、不析构**；
+	//   ③ 摘树的节点在链上被标记 `m_removedDuringDispatch` ⇒ 后续迭代**跳过**它
+	//      （「已移除的控件不再接收事件」——与用户直觉一致，且避免向已脱离 UI 的对象派发）。
+	// ⚠️ **边界（如实记账）**：钉住的是「本次派发开始时已存在的祖先链」。若回调**绕过**
+	//    `RequestRemove` 直接 `parent->RemoveChild(child)` 并丢弃返回值，该对象会在回调栈帧内
+	//    立即析构 —— 框架无法拦截（`RemoveChild` 是既有公共原语、其「立即交回所有权」语义不作废）。
+	//    安全的删除入口 = `RequestRemove`。
+
 private:
+
+	/// @brief 登记「本次派发的祖先链」为存活保护（由 Application 在派发开始时调用）
+	/// @param chain 命中目标 → 根 的节点列表（顺序无关；`nullptr` 元素被忽略）
+	static void PrepareDispatchChain(const std::vector<Widget*>& chain) noexcept;
+
+	/// @brief 解除一次派发的存活保护（与 `PrepareDispatchChain` **严格配对**；幂等）
+	/// @details 解除时顺带清掉各节点上残留的 `m_removedDuringDispatch` 标记（下一次派发重新冻结）。
+	static void ReleaseDispatchChain(const std::vector<Widget*>& chain) noexcept;
+
+	/// @brief 本节点是否在**当前**派发中被移除（链上早退判据；非链节点恒 false）
+	[[nodiscard]] bool IsRemovedDuringDispatch() const noexcept{ return m_removedDuringDispatch; }
+
+	/// @brief 立即脱树（`RequestRemove` 的「立即」分支；★ 可能析构 `this`——返回后不得再访问）
+	void DetachFromParentNow();
+
+	/// @brief RootWidget 判断（`RequestRemove` 的终止条件——根无父可摘）
+	[[nodiscard]] bool IsRoot() const noexcept{ return m_parent == nullptr && m_window != nullptr; }
+
+	/// @brief 找到所属 Application（沿父链上溯到根取 Window → Application；无窗口返回 nullptr）
+	[[nodiscard]] Application* FindApplication() noexcept;
 
 	/// @brief 设置所属 Window（仅 Window 构造 RootWidget 后调用；friend 授权）
 	void SetWindow(Window* window);
 
 	friend class Window;	///< SetWindow 私有化的配套授权
+	friend class Application;	///< ★ Phase 35：派发链 Prepare/Release + 延迟移除队列（最小 API 面）
 
 	/// @brief 递归检测 widget 是否是 this 的后代（用于 AddChild 防环检测）
 	bool Contains(const Widget* widget) const noexcept;
@@ -334,6 +393,14 @@ private:
 	std::unique_ptr<Layout> m_layout;
 
 	Window* m_window = nullptr;		///< 所属 Window（非拥有；仅 RootWidget 由 Window 设置）
+
+	/// @brief 本次事件派发的存活钉住计数（★ Phase 35；`Application` 在派发开始/结束时 ±1）
+	/// @details `>0` ⇒ 本节点处在一个已知派发栈的路径上 ⇒ `RequestRemove` 只摘树、延迟析构。
+	///          用**计数**而非 bool：控件可能同时被两层派发覆盖（如 Up 回调里再派发 Timer）。
+	int m_dispatchRefCount = 0;
+
+	/// @brief 是否在**当前**派发中被移除（派发栈据此跳过本节点；`ReleaseDispatchChain` 清零）
+	bool m_removedDuringDispatch = false;
 
 protected:
 
