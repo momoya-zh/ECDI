@@ -20,6 +20,37 @@ namespace ECDI {
 
 namespace{
 
+/// @brief 普通矩形边界的唯一量化入口：边取 floor，尺寸由边相减导出。
+inline RECT ToPixelRect(const Rect& rect) noexcept
+{
+	const int left = BackendContract::QuantizeEdge(rect.x);
+	const int top = BackendContract::QuantizeEdge(rect.y);
+	const int right = BackendContract::QuantizeEdge(rect.x + rect.width);
+	const int bottom = BackendContract::QuantizeEdge(rect.y + rect.height);
+	RECT rc{};
+	rc.left = static_cast<LONG>(left);
+	rc.top = static_cast<LONG>(top);
+	rc.right = static_cast<LONG>(right);
+	rc.bottom = static_cast<LONG>(bottom);
+	return rc;
+}
+
+struct PixelBox
+{
+	LONG left;
+	LONG top;
+	int width;
+	int height;
+};
+
+inline PixelBox ToPixelBox(const Rect& rect) noexcept
+{
+	const RECT rc = ToPixelRect(rect);
+	return PixelBox{ rc.left, rc.top,
+	                 static_cast<int>(rc.right - rc.left),
+	                 static_cast<int>(rc.bottom - rc.top) };
+}
+
 // ── Phase 28 批三（D28-C）：长文本 clip 前缀截断阈值 ──
 // ≤ 此长度的文本走精确原路径（零新增 GetClipBox/extent 开销）；> 才进三分支。
 // 性能调参（盯防⑥）：任何改动必须复跑 T28-4/5 探针。
@@ -47,8 +78,9 @@ void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cor
 		return;
 	}
 
-	const int width = std::lround(rect.width);
-	const int height = std::lround(rect.height);
+	const PixelBox box = ToPixelBox(rect);
+	const int width = box.width;
+	const int height = box.height;
 	if (width <= 0 || height <= 0)
 	{
 		return;
@@ -117,7 +149,7 @@ void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cor
 		// 四角以掩码取覆盖度；掩码不可用时退化为既有二值判定（不越界读、不崩溃）
 		const float radius = (std::min)(cornerRadius, (std::min)(static_cast<float>(width), static_cast<float>(height)) / 2.0f);
 		const float radiusSq = radius * radius;
-		const int R = static_cast<int>(std::lround(radius));
+		const int R = static_cast<int>(std::lround(radius)); // N4：圆角半径保持既有 lround 口径
 
 		// 预乘色分量（循环外）：每像素只再乘覆盖度 cov
 		const float ba = color.b * color.a;
@@ -215,7 +247,7 @@ void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cor
 	blend.SourceConstantAlpha = 255;
 	blend.AlphaFormat = AC_SRC_ALPHA;
 	AlphaBlend(target,
-	           std::lround(rect.x), std::lround(rect.y),
+	           static_cast<int>(box.left), static_cast<int>(box.top),
 	           width, height,
 	           dibDC, 0, 0, width, height, blend);
 
@@ -347,10 +379,11 @@ void GDIBackend::WriteRoundedRectPremultiplied(const Rect& rect, int R, const Co
 	// K②：覆盖率**预乘直写**——不跑 GDI 绘制（缓冲在清屏态上直接写目标像素）。
 	// 预乘公式（详设 D32-K②/E-B2 定案）：RGB = color×cov×a、A = 255×cov×a ——
 	// a<1 的半透明填充在预乘表示下与材质**天然正确合成**（材质按比例透过）。
-	const LONG x = static_cast<LONG>(rect.x);
-	const LONG y = static_cast<LONG>(rect.y);
-	const LONG w = static_cast<LONG>(rect.width);
-	const LONG h = static_cast<LONG>(rect.height);
+	const PixelBox box = ToPixelBox(rect);
+	const LONG x = box.left;
+	const LONG y = box.top;
+	const LONG w = box.width;
+	const LONG h = box.height;
 	const float alphaFactor = std::clamp(color.a, 0.0f, 1.0f);
 
 	// C32-3：裁剪盒（None 不进此路；无有效裁剪/空盒 ⇒ 全部跳过）
@@ -591,11 +624,7 @@ void GDIBackend::DrawRect(const Rect& rect, const Color& color)
 	// 非「合成结果不透明」的 #56 限制族）；a == 1 ⇒ 原 GDI 快速路径 + K① 矩形级修补。
 	if (m_backdropActual != BackdropMode::None)
 	{
-		RECT rc{};
-		rc.left = static_cast<LONG>(rect.x);
-		rc.top = static_cast<LONG>(rect.y);
-		rc.right = rc.left + static_cast<LONG>(rect.width);
-		rc.bottom = rc.top + static_cast<LONG>(rect.height);
+		const RECT rc = ToPixelRect(rect);
 		if (color.a < 1.0f)
 		{
 			// R = 0 ⇒ 三带合并为全矩形 = 预乘直写（cov=1 全覆盖；mask 取空——零角循环）
@@ -626,12 +655,8 @@ void GDIBackend::DrawRect(const Rect& rect, const Color& color)
 	// 决策 21/23：Color→COLORREF 转换封闭在此（ToByte Clamp 在消费边界，DrawText 共用）
 	const COLORREF colorRef = ToColorRef(color);
 
-	// 决策 25：Rect→RECT 直接截断；决策 24 实现：right/left 开区间 [x, x+width)
-	RECT rc{};
-	rc.left = static_cast<LONG>(rect.x);
-	rc.top = static_cast<LONG>(rect.y);
-	rc.right = static_cast<LONG>(rect.x + rect.width);
-	rc.bottom = static_cast<LONG>(rect.y + rect.height);
+	// Phase 34：Rect→RECT 统一由边量化（floor）取得，尺寸由右/下边减左/上边导出。
+	const RECT rc = ToPixelRect(rect);
 
 	// 决策 24：画刷每次创建/销毁（无缓存）；决策 30：局部失败跳过
 	HBRUSH brush = CreateSolidBrush(colorRef);
@@ -677,6 +702,7 @@ void GDIBackend::DrawText(const Point& pos, const std::string& text,
 	{
 		return;   // 决策 30：测量失败 ⇒ 跳过修补（本帧该文字按现状呈现）
 	}
+	// D6：文字起点是文本定位点，保持原向零截断口径；此 rect 仅用于哨兵扫描容差框。
 	RECT textRect{};
 	textRect.left = static_cast<LONG>(pos.x) - 2;
 	textRect.top = static_cast<LONG>(pos.y) - 2;
@@ -719,7 +745,7 @@ void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
 	SetBkMode(m_memoryDC, TRANSPARENT);           // P5：背景透明（文本叠在控件背景上）
 	SetTextColor(m_memoryDC, ToColorRef(color));  // P8：前景色
 
-	// D6 细节：坐标截断（决策 25 统一）；TextOutW 长度是 wchar 数（非字节）
+	// D6 豁免：TextOutW 的文本定位点保留原向零截断口径（不是矩形边）；长度是 wchar 数（非字节）。
 	const LONG drawX = static_cast<LONG>(pos.x);
 	const LONG drawY = static_cast<LONG>(pos.y);
 
@@ -832,11 +858,12 @@ void GDIBackend::DrawLine(const Point& start, const Point& end,
 		const float minY = (std::min)(start.y, end.y) - margin;
 		const float maxX = (std::max)(start.x, end.x) + margin;
 		const float maxY = (std::max)(start.y, end.y) + margin;
+		// bbox 来自端点 ± margin 的四个独立值，不构成 Rect，故直接量化各边。
 		RECT bbox{};
-		bbox.left = static_cast<LONG>(minX);
-		bbox.top = static_cast<LONG>(minY);
-		bbox.right = static_cast<LONG>(maxX);
-		bbox.bottom = static_cast<LONG>(maxY);
+		bbox.left = static_cast<LONG>(BackendContract::QuantizeEdge(minX));
+		bbox.top = static_cast<LONG>(BackendContract::QuantizeEdge(minY));
+		bbox.right = static_cast<LONG>(BackendContract::QuantizeEdge(maxX));
+		bbox.bottom = static_cast<LONG>(BackendContract::QuantizeEdge(maxY));
 		FixupSentinelFrosted(bbox);
 	}
 }
@@ -847,7 +874,7 @@ void GDIBackend::DrawLineLegacy(const Point& start, const Point& end,
 	// Phase 8 §8.1：宽度 lround 取整 + 下限 1px（lround(0.4f)=0 → CreatePen(0) 实为 1px cosmetic pen，
 	// 显式下限使契约确定）；所有坐标同样 lround（亚像素线段 Phase 8 不做）
 	// ★ Phase 24：本函数 = 原 DrawLine 函数体逐字搬入（R3/R4 的逐位回归锚）——不得顺手修改
-	const LONG penWidth = (std::max)(1L, std::lround(width));
+	const LONG penWidth = (std::max)(1L, std::lround(width)); // N4：线宽保持既有 lround 契约
 	HPEN pen = CreatePen(PS_SOLID, penWidth, ToColorRef(color));
 	if (!pen)
 	{
@@ -855,6 +882,7 @@ void GDIBackend::DrawLineLegacy(const Point& start, const Point& end,
 	}
 
 	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, pen));
+	// D6：线段端点是点而非区间边，保持原有 lround 口径。
 	MoveToEx(m_memoryDC, std::lround(start.x), std::lround(start.y), nullptr);
 	LineTo(m_memoryDC, std::lround(end.x), std::lround(end.y));
 
@@ -953,11 +981,12 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 	}
 
 	// 半径钳制到 [0, min(w,h)/2]：GDI RoundRect 对过大半径行为未定义（§8.2 契约）
-	// Phase 8.6：显式类型链（量化 → 上界 → 钳制 → int）——effective 整数半径 R 即掩码缓存键
-	const LONG w = static_cast<LONG>(rect.width);
-	const LONG h = static_cast<LONG>(rect.height);
+	// Phase 34：边界与尺寸来自同一 PixelBox；尺寸为量化后的两边之差。
+	const PixelBox box = ToPixelBox(rect);
+	const LONG w = box.width;
+	const LONG h = box.height;
 
-	const LONG roundedRadius   = static_cast<LONG>(std::lround(cornerRadius));   // ① 量化
+	const LONG roundedRadius   = static_cast<LONG>(std::lround(cornerRadius));   // N4：圆角半径保持契约
 	const LONG maxRadius       = (std::min)(w, h) / 2;                           // ② 上界
 	const LONG effectiveRadius = std::clamp(roundedRadius, 0L, maxRadius);       // ③ 钳制
 
@@ -973,10 +1002,10 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 		if (m_backdropActual != BackdropMode::None)
 		{
 			RECT bbox{};
-			bbox.left = static_cast<LONG>(rect.x);
-			bbox.top = static_cast<LONG>(rect.y);
-			bbox.right = bbox.left + static_cast<LONG>(rect.width);
-			bbox.bottom = bbox.top + static_cast<LONG>(rect.height);
+			bbox.left = box.left;
+			bbox.top = box.top;
+			bbox.right = box.left + box.width;
+			bbox.bottom = box.top + box.height;
 			FixupSentinelFrosted(bbox);
 		}
 		return;
@@ -1020,8 +1049,10 @@ void GDIBackend::DrawRoundedRectLegacy(const Rect& rect, float cornerRadius,
 	//    R == 0 或 AA 关闭时走此路，以保证「AA 关闭 / R == 0」与改造前逐位一致。
 
 	// 半径钳制到 [0, min(w,h)/2]：GDI RoundRect 对过大半径行为未定义（§8.2 契约）
-	const LONG w = static_cast<LONG>(rect.width);
-	const LONG h = static_cast<LONG>(rect.height);
+	const PixelBox box = ToPixelBox(rect);
+	const LONG w = box.width;
+	const LONG h = box.height;
+	// N4：圆角半径保持既有 lround 契约。
 	const LONG clampedRadius = std::clamp(std::lround(cornerRadius),
 	                                      0L, (std::min)(w, h) / 2);
 
@@ -1046,12 +1077,12 @@ void GDIBackend::DrawRoundedRectLegacy(const Rect& rect, float cornerRadius,
 	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, nullPen));
 	HBRUSH oldBrush = static_cast<HBRUSH>(SelectObject(m_memoryDC, brush));
 
-	// 决策 24 风格：left/top/right/bottom 开区间 [x, x+width)（与 DrawRect 一致）
+	// Phase 34：边界由共享量化盒取得，右/下边由边界与尺寸同源导出。
 	RECT rc{};
-	rc.left = static_cast<LONG>(rect.x);
-	rc.top = static_cast<LONG>(rect.y);
-	rc.right = static_cast<LONG>(rect.x + rect.width);
-	rc.bottom = static_cast<LONG>(rect.y + rect.height);
+	rc.left = box.left;
+	rc.top = box.top;
+	rc.right = box.left + box.width;
+	rc.bottom = box.top + box.height;
 
 	// GDI RoundRect 参数语义 = 圆角椭圆直径（非半径）——cornerRadius 契约是"半径"，
 	// 必须转直径传入（×2），否则实际圆角只有设定值一半（历史 bug，2026-08-26 修复：
@@ -1125,9 +1156,10 @@ void GDIBackend::DrawImage(const Rect& dest, const Image& image)
 	blend.BlendOp = AC_SRC_OVER;
 	blend.SourceConstantAlpha = 255;
 	blend.AlphaFormat = AC_SRC_ALPHA;
+	const PixelBox box = ToPixelBox(dest);
 	AlphaBlend(m_memoryDC,
-	           std::lround(dest.x), std::lround(dest.y),
-	           std::lround(dest.width), std::lround(dest.height),
+	           static_cast<int>(box.left), static_cast<int>(box.top),
+	           box.width, box.height,
 	           dibDC, 0, 0, width, height, blend);
 
 	SelectObject(dibDC, oldBitmap);
@@ -1140,10 +1172,10 @@ void GDIBackend::DrawImage(const Rect& dest, const Image& image)
 	if (m_backdropActual != BackdropMode::None)
 	{
 		RECT destRect{};
-		destRect.left = std::lround(dest.x);
-		destRect.top = std::lround(dest.y);
-		destRect.right = destRect.left + std::lround(dest.width);
-		destRect.bottom = destRect.top + std::lround(dest.height);
+		destRect.left = box.left;
+		destRect.top = box.top;
+		destRect.right = box.left + box.width;
+		destRect.bottom = box.top + box.height;
 		FixupSentinelFrosted(destRect);
 	}
 }
@@ -1157,12 +1189,8 @@ void GDIBackend::PushClip(const Rect& rect)
 		return;
 	}
 
-	// 与当前裁剪区求交（默认裁剪区 = 整个内存缓冲）；最终坐标 lround 统一
-	RECT rc{};
-	rc.left = std::lround(rect.x);
-	rc.top = std::lround(rect.y);
-	rc.right = std::lround(rect.x + rect.width);
-	rc.bottom = std::lround(rect.y + rect.height);
+	// 与当前裁剪区求交（默认裁剪区 = 整个内存缓冲）；Phase 34 与绘制边界统一。
+	const RECT rc = ToPixelRect(rect);
 	IntersectClipRect(m_memoryDC, rc.left, rc.top, rc.right, rc.bottom);
 
 	m_clipStack.push_back(savedId);
@@ -1201,18 +1229,18 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 
 	// GDI 开区间约定：可见像素 = [left, right-1] × [top, bottom-1]（right/bottom 列被
 	// PushClip(控件边界 [x,x+w)) 裁掉——手动画段需显式内缩，2026-08-27 修复）
-	const float fLeft = static_cast<float>(std::lround(rect.x));
-	const float fTop = static_cast<float>(std::lround(rect.y));
-	const float fRight = static_cast<float>(std::lround(rect.x + rect.width) - 1);
-	const float fBottom = static_cast<float>(std::lround(rect.y + rect.height) - 1);
+	const float fLeft = static_cast<float>(BackendContract::QuantizeEdge(rect.x));
+	const float fTop = static_cast<float>(BackendContract::QuantizeEdge(rect.y));
+	const float fRight = static_cast<float>(BackendContract::QuantizeEdge(rect.x + rect.width) - 1);
+	const float fBottom = static_cast<float>(BackendContract::QuantizeEdge(rect.y + rect.height) - 1);
 
 	// ⚠️ 2026-09-11 修复：圆角弧心与半径必须基于「几何边界」[x, x+w) × [y, y+h)
 	//    （与 DrawRoundedRect / DrawRect 的形状语义一致），而非上面内缩后的可见像素边界。
 	//    原实现四角一律用 fRight/fBottom 定位弧心 ⇒ 右上 / 左下 / 右下三角的弧心各内移 1px
 	//    （左上角因 fLeft/fTop 本就不内缩而恰好对齐）→ 与背景圆角的弧错位，
 	//    在圆角与直线交接处表现为焦点框「内收」。
-	const float gRight = static_cast<float>(std::lround(rect.x + rect.width));
-	const float gBottom = static_cast<float>(std::lround(rect.y + rect.height));
+	const float gRight = static_cast<float>(BackendContract::QuantizeEdge(rect.x + rect.width));
+	const float gBottom = static_cast<float>(BackendContract::QuantizeEdge(rect.y + rect.height));
 	const float r = (std::min)(cornerRadius, (std::min)((gRight - fLeft), (gBottom - fTop)) * 0.5f);
 
 	// ── 周界子段（按顺序：上 → 右上 → 右 → 右下 → 下 → 左下 → 左 → 左上）──
@@ -1300,6 +1328,7 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 			for (int i = 1; i <= kSub; ++i)
 			{
 				const auto [x, y] = PointAt(t + (t2 - t) * static_cast<float>(i) / static_cast<float>(kSub));
+				// D6：手绘折线端点属于点，不属于矩形边，保留 lround。
 				MoveToEx(m_memoryDC, std::lround(px), std::lround(py), nullptr);
 				LineTo(m_memoryDC, std::lround(x), std::lround(y));
 				px = x;
@@ -1317,11 +1346,12 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 	// 空隙 = 清屏 ⇒ 透材质；框外/内部不动）────────────────────────────────
 	if (m_backdropActual != BackdropMode::None)
 	{
+		const RECT base = ToPixelRect(rect);
 		RECT bbox{};
-		bbox.left = static_cast<LONG>(rect.x) - 2;
-		bbox.top = static_cast<LONG>(rect.y) - 2;
-		bbox.right = bbox.left + static_cast<LONG>(rect.width) + 4;
-		bbox.bottom = bbox.top + static_cast<LONG>(rect.height) + 4;
+		bbox.left = base.left - 2;
+		bbox.top = base.top - 2;
+		bbox.right = base.right + 2;
+		bbox.bottom = base.bottom + 2;
 		FixupSentinelFrosted(bbox);
 	}
 }
@@ -1413,10 +1443,11 @@ void GDIBackend::EndFrame()
 void GDIBackend::DrawRoundedRectOpaqueAA(const Rect& rect, int R, const Color& color,
                                          const CornerCoverageMask& mask)
 {
-	const LONG x = static_cast<LONG>(rect.x);
-	const LONG y = static_cast<LONG>(rect.y);
-	const LONG w = static_cast<LONG>(rect.width);
-	const LONG h = static_cast<LONG>(rect.height);
+	const PixelBox box = ToPixelBox(rect);
+	const LONG x = box.left;
+	const LONG y = box.top;
+	const LONG w = box.width;
+	const LONG h = box.height;
 
 	// ── ① 三条实心带（覆盖度恒为 1 → 与覆盖度混合路径数学等价，初设 §2.2 已证）──
 	// 因 clamp 保证 2R <= min(w,h)，三条带的宽高恒 >= 0；零尺寸者跳过

@@ -81,12 +81,15 @@ inline bool ImageIsDrawable(const Image& image) noexcept
 ///          ⇒ 本函数只回答「边落在哪个像素」，`floor` 对**正负号一致**（域是整数格点）。
 ///          ★ **为什么不用 `static_cast<int>`（向零截断）**：`static_cast<int>(-1.5f) == -1`
 ///          把 -1.5 归到像素 `[-1, 0)`——而它 5/6 的覆盖在 `[-2, -1)` ⇒ **符号相关的不一致**。
-///          ★★ **已知偏差（如实记账，不假装已统一）**：`GDIBackend` 的多处边转换仍用
-///          `static_cast<LONG>`（**向零截断**）⇒ 与本节规则**仅在「负的分数边」上相差 1px**
-///          （正数、以及负整数不受影响）。**本批不改 GDI 的这四处**——那会改变**每一条
-///          负坐标绘制**的像素输出（`ScaleRect` 在非 100% DPI 下天然产生分数边），
-///          属需要独立目视回归的改动，不塞进缺陷批（沿「不把无关改动伪装成顺带修复」纪律）。
-///          偏差已登记入 `roadmap-deferred.md` #62 行余量。
+///          ★★ **历史偏差（Phase 34 已消除）**：本段曾登记「GDIBackend 多处边转换仍用
+///          `static_cast<LONG>`，仅在负分数边相差 1px」。实测该描述有两处不准：
+///          ① 边级截断为 **22 处**（survey 复算：边级 trunc 22 · 全部 trunc 40）；
+///          ② 另有 **16 处边级 std::lround** 未被提及。在职责确认 §9.2 记录的实测 DPI
+///          档位与输入样本中，lround 与 floor 的分歧率为 **43.2%–49.8%**（该区间仅为本次
+///          测量结果，不代表所有非整数 DPI 或任意输入分布；统计口径见该节：DIP 整数 0..80
+///          × 五个 scale，含负坐标偏移，共 12960 样本/档）。其相对截断组（仅负坐标分歧）
+///          高出一个数量级。⇒ Phase 34：边级统一 QuantizeEdge，尺寸由边相减，端点（D6）与
+///          线宽/半径（N4）显式保留。
 inline int QuantizeEdge(float edge) noexcept
 {
 	return static_cast<int>(std::floor(edge));
