@@ -67,6 +67,38 @@ private:
     static FakeTextMeasurer ms_fake;
 };
 
+/// @brief ★★ 2026-10-21：**小数行高**的可测 TextBox（取整方向的唯一可测面）。
+/// @details 为什么必须单独做一个：`FakeTextMeasurer::LineHeight` 恒返回 **16.0（整数）**，
+/// 于是 `行数 × 16 + padding×2` 永远是整数 ⇒ `ceil` 是**恒等变换** ⇒
+/// 「取整方向」这条契约在既有夹具上**根本不可观测**。
+/// ★ 这不是推测：负对照脚本（`.scratch/ecdi_multiline_negctl.py`）把实现改成截断后，
+/// 全套 487 个用例**仍然全绿** —— 测试对这个缺陷是瞎的。
+/// ⇒ 用 19.2（雅黑 13px 附近的真实量级）让"截断"与"ceil"产生可见差异。
+class FractionalLineHeightTextBox : public TextBox
+{
+public:
+    using TextBox::TextBox;
+protected:
+    TextMeasurer* ResolveMeasurer() const override{ return &ms_frac; }
+private:
+    /// @brief 行高 19.2、每码点 8 宽（宽度不参与本组判据）
+    class FracMeasurer : public TextMeasurer
+    {
+    public:
+        Size MeasureText(const Font&, const std::string& text) override{
+            size_t count = 0;
+            for (size_t i = 0; i < text.size(); ++i)
+                if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+                    ++count;
+            return Size{ static_cast<float>(count) * 8.0f, 19.2f };
+        }
+        float LineHeight(const Font&) override{ return 19.2f; }
+    };
+    static FracMeasurer ms_frac;
+};
+
+FractionalLineHeightTextBox::FracMeasurer FractionalLineHeightTextBox::ms_frac;
+
 FakeTextMeasurer TestableTextBox::ms_fake;
 
 void TestTextBoxInsertDelete()
@@ -1179,14 +1211,94 @@ void TestTextBoxSingleLineEnterNoOp()
 	EXPECT_TRUE(box.IsSingleLine());
 }
 
-void TestTextBoxPreferredMultilineNotParticipating()
+void TestTextBoxPreferredMultilineParticipates()
 {
-	// §3.4：多行（含 \n）→ preferred = 当前尺寸（v1 不参与 AutoSize——高度仍手工 SetSize）
+	// ★★ 2026-10-21：**旧断言翻转**（原 `TestTextBoxPreferredMultilineNotParticipating`）。
+	//   改前：多行（含 \n）→ preferred = 当前尺寸（K4 挂账「v1 手工 SetSize，不参与 AutoSize」）。
+	//   改后：多行 → {当前宽, ceil(行数 × 行高 + padding×2)}，与 wrap 分支（D29-B）同构。
+	//
+	//   ★ 为什么**不删掉这条测试**：它是这个语义唯一的守卫。翻转成反向断言之后，
+	//     「装不下 ⇒ preferred > 当前」「装得下 ⇒ preferred == 当前（即 AutoSize 不会
+	//      把框撑大）」两个方向都有测试盯着——后者正是"缩得回去"那个方向的守卫。
+	//     ★ 单靠"长高"一侧的测试抓不到"只增不减"的实现（harness 的 M5 变异实证过）。
+	//
+	//   ★ 口径：FakeTextMeasurer 的 LineHeight = 16、MeasureText 高 = 16、每码点 8 宽。
+	//     "ab\ncd" ⇒ 2 行 ⇒ 内容高 = 2×16 = 32；padding 0 ⇒ preferred = {当前宽, 32}。
 	TestableTextBox box("ab\ncd");
+
+	// ① 当前尺寸**小于**内容高 ⇒ preferred 必须报告真话（改前这里返回 30，即"撒谎"）。
 	box.SetSize(100, 30);
-	const Size preferred = box.GetPreferredSize();
-	EXPECT_NEAR(preferred.width, 100.0f, kEps);
-	EXPECT_NEAR(preferred.height, 30.0f, kEps);
+	{
+		const Size preferred = box.GetPreferredSize();
+		EXPECT_NEAR(preferred.width, 100.0f, kEps);    // 宽 = 当前宽（不制造宽度约束）
+		EXPECT_NEAR(preferred.height, 32.0f, kEps);    // 高 = 2 行 × 16
+		EXPECT_TRUE(preferred.height > 30.0f);         // ★ 反向断言：装不下就必须大于当前
+	}
+
+	// ② `AutoSize()` 真的会长高（改前是结构性 no-op——`Widget::AutoSize` 见同尺寸即返回 false）。
+	{
+		EXPECT_TRUE(box.AutoSize());
+		EXPECT_EQ(box.GetHeight(), 32);
+	}
+
+	// ③ ★★ 「报告内容高、不是视口高」——这是"只增不减"实现的**唯一**反证方向。
+	//    ★ 我第一版把这条写成 `EXPECT_FALSE(box.AutoSize())` + `GetHeight()==60`，**写错了**：
+	//      `AutoSize` 的本职就是"尺寸 = preferred"，视口 60 > 内容 32 时它**应当**缩到 32。
+	//      那条断言是在要求 AutoSize 什么都不做，等于把"不参与"的旧语义又请了回来。
+	//      ⇒ 正确的判据是**preferred 本身**：它必须报内容高（32），不能报视口高（60）。
+	//      若实现取 `GetMaxScrollOffset()+GetTextAreaHeight()` 那种带 `max(0,·)` 的式子，
+	//      这里会得到 60 —— 那条断言正是打它的。
+	{
+		box.SetSize(100, 60);                       // 视口比内容高
+		const Size preferred = box.GetPreferredSize();
+		EXPECT_NEAR(preferred.height, 32.0f, kEps); // ★ 内容高，不是视口高 60
+		EXPECT_TRUE(preferred.height < 60.0f);      // ★ 反向：绝不等于视口
+		// 且 AutoSize 把框**缩**到内容高（"缩得回去"的正面表述）
+		EXPECT_TRUE(box.AutoSize());
+		EXPECT_EQ(box.GetHeight(), 32);
+	}
+
+	// ④ ★ 删掉一行后必须变矮（行数口径 = `\n` 数 + 1 的可测面）。
+	{
+		box.SetText("ab");
+		const Size preferred = box.GetPreferredSize();
+		EXPECT_NEAR(preferred.height, 16.0f, kEps); // 1 行
+		EXPECT_TRUE(preferred.height < 32.0f);      // ★ 反向：真的缩回去了
+	}
+
+	// ⑤ ★★ **取整方向**（`ceil` 而不是截断）——本组唯一能盯住它的判据。
+	//    ★ 为什么必须用小数行高：`FakeTextMeasurer` 行高 16.0 是整数，
+	//      `行数 × 16` 恒为整数 ⇒ `ceil` 与截断**结果相同**，这条契约在 ①②③④
+	//      里根本不可观测（负对照实测：改成截断后全套仍绿）。
+	//    行高 19.2、2 行 ⇒ 内容高 = 38.4：
+	//      · `ceil`   ⇒ 39  ⇒ 39 >= 38.4 ✅ 内容装得下
+	//      · 截断      ⇒ 38  ⇒ 38 <  38.4 ❌ 差 0.4px ⇒ `GetMaxScrollOffset > 0`
+	//                        ⇒ **恰好装得下时反而冒出内部滚动条、末行被切**
+	{
+		FractionalLineHeightTextBox frac("a\nb");    // 2 行
+		frac.SetSize(120, 10);
+		const Size preferred = frac.GetPreferredSize();
+		EXPECT_NEAR(preferred.height, 39.0f, kEps);          // ★ ceil(38.4) = 39
+		EXPECT_TRUE(preferred.height >= 2.0f * 19.2f);       // ★ 绝不小于真实内容高
+		// 且 `AutoSize` 之后仍然装得下（截断实现会在这里留下 0.4px 的溢出）
+		EXPECT_TRUE(frac.AutoSize());
+		EXPECT_EQ(frac.GetHeight(), 39);
+		EXPECT_TRUE(static_cast<float>(frac.GetHeight()) >= 2.0f * 19.2f);
+	}
+
+	// ⑥ ★ 细节②守卫：**无测量器 / 无窗口 ⇒ 退回当前尺寸**。
+	//    与 wrap 分支「无有限宽 ⇒ 退化单行」（`IsWrapLayoutActive` 三条件）同构：
+	//    没有测量能力就没有内容高可言，此时返回当前尺寸是唯一诚实的答案。
+	//    ★ 这条同时是**无头测试的零污染契约**（Phase 7.2）：裸 `TextBox`（无窗口、
+	//      不注入测量器）调用 `GetPreferredSize()` 必须与改前**逐位一致**。
+	{
+		TextBox bare("ab\ncd");                      // 裸 TextBox：ResolveMeasurer() 返回 nullptr
+		bare.SetSize(100, 30);
+		const Size preferred = bare.GetPreferredSize();
+		EXPECT_NEAR(preferred.width, 100.0f, kEps);  // = 当前尺寸
+		EXPECT_NEAR(preferred.height, 30.0f, kEps);  // ★ 不是 2×16=32，而是退回当前高
+		EXPECT_FALSE(bare.AutoSize());               // 当前尺寸 == preferred ⇒ no-op
+	}
 }
 
 void TestTextBoxPreferredSingleLine()
@@ -1578,7 +1690,7 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.ReadOnlyEditNoOp", &TestTextBoxReadOnlyEditNoOp);  // P1：只读门禁
     GetTestRegistry().Add("TextBox.ReadOnlyCompositionRefuse", &TestTextBoxReadOnlyCompositionRefuse);  // P1：只读拒 IME
     GetTestRegistry().Add("TextBox.SingleLineEnterNoOp", &TestTextBoxSingleLineEnterNoOp);  // P1：单行 Enter 不换行
-    GetTestRegistry().Add("TextBox.MultilineNotParticipating", &TestTextBoxPreferredMultilineNotParticipating);  // 9.8：多行不参与
+    GetTestRegistry().Add("TextBox.MultilinePreferred", &TestTextBoxPreferredMultilineParticipates);  // 9.8/2026-10-21：多行参与（旧「不参与」翻转）
     GetTestRegistry().Add("TextBox.SingleLinePreferred", &TestTextBoxPreferredSingleLine);  // 9.8：padding 修正 + 自然居中验证
     GetTestRegistry().Add("TextBox.ShapeRounded", &TestTextBoxShapeRounded);  // P1：圆角背景
     GetTestRegistry().Add("TextBox.ShapeBorderRing", &TestTextBoxShapeBorderRing);  // P1：双矩形描边环

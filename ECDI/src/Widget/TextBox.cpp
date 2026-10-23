@@ -16,6 +16,7 @@
 #include "ECDI/Widget/ScrollBar.h"
 
 #include <algorithm>
+#include <cmath>     // std::ceil（多行 preferred 的取整——见 MultilinePreferred）
 #include <memory>
 #include <utility>
 
@@ -164,13 +165,65 @@ void TextBox::SetSingleLine(bool singleLine){
 }
 
 Size TextBox::GetPreferredSize() const{
-	// 多行（含 \n）→ 当前尺寸（§3.4 挂账——多行高度 v1 手工 SetSize，不参与 AutoSize）
+	// ★★ 2026-10-21：**多行高度语义订正**（K4 挂账关闭——此前「多行 → 当前尺寸」）。
+	//
+	// 【为什么改】修复前的多行分支 `return Widget::GetPreferredSize()`（= 当前尺寸）
+	//   让 `AutoSize()` 在多行输入框上是**结构性 no-op**，而**同一条虚函数**在
+	//   `TextWidget` 的 wrap 分支返回 `{GetWidth(), 行数 × 行高}`（D29-B）。
+	//   ⇒ 同一框架对「内容需要多大」给出两个答案：wrap 的 `Label` 能长高、多行 `TextBox` 不能。
+	//   这不是两类控件的分野，是**一个缺陷**。harness 侧曾用组合实现绕过（手抄
+	//   「行数 = `\n` 数 + 1」「行高 = `LineHeight`」两条规则），本轮把债还回框架。
+	//
+	// 【为什么是"订正"而不是"新增查询"】`GetPreferredSize` 的语义本来就是
+	//   「内容需要多大」。另加一个 `GetContentHeight()` 会让不一致继续存在——下一个
+	//   消费者先伸手拿的一定是 `GetPreferredSize`（所有控件的统一入口），然后掉进同一个坑。
+	//
+	// 【多行高度 = 行数 × 行高 + padding×2】
+	//   · 行数 = `\n` 数 + 1（与 `RecalculateLines` **同一口径**，`TextBox.cpp:390-403`）
+	//   · 行高 = `TextMeasurer::LineHeight`（与 `GetLineHeight`/绘制/光标**同源**）
+	//   · 宽 = **当前宽**（与 wrap 分支 D29-B 同构：wrap 不凭空制造宽度约束）
+	//
+	// ★★ 取整：**本函数负责 `ceil`，不把取整留给 `AutoSize`**。
+	//   `Widget::AutoSize` 是 `static_cast<int>`（向零截断），而行高是 float
+	//   （如 19.2）。若这里返回 69.6、由 AutoSize 截成 69，则
+	//   `GetMaxScrollOffset()` = 内容高 − 视口高 = 0.6 > 0 ⇒ **内容恰好装得下时
+	//   反而冒出一条内部滚动条，最后一行被切掉零点几像素**。
+	//   ⇒ 返回**向上取整后的整数**（float 表达），使「preferred == 内容高 ≥ 行数×行高」
+	//   在 AutoSize 截断下仍然成立。此条由 harness 的 `--grow-probe` `exact-fit` 相盯防。
 	if (m_text.find('\n') != std::string::npos)
-		return Widget::GetPreferredSize();
+		return MultilinePreferred();
+
 	// 单行 → TextWidget 内容测量（显式限定——防多态递归回本 override）→ padding×2 修正
 	const Size measured = TextWidget::GetPreferredSize();
 	const float pad = m_style.padding.value;
 	return Size{ measured.width + pad * 2.0f, measured.height + pad * 2.0f };
+}
+
+Size TextBox::MultilinePreferred() const{
+	// ★ 细节②：**无测量器 / 无窗口 ⇒ 退回当前尺寸**。
+	//   与 wrap 分支「无有限宽 ⇒ 退化单行」（`IsWrapLayoutActive` 三条件）**同构**：
+	//   没有测量能力就没有内容高可言，此时返回当前尺寸是**唯一诚实**的答案，
+	//   而不是编造一个数字。★ 这条同时保住了无头测试（Phase 7.2 无污染契约）：
+	//   无窗口的 `TextBox` 调用 `GetPreferredSize()` 仍得到当前尺寸，行为与改前逐位一致。
+	TextMeasurer* measurer = ResolveMeasurer();
+	if (measurer == nullptr)
+		return Widget::GetPreferredSize();
+
+	// 行数 = `\n` 数 + 1 —— 与 `RecalculateLines` 同一分段口径（本类多行**不做** wrap；
+	//   编辑器内 wrap 是 Phase 29 的 O2 挂账，兑现时**只需改这里**，因为它是唯一真相源）。
+	int lines = 1;
+	for (char c : m_text){
+		if (c == '\n')
+			++lines;
+	}
+
+	const float lineH = measurer->LineHeight(TextWidget::m_style.font.value);
+	const float pad = m_style.padding.value;
+	const float contentH = static_cast<float>(lines) * lineH + pad * 2.0f;
+
+	// ★ `ceil`（见声明处注释：取整是本函数的责任，不是 AutoSize 的）
+	//   ★ 宽仍取**当前宽**：本函数不制造宽度约束（与 wrap 分支同一条纪律）。
+	return Size{ static_cast<float>(GetWidth()), static_cast<float>(std::ceil(contentH)) };
 }
 
 std::string TextBox::BuildDisplayText() const{

@@ -59,7 +59,20 @@ public:
 
 	bool IsSingleLine() const noexcept { return m_singleLine; }
 
-	/// @brief 内容测量 preferred（9.8 override）——多行（含 \n）→ Widget 默认当前尺寸（§3.4 挂账，v1 手工 SetSize）；
+	/// @brief 内容测量 preferred（9.8 override）
+	/// @details ★★ 2026-10-21 **多行高度语义订正**（K4 挂账关闭）：
+	/// 多行（含 `\n`）→ `{当前宽, ceil(行数 × 行高 + padding×2)}`——与 `TextWidget` 的
+	/// wrap 分支（D29-B）**同构**：宽由控件给、高由行数定，`AutoSize()` 因此可用。
+	/// 修复前多行分支返回**当前尺寸** ⇒ `AutoSize()` 结构性 no-op，而同一框架里
+	/// wrap 的 `Label` 却能长高（同一虚函数两个答案 = 一个缺陷）。
+	/// ★ 三条实现契约（均有 harness 探针盯防）：
+	///   ① **取整在本函数内做**（`ceil`）——`Widget::AutoSize` 是向零截断，若把 69.6
+	///      交给它截成 69，则"内容恰好装得下"时 `GetMaxScrollOffset > 0` ⇒ 凭空冒出
+	///      一条内部滚动条、末行被切掉零点几像素；
+	///   ② **无测量器 / 无窗口 ⇒ 退回当前尺寸**（与 wrap「无有限宽 ⇒ 退化单行」同构，
+	///      保住无头测试）；
+	///   ③ 行数口径 = `\n` 数 + 1，与 `RecalculateLines` **同源**——编辑器内 wrap（O2）
+	///      兑现时只需改这一处真相源。
 	/// 单行 → TextWidget 内容测量 + padding×2（§3.6 验证项：height = lineH + padding×2 → 自然垂直居中）
 	[[nodiscard]] Size GetPreferredSize() const override;
 
@@ -288,6 +301,12 @@ private:
 
 	/// @brief 码点总数（私有辅助——消除 DeleteForward/MoveCaret/MoveCaretToEnd 多处重复统计）
 	size_t GetCodepointCount() const;
+
+	/// @brief 多行 preferred（2026-10-21 订正 K4——`GetPreferredSize` 的多行分支实现）
+	/// @details `{当前宽, ceil(行数 × 行高 + padding×2)}`；无测量器/无窗口 ⇒ 当前尺寸。
+	/// ★ 独立成函数而非内联进 `GetPreferredSize`：那个 override 同时管单/多行两条路径，
+	///   多行这条的**三条契约**（ceil 归属 / 无窗口退化 / 行数口径）需要一处写清楚。
+	[[nodiscard]] Size MultilinePreferred() const;
 
 	// ── 多行与滚动（8.5.2；B4/B5——行缓存 + 滚动偏移 + 坐标定位）──
 
