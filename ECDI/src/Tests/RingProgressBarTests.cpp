@@ -57,6 +57,7 @@ public:
 	void SetCaptionHeight(int) override{}
 	void SetResizeInset(int) override{}
 	void SetWindowLayer(WindowLayer) override{}
+	void SetMinimumSize(int, int) override{}	// ★ REQ-13：本替身不关心窗口下限
 	void Minimize() override{}
 	void Maximize() override{}
 	void Restore() override{}

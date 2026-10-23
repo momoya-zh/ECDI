@@ -624,6 +624,108 @@ void Test31BoundsAvailableBeforeShow()
     EXPECT_NEAR(afterShow.height, 180.0f, 1.0f);
 }
 
+// ── ★ REQ-13：窗口最小尺寸（客户区 DIP 下限）────────────────────────────
+
+/// @brief 程序化改尺寸被下限夹住（Borderless：整窗 == 客户区，换算差值为 0）
+/// @details ★ 本用例刻意先造**对照世界**（下限清零后同一请求真的落成 200×150），
+///          再登记下限并重发同一请求——否则「窗口没变小」只是同义反复，证明不了下限在起作用。
+void TestMinSizeClampsProgrammaticResize()
+{
+    TestApp app;
+    TestWindow win(app, ChromeMode::Borderless, 32, 8);
+
+    HWND hwnd = win.Handle();
+
+    // ① 对照世界：无下限 ⇒ 200×150 原样生效（证明下面的「不变小」归因于下限）
+    win.window->SetMinimumSize(0, 0);
+    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    {
+        const Rect got = win.window->GetBounds();
+        EXPECT_NEAR(got.width, 200.0f, 1.0f);
+        EXPECT_NEAR(got.height, 150.0f, 1.0f);
+    }
+
+    // ② 登记下限 500×400（客户区 DIP）
+    win.window->SetMinimumSize(500, 400);
+
+    // ★ 登记**不**改当前几何：下限只约束「下一次」几何变更（框架不替应用偷偷放大）
+    {
+        const Rect got = win.window->GetBounds();
+        EXPECT_NEAR(got.width, 200.0f, 1.0f);
+        EXPECT_NEAR(got.height, 150.0f, 1.0f);
+    }
+
+    // ③ 同一请求重发 ⇒ 被抬到下限（Borderless ⇒ 整窗下限即客户区下限）
+    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    {
+        const Rect got = win.window->GetBounds();
+        EXPECT_NEAR(got.width, 500.0f, 1.0f);
+        EXPECT_NEAR(got.height, 400.0f, 1.0f);
+    }
+
+    // ④ 合规尺寸不被改写（下限只抬不压——最大化/还原/DPI 变更的既有几何不受影响）
+    SetWindowPos(hwnd, nullptr, 0, 0, 900, 700, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    {
+        const Rect got = win.window->GetBounds();
+        EXPECT_NEAR(got.width, 900.0f, 1.0f);
+        EXPECT_NEAR(got.height, 700.0f, 1.0f);
+    }
+}
+
+/// @brief Normal 模式下限按**客户区**口径（整窗 = 客户区 + 系统边框）
+/// @details ★ 这条是「换算留在框架内」的验收：若误把下限当整窗尺寸，客户区会明显小于 500×400；
+///          若误按样式位给 Borderless 加边框（反之亦然），差值也会露出来。
+void TestMinSizeNormalUsesClientArea()
+{
+    TestApp app;
+    TestWindow win(app, ChromeMode::Normal, 32, 8);
+
+    HWND hwnd = win.Handle();
+
+    win.window->SetMinimumSize(500, 400);
+    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    PumpMessages(8);
+
+    // Window 不暴露客户区查询——经平台层取（与 Handle() 同一条「抽象接口 → 平台」两跳）
+    const Size client = win.window->GetPlatformWindow().GetClientSize();
+    EXPECT_NEAR(client.width,  500.0f, 2.0f);
+    EXPECT_NEAR(client.height, 400.0f, 2.0f);
+
+    // 整窗必须**大于**客户区（Normal 有边框/标题栏）——恰好相等说明换算漏了
+    const Rect bounds = win.window->GetBounds();
+    EXPECT_TRUE(bounds.width  > 500.0f);
+    EXPECT_TRUE(bounds.height > 400.0f);
+}
+
+/// @brief 逐轴独立：`0` 的那一轴不设下限（且保留系统自己的最小值）
+/// @details ★ 逐轴是刻意的契约（`<= 0 = 该轴无下限`）：整体语义的 `0` 会强迫调用方
+///          「想要只限宽就得编一个高度」，而 Windows 自身也按轴分别处理。
+void TestMinSizePerAxisIndependent()
+{
+    TestApp app;
+    TestWindow win(app, ChromeMode::Borderless, 32, 8);
+
+    HWND hwnd = win.Handle();
+
+    // 只限宽：高 150 必须原样生效，宽被抬到 500
+    win.window->SetMinimumSize(500, 0);
+    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    {
+        const Rect got = win.window->GetBounds();
+        EXPECT_NEAR(got.width,  500.0f, 1.0f);
+        EXPECT_NEAR(got.height, 150.0f, 1.0f);
+    }
+
+    // 负数按 0 处理（与 SetCaptionHeight / SetResizeInset 的边界契约一致）⇒ 两轴都没有下限
+    win.window->SetMinimumSize(-10, -10);
+    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    {
+        const Rect got = win.window->GetBounds();
+        EXPECT_NEAR(got.width,  200.0f, 1.0f);
+        EXPECT_NEAR(got.height, 150.0f, 1.0f);
+    }
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterWindowChromeTests()
@@ -642,4 +744,8 @@ void ECDI::Test::RegisterWindowChromeTests()
     GetTestRegistry().Add("WindowBounds.FractionalDip",                  &Test31BoundsFractionalDip);
     GetTestRegistry().Add("WindowBounds.DegenerateInput",                &Test31BoundsDegenerateInput);
     GetTestRegistry().Add("WindowBounds.AvailableBeforeShow",            &Test31BoundsAvailableBeforeShow);
+    // ── ★ REQ-13（harness 账本）：窗口最小尺寸 ──
+    GetTestRegistry().Add("WindowMinimumSize.ClampsProgrammaticResize",   &TestMinSizeClampsProgrammaticResize);
+    GetTestRegistry().Add("WindowMinimumSize.NormalUsesClientArea",       &TestMinSizeNormalUsesClientArea);
+    GetTestRegistry().Add("WindowMinimumSize.PerAxisIndependent",         &TestMinSizePerAxisIndependent);
 }

@@ -389,6 +389,12 @@ void Window::SetWindowLayer(WindowLayer layer){
 
 }
 
+void Window::SetMinimumSize(int width, int height){
+
+	m_platformWindow->SetMinimumSize(width, height);
+
+}
+
 void Window::SetBackgroundColor(const Color& color){
 
 	// Phase 18：改自身成员（**不是**转发平台层——与 SetCaptionHeight 一类的形制不同）

@@ -130,6 +130,35 @@ public:
 	/// 交系统自然演化）。
 	virtual void SetWindowLayer(WindowLayer layer) = 0;
 
+	// ── ★ REQ-13：窗口最小尺寸（几何下限——系统改尺寸**之前**的一道闸）────
+
+	/// @brief 设置窗口最小尺寸（客户区**逻辑坐标 DIP**；<= 0 = 该轴不设下限）
+	/// @param width  客户区最小宽度（DIP）
+	/// @param height 客户区最小高度（DIP）
+	/// @details ★★ **为什么需要它**：本框架此前对窗口缩放下限**没有任何约束力**——
+	///   系统只认 `WM_GETMINMAXINFO` 的 `ptMinTrackSize`，而框架既不处理该消息、也没有
+	///   任何最小尺寸 API（全仓 `MinSize|MinimumSize|MinTrack` 零命中）。应用层唯一能做的
+	///   就是「先让它变小、再在 resize 回调里推回下限」——表现为拖拽边框时的**一次回弹**，
+	///   且拖拽过程中窗口确实到过下限以下（消费者 ECDI_fake_harness 为此立了 REQ-13，
+	///   其 `ClampToMinimum` 就是这个绕行）。下限必须在**尺寸被应用之前**生效。
+	/// @note **单位与口径**：客户区（与 `GetClientSize` 同口径）+ DIP（Phase 20 Q1）。
+	///   ★ 与 `Create(width, height)` / `SetBounds` 的**整窗**口径**不同**，理由有二：
+	///   ① 应用推理的是「内容至少多宽多高」，不是「含边框的窗口多大」；
+	///   ② 客户区↔整窗的换算是**框架规则**（`WM_NCCALCSIZE` 是框架行为），留在框架内
+	///      才不会被应用层复制成第二份真相（与 REQ-12 的收敛原则同族）。
+	/// @note **运行期有效**（Show() 前后均可）——与 chrome 四件套（配置期**一次确定**）
+	///   不同：下限只是被**读取**的配置，不参与布局/外观的一次性决策，没有需要一次确定的状态。
+	/// @note **只登记，不主动改变当前尺寸**：当前已低于下限时，下一次几何变更（用户拖拽 /
+	///   程序化 `SetWindowPos`）才被夹住；本方法不替应用偷偷放大窗口。
+	/// @note 落实点是**两条互补路径**（均有实测，见 `.cpp` 的 WM_GETMINMAXINFO 注释）：
+	///   ① `WM_GETMINMAXINFO` 的 `ptMinTrackSize`——系统在**应用之前**夹住，原生拖拽与
+	///      程序化 `SetWindowPos` 都吃，拖拽过程零回弹；
+	///   ② `WM_WINDOWPOSCHANGING` 的 cx/cy 夹——**与窗口样式无关**的那一半（无 sizing
+	///      frame 的窗口上，系统根本不查 WM_GETMINMAXINFO）。
+	///   ⚠️ 已知缺口：调用方带 `SWP_NOSENDCHANGING` 调 `SetWindowPos` 时两条路径都被跳过
+	///   （系统不问、我们也不被通知——该标志的语义就是「别问我」）。
+	virtual void SetMinimumSize(int width, int height) = 0;
+
 		// ── Phase 32：窗口衬底（带默认实现——S7 硬契约：既有实现者零改动）──────
 
 		/// @brief 设置衬底配置（Phase 32——详设 D32-A/R）

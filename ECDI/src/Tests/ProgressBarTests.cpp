@@ -65,6 +65,10 @@ public:
 
 	void SetWindowLayer(WindowLayer) override{}
 
+	// ── ★ REQ-13（harness 账本）：新增 1 个纯虚（本替身不关心窗口下限——空实现）──
+
+	void SetMinimumSize(int, int) override{}
+
 	void Minimize() override{}
 
 	void Maximize() override{}

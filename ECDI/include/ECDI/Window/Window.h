@@ -140,6 +140,17 @@ class Window : public PlatformWindowHost {
 		/// reparent / WinEventHook）为平台细节，公共 API 不承诺任何具体机制。
 		void SetWindowLayer(WindowLayer layer);
 
+		// ── ★ REQ-13（harness 账本）：窗口最小尺寸（运行期 API——Show 前后均可）──
+
+		/// @brief 设置窗口最小尺寸（★ REQ-13——客户区逻辑坐标 DIP；<= 0 = 该轴不设下限）
+		/// @details 薄转发到平台层（D-SEAM-1 三步惯例的第 ② 步）。下限描述的是**客户区**
+		///   （与 `GetClientSize` 同口径）——客户区↔整窗的换算是框架规则，留在框架内。
+		/// @note **运行期有效**（不要求 `Show()`）——与相邻的 chrome 四件套（配置期一次确定）
+		///   不同：下限只是被读取的配置，没有需要一次确定的状态。
+		/// @note 与 `SetBounds` 的关系：低于下限的 `SetBounds` 会被系统夹住，本方法**不**替调用方
+		///   放大窗口（`SetBounds` 的「请求语义 / 读回值以 `GetBounds` 为准」照样成立）。
+		void SetMinimumSize(int width, int height);
+
 		// ── Phase 32：窗口衬底（Frosted Backdrop——配置期 API）──────────────
 
 		/// @brief 设置窗口衬底（Phase 32——整窗雾面材质 + 控件不透明，详设 D32-A/M/Q）

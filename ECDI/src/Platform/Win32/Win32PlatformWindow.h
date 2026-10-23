@@ -61,6 +61,11 @@ public:
 	void SetResizeInset(int inset) override;
 	void SetWindowLayer(WindowLayer layer) override;
 
+	/// @brief 设置窗口最小尺寸（客户区 DIP；<= 0 = 该轴不设下限）——★ REQ-13
+	/// @details 只登记（存 DIP，不冻结成像素——DPI 变化后同一份配置仍成立）；落点在
+	///          `WM_GETMINMAXINFO`（ptMinTrackSize）与 `WM_WINDOWPOSCHANGING`（cx/cy 夹）。
+	void SetMinimumSize(int width, int height) override;
+
 	// ── Phase 32：窗口衬底（带默认实现的基类虚函数——配置存此处，应用在 Show/重应用）──
 	void SetWindowBackdrop(BackdropMode mode, const Color& tint) override;
 	[[nodiscard]] WindowBackdropState GetWindowBackdropState() const noexcept override;
@@ -228,6 +233,18 @@ private:
 	/// @brief 当前是否处于 Desktop 档（判据集中——避免各处重复比较枚举）
 	bool IsDesktopLayer() const noexcept{ return m_windowLayer == WindowLayer::Desktop; }
 
+	/// @brief 下限换算：**客户区 DIP** → **整窗物理像素**（REQ-13；0 = 该轴未设下限）
+	/// @param outWidth  整窗最小宽（物理像素；0 = 不约束）
+	/// @param outHeight 整窗最小高（物理像素；0 = 不约束）
+	/// @details 为什么必须换算：`ptMinTrackSize.x/y` 与 `WINDOWPOS.cx/cy` 都是**整窗物理
+	///   像素**，而公共契约是**客户区 DIP**——两种口径的差值由本函数承担，应用层不得复制。
+	///   ★ 边框差值**按 chrome 形态分流**，而不是一律按样式位算：Borderless 的
+	///   「客户区 == 整窗」是 `WM_NCCALCSIZE` 造成的（**样式位仍保留边框**），
+	///   按 `AdjustWindowRectExForDpi` 算会凭空加一圈并不存在的边框。
+	///   ★ 也不实测 `GetWindowRect - GetClientRect`：最小化那一刻客户区是 0×0，
+	///   差值会变成整个图标尺寸（幽灵下限）；无状态换算在任何时刻给同样的答案。
+	void MinimumTotalSizePx(int& outWidth, int& outHeight) const;
+
 	PlatformWindowHost& m_host;	///< Host 回调（非拥有——Window 实现）
 	WindowMessageHandler m_messageHandler;	///< 翻译器（7.1.2：构造传 m_host——不再认识应用层）
 	HWND m_hwnd = nullptr;	///< 窗口句柄（原 Window::m_handle）
@@ -240,6 +257,13 @@ private:
 	int m_captionHeight = 32;	///< 标题栏命中高度（R3；逻辑坐标 DIP——默认 32）
 	int m_resizeInset = 8;	///< 缩放热区宽度（R3；逻辑坐标 DIP——默认 8）
 	WindowLayer m_windowLayer = WindowLayer::Normal;	///< 层级档位（R10——语义状态，不随实现路径降级）
+
+	// ★★ REQ-13：窗口最小尺寸——**客户区**逻辑坐标 DIP（0 = 该轴不设下限）。
+	// 为什么存 DIP 而不是像素：`WM_GETMINMAXINFO` / `WINDOWPOS` 要的是**整窗物理像素**，
+	//   而换算必须发生在**读取的那一刻**（`MinimumTotalSizePx`）——若在登记的瞬间就
+	//   冻结成像素，跨 DPI 拖动窗口后同一份配置会悄悄失真（100% → 150% 时下限缩水 1/3）。
+	int m_minClientWidthDip = 0;	///< 客户区最小宽（DIP；<= 0 = 该轴无下限）
+	int m_minClientHeightDip = 0;	///< 客户区最小高（DIP；<= 0 = 该轴无下限）
 
 	// ★★ Phase 20（崩溃修复）：构造传入的 **DIP** 目标尺寸——**延迟到 `Show()` 再换算成物理**。
 	// 原因：构造期调 `SetWindowPos` 会**同步派发 `WM_SIZE`**，而那一刻 `Window` 尚在成员

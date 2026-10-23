@@ -758,15 +758,89 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 
 	}
 
-	// ── Phase 12 R10 / Phase 16 D8：持续维护层级档位对应的 z 序位置 ─────────
+	// ── ★ REQ-13：窗口最小尺寸（系统在**应用尺寸之前**问我们「最小能给多大」）────────
+
+	// ★ 这是**主路径**：系统在原生拖拽（sizing loop）与程序化 `SetWindowPos` 两条路径
+	//   上都以 `ptMinTrackSize` 夹住目标尺寸，且**在应用之前**（实测 2026-10-23，
+	//   `.scratch/probe_minmaxinfo/probe3.cpp`：裸 `SetWindowPos(400×300)` 落成 800×600，
+	//   事件序列里**不出现**低于下限的尺寸 ⇒ 拖拽过程零回弹）。
+	// ★ 为什么用 `break` 而不是 `return 0`：两种写法实测等价（DefWindowProc **不会**覆盖
+	//   已写入的非零 `ptMinTrackSize`），`break` 让系统补齐其余字段（ptMaxSize 等）——
+	//   框架没意见的字段不该由框架给值。
+	// ⚠️ 已知缺口一：**无 sizing frame** 的窗口上系统根本不查本消息（实测 WS_POPUP：
+	//   消息计数不增长，窗口照落 400×300）⇒ 还有 `WM_WINDOWPOSCHANGING` 那一半。
+	// ⚠️ 已知缺口二：`SWP_NOSENDCHANGING` 让两条路径都被跳过（系统不问、我们不被通知）。
+	case WM_GETMINMAXINFO: {
+
+		int minW = 0;
+		int minH = 0;
+
+		MinimumTotalSizePx(minW, minH);
+
+		if (minW > 0 || minH > 0){
+
+			auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+
+			// ★ 逐轴写入：`0` 表示「该轴不设下限」——此时**必须**保留系统默认值，
+			//   写 0 会被系统当成「最小 0×0」，反而把系统自己的下限（边框尺寸）抹掉。
+			if (minW > 0){
+
+				mmi->ptMinTrackSize.x = minW;
+
+			}
+
+			if (minH > 0){
+
+				mmi->ptMinTrackSize.y = minH;
+
+			}
+
+		}
+
+		break;   // 走 DefWindowProc（未表态的字段由系统给默认值）
+
+	}
+
+	// ── Phase 12 R10 / Phase 16 D8 / ★ REQ-13：z 序维护 + 窗口下限（改尺寸前的一道闸）──
 	case WM_WINDOWPOSCHANGING: {
 
 		// ⚠️ 必须是「持续维护」而非一次性 SetWindowPos（其他程序会把我们顶下来）；
-		// ⚠️ 只改 hwndInsertAfter，不碰 x/y/cx/cy/flags（否则会干扰最大化/还原几何）；
 		// ⚠️ 契约边界：不承诺阻止第三方 SetWindowPos 造成的瞬时 z 序变化（Windows z 序是动态的）
 		// ★ Phase 16（D8）：判据由「!= Normal ⇒ 一律 HWND_BOTTOM」改为**按档位分流**——
 		//   Normal 不修改 / Bottom 保持既有语义（逐位等价）/ Desktop 贴桌面窗口正上方。
 		auto* wp = reinterpret_cast<WINDOWPOS*>(lParam);
+
+		// ── ★ REQ-13：下限的**第二条**落实路径（与样式位无关的那一半）──────────
+		// ★ 为什么需要它：`ptMinTrackSize` 只在有 sizing frame 的窗口上被采用；这里的夹子
+		//   是纯算术，与样式无关（实测同一个无框 WS_POPUP 窗口：MINMAXINFO 不拦、
+		//   本夹子拦得住）。两条路径合起来才覆盖「原生拖拽 + 程序化改尺寸 + 任意样式」。
+		// ★ 为什么夹在这里是安全的：只在**低于下限**时抬到下限，从不改写已合规的尺寸 ⇒
+		//   最大化/还原（实测 1936×1096 原样通过）与 DPI 变更（框架自己 SetWindowPos 到
+		//   系统建议矩形）都不受影响。★ 历史上「不碰 cx/cy」的告诫针对的是**无条件改写**，
+		//   不是这种单向抬升——那段告诫的原文理由（别干扰最大化/还原几何）仍成立。
+		// ★ 为什么最小化要放行：实测最小化过渡确实派发本消息（cx/cy = 160×28，此刻
+		//   `IsIconic` **已为 1**）。下限描述的是**还原态**几何，把最小化落位抬到下限
+		//   属于语义越界（系统随后也会按自己的落位覆盖，夹了不产生效果）。
+		if ((wp->flags & SWP_NOSIZE) == 0 && !IsIconic(hwnd)){
+
+			int minW = 0;
+			int minH = 0;
+
+			MinimumTotalSizePx(minW, minH);
+
+			if (minW > 0 && wp->cx < minW){
+
+				wp->cx = minW;
+
+			}
+
+			if (minH > 0 && wp->cy < minH){
+
+				wp->cy = minH;
+
+			}
+
+		}
 
 		if ((wp->flags & SWP_NOZORDER) == 0){
 
@@ -1446,6 +1520,95 @@ void Win32PlatformWindow::SetWindowLayer(WindowLayer layer){
 	if (target != nullptr){
 
 		SetWindowPos(m_hwnd, target, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	}
+
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ★ REQ-13：窗口最小尺寸（客户区 DIP → 两条落实路径见 HandleMessage）
+// ══════════════════════════════════════════════════════════════════════════
+
+void Win32PlatformWindow::SetMinimumSize(int width, int height){
+
+	// ★ 运行期有效——**刻意不**仿 chrome 四件套的 `m_shown` 闸门：下限只是被**读取**的
+	//   配置，不参与布局/外观的一次性决策，没有「一次确定」的理由；更重要的是应用与探针
+	//   需要能在运行期**清零**它来造对照世界（「下限真的拦住了吗」这一问，只能靠
+	//   「把下限拿掉后同一个请求真的生效」来回答——否则断言就是同义反复）。
+	// ★ 边界契约与 SetCaptionHeight / SetResizeInset 一致：「<= 0 视为 0」= 该轴不设下限
+	//   （逐轴独立——0 的那一轴保留系统自己的最小值，不被写坏）。
+	m_minClientWidthDip = width < 0 ? 0 : width;
+	m_minClientHeightDip = height < 0 ? 0 : height;
+
+	// ★ 登记之后**不**主动改当前尺寸：下限只约束「下一次几何变更」。此刻窗口若已小于新下限，
+	//   应用下一次拖拽 / 程序化改尺寸即被夹住——框架不替应用偷偷放大窗口。
+	// ★ 也**不**发 SetWindowPos 去「刷新下限」：`ptMinTrackSize` 是每次 WM_GETMINMAXINFO
+	//   现算的（见 MinimumTotalSizePx），下一次拖拽自然吃到新值；为一次无尺寸变化的配置
+	//   派发 WM_WINDOWPOSCHANGING / WM_SIZE 违反本仓「同值不制造事件」的纪律。
+
+}
+
+void Win32PlatformWindow::MinimumTotalSizePx(int& outWidth, int& outHeight) const{
+
+	outWidth = 0;
+	outHeight = 0;
+
+	// 无句柄：没有可换算的边框（构造期查询的防御——同 SetWindowLayer 的 HWND 生命周期前提）
+	if (m_hwnd == nullptr){
+
+		return;
+
+	}
+
+	const int dpi = GetDpiForWindow(m_hwnd);
+
+	// ① 客户区下限 DIP → 客户区物理像素（`dpi == 96` 时恒等——Phase 20 G5）
+	const int clientW = DipToPixels(m_minClientWidthDip, dpi);
+	const int clientH = DipToPixels(m_minClientHeightDip, dpi);
+
+	// ② Borderless：`WM_NCCALCSIZE` 把客户区扩满整窗 ⇒ 差值**恒为 0**。这里绝不能改走
+	//    样式位换算——Borderless **刻意保留** WS_OVERLAPPEDWINDOW（技术路线核心），
+	//    按样式算会凭空加一圈并不存在的边框（下限凭空偏大）。
+	if (m_chromeMode == ChromeMode::Borderless){
+
+		if (m_minClientWidthDip > 0){
+
+			outWidth = clientW;
+
+		}
+
+		if (m_minClientHeightDip > 0){
+
+			outHeight = clientH;
+
+		}
+
+		return;
+
+	}
+
+	// ③ Normal：客户区 + 系统边框 = 整窗。以 0×0 客户区求一次，得到的正是**差值本身**
+	//    （边框/内边距与客户区尺寸无关，是该 DPI + 该样式下的常量）。
+	RECT frame{ 0, 0, 0, 0 };
+
+	AdjustWindowRectExForDpi(&frame,
+		static_cast<DWORD>(GetWindowLongPtrW(m_hwnd, GWL_STYLE)),
+		FALSE,
+		static_cast<DWORD>(GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE)),
+		static_cast<UINT>(dpi));
+
+	const int frameW = static_cast<int>(frame.right - frame.left);
+	const int frameH = static_cast<int>(frame.bottom - frame.top);
+
+	if (m_minClientWidthDip > 0){
+
+		outWidth = clientW + frameW;
+
+	}
+
+	if (m_minClientHeightDip > 0){
+
+		outHeight = clientH + frameH;
 
 	}
 

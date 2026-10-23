@@ -92,7 +92,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
 | `SetWindowBackdrop(BackdropMode)` | `None` / `Acrylic`（亚克力；系统不支持会降级，`Degraded` 只能作为查询结果出现，**不能作为请求值**） |
 
 **运行期 API**：`Show/Hide` · `SetBounds(const Rect&)/GetBounds()`（屏幕坐标 DIP，含边框总尺寸；
-**请求语义**——读回以 `GetBounds` 为准）· `Minimize/Maximize/Restore/GetWindowState` ·
+**请求语义**——读回以 `GetBounds` 为准）· `SetMinimumSize(int w, int h)`（★ REQ-13——**客户区** DIP；
+`<= 0` = 该轴不设下限；`Show()` 前后均可。低于下限的请求被系统**在生效之前**夹住：拖边框在边框处硬停、
+不回弹，`SetBounds` 照其为请求语义——读回以 `GetBounds` 为准，本方法**不**替调用方放大窗口）·
+`Minimize/Maximize/Restore/GetWindowState` ·
 `SetBackgroundColor(const Color&)`（运行期可用，忽略 alpha，默认白）· `SetFocusedWidget/GetFocusedWidget` ·
 `Invalidate()` · `GetTextMeasurer()` · `GetPlatformWindow()` · `GetDpiScale()` ·
 `SetFileDropEnabled(bool)`（开启 `WM_DROPFILES` → `OnDropFiles`）· `SetCaptureWidget/GetCaptureWidget`
