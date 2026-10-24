@@ -1,6 +1,6 @@
-# Phase 36 · Font 表达力——字重 / face index / 复合族名第二项（deferred #70 ← harness REQ-10）
+﻿# Phase 36 · Font 表达力——字重 / face index / 复合族名第二项（deferred #70 ← harness REQ-10）
 
-> 状态：**v1.0**（2026-10-24 落盘，**待评审**）｜上游 = `roadmap-deferred.md` **#70**（v2.32 新立、v2.33 勘误排期注记）｜来源 = harness `ECDI_fake_harness/docs/ecdi-capability-requests.md` **REQ-10**（2026-10-18 取证新立）
+> 状态：**v1.1**（2026-10-24 外部评审「基本通过」吸收——**PASS ⇒ 可移交初设**；v1.0 同日落盘）｜上游 = `roadmap-deferred.md` **#70**（v2.32 新立、v2.33 勘误排期注记）｜来源 = harness `ECDI_fake_harness/docs/ecdi-capability-requests.md` **REQ-10**（2026-10-18 取证新立）
 > ★ **立项语境**：2026-10-24 清理轮盘点——#70 是缺陷队列**唯一有真实消费者锚点**的开放项（variant-c 十处字重层级），用户拍板「先列需求稿，认真核对，根据项目事实来弄」。DesktopNest 暂缓与本 Phase 无排期冲突。
 > ★ **事实纪律（本稿自约束）**：① 所有行号 = 2026-10-24 对 HEAD 实测（`70c5c44`；该两笔均为 docs-only 提交，源码行号自 `e913b8d` 起未变）；② **标注「harness 读数」的数字全部来自对方探针**（`req11_weight.cpp` / `req11_root.cpp` / `req11_facekind.cpp` / `family-sim.py` / `ttc-faces.py`），**ECDI 侧未复跑**（条 105 诚实边界），验收 A2/A6 才要求复现；③ 本机字体事实 = 本日**独立实测**（§2 K6，GDI `PrivateFontCollection` 装置），**非转抄 harness**；④ 沿 Phase 31 评审铁律：**§4 只列决策点与倾向，倾向 ≠ 定案**——「不能直接把倾向方案当成已定方案」「不得因为当前一侧的行为反过来定义框架契约」。
 
@@ -49,7 +49,7 @@
 | **K5** | 默认口径 | 空 `family`：GDI 链 `lfFaceName` 留空 → 系统映射；GL 链 `ResolveFile("")` → `DefaultFontFile` ⇒ **两链一致落 SimSun**（Phase 26 对齐决策）。⇒ 框架内未设 family 的全部文本**当前渲染在宋体上** |
 | **K6** | **TTC face 枚举（本机独立实测 2026-10-24）** | GDI `PrivateFontCollection::AddFontFile` 装置：`msyh.ttc` = **2 faces**（`微软雅黑` + `Microsoft YaHei UI`）· `simsun.ttc` = **2 faces**（`宋体` + `新宋体`）· `msyhbd.ttc` = **2 faces**（同名 Bold）· `consola.ttf` = 1 face。⇒ **face index 缺口不只 YaHei 一家**（NSimSun 同样不可达）；harness `ttc-faces.py` 读数与本次独立实测**一致** |
 | **K7** | 消费者盘点 | **框架内零 `family` 赋值**（全库 grep：仅 `TextWidget.cpp:326-327/450` 指纹比较 + ModelProbe 示例两处文件名写法 `examples/ModelProbe/ModelProbe.cpp:474/779` `"consola.ttf"`）⇒ 框架文本全部默认 SimSun；**weight 消费者 = 零**（variant-c 十处 `font-weight: 600/650/700` = 潜在首个，harness 侧） |
-| **K8** | 缓存 / 指纹面（初设必答全清单） | weight/faceIndex 加入后须**逐项定键**：① GDI 字体缓存 `(size, family, dpi)`（`:1372`/`:51`）② `FontEngine::familyCache`（family 原串，`:56`）③ `FontEngine::faces`（文件路径）④ `TextWidget` wrap/preferred 指纹（含 `.family`/`.size`，`:326-327`/`:450`——**漏加 = 换字重不重排**）⑤ Phase 28 advance memo（FaceId 在键——文件级分离天然安全；variation 轴路线则不然）⑥ GL 字形图集键（FaceId 在键）。**漏任何一项 = 「改了字段没生效」类静默错误** |
+| **K8** | 缓存 / 指纹面（初设必答全清单——★ v1.1 外部评审 P1 扩充：6 → **11 项**） | **键含 Font 语义字段、weight 加入后必须扩展的 7 处**：① GDI 字体缓存 `(size, family, dpi)`（`GDIBackend.cpp:1372` · `GDITextMeasurer.cpp:51`）② `FontEngine::familyCache`（family 原串，`FontEngine.cpp:56`）③ `FontEngine::faces`（解析后路径，`:53`——**键须扩为 (路径, faceIndex)**：同一 TTC 两 face 同路径）④ `TextWidget` wrap/preferred 指纹（含 `.family`/`.size`，`:326-327`/`:450`——漏加 = 换字重不重排）⑤ **FontEngine measureCache** `(text, size, family, dpi)`（`:61` 声明 / `:285` 键）⑥ **FontEngine lineHeightCache** `(size, family, dpi)`（`:62`/`:389`）⑦ **GDITextMeasurer 测量缓存** `(text, size, family, dpi)`（`GDITextMeasurer.h:90` / `.cpp:97`）——⑤⑥⑦ 漏扩展的后果 = **同 (family,size,dpi) 先 400 后 700 ⇒ 命中缓存返回 regular 宽度/行高**，恰是「改字段不生效」；且违反 `GDITextMeasurer.h:82` 既有契约注释「**键含 DPI——必须完整覆盖 Font 语义字段 + 换算基准**」（v1.1 S2：代码内既有依据）。**`FaceId` 在键、文件级分离天然安全的 4 处**（前置 = ② 的 face 解析变 weight-aware）：⑧ advance memo `GlyphKey`（`:64`）⑨ GL 字形图集 `GlyphKey`（`GLGlyphAtlas.h:93`）⑩ FontEngine glyphCache `GlyphKey`（`:60`）⑪ ascentCache `(FaceId, px)`（`:63`/`:418`）。`GlyphKey` = {faceId, glyphIndex, pixelSize, hinting}（`FontEngine.h:30-34`）。**漏任何必改键 = 「改了字段没生效」类静默错误**。★ 全库清点收尾（v1.1）：`FreeTypeTextMeasurer` 为 FontEngine 薄委托（`FreeTypeTextMeasurer.cpp:37`）无自有缓存；GL `CornerMaskCache` 键 = 整数半径、与字体无关——清单到此为尽 |
 | **K9** | 现有测试面 | 490 条中**无任何 weight / face index 断言**（从未覆盖，非回归）；字体相关既有面 = FontEngine 族名反查（#69 验收 8 族 × 2 链）· FitText/wrap 家族（Phase 29）· GDI 量化（Phase 34）。默认（不设 weight）路径**必须逐位不变**（A1） |
 
 ---
@@ -79,7 +79,7 @@
 | **D36-2** | **两链一致性口径**（本 Phase 最高风险） | **Phase 31 论证顺序铁律适用**：先选定独立于后端的语义 → 两链各自实现 → 受控样本验证（不可颠倒；不得挑一侧实现当契约）。具体待定：同族无该字面时（如 `Consolas` + weight 600，族内只有 Regular/Bold），GDI 映射器挑「最近 face」、GL 侧按什么规则挑——**两链落点是否要求同 face** = 口径核心。倾向：**A3 验收要求同 face** ⇒ GL 归并规则必须显式设计（而非依赖 GDI 映射器行为反推） |
 | **D36-3** | **weight 与族名内嵌样式的优先级** | `family="Consolas Bold"` + `weight=400` 谁赢？（族名已含样式 = 隐式请求）倾向：**族名内嵌样式优先**（不推翻 #69 已验收行为「请求粗体得粗体」），weight 仅在族名为纯族名时生效——初设钉死并写入 `Font` 契约注释 |
 | **D36-4** | **face 可达性形态** | 候选：(a) `Font` 加 `faceIndex` 公共字段（调用方显式选 face——**GDI 链无对应概念**，`lfFaceName` 按名选择，字段在 GDI 链语义悬空）· (b) **resolve 层返回二元组**（`Win32FontSource` 内部 family→(file, face)，含复合键第二项匹配 + 按请求名匹配 face 名；**零公共 API 增量**）· (c) `Font.family` 允许 `name#index` 语法（污染字符串语义，不倾向）。**倾向 (b)**：动机（YaHei UI / NSimSun）全部可由族名表达；**但**「族名→face 名匹配」需要读 face 的 name 表或 `FT_Get_Postscript_Name`——初设给方案与代价。★ YaHei vs YaHei UI 的实际差异 = 行高/度量（harness 读数），**不新增字形能力**——本决策点允许降级为「只做复合键第二项匹配、face 选择按请求名尽力」的窄版 |
-| **D36-5** | **默认值与向后兼容** | `weight` 默认 400 = `FW_NORMAL` ⇒ 不设该字段的全部既有调用方**逐位不变**（K7：框架内无人设 family，K5：默认 SimSun 不动）。公共头 98→98（`Font.h` 字段扩展，非新文件）； designated-initializer 调用点（ModelProbe 两处 `.size/.family` 具名初始化）零改动 |
+| **D36-5** | **默认值与向后兼容** | `weight` 默认 400 = `FW_NORMAL` ⇒ 不设该字段的全部既有调用方**逐位不变**（K7：框架内无人设 family，K5：默认 SimSun 不动）。公共头 98→98（`Font.h` 字段扩展，非新文件）； designated-initializer 调用点（ModelProbe 两处 `.size/.family` 具名初始化）零改动。★ **硬约束（v1.1 P2）**：`weight` 必须声明于 `family` **之后**（C7560：designated-initializer 顺序须匹配声明序——插到 size 与 family 之间会打崩全部既有具名初始化调用点） |
 | **D36-6** | **组合解析优先级** | `(family, weight)` 联合解析规则表：`"Microsoft YaHei"` + 700 ⇒ `msyhbd.ttc` face 0；`"Microsoft YaHei UI"` + 700 ⇒ `msyhbd.ttc` **face 1**；`"Consolas Bold"` + 任意 ⇒ `consolab.ttf`（D36-3）。★ 初设产出 = **一张穷举规则表**（族名形态 × weight 档 × 有无对应文件），每格给两链落点——禁止各链各自临场发挥 |
 
 ---
@@ -103,7 +103,7 @@
 |---|---|---|
 | 公共头 | **98 → 98** | `Font.h` 字段扩展（非新文件）；`TextStyle` 经 `StyleField<Font>` 自动携带 |
 | 公共 API | **+1 字段**（`Font::weight`，默认 400） | 若 D36-4 取窄版 (b) 则 faceIndex **不加**公共字段；观测缝可能 +0～1（初设定） |
-| 用例 | **490 → ~498**（估 +8） | A1 存量守恒 ×1~2 · A2 字重 ×2 · A3 同 face ×2 · A4/A5 TTC/组合 ×3；初设细化 |
+| 用例 | **490 → ~500**（估 +10） | A1 存量守恒 ×1~2 · A2 字重 ×2 · A3 同 face ×2 · A4/A5 TTC/组合 ×3 · 缓存键守护 ×2~3（v1.1 S4：K8 扩至 11 项）；初设细化 |
 | CMake | **0** | 无新文件（窄版） |
 | 内部改动面 | `Win32FontSource`（复合第二项 + face 名匹配）/ `FontEngine`（face 选择 + 缓存键）/ `GDIBackend` + `GDITextMeasurer`（lfWeight 各一处 + 缓存键）/ `TextWidget` 指纹两处 | K8 清单为完整底账 |
 | 风险 | **中** | 首次给公共数据模型加「影响两链解析」的维度；一致性口径（D36-2）是本 Phase 成败点——沿 Phase 31 先例「需求方向认可、口径公式待设计」处理 |
@@ -112,7 +112,7 @@
 
 ## §7 初设闸门（移交初设的必答项）
 
-1. **K8 缓存/指纹六项逐项定键**——每项给出「weight（和/或 faceIndex）加入后」的新键与漏加后果；④（TextWidget `:326-327/450`）与 ①（GDI `:1372/51`）为必查。
+1. **K8 缓存/指纹十一项逐项定键**（v1.1 P1 扩充）——**7 处必改键**逐项给新键与漏加后果（⑤⑥⑦ 三处测量链缓存为重中之重：键含 family 而无 weight，违反 `GDITextMeasurer.h:82` 自身契约）+ **4 处 FaceId 安全类**核验（前置 = ② face 解析变 weight-aware）；①（GDI `:1372/51`）与 ④（TextWidget `:326-327/450`）为必查。
 2. **D36-2 一致性口径先行**——先产出口径定义，再写两链实现；GL 归并规则（最近档位的选择函数）给出**可测试的纯函数**形态（沿 Phase 34 `BackendContract` 共享件先例——两链共用一份规则代码强于两份等价断言）。
 3. **GDI 无对应字面时的映射器行为实测**（小探针）：族内只有 Regular/Bold 时请求 600/650 的落点；跨族回退是否可能。**结论反喂 D36-2**，不许凭文档假设。
 4. **D36-4 窄版/全版的取舍证据**：`FT_Get_Postscript_Name` / name 表匹配在本机四 TTC 上的实测可行性（K6 装置可直接复用）。
@@ -122,4 +122,5 @@
 
 ## §8 修订记录
 
+- **v1.1**（2026-10-24）**外部评审（mimo）「基本通过」吸收——PASS ⇒ 可移交初设**。① ★★ **P1 采纳：K8 缓存清单 6 → 11 项**——原稿漏列测量链上三处以 `(family, size, dpi)` 为键的缓存：**FontEngine measureCache**（`:61`/`:285`）· **FontEngine lineHeightCache**（`:62`/`:389`）· **GDITextMeasurer 测量缓存**（`GDITextMeasurer.h:90`/`.cpp:97`）——weight 成为 `Font` 语义字段后这些键违反 `GDITextMeasurer.h:82` 自身契约「必须完整覆盖 Font 语义字段」，后果 = 同 (family,size,dpi) 先 400 后 700 **命中缓存返回 regular 宽度/行高**；glyphCache（`:60`）/ascentCache（`:63`/`:418`）与 advance memo/GL 图集并列为「FaceId 在键天然安全」类（`GlyphKey` = {faceId, glyphIndex, pixelSize, hinting}，`FontEngine.h:30-34`）；③ faces 键补明「须扩为 (路径, faceIndex)」。**评审行号经全量复核零误差**；吸收时追加全库清点收尾（`FreeTypeTextMeasurer` = 薄委托 `:37` 无自有缓存 · GL `CornerMaskCache` 键 = 半径——清单到 11 项为尽）。② ★ **P2 采纳**：D36-5 补硬约束「`weight` 声明于 `family` 之后」（C7560 顺序）。③ **S1/S2/S4 采纳**（glyphCache 单列 · `GDITextMeasurer.h:82` 引为代码内依据 · 用例 ~498→~500）；**S3 知悉不改**（HEAD 表述准确）。④ **保留清单由初设继承**（评审确认项）：§1.4 耦合 · D36-2 定性 · A3 串宽量具 · A1 红线 · A6 指纹 · 非目标边界 · 条 105 分界 · K6 独立实测 · D36-4 倾向。⑤ 头部 v1.0 待评审 → **v1.1，可移交初设**
 - **v1.0**（2026-10-24）初稿。**输入** = harness REQ-10（2026-10-18，受控对照取证）+ ECDI 侧 2026-10-24 对码核验（deferred #70 登记）+ 本机独立实测（K6 TTC 枚举、PrivateFontCollection 装置，与 harness `ttc-faces.py` 读数一致）。**§2 勘察 K1–K9 全部带行号**（含 K8 缓存/指纹六项底账 + K7 消费者盘点「框架内零 family 赋值」）；**§1.4 记录 ECDI 侧核验新发现（②③ 耦合，已回写 harness 账本订正 ⓒ）**；**§3 范围两项 + 非目标 7 项**；**§4 决策点 D36-1..6**（倾向 ≠ 定案，D36-2 一致性口径 = 本 Phase 成败点，Phase 31 论证顺序铁律明写）；**§5 验收 A1–A6**（A1 存量逐位不变红线 · A3 串宽量具纪律 · A6 固定指纹）；**§6 影响面**（头 98→98 / API +1 字段 / 用例 490→~498 / CMake 0 / 风险 中）；**§7 初设闸门五项**（含 GDI 映射器行为实测反喂 D36-2）。**harness 读数全部标注「harness 读数」**，ECDI 未复跑（条 105）——A2/A6 才要求复现。
