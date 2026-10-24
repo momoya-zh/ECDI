@@ -19,7 +19,7 @@ ECDI is a **teaching-first** framework: it exists so that anyone can learn how a
 
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 183 design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 188 design documents in Chinese).
 
 ## How this was built
 
@@ -58,7 +58,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Anti-aliasing**: supersampled corner coverage masks for rounded rects (`S=8`), cached per radius — GDI has no native AA, so arcs are composited through a premultiplied alpha path that composes with the theme's corner radius
 - **Window chrome**: borderless mode (`WM_NCCALCSIZE` interception) with a self-drawn caption bar — title plus vector min/max/close buttons — and `NCHITTEST` delegated into the widget tree, so interactive controls inside the caption stay clickable while the rest drags the window
 - **Shell integration**: tray icon (application-level — lives on `PlatformApplication`, not on any `Window`, so closing/rebuilding every window leaves it intact) with a native popup menu, plus window-level file drop (`WM_DROPFILES` → UTF-8 path list; the `HDROP` is released before the event is emitted). Both stay behind platform seams — the public API exposes no Win32 types.
-- **Testing**: self-hosted test framework (465 cases as of 2026-10-16, zero dependencies) with a recording backend for paint assertions
+- **Testing**: self-hosted test framework (490 cases as of 2026-10-23, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -85,7 +85,7 @@ Targets:
 | Target | Type | Description |
 |---|---|---|
 | `ECDI` | static library | The framework (`include/ECDI/*.h` — 98 public headers; internal implementation lives in `src/`) |
-| `ecdi_tests` | executable | Self-hosted test suite — 465 cases (2026-10-16), zero dependencies |
+| `ecdi_tests` | executable | Self-hosted test suite — 490 cases (2026-10-23), zero dependencies |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `visualtest` | executable | Side-by-side visual check for image decoding (Phase 11) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |

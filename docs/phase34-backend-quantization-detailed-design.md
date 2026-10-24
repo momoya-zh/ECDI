@@ -684,7 +684,7 @@ bbox.bottom = static_cast<LONG>(BackendContract::QuantizeEdge(maxY));
 
 | 批 | 日期 | 改动 | 用例 | 回归 | 偏离 |
 |---|---|---|---|---|---|
-| U1–U7（同一工作区集成；未拆分提交或独立逐单元回归） | 2026-10-17 · **归档 2026-10-19** | `GDIBackend.cpp`：实现 `ToPixelRect` / `ToPixelBox` 并覆盖 §2 指定消费者；`BackendContract.h` 更新历史注释；新增并登记 `BackendQuantizationTests.cpp` | **新增 9 条自动化测试**；§4 十项源码盯防人工逐项复核（含 16 项豁免注释/行为对照）；`PixelBoxDimensions` 含 162 组整数 DIP × scale {1,2} 几何比较，并执行真实窗口栅格探针 | MSVC Debug `ecdi_tests` 构建成功，全套 **474 passed / 0 failed / 474 total**；真实窗口 200×200 `Renderer → GDIBackend` 不透明 `DrawRect` 样本在 scale 1/2 与旧截断几何参考帧均为 **0 不同像素、0 CLR_INVALID**；`git diff --check` 通过 | 探针只覆盖所列四个不透明 `DrawRect` 矩形，不代表全部消费者或应用级视觉验收；测试文件里的 `TestPixelBox` 是独立契约 oracle，不直接调用 GDIBackend 匿名命名空间助手，调用点正确性由源码审计覆盖。旧 `audit_source.py` 使用改动前固定表达式/基线行号，未作为实施后验证器。无公共 API/CMake 改动；D6/N4 豁免继续保留。
+| U1–U7（同一工作区集成；未拆分提交或独立逐单元回归） | 2026-10-17 · **归档 2026-10-19** | `GDIBackend.cpp`：实现 `ToPixelRect` / `ToPixelBox` 并覆盖 §2 指定消费者；`BackendContract.h` 更新历史注释；新增并登记 `BackendQuantizationTests.cpp` | **新增 9 条自动化测试**；§4 十项源码盯防人工逐项复核（含 16 项豁免注释/行为对照）；`PixelBoxDimensions` 含 162 组整数 DIP × scale {1,2} 几何比较，并执行真实窗口栅格探针 | MSVC Debug `ecdi_tests` 构建成功，全套 **474 passed / 0 failed / 474 total**；真实窗口 200×200 `Renderer → GDIBackend` 不透明 `DrawRect` 样本在 scale 1/2 与旧截断几何参考帧均为 **0 不同像素、0 CLR_INVALID**；`git diff --check` 通过 | 探针只覆盖所列四个不透明 `DrawRect` 矩形，不代表全部消费者或应用级视觉验收；测试文件里的 `TestPixelBox` 是独立契约 oracle，不直接调用 GDIBackend 匿名命名空间助手，调用点正确性由源码审计覆盖。旧 `audit_source.py` 使用改动前固定表达式/基线行号，未作为实施后验证器。无公共 API/CMake 改动；D6/N4 豁免继续保留。 |
 
 ★ **实施偏离**（详设与契约冲突时按契约裁决，集中记录于此，条 107）：
 
