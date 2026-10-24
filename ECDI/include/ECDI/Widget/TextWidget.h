@@ -141,7 +141,7 @@ private:
 	mutable bool m_prefValid = false;    ///< 指纹是否已建立（首次 GetPreferredSize 恒 miss）
 	mutable Size m_prefCache{};          ///< 上次测量结果（有效时返回——零 measurer 调用）
 	mutable std::size_t m_prefRevision = 0;   ///< 建立缓存时的文本版本
-	mutable Font m_prefFont{};           ///< 建立缓存时的字体（值比较——SetFont/SetStyle/ApplyTheme 无需 bump）
+	mutable Font m_prefFont{};           ///< 建立缓存时的字体（值比较逐字段**含 weight**——Phase 36 K8-④；SetFont/SetStyle/ApplyTheme 无需 bump）
 	mutable int m_prefDpi = 0;           ///< 建立缓存时的 DPI（`lround(GetDpiScale()*96)`——跨屏失效）
 
 	// ── Phase 29 批二：断行开关 + wrap 布局缓存（D29-C / C29-10）──
@@ -150,9 +150,9 @@ private:
 	mutable TextLayout m_wrapLayout;         ///< 布局缓存（`m_wrapValid` 为真时有效）
 	mutable bool m_wrapValid = false;        ///< 布局指纹是否已建立
 	mutable std::size_t m_wrapRevision = 0;  ///< 建立缓存时的文本版本（C29-10 键维 1）
-	mutable Font m_wrapFont{};               ///< 建立缓存时的字体（键维 2/3——size + family）
-	mutable int m_wrapDpi = 0;               ///< 建立缓存时的 DPI（键维 4）
-	mutable int m_wrapWidth = 0;             ///< 建立缓存时的 `GetWidth()`（键维 5——宽度驱动重排，T29-3）
+	mutable Font m_wrapFont{};               ///< 建立缓存时的字体（键维 2/3/4——size + family + weight；Phase 36 K8-④）
+	mutable int m_wrapDpi = 0;               ///< 建立缓存时的 DPI（键维 5）
+	mutable int m_wrapWidth = 0;             ///< 建立缓存时的 `GetWidth()`（键维 6——宽度驱动重排，T29-3）
 
 };
 

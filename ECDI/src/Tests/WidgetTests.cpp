@@ -881,6 +881,36 @@ void Test29WrapSameWidthNoRebuild(){
 	EXPECT_TRUE(probe.measurer->FitCalls() > afterBuild);
 }
 
+// ── T36-7：wrap 指纹含 weight（Phase 36 K8-④）——变 weight ⇒ 重建；同 weight ⇒ 命中 ──
+void Test36WrapFingerprintIncludesWeight(){
+	WrapProbe probe("ECDI_T36_FP", 200, 200);
+	probe.SetLabelSize(40, 200);
+	probe.label->SetText(std::string("aaaa bbbb cccc dddd"));
+	probe.label->SetWordWrap(true);
+	probe.label->SetFont(Font{.size = 14.0f, .family = "SimSun"});   // weight 默认 400（C36-1）
+
+	(void)probe.label->GetPreferredSize();
+	const std::size_t afterBuild = probe.measurer->FitCalls();
+	EXPECT_TRUE(afterBuild > 0);
+
+	// ① 同字体重设（同 weight）⇒ 指纹命中 ⇒ 零重建（T29-WRAP-3 同构）
+	probe.label->SetFont(Font{.size = 14.0f, .family = "SimSun"});
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.measurer->FitCalls(), afterBuild);
+
+	// ② 反证：变 weight ⇒ 重建（K8-④：比较漏加 weight = 换字重静默不重排——修复前此格红）
+	probe.label->SetFont(Font{.size = 14.0f, .family = "SimSun", .weight = 700});
+	(void)probe.label->GetPreferredSize();
+	EXPECT_TRUE(probe.measurer->FitCalls() > afterBuild);
+	const std::size_t afterWeight = probe.measurer->FitCalls();
+
+	// ③ 同 bold 字体再查 ⇒ 新指纹建立并命中
+	probe.label->SetFont(Font{.size = 14.0f, .family = "SimSun", .weight = 700});
+	(void)probe.label->GetPreferredSize();
+	EXPECT_EQ(probe.measurer->FitCalls(), afterWeight);
+}
+
+
 // ── A2 结构判据（批二验收前半）：`wrap == false` ⇒ FitText / 布局构建**零调用** ──
 // ★ 红线①「默认关 = 100% 原路径」的可判定形式（命令流逐字节比对在批三 T29-4）。
 void Test29WrapDefaultOffZeroFit(){
@@ -1673,6 +1703,7 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.WrapWidthDynamics",       &Test29WrapWidthDynamics);        // T29-3
     GetTestRegistry().Add("TextWidget.WrapEmptyLines",          &Test29WrapEmptyLines);           // T29-WRAP-1
     GetTestRegistry().Add("TextWidget.WrapSameWidthNoRebuild",  &Test29WrapSameWidthNoRebuild);   // T29-WRAP-3
+    GetTestRegistry().Add("TextWidget.WrapFingerprintIncludesWeight", &Test36WrapFingerprintIncludesWeight);   // T36-7
     GetTestRegistry().Add("TextWidget.WrapDefaultOffZeroFit",   &Test29WrapDefaultOffZeroFit);    // A2 结构判据（批二）
     GetTestRegistry().Add("TextWidget.WrapDefaultOff",          &Test29WrapDefaultOff);           // T29-4（批三：命令流逐字段基线）
     GetTestRegistry().Add("TextWidget.WrapDegenerate",          &Test29WrapDegenerate);           // T29-5（批三：退化边界）

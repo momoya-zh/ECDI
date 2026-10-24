@@ -312,7 +312,7 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer, float
 const TextWidget::TextLayout& TextWidget::GetTextLayout(TextMeasurer& measurer) const{
 
 	// ★ C29-10：**五元组指纹显式列键**——入口每次判定（不依赖任何 setter「记得清」）。
-	//   (revision, font.size, font.family, dpi, GetWidth())——与 Phase 28 preferred 指纹同构。
+	//   (revision, font.weight, font.size, font.family, dpi, GetWidth())——六元组；Phase 36 批三 +weight（K8-④）。
 	int dpi = 0;
 	if (const Window* window = GetWindow())
 	{
@@ -324,7 +324,8 @@ const TextWidget::TextLayout& TextWidget::GetTextLayout(TextMeasurer& measurer) 
 	    && m_wrapDpi == dpi
 	    && m_wrapWidth == width
 	    && m_wrapFont.size == m_style.font.value.size
-	    && m_wrapFont.family == m_style.font.value.family)
+	    && m_wrapFont.family == m_style.font.value.family
+	    && m_wrapFont.weight == m_style.font.value.weight)   // Phase 36 批三 K8-④：漏加 = 换字重不重排
 	{
 		return m_wrapLayout;   // ★ 命中 ⇒ 零 FitText / 零 MeasureText 调用（T29-3 / T29-WRAP-3 锚）
 	}
@@ -447,7 +448,8 @@ Size TextWidget::GetPreferredSize() const{
 	if (m_prefValid && dpi != 0 && m_prefRevision == m_textRevision
 	    && m_prefDpi == dpi
 	    && m_prefFont.size == m_style.font.value.size
-	    && m_prefFont.family == m_style.font.value.family)
+	    && m_prefFont.family == m_style.font.value.family
+	    && m_prefFont.weight == m_style.font.value.weight)   // Phase 36 批三 K8-④
 	{
 		return m_prefCache;   // 命中 ⇒ 零 measurer 调用、零键构造（C28-5）
 	}
