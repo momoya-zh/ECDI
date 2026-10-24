@@ -16,7 +16,7 @@ struct Color
 	float r = 0.0f;		///< 红 [0,1]
 	float g = 0.0f;		///< 绿 [0,1]
 	float b = 0.0f;		///< 蓝 [0,1]
-	float a = 1.0f;		///< alpha／**不透明度** [0,1]：`1.0` = 完全不透明，`0.0` = 全透明（★ **不是「透明度」**——措辞反了会让「0.8」被误读成 80% 透明）。消费方 = `DrawRect` / `DrawRoundedRect` 经 `BlendAlphaSolid`（Phase 9）；★ **窗口清屏路径不消费**（Phase 18 C4：`COLORREF` 无 alpha 通道——见 `Window::SetBackgroundColor` 注释）
+	float a = 1.0f;		///< alpha／**不透明度** [0,1]：`1.0` = 完全不透明，`0.0` = 全透明（★ **不是「透明度」**——措辞反了会让「0.8」被误读成 80% 透明）。消费方**分后端**（★ 双链不对等 = deferred #71，2026-10-24 登记；当前零消费者，触发条件 = 首个半透明文本/焦点框消费者出现）：两链均消费 = `DrawRect` / `DrawRoundedRect`（经 `BlendAlphaSolid`，Phase 9）+ `DrawArc` / 覆盖度路径（经 `RasterizeMask` 预乘，Phase 8.6/24/33）；**GDI 链 `DrawText` / `DrawFocusRect` 恒丢弃**（`ToColorRef` 只取 RGB——GL 链全原语消费）；`DrawLine` 仅「AA 关 + a<1」边角丢弃。★ **窗口清屏路径不消费**（Phase 18 C4：`COLORREF` 无 alpha 通道——见 `Window::SetBackgroundColor` 注释）
 
 	static constexpr Color White()   noexcept { return { 1.0f, 1.0f, 1.0f, 1.0f }; }
 	static constexpr Color Black()   noexcept { return { 0.0f, 0.0f, 0.0f, 1.0f }; }
