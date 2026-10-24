@@ -515,7 +515,8 @@ void GLRenderer::PushClip(const Rect& rect)
 
 	// 焦点框以 lround 后的像素索引定位；裁切区必须使用相同的量化规则。
 	// 否则缩放产生的 .5 坐标会使右/下边比 scissor 多出一个像素，进而被裁掉。
-	// 这也与 GDIBackend::PushClip 的 IntersectClipRect 参数保持一致。
+	// 注意：GDI PushClip 自 Phase 34 起走 floor（ToPixelRect = QuantizeEdge），本处 lround
+	// 为跨后端已知 ≤1px 残差（deferred #75）——GL 内部与焦点框顶点的同口径不受影响。
 	RECT rc{ static_cast<LONG>(std::lround(rect.x)), static_cast<LONG>(std::lround(rect.y)),
 	         static_cast<LONG>(std::lround(rect.x + rect.width)),
 	         static_cast<LONG>(std::lround(rect.y + rect.height)) };
