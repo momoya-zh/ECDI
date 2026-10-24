@@ -116,8 +116,8 @@ private:
 
 	// ★ Phase 20（△20）：缓存键**含 DPI** ⇒ 跨屏后旧 DPI 的 HFONT 自然不命中
 	//   （需求 D3 的"清字体缓存"由**键隔离**达成——零新增 API，且比显式清理更强：
-	//    旧项仍在，只是永不命中）。键 = (size, family, dpi)。
-	std::map<std::tuple<float, std::string, int>, HFONT> m_fontCache;   ///< D1+Phase20：Font→HFONT 缓存（键含 DPI；测量缓存归 GDITextMeasurer）
+	//    旧项仍在，只是永不命中）。键 = (weight, size, family, dpi)——Phase 36 C36-2：键一律含 weight。
+	std::map<std::tuple<std::uint16_t, float, std::string, int>, HFONT> m_fontCache;   ///< D1+Phase20：Font→HFONT 缓存（键含 DPI；测量缓存归 GDITextMeasurer）
 
 	// ── Phase 8.6：圆角覆盖度抗锯齿 ─────────────────────────────────
 

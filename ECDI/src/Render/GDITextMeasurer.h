@@ -78,16 +78,16 @@ private:
 	HFONT GetOrCreateFont(const Font& font, int dpi);
 
 	/// ★ Phase 20（△21）：缓存键**含 DPI**——与 `GDIBackend` 同理（键隔离）。
-	/// 键 = (size, family, **测量基准 dpi**)。
-	std::map<std::tuple<float, std::string, int>, HFONT> m_fontCache;   ///< Font→HFONT 缓存（键含 DPI——必须完整覆盖 Font 语义字段 + 换算基准）
+	/// 键 = (weight, size, family, **测量基准 dpi**)——Phase 36 C36-2：键一律含 weight。
+	std::map<std::tuple<std::uint16_t, float, std::string, int>, HFONT> m_fontCache;   ///< Font→HFONT 缓存（键含 DPI——必须完整覆盖 Font 语义字段 + 换算基准）
 
 	HWND m_hwnd = nullptr;   ///< ★ Phase 26：窗口句柄（`Initialize` 注入——测量基准 DPI 的来源）
 
 	/// ★ Phase 26（△9b）：**测量结果缓存**——消掉「每帧 × 每行」的
 	/// `GetDC` + `SelectObject` + `GetTextExtentPoint32W`（性能方向②）。
-	/// 键 = (text, size, family, **dpi**)——★ 含 DPI（跨屏自动失效），与 `m_fontCache` 同口径。
+	/// 键 = (weight, text, size, family, **dpi**)——★ 含 DPI（跨屏自动失效），与 `m_fontCache` 同口径；Phase 36 +weight。
 	/// ★ `font.size`（float）在生成 key 前**不得额外 rounding**（同一 `Font` 重复测量须逐位命中）。
-	std::map<std::tuple<std::string, float, std::string, int>, Size> m_measureCache;
+	std::map<std::tuple<std::uint16_t, std::string, float, std::string, int>, Size> m_measureCache;
 
 	/// ★ 上限 ⇒ 达上限 `clear()`（O(1)，防无界增长——TextBox 反复编辑会不断产生新 `text` 键）。
 	/// ★ 淘汰策略（LRU）不做——记为详设开放项 O9。

@@ -4,6 +4,7 @@
 #include "ECDI/Core/String.h"
 #include "ECDI/Core/UTF8.h"   // ★ Phase 29 △2：CodepointIndexToByteOffset（startCp → 字节偏移）
 #include "Platform/Win32/Win32RenderContext.h"   // ★ Phase 26：Initialize 取 HWND（同 GDIBackend 先例）
+#include "Render/FontWeightRule.h"       // ★ Phase 36 C36-1：字重消费边界 clamp
 
 #include <algorithm>
 #include <cmath>
@@ -45,10 +46,10 @@ HFONT GDITextMeasurer::GetOrCreateFont(const Font& font, int dpi)
 	//   基准 = **调用点传入的测量 DC 的 `LOGPIXELSX`**（屏幕 DC）。
 	//   测量链路"自己进、自己出"用同一基准 ⇒ 返回值对基准 DPI **近似不敏感**（初设 §2.2.4）；
 	//   与渲染侧（窗口 DC 基准）的差异是**已记的近似**（详设 O1）。
-	// D1：缓存键 = size + family + **dpi**（键隔离——与 GDIBackend 同理）
+	// D1：缓存键 = weight + size + family + **dpi**（键隔离——与 GDIBackend 同理；Phase 36 +weight）
 	const int effectiveDpi = (dpi > 0) ? dpi : 96;
 
-	const auto key = std::make_tuple(font.size, font.family, effectiveDpi);
+	const auto key = std::make_tuple(font.weight, font.size, font.family, effectiveDpi);
 	auto it = m_fontCache.find(key);
 	if (it != m_fontCache.end())
 	{
@@ -60,7 +61,7 @@ HFONT GDITextMeasurer::GetOrCreateFont(const Font& font, int dpi)
 	// ★ Phase 20：DIP → 物理像素（float 口径）——使本地 HFONT 与渲染侧同尺度
 	lf.lfHeight = -static_cast<LONG>(std::lround(font.size * effectiveDpi / 96.0));
 	lf.lfCharSet = DEFAULT_CHARSET;                             // 关键：中文/Unicode 正常
-	lf.lfWeight = FW_NORMAL;
+	lf.lfWeight = static_cast<WORD>(ClampWeight(font.weight));   // Phase 36 C36-1：消费边界 clamp（默认 400 = FW_NORMAL 逐位）
 
 	if (!font.family.empty())
 	{
@@ -93,8 +94,8 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 	}
 
 	// ★ Phase 26（△9b）：查测量结果缓存（★ 在 GetDC **之前**）。
-	//   键 = (text, size, family, **dpi**)——★ 含 DPI（跨屏自动失效）。
-	const auto cacheKey = std::make_tuple(text, font.size, font.family, dpi);
+	//   键 = (weight, text, size, family, **dpi**)——★ 含 DPI（跨屏自动失效）；Phase 36 +weight。
+	const auto cacheKey = std::make_tuple(font.weight, text, font.size, font.family, dpi);
 	const auto cacheIt = m_measureCache.find(cacheKey);
 	if (cacheIt != m_measureCache.end())
 	{

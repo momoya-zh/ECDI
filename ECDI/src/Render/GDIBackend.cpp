@@ -8,6 +8,7 @@
 #include "Render/BackendContract.h"   // ★ 审计 #62：共享契约件（H3 图像可用性守卫）
 #include "Render/CoverageRaster.h"
 #include "Render/LineCoverage.h"
+#include "Render/FontWeightRule.h"   // ★ Phase 36 C36-1：字重消费边界 clamp（批一 = ClampWeight；PickNearestTier 随批二消费者落地）
 
 
 #include <algorithm>
@@ -1368,8 +1369,8 @@ HFONT GDIBackend::GetOrCreateFont(const Font& font)
 
 	const int effectiveDpi = (dpi > 0) ? dpi : 96;
 
-	// D1：缓存键 = size + family + **dpi**（键隔离——见头文件成员注释）
-	const auto key = std::make_tuple(font.size, font.family, effectiveDpi);
+	// D1：缓存键 = weight + size + family + **dpi**（键隔离——见头文件成员注释；Phase 36 +weight）
+	const auto key = std::make_tuple(font.weight, font.size, font.family, effectiveDpi);
 	auto it = m_fontCache.find(key);
 	if (it != m_fontCache.end())
 	{
@@ -1381,7 +1382,7 @@ HFONT GDIBackend::GetOrCreateFont(const Font& font)
 	// ★ Phase 20：DIP → 物理像素（float 口径）+ lround 取整（lfHeight 是 LONG）
 	lf.lfHeight = -static_cast<LONG>(std::lround(font.size * effectiveDpi / 96.0));
 	lf.lfCharSet = DEFAULT_CHARSET;                             // 关键：中文/Unicode 正常
-	lf.lfWeight = FW_NORMAL;
+	lf.lfWeight = static_cast<WORD>(ClampWeight(font.weight));   // Phase 36 C36-1：消费边界 clamp（默认 400 = FW_NORMAL 逐位）
 
 	if (!font.family.empty())
 	{

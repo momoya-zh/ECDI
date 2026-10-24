@@ -36,6 +36,7 @@ int ECDI::Test::RunAllTests()
     RegisterApplicationDispatchTests();   // Phase 23：工作线程 → UI 线程投递（T23-1..T23-11）
     RegisterLineCoverageTests();   // Phase 24：DrawLine 线段抗锯齿（T24-1..T24-11）
     RegisterTextMeasurerTests();   // Phase 26：文本测量链（T26-10 / T26-12）
+    RegisterFontWeightTests();   // Phase 36 批一：字重红线（T36-2）
     RegisterFontEngineTests();   // Phase 26：FontEngine（T26-1..T26-6）
     RegisterGLBackendTests();   // Phase 26：GL 后端（T26-7 / T26-8）
     RegisterDesktopNestTests();   // M1：DesktopNest（T-M1-1..T-M1-6）
