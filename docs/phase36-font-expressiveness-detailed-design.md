@@ -1,6 +1,6 @@
 ﻿# Phase 36 · Font 表达力 详细设计（字重 / face index / 复合族名第二项）
 
-> 状态：**v1.2**（2026-10-24 批一/批二实施回填——§9；评审吸收后的事实层勘误 E36-1..3；架构零回退）｜输入 = [初设 v1.1](phase36-font-expressiveness-preliminary-design.md) + [需求稿 v1.1](phase36-font-expressiveness-requirements.md)｜上游 = deferred #70
+> 状态：**v1.3**（2026-10-24 全链收口——§9 含批一/二/三与 harness 验收记录；E36-1..3 实施期勘误；架构零回退）｜输入 = [初设 v1.1](phase36-font-expressiveness-preliminary-design.md) + [需求稿 v1.1](phase36-font-expressiveness-requirements.md)｜上游 = deferred #70
 > ★ **证据链（全部落盘 `.workbuddy/spike/p36/`）**：探针 1/1b/1c（GDI 映射器）· 探针 2（name 表解析器）· **探针 3 v2（p36c，本日扩展 OS/2 列**：`usWeightClass` + `fsSelection`，clang-cl `/MD` 链生产同款 vendored FreeType 2.14.3 静态库——`p36c_ftnames.cpp` + `p36c_readout.txt`）。
 > ★ **v1.1 两大设计换血（均为读数反喂）**：① **档位来源 = face 自身 `OS/2.usWeightClass`**（初设的「注册表样式词→weight 映射表」废除——本方读数复核评审读数：seguisb=600 · segoeuisl=350 · segoeuil=300 · seguibl=900 · consolab=700 全吻合，唯一偏差 msyhl 真实 = **290** 非表记 300；GDI `tmWeight` 与 `usWeightClass` 对真实字面逐一相等 = 双仪器互证）；② **斜体面排除 = `OS/2.fsSelection` bit0**（consolai fsSel=1、consolaz fsSel=33 [ITALIC] 实测——它们 nameID1 = 'Consolas' 能穿过族名过滤，必须显式排除）。
 
@@ -171,7 +171,8 @@ inline std::uint16_t ClampWeight(std::uint32_t w) { return (std::uint16_t)std::m
 - **E36-2（批二实施期盘点）**：`FaceIdFor(font.family)` 内部调用点实测 **9 处**（GlyphIndex/MeasureText/FitText/LineHeight/Ascent×3/Glyph/GlyphKey）——详设盯防④只点名 GLRenderer 一处；九处全部随批二显式传 `font.weight`（漏一处 = 静默错档）。
 - **E36-3（P3-⑯ 定案细化）**：familyCache 键 = `(family, weight)` **weight 原值**（含空 family `("", weight)`——非 ("", ClampWeight) 字面；clamp 仅作用于归并/lfWeight，键存原值与 C36-1 一致）。
 - **批一落地**（`762c483`）：△1-5 + △14a（仅 ClampWeight）+ T36-2 ⇒ **MinGW 491/491**。
-- **批二落地**（本提交）：△6/7/8/9/10/11/14b + T36-3/4/5/6/8 ⇒ **MinGW 496/496 退出码 0**——490 存量全绿（T26-6/T26-12/T26-13/T69 回归锚全过 = `FamilyToFileName` 逐字等价 + 计数语义 + 缓存行为实证保持）；新用例六判别式全成立（Segoe 600==700≠400 / 300==400 / 900==700 · YaHei UI≠YaHei@400/700 · NSimSun · YaHei Light 独立族 · consola.ttf 直查豁免 · Consolas@650==@700 斜体排除 · ZH 回退边界）。
+- **批二落地**（本提交）：△6/7/8/9/10/11/14b + T36-3/4/5/6/8 ⇒ **MinGW 496/496 退出码 0**——490 存量全绿（T26-6/T26-12/T26-13/T69 回归锚全过 = `FamilyToFileName` 逐字等价 + 计数语义 + 缓存行为实证保持）；新用例六判别式全成立（Segoe 600==700≠400 / 300==400 / 900==700 · YaHei UI≠YaHei@400/700 · NSimSun · YaHei Light 独立族 · consola.ttf 直查豁免 · Consolas@650==@700 斜体排除 · ZH 回退边界）。-
+- **★★ 全链收口（2026-10-24）**：harness 库外验收通过（`6820866`，读数 `.workbuddy/spike/p36/p36h_matrix_readout.txt` + harness `.scratch/req11/p36h_matrix.{cpp,txt}`）——GL 生产 FaceIdFor 身份矩阵 **14/14** · A2 五族墨迹比双链 **10/10 方向 OK**（GDI 与 REQ-10 基线逐位同 = A6 环境恒定锚；GL 经生产 FaceIdFor/Glyph **1.35–1.72×**）· A3 真字面格串宽 **9/9 delta=0**（SimSun@700 按 C36-4 豁免）· harness 回归全绿；**五链 497/497**（MinGW / Clang / ClangCL / MSVC Debug / MSVC Release）；**#70 关闭 + harness REQ-10 同日翻转 ✅（v3.6）**；锚点 497。
 
 ---
 
