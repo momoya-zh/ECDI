@@ -1,155 +1,169 @@
-﻿# Phase 36 · Font 表达力 详细设计（字重 / face index / 复合族名第二项）
+# Phase 36 · Font 表达力 详细设计（字重 / face index / 复合族名第二项）
 
-> 状态：**v1.0**（2026-10-24 落盘，**待评审**）｜输入 = [初设 v1.1](phase36-font-expressiveness-preliminary-design.md)（PASS）+ [需求稿 v1.1](phase36-font-expressiveness-requirements.md)｜上游 = deferred #70
-> ★ **探针 3（p36c）= 初设移交的唯一实证项，本日完成并改写了设计**：`.workbuddy/spike/p36/p36c_ftnames.cpp` + `p36c_readout.txt`（clang-cl `/MD` 链**生产同款 vendored FreeType 2.14.3** 静态库——`cmake-build-release-visual-studio/freetype.dir/Release/freetype.lib`）。**核心发现：FT 的 `face->family_name` 优先返回 nameID-16（排版族）而非 nameID-1**——`msyhl.ttc` face0 返回 `family='Microsoft YaHei' style='Light'`（其 nameID1 = "Microsoft YaHei Light"）；`seguisb.ttf` 同型。⇒ **初设 §1.2「用 `family_name` 做 nameID-1 过滤」的假设被本探针证伪**：若照做，Light 会被误放进基族档位集（300 进入 `Microsoft YaHei` 的候选档）——恰是要防的两链分歧。⇒ 过滤实现改为**直读 nameID 1**（`FT_Get_Sfnt_Name`，读数列证明可行且 ZH 记录可读）。
-
----
-
-## §1 详设必答收口（初设移交项）
-
-### 1.1 FT name 实读读数（探针 3，全部 face）
-
-| 文件 face | `family_name` | `style_name` | flags | PS | **nameID1-EN**（`FT_Get_Sfnt_Name`） | nameID1-ZH |
-|---|---|---|---|---|---|---|
-| msyh.ttc f0 | Microsoft YaHei | Regular | 0 | MicrosoftYaHei | Microsoft YaHei | 微软雅黑 |
-| msyh.ttc f1 | **Microsoft YaHei UI** | Regular | 0 | MicrosoftYaHeiUI | Microsoft YaHei UI | Microsoft YaHei UI |
-| simsun.ttc f0/f1 | SimSun / NSimSun | Regular | 0 | … | SimSun / NSimSun | 宋体 / 新宋体 |
-| msyhbd.ttc f0/f1 | Microsoft YaHei / YaHei UI | Bold | **2** | …**-Bold** | Microsoft YaHei / YaHei UI | 微软雅黑 / 同 EN |
-| **msyhl.ttc f0** | **Microsoft YaHei（!）** | Light | 0 | MicrosoftYaHeiLight | **Microsoft YaHei Light** | **微软雅黑 Light** |
-| msyhl.ttc f1 | Microsoft YaHei UI（!） | Light | 0 | … | Microsoft YaHei UI Light | 同 EN |
-| seguuisb（seguisb.ttf） | **Segoe UI（!）** | Semibold | 0 | SegoeUI-Semibold | **Segoe UI Semibold** | — |
-
-### 1.2 过滤判据定案（替换初设 §1.2 第 2 层的实现表述）
-
-- **判据 = nameID1 直读**：`MatchRequest(face) = (nameId1En == request) || (nameId1Zh == request)`——`nameId1En` = platform 3 · nameID 1 · language 0x409；`nameId1Zh` = 同 nameID · language 0x804；记录为 UTF-16BE → UTF-8（复用 Phase 26 `Win32FontSource` 的宽串转换纪律）。两字段在 **face 加载时读取一次**并存入 `FaceEntry`（faces 缓存不重复读）。
-- **`face->family_name` / `style_name` / `style_flags` / PS 名 = 诊断信息，不作判据**（family_name 的 nameID16 偏好已被探针 3 证伪；flags 只区分 Bold 无法表达 300/600 档）。
-- 跨文件同族名歧义（P3-①）：`msyh.ttc` 与 `msyhbd.ttc` 的 nameID1 **相同**——无碍：候选由 resolve 按样式词定位到**不同文件**，过滤只做「该 face 属不属于请求族」的布尔判定，文件身份在候选层已区分。
-- **ZH 请求可达**：`family="微软雅黑"` ⇒ nameID1-ZH = "微软雅黑" ✓（msyh f0 命中；msyhbd f0 同名 ⇒ weight 700 档命中）。`family="微软雅黑 Light"` ⇒ zh1 = "微软雅黑 Light" ✓（独立族直达）。`Segoe UI` 系无 ZH 记录（zh1 空）⇒ EN 判据兜底 ✓。
-- 读取失败（无 name 表/无记录）⇒ `nameId1*` 记空串 ⇒ 过滤判据恒 false ⇒ 该候选出局 + 告警（不静默）。
-
-### 1.3 其余移交项状态
-
-K8 十一项定键、兼容机制（默认参数/默认实现虚函数）、组合规则表 = 初设已定案，本稿 §2/§3 落到签名与逐文件粒度；勿重开清单继续有效。
+> 状态：**v1.1**（2026-10-24 外部评审「有条件通过」吸收——3×P0 + 3×P1 + 5×P2 + 4×P3 修毕 ⇒ **PASS**，不退回初设；v1.0 同日落盘）｜输入 = [初设 v1.1](phase36-font-expressiveness-preliminary-design.md) + [需求稿 v1.1](phase36-font-expressiveness-requirements.md)｜上游 = deferred #70
+> ★ **证据链（全部落盘 `.workbuddy/spike/p36/`）**：探针 1/1b/1c（GDI 映射器）· 探针 2（name 表解析器）· **探针 3 v2（p36c，本日扩展 OS/2 列**：`usWeightClass` + `fsSelection`，clang-cl `/MD` 链生产同款 vendored FreeType 2.14.3 静态库——`p36c_ftnames.cpp` + `p36c_readout.txt`）。
+> ★ **v1.1 两大设计换血（均为读数反喂）**：① **档位来源 = face 自身 `OS/2.usWeightClass`**（初设的「注册表样式词→weight 映射表」废除——本方读数复核评审读数：seguisb=600 · segoeuisl=350 · segoeuil=300 · seguibl=900 · consolab=700 全吻合，唯一偏差 msyhl 真实 = **290** 非表记 300；GDI `tmWeight` 与 `usWeightClass` 对真实字面逐一相等 = 双仪器互证）；② **斜体面排除 = `OS/2.fsSelection` bit0**（consolai fsSel=1、consolaz fsSel=33 [ITALIC] 实测——它们 nameID1 = 'Consolas' 能穿过族名过滤，必须显式排除）。
 
 ---
 
-## §2 接口与结构定稿
+## §1 评审修订收口（v1.0 → v1.1 的事实层修正）
+
+### 1.1 【P0-1 修】「family 即文件名」直查路径保留且优先
+
+`Win32FontSource::ResolveFile` 的既有路径序 = ①**文件名直查**（`Win32FontSource.cpp:135-148`：fonts 目录 + FileExistsWide）→ ②注册表 `FamilyToFileName`。v1.0 的 `ResolveFileCandidates` 覆写只写「注册表枚举」⇒ **ModelProbe 的 `consola.ttf` 写法（`ModelProbe.cpp:474/779`）会解析失败回退 SimSun**。
+**修正**：`ResolveFileCandidates(family)` = **①文件名直查命中 ⇒ 单候选 `{family, hint=0}`（排在首位）** + **②注册表枚举候选**；`FontEngine` 侧归并平手时**候选序优先**（下标小者胜——P3-15 后的 tie-break）⇒ 直查路径在 weight=400 时的最终选择与 legacy 逐位一致（A1）。
+
+### 1.2 【P0-2 修】ZH 族名可达断言删除，回归需求非目标 3
+
+评审实测：本机注册表 Fonts 键值名**无任何中文项** ⇒ ZH 请求在 resolve 层**不可能产生候选**（过滤层不能凭空造候选——v1.0 把 ZH 可达写在过滤层属逻辑倒置）。**裁定 = 采纳评审建议**：
+- 删除 v1.0 §1.2/§2.3/§4 的全部「ZH 请求可达」表述（`微软雅黑` 直达断言作废）；
+- `FaceEntry` **不引入 `nameId1Zh` 字段**（死代码不进——条 95）；过滤判据 = `nameId1En == request` 单判（候选文本本就是 EN）；
+- **边界钉住**（T36-4 新增负对照）：`FaceIdFor("微软雅黑")` ⇒ 回退默认 face + Warning——ZH 请求在 GL 链不解析 = 需求非目标 3 的既有边界（GDI 链 ZH 可用 = **既有跨链不对称**，v1.1 如实登记，非本 Phase 引入）；
+- `nameId1En` 直读仍必要（探针 3：`family_name` 偏好 nameID-16——msyhl f0 读 "Microsoft YaHei"/Light，必须用 nameID1 才能滤掉）。
+
+### 1.3 【P0-3 修】「等宽族字重串宽不变」断言删除（已被已有读数证伪）
+
+`p36a2_readout.txt` [3]：Consolas 400 → w=**187**、560/700 档 → w=**200**（+7%）——「等宽 Bold 推进不变」的假设不成立（读数含 CJK 字符的 GDI 字体回退加粗干扰，Latin 纯串未单测）。**仪器教训记录**：未经单变量验证的「常识不变量」不得作判据。T36-2 收窄 = SimSun 串宽回归带一条（合成加粗的 advance 变化本身就是「字重可达」的 GDI 侧证据——A2 库内载体，见 §4 批次）。
+
+### 1.4 【P1-4 修】numFaces 读取顺序
+
+`FT_New_Face(path, hint)` 在 hint 越界时**打开即失败**，拿不到 `num_faces`。**修正 = p36c 自己的写法**（`p36c_ftnames.cpp:37-40`）：先 `FT_New_Face(path, 0)` 读 `num_faces`（该 face 即 face0，入缓存复用），再逐 index 重开；hint 仅决定**扫描起点序**（hint 先试、其余升序），不再是「首开参数」。
+
+### 1.5 【P1-5 + P2-12 合并修】档位 = `OS/2.usWeightClass`；斜体 = `fsSelection` bit0 排除
+
+- 斜体面实测能穿过族名过滤（`consolaz.ttf` nameID1 = 'Consolas'）——v1.0 的「样式词映射表 + Italic 跳过」既未定义组合词（"Bold Italic"）又有 msyhl 290/300 偏差。**修正 = 双双废除**：
+  - **档位 weight = face 自身的 `OS/2.usWeightClass`**（FontEngine 加载时随 nameID1 一并读入 `FaceEntry`；OS/2 缺失 ⇒ 记 400 + 告警）；
+  - **斜体排除 = `fsSelection & 0x01`**（Italic 位——consolai=1 / consolaz=33 实测；排除发生于候选过滤层，先于归并）；
+  - resolve 候选结构随之瘦身为 `{filePath, faceIndexHint}`（P2-7：`weight` 参数与字段删除——枚举本就全档，请求档由归并层决定，死参数不进）。
+- `Win32FontSource::ResolveFileCandidates` = **单参 `(family)`**；`EnumerateFontKeys` 提取照旧（P0-1 双源：直查 + 注册表项）。
+
+### 1.6 【P1-6 修】A2 双载体落位
+
+A2（字重可达）= **库内**：T36-2 SimSun 串宽回归带 [1.05, 1.10]（真实窗口经 `GDITextMeasurer`，`lfWeight` 接线的端到端证据）+ **库外**：批三 harness 交付时 A6 探针扩墨迹比读数（5 族 1.29–1.79× 复现，固定指纹）。批次表（§5）补 A2 行，不再落空。
+
+### 1.7 其余 P2/P3 吸收（逐条）
+
+| # | 修正 |
+|---|---|
+| P2-8 | `FaceEntry` 字段（+`nameId1En` +`os2Weight` +`italic`）归 **△7**（`FontEngine.cpp` Impl `:46-49`）；△6 = `FaceIdFor` 签名 + `:85-89` doxygen 同步 |
+| P2-9 | T36-6 改用**既有观测缝** `MeasureTextCacheMissCount()`（`FontEngine.cpp:263`）：400 首测 miss+1 → 同参复测 +0 → 变 weight miss+1；m_fontCache/lineHeightCache 无观测缝 ⇒ 键完整性由盯防①代码走查承担（如实记录不可观测） |
+| P2-10 | T36-8 改断 **face 身份**：`FaceIdFor("Segoe UI",600) == FaceIdFor("Segoe UI",700)` 且 `!= @400`（宽度相等在同 FaceId 下是同义反复） |
+| P2-11 | 注释同步补：`TextWidget.cpp:312`「五元组」→ 六元组（+weight）· `GDIBackend.h:119` · `GDITextMeasurer.h:80/:88` 的「键 = (size, family, dpi)」→ 四元组 |
+| P3-13 | `familyCache` 行号 = **`:56`**（:55 是 nextFaceId）；「tuple weight 最前」措辞改「**键一律含 weight**」（familyCache = `pair<string,uint16>`、faces = `pair<string,int>`，两者非 tuple） |
+| P3-14 | 490 = **运行自报口径**（全局注册表内含框架自注册条目，均可执行；`RunAllTests.cpp` 本身无 Add(，仅调 RunAll）——锚点不改，本条备查 |
+| P3-15 | `PickNearestTier` 返回 **tiers 下标**；`WeightTier` 结构删除（直接 `std::vector<std::uint16_t>` 输入） |
+| P3-16 | 空 family 的 familyCache 键 = `("", ClampWeight(weight))`——与普通键同形，写入 §2.3-① |
+
+**复核确认（评审正面清单）**：K8 穷尽性独立复核通过（全库逐字段比较点仅 TextWidget 两处）；行号抽查 ±1 内吻合（仅 :55 例外已修）；「Segoe UI@900 ⇒ GL 给 Black」的评审自查假设已自我证伪撤回（seguiBL n1en = "Segoe UI Black" 被滤）。
+
+---
+
+## §2 接口与结构定稿（v1.1 修订）
 
 ### 2.1 `FontSource.h`（△4）
 
 ```cpp
 struct FontSourceCandidate {
-    std::string filePath;      // 可 FT_New_Face 的路径（编码契约同 ResolveFile = ANSI/UTF-8 窄串）
-    std::uint16_t weight;      // 该候选代表的档位（注册表样式词映射；无样式词 = 400）
-    int faceIndexHint;         // 复合键匹配项位置（0 起；非复合 = 0）——仅提示，加载时验证
+    std::string filePath;   // 可 FT_New_Face 的路径（编码契约同 ResolveFile）
+    int faceIndexHint;      // 复合键匹配项位置（0 起；非复合/文件直查 = 0）——仅提示
 };
-// 新虚函数，带默认实现（实现者零改动——Phase 32 S7 / #60 先例）：
-virtual std::vector<FontSourceCandidate> ResolveFileCandidates(
-    const std::string& family, std::uint16_t weight) const;
-// 默认实现：{ ResolveFile(family) 非空 ⇒ 单候选 { path, /*weight=*/400, /*hint=*/0 } }
-// ——单候选档位未知记 400 ⇒ 归并时它是唯一候选必被选中 ⇒ 非 Win32/测试源行为与 legacy 完全一致
+// 新虚函数，带默认实现（实现者零改动）：
+virtual std::vector<FontSourceCandidate> ResolveFileCandidates(const std::string& family) const;
+// 默认实现：{ ResolveFile(family) 非空 ⇒ 单候选 {path, 0} }——非 Win32/测试源与 legacy 一致
 ```
-**legacy `ResolveFile(family)` 签名与语义逐字不变**（`FontEngineTests.cpp:178/182/189`、`TextMeasurerTests.cpp:486`、CountingFontSource `:42` 零改动）。
 
 ### 2.2 `Win32FontSource`（△5/△6）
 
-- 新增 `ResolveFileCandidates` 覆写：复用注册表全键枚举（提取内部助手 `EnumerateFontKeys(callback)` 供新旧两路共用——旧 `FamilyToFileName` 行为逐字保留）→ 键名剥后缀 → ` & ` 拆项 → 对**每一项**独立判「== family（3）/ family+样式词前缀（2）」→ 命中项产出候选 `{文件, 样式词→weight, 项序}`。
-- **样式词→weight 映射表**（定稿）：`Bold→700 · Semibold→600 · Medium→500 · Regular→400 · Semilight→350 · Light→300 · Thin→250 · Black→900`；`Italic/Oblique` 等非 weight 词 = 跳过该项（weight 维非目标）；未知词 = 跳过 + 该候选不计。同键两项各自成候选（`Microsoft YaHei & Microsoft YaHei UI` ⇒ f0@400 + f1@400 两个 hint）。
-- `FamilyToFileName`/`ResolveFile`/`DefaultFontFile` **零改动**。
+`ResolveFileCandidates` 覆写 = **①文件名直查**（镜像 legacy 路径序：fonts 目录 + FileExistsWide，命中 ⇒ `{family, 0}` 首位）+ **②注册表枚举**（`EnumerateFontKeys` 提取共用；键名剥后缀 → ` & ` 拆项 → 每项独立判「== family（3）/ family+␣前缀（2）」→ 命中项产出候选，**无 weight 字段**——档位归 face 自身 OS/2）。`FamilyToFileName`/`ResolveFile`/`DefaultFontFile` 逐字不动。
 
-### 2.3 `FontEngine`（△3）
+### 2.3 `FontEngine::FaceIdFor(family, weight = 400)`（△6/△7）六步流程
 
-- `FaceId FaceIdFor(const std::string& family, std::uint16_t weight = 400);`（默认参数 = 编译兼容；GL 侧调用点显式传参）。
-- 流程：① 空 family ⇒ **legacy 路径原样**（`ResolveFile("") → DefaultFontFile`，不进候选机制——A1 逐位）；② `familyCache.find((family, weight))`；③ 候选为空 ⇒ 告警 + legacy 默认回退 + 入缓存（沿 `:211-215` 不静默契约）；④ 逐唯一路径：`FT_New_Face(path, hint)` → 读 `numFaces` → 在 0..numFaces−1 内**先 hint 后其余**找 `MatchRequest` 命中的 faceIndex（faces 键 = `(路径, faceIndex)`；`FaceEntry` 增 `nameId1En/nameId1Zh`）；命中 ⇒ 存活档 `{candidate.weight, 索引}`；⑤ 存活档集合 → `FontWeightRule::PickNearestTier(tiers, ClampWeight(weight))` → 选定 `(path, faceIndex)` ⇒ `familyCache.emplace((family, weight), id)`；⑥ 全部候选无存活 face ⇒ 告警 + legacy 默认回退 + 入缓存。
-- **ClampWeight**：`std::min<std::uint32_t>(weight, 1000u)`（C36-1，两处消费点同式：FontEngine 归并前 + GDI `lfWeight` 前）。
-- `measureCache`/`lineHeightCache` 键前置 weight（§2.4）。
+1. **空 family** ⇒ legacy 原样（`ResolveFile("") → DefaultFontFile`）+ `familyCache[("", ClampWeight(weight))]`。
+2. `familyCache.find((family, ClampWeight(weight)))` 命中即返。
+3. `candidates = source->ResolveFileCandidates(family)`；为空 ⇒ 告警 + legacy 默认回退 + 入缓存（不静默）。
+4. 逐唯一 path：**`FT_New_Face(path, 0)` 先开读 `numFaces`**（face0 入缓存）→ 扫描序 = 各候选 hint 优先、其余升序 → 每 face 入 `faces[(path, idx)]` 时读 `nameId1En`（FT_Get_Sfnt_Name，platform 3 · nameID 1 · lang 0x409，UTF-16BE→UTF-8）+ `os2Weight`（OS/2 usWeightClass，缺表记 400 + 告警）+ `italic`（fsSelection bit0）。
+5. **过滤**：`nameId1En == family` 且 `!italic` 的 face 成为存活档（weight = 其 os2Weight）。
+6. `PickNearestTier(存活档 weights, ClampWeight(weight))` → 下标 → 对应 `(path, idx)` ⇒ `familyCache.emplace`；全灭 ⇒ 告警 + legacy 默认回退 + 入缓存。
 
-### 2.4 缓存键定稿（K8 必改 7 处，tuple 字段序统一「weight 在最前」）
+### 2.4 缓存键（K8 必改 7 处；措辞 = 「键一律含 weight」）
 
-| 位置 | 新键类型 |
+| 位置 | 新键 |
 |---|---|
-| `GDIBackend.h:120` | `std::map<std::tuple<std::uint16_t, float, std::string, int>, HFONT>` |
-| `GDITextMeasurer.h:82` | 同上（HFONT） |
-| `GDITextMeasurer.h:90` | `std::map<std::tuple<std::uint16_t, std::string, float, std::string, int>, Size>` |
-| `FontEngine.cpp:61` measureCache | `std::map<std::tuple<std::uint16_t, std::string, float, std::string, int>, Size>` |
-| `FontEngine.cpp:62` lineHeightCache | `std::map<std::tuple<std::uint16_t, float, std::string, int>, float>` |
-| `FontEngine.cpp:55` familyCache | `std::map<std::pair<std::string, std::uint16_t>, FaceId>` |
-| `FontEngine.cpp:53` faces | `std::map<std::pair<std::string, int>, FaceEntry>` |
+| `GDIBackend.h:120`（:119 注释同步） | `std::tuple<std::uint16_t, float, std::string, int>`（weight, size, family, dpi） |
+| `GDITextMeasurer.h:82`（:80 注释同步） | 同上 |
+| `GDITextMeasurer.h:90`（:88 注释同步） | `std::tuple<std::uint16_t, std::string, float, std::string, int>`（weight, text, size, family, dpi） |
+| `FontEngine.cpp:61` measureCache | 同上（五元组） |
+| `FontEngine.cpp:62` lineHeightCache | `std::tuple<std::uint16_t, float, std::string, int>` |
+| `FontEngine.cpp:56` familyCache | `std::pair<std::string, std::uint16_t>`（family, weight） |
+| `FontEngine.cpp:53` faces | `std::pair<std::string, int>`（path, faceIndex） |
 
-### 2.5 `FontWeightRule.h`（新建，内部头，△13）
+### 2.5 `FontWeightRule.h`（新建内部头，△13）
 
 ```cpp
-struct WeightTier { std::uint16_t weight; std::size_t candidateIndex; };
-// |w-request| 最小者；平手取轻（w 小者）；再平手取 candidateIndex 小者——与 GDI 探针 1 全格一致
-std::size_t PickNearestTier(const std::vector<WeightTier>& tiers, std::uint16_t request);
-inline std::uint16_t ClampWeight(std::uint32_t w) { return static_cast<std::uint16_t>(std::min<std::uint32_t>(w, 1000u)); }
+// |w-request| 最小者；平手取轻（w 小者）；再平手取下标小者——与 GDI 探针 1 全格一致
+std::size_t PickNearestTier(const std::vector<std::uint16_t>& tiers, std::uint16_t request);
+inline std::uint16_t ClampWeight(std::uint32_t w) { return (std::uint16_t)std::min<std::uint32_t>(w, 1000u); }
 ```
-纯函数无 FT 依赖 ⇒ T36-3 真值表零环境。GDI 链不消费（映射器即实现，探针 = 验证样本）。
 
-### 2.6 其余调用点
+### 2.6 其余调用点与注释面
 
-`GLRenderer.cpp:229` ⇒ `FaceIdFor(font.family, font.weight)`（唯一 GL 解析点，显式传参）；`TextWidget` 两处指纹比较 +`.weight` + 注释键维顺移（wrap `:152-155`：font = 键维 2/3/4、DPI = 5、宽 = 6；preferred `:144`/`:444-452` 同步）；`Font.h` +`std::uint16_t weight = 400;`（`family` 之后[C7560]）+ 契约注释（0–1000 刻度 / 三层归并 / C36-4 合成分歧声明 / clamp 语义）。
+`GLRenderer.cpp:229` ⇒ `FaceIdFor(font.family, font.weight)`（显式）；`TextWidget.h:144/:152-155` + `.cpp:312/:320-336/:444-452`（P2-11 全集）；`Font.h` +`weight`（family 后[C7560]）+ 契约注释。
 
 ---
 
-## §3 逐文件差异 △1..△14
+## §3 逐文件差异 △1..△14（v1.1 修订）
 
 | △ | 文件 | 改动 |
 |---|---|---|
-| 1 | `ECDI/include/ECDI/Core/Font.h` | +`weight` 字段（family 后[C7560]）+ 契约注释 |
-| 2 | `ECDI/src/Render/GDIBackend.h` | `:120` 缓存键类型 +weight（§2.4） |
-| 3 | `ECDI/src/Render/GDIBackend.cpp` | `:1372` 键构造；`:1384` `lfWeight = static_cast<WORD>(ClampWeight(font.weight))`（ClampWeight 经 FontWeightRule.h 引入） |
-| 4 | `ECDI/src/Render/GDITextMeasurer.h` | `:82`/`:90` 键类型 +weight；注释「必须完整覆盖 Font 语义字段」之下补 weight 实例 |
-| 5 | `ECDI/src/Render/GDITextMeasurer.cpp` | `:51` 键构造；`:63` lfWeight 同 △3；`:97` 键构造 |
-| 6 | `ECDI/src/Render/FontEngine.h` | `FaceIdFor` 签名 +weight 默认参；`FaceEntry` +`nameId1En/nameId1Zh` |
-| 7 | `ECDI/src/Render/FontEngine.cpp` | FaceIdFor 流程重写（§2.3-④⑤⑥）；familyCache/faces/measureCache/lineHeightCache 键（§2.4）；`ReadFaceNameId1` 助手（FT_Get_Sfnt_Name，UTF-16BE→UTF-8，EN 优先 ZH 兜底） |
-| 8 | `ECDI/src/Render/FontSource.h` | +`FontSourceCandidate` + `ResolveFileCandidates` 带默认实现（§2.1） |
-| 9 | `ECDI/src/Platform/Win32/Win32FontSource.h` | +覆写声明 +`EnumerateFontKeys` 助手声明 |
-| 10 | `ECDI/src/Platform/Win32/Win32FontSource.cpp` | 覆写实现 + 样式词映射表 + `EnumerateFontKeys` 提取（FamilyToFileName 改调助手，**行为逐字等价**——T26-6/T69 既有用例回归锚） |
-| 11 | `ECDI/src/Render/GLRenderer.cpp` | `:229` `FaceIdFor(font.family, font.weight)` |
-| 12 | `ECDI/include/ECDI/Widget/TextWidget.h` | `:144`/`:152-155` 注释键维顺移 |
-| 13 | `ECDI/src/Widget/TextWidget.cpp` | `:320-336`/`:444-452` 两处比较 +`.weight` |
-| 14 | `ECDI/src/Render/FontWeightRule.h` | **新建**（§2.5；不入 `include/ECDI/` ⇒ CMake 0[GLOB 收录自动成立，沿 Phase 29 先例]） |
+| 1 | `include/ECDI/Core/Font.h` | +`weight`（family 后[C7560]）+ 契约注释 |
+| 2 | `src/Render/GDIBackend.h` | `:119` 注释 + `:120` 键类型 +weight |
+| 3 | `src/Render/GDIBackend.cpp` | `:1372` 键构造；`:1384` `lfWeight = static_cast<WORD>(ClampWeight(font.weight))` |
+| 4 | `src/Render/GDITextMeasurer.h` | `:80/:82/:88/:90` 注释 + 键类型 +weight |
+| 5 | `src/Render/GDITextMeasurer.cpp` | `:51` 键；`:63` lfWeight 同 △3；`:97` 键 |
+| 6 | `src/Render/FontEngine.h` | `FaceIdFor` 签名 +weight 默认参；`:85-89` doxygen 同步（字段在 △7） |
+| 7 | `src/Render/FontEngine.cpp` | Impl（`:46-49`）`FaceEntry` +`nameId1En/os2Weight/italic`；FaceIdFor 六步（§2.3）；`ReadFaceNameId1` 助手；familyCache `:56`/faces `:53`/measureCache `:61`/lineHeightCache `:62` 键 |
+| 8 | `src/Render/FontSource.h` | +`FontSourceCandidate` + `ResolveFileCandidates(family)` 带默认实现（§2.1） |
+| 9 | `src/Platform/Win32/Win32FontSource.h` | +覆写声明 +`EnumerateFontKeys` 声明 |
+| 10 | `src/Platform/Win32/Win32FontSource.cpp` | 覆写实现（直查 + 注册表双源，§2.2）+ `EnumerateFontKeys` 提取（FamilyToFileName 改调，**逐字等价**——T26-6/T69 锚） |
+| 11 | `src/Render/GLRenderer.cpp` | `:229` 显式传 `font.weight` |
+| 12 | `include/ECDI/Widget/TextWidget.h` | `:144/:152-155` 注释键维顺移 |
+| 13 | `src/Widget/TextWidget.cpp` | `:312` 五元组→六元组注释；`:320-336`/`:444-452` 比较 +`.weight` |
+| 14 | `src/Render/FontWeightRule.h` | **新建**（§2.5） |
 
-**测试文件 0 改动**（兼容机制 = §2.1 默认实现 + §2.3 默认参数——T36-1 承诺）。
+**测试文件 0 改动**（§2.1 默认实现 + §2.3 默认参数）。
 
----
+## §4 契约 C36-1..5（v1.1 终稿）
 
-## §4 契约 C36-1..5（终稿）
+1. **C36-1** `Font::weight` = 0–1000，默认 400；clamp = 消费边界（`ClampWeight`：FontEngine 归并前 / GDI lfWeight 前）；**缓存键存原值**（Clamp 后值仅用于归并与 lfWeight——用户改回合法值不残留污染）。
+2. **C36-2** 归并 = 候选集（**文件直查优先 + 注册表枚举**）→ **nameID1-EN 直读过虑 ∧ 非斜体**（fsSelection bit0）→ **OS/2 usWeightClass 档位**最近平手取轻；不跨族；`family_name` 不作判据；**ZH 族名不解析**（非目标 3——GL 链 ZH 请求回退默认 face + 告警；GDI 链 ZH 可用 = 既有跨链不对称，已登记）。
+3. **C36-3** 族名内嵌样式优先于 weight（weight 不降级既有样式——p36a2 [2]）。
+4. **C36-4** 合成分歧 = 已知限制（GDI 合成 advance +7.6% / GL 不合成）。
+5. **C36-5** 公共 API = **+1 字段 + 1 带默认实现的虚函数**（单参 `ResolveFileCandidates(family)`——无死参数）。
 
-1. **C36-1** `Font::weight` = 0–1000 刻度，默认 400；**clamp = 消费边界**（`ClampWeight` 两处：FontEngine 归并前 / GDI `lfWeight` 前；超界值不进任何缓存键——键存原值、消费时 clamp ⇒ 用户改回合法值不残留污染）。
-2. **C36-2** 归并 = 候选集（注册表强度匹配）→ **nameID1 直读过虑**（EN/ZH 双判）→ 最近字面平手取轻；**不跨族**；`face->family_name` 不作判据（探针 3 证伪记录在案）。
-3. **C36-3** 族名内嵌样式优先于 weight（weight 不降级既有样式——GDI 探针 p36a2 [2] 验证）。
-4. **C36-4** 合成分歧 = 已知限制：族内无所选字面档时 GDI 合成（advance +7.6% 实测）、GL 不合成；face 相同、墨不同。
-5. **C36-5** 公共 API 净变化 = `Font::weight` **+1 字段** + `FontSource::ResolveFileCandidates` **+1 带默认实现的虚函数**；face 可达性 = 内部实现细节。
+## §5 测试 T36-1..8（490 → ~500）与批次
 
----
-
-## §5 测试 T36-1..8（精确断言与装置；490 → ~500）
-
-| # | 装置 | 精确断言 |
+| # | 装置 | 精确断言（v1.1 修订） |
 |---|---|---|
-| T36-1 | 全量回归 | 490 条全绿；`FontEngineTests`/`TextMeasurerTests` **源文件逐字节未改**（git diff 空）；FaceIdFor(family)（单参）对 #69 验收 8 族返回值与改前一致（默认参数路径 = legacy 语义） |
-| T36-2 | 真窗口 GDI（沿 `TextMeasurerTests` 夹具形态） | `GDITextMeasurer::MeasureText`：SimSun `weight=400` vs `700` 串宽比 ∈ [1.05, 1.10]（探针读数 183/170 = 1.076 的回归带）；`Consolas`@700 与 @400 串宽相等（等宽族——判据独立于宽度，防误用） |
-| T36-3 | `FontWeightRule` 纯函数（零环境） | 真值表：tiers={400,700}：400/500/550→400 档 · 560/600/650/700/900→700 档；tiers={400}：任意请求→0 号；**平手**：tiers={300,400}@350 → 300 档（取轻）；`ClampWeight(65535)=1000` |
-| T36-4 | FT 链（真实 Win32FontSource） | `FaceIdFor("Microsoft YaHei UI") != FaceIdFor("Microsoft YaHei")`（face1 vs face0）；`FaceIdFor("Microsoft YaHei UI",700) != FaceIdFor("Microsoft YaHei",700)`（msyhbd f1 vs f0）；`FaceIdFor("NSimSun") != FaceIdFor("SimSun")`；`FaceIdFor("微软雅黑") == FaceIdFor("Microsoft YaHei")`（ZH/EN 同 face） |
-| T36-5 | FT 链（兜底） | 构造 hint 失配 ⇒ 扫描命中（复合第二项 hint=1 场景即天然覆盖）；候选全灭（无 nameID1 匹配）⇒ 回退默认 face + 告警日志非空（不静默——断言 Warning 记录，沿 `:211-215` 契约） |
-| T36-6 | 缓存键守护（K8） | `MeasureText` 同 `(family,size,dpi)` 变 weight：YaHei UI@400 vs @700 宽度不等（真字面）；重复调用各自命中（宽度复现）；**m_fontCache**（tuple 键）负对照 = 键比较含 weight（直接以 `std::tuple` 判等单测，无幽灵类型） |
-| T36-7 | TextWidget 指纹 | SetStyle 变 weight ⇒ wrap 重排（FitText 调用数 +1，沿 T29-4 线性判据装置）；不变 weight ⇒ 命中（FitText 零调用） |
-| T36-8 | FT 侧关系断言（真字面格） | `W("Segoe UI",600) == W("Segoe UI",700)`（Semibold 被滤 ⇒ 同落 700 档）且 `!= W("Segoe UI",400)`；`W("Segoe UI",300) == W("Segoe UI",400)`（Light 被滤）；`FaceIdFor("Microsoft YaHei Light") != FaceIdFor("Microsoft YaHei")`（独立族直达）。★ **跨链串宽对照不在库内**（无 WGL 测试环境，T26-9 先例）= A6/harness 库外探针（批三交付） |
+| T36-1 | 全量回归 | 490 全绿；测试源文件 git diff 空；FaceIdFor 单参对 #69 八族返回值 = 改前（含 `consola.ttf` 文件名写法——P0-1 回归锚） |
+| T36-2 | 真窗口 GDI | SimSun @400 vs @700 串宽比 ∈ [1.05, 1.10]（探针 1.076 的回归带）——**A2 库内载体**（P0-3 后仅此一条宽度判据，Consolas 等宽假设已证伪删除） |
+| T36-3 | `FontWeightRule` 纯函数 | tiers={400,700}：400/500/550→400 · 560/600/650/700/900→700；{400}：任意→0；平手 {300,400}@350 → 300（取轻）；`ClampWeight(65535)=1000` |
+| T36-4 | FT 链（真实源） | `FaceIdFor("Microsoft YaHei UI") != FaceIdFor("Microsoft YaHei")`；@700 同构不等（msyhbd f1 vs f0）；`FaceIdFor("NSimSun") != FaceIdFor("SimSun")`；**负对照（P0-2 边界钉）**：`FaceIdFor("微软雅黑")` = 默认 face 且 Warning 日志非空 |
+| T36-5 | FT 链（兜底） | hint 失配 ⇒ 扫描命中（复合第二项天然覆盖）；候选全灭 ⇒ face0 + 告警不静默 |
+| T36-6 | **观测缝**（P2-9） | `MeasureTextCacheMissCount()`：YaHei UI @400 首测 +1 → 同参复测 +0 → @700 +1（键含 weight 的黑盒证明）；m_fontCache/lineHeightCache 无缝 ⇒ 盯防①代码走查 |
+| T36-7 | TextWidget 指纹 | 变 weight ⇒ FitText +1；不变 ⇒ 命中 |
+| T36-8 | **face 身份**（P2-10） | `FaceIdFor("Segoe UI",600) == FaceIdFor("Segoe UI",700)` 且 `!= @400`（Semibold 滤除）；`@300 == @400`（Light 滤除）；`FaceIdFor("Microsoft YaHei Light") != FaceIdFor("Microsoft YaHei")`（独立族直达）；跨链串宽对照 = A6 库外（T26-9 先例） |
 
-**批次**：批一（红线）= △1/2/3/4/5 + T36-1/2；批二（解析链）= △6/7/8/9/10/11/14 + T36-3/4/5/6；批三（收口）= △12/13 + T36-7/8 + harness Release 库交付 + A6 复跑（固定版本指纹 + 字体 + DPI——Phase 31 A5 纪律）。
+**批次**：批一（红线）= △1/2/3/4/5 + T36-1/2；批二（解析链）= △6/7/8/9/10/11/14 + T36-3/4/5/6/8；批三（收口）= △12/13 + T36-7 + harness 交付 + **A2 库外墨迹比 + A6 固定指纹复跑**（P1-6 双载体落位）。
 
----
+## §6 影响面（v1.1 终稿）
 
-## §6 影响面（终稿）
+公共头 **98 → 98** · API = **+1 字段 + 1 单参默认实现虚函数** · 用例 **490 → ~500**（490 = 运行自报口径，P3-14 备查）· CMake **0** · 内部 **14 文件**（§3，测试 0 改动）· 风险 **低**。
 
-公共头 **98 → 98** · 公共 API = **+1 字段（`Font::weight`）+ 1 带默认实现的虚函数（`FontSource::ResolveFileCandidates`）** · 用例 **490 → ~500**（T36-1..8 + 真值表展开）· CMake **0** · 内部改动 **14 文件**（§3，测试 0 改动）· 新增内部头 1（`FontWeightRule.h`）· 风险 **低**（口径全部探针钉死；三层规则纯函数化；兼容机制不破既有测试）。
-
-**盯防九条**：① K8 七处必改键逐一核对（漏一 = 静默错）② `FT_Get_Sfnt_Name` UTF-16BE 转换（复用 `WideToUtf8` 前确认字节序——name 记录为大端）③ ZH 记录缺失时 EN 兜底、双缺时过滤出局 + 告警 ④ `GLRenderer.cpp:229` 显式传参（默认参数只保编译）⑤ legacy `ResolveFile`/`FamilyToFileName` 逐字等价（T26-6/T69 回归锚）⑥ GDI 边界 555 语义 = 探针验证样本，GL 归并纯函数与之对齐（T36-3 真值表）⑦ `ClampWeight` 两处消费点同式（C36-1）⑧ familyCache 含回退结果入缓存（v1.5 教训——T26-13 锚）⑨ MSVC 下 `std::min` 括号抑制宏污染（项目既有纪律）。
+**盯防九条**（v1.1 修订）：① K8 七键逐一核对（m_fontCache/lineHeightCache 无观测缝 = 代码走查项）② FT_Get_Sfnt_Name UTF-16BE 字节序 ③ nameID1 缺失 ⇒ 过滤出局 + 告警 ④ `GLRenderer.cpp:229` 显式传参 ⑤ legacy 三函数逐字等价（T26-6/T69 锚 + `consola.ttf` 直查路径）⑥ **文件直查候选首位 + 平手取下标小者 = legacy 优先序**（A1）⑦ ClampWeight 两处同式 ⑧ familyCache 含回退结果（T26-13 锚）⑨ OS/2 缺表记 400 + 告警。
 
 ---
 
 ## §8 修订记录
 
-- **v1.0**（2026-10-24）初稿。**探针 3（p36c）完成初设移交的唯一实证项并证伪一处初设假设**：FT `family_name` 优先返回 nameID-16（`msyhl.ttc` face0 = "Microsoft YaHei"/Light；`seguisb.ttf` = "Segoe UI"/Semibold）⇒ nameID-1 过滤**不得用 `family_name`**，改为 `FT_Get_Sfnt_Name` 直读（EN 0x409 优先 / ZH 0x804 兜底，FaceEntry 加载时缓存两字段）——ZH 请求与独立族直达（`微软雅黑 Light`）由此可达。**§2 接口定稿**（`FontSourceCandidate{filePath,weight,faceIndexHint}` · `ResolveFileCandidates` 默认实现语义 · FaceIdFor 六步流程 · 七处 tuple 键字段序「weight 最前」 · `FontWeightRule` 纯函数签名）· **§3 △1..14 逐文件**（FamilyToFileName 零改动 / EnumerateFontKeys 提取逐字等价）· **§4 C36-1..5 终稿**（C36-1 clamp 不进缓存键的细化）· **§5 T36-1..8 精确断言**（SimSun 串宽回归带 [1.05,1.10] · Segoe 600==700 / 300==400 过滤判别式 · 跨链对照归 A6 库外）+ 三批 · **§6 影响面终稿**（头 98→98 / +1 字段 +1 默认虚函数 / 490→~500 / CMake 0 / 风险 低）+ 盯防九条。
+- **v1.1**（2026-10-24）**外部评审「有条件通过」吸收——3×P0 + 3×P1 + 5×P2 + 4×P3 修毕 ⇒ PASS**（评审明示不退回初设；架构骨架复核成立）。① ★ **P0-1**：`ResolveFileCandidates` 补「family 即文件名」直查路径且首位（`Win32FontSource.cpp:135-148` 镜像）——ModelProbe `consola.ttf` 写法与 T36-1 八族回归获救；平手取下标小者 = legacy 优先序。② ★ **P0-2（采纳评审建议砍）**：ZH 族名可达断言全删——注册表键名无中文项（评审 reg query 实测）⇒ resolve 层不可能为 ZH 请求产生候选，v1.0 把 ZH 可达写在过滤层 = 逻辑倒置；回归非目标 3；`FaceEntry` 不引入 `nameId1Zh`（条 95）；T36-4 改边界钉住（ZH 请求 ⇒ 默认 face + 告警；GDI 可用 = 既有跨链不对称登记）。③ ★ **P0-3**：「等宽族 700==400 串宽」断言删除——`p36a2_readout.txt` [3] 实测 187→200 证伪（含 CJK 回退加粗干扰）；仪器教训入册（未经验证的常识不变量不作判据）；T36-2 收窄 SimSun 带。④ ★ **P1-4**：numFaces 读取顺序 = 先开 face0 再逐 index（p36c 正确写法 `:37-40`——hint 越界打开即失败拿不到 num_faces）。⑤ ★★ **P1-5 + P2-12 合并 = 档位来源换血**：评审本日 OS/2 探针 + 我方 p36c v2 扩列独立复核吻合（seguisb=600 · segoeuisl=350 · segoeuil=300 · seguibl=900 · consolab=700；唯一偏差 msyhl 真实 **290**）⇒ **档位 = face 自身 `OS/2.usWeightClass`**（样式词映射表废除）；**斜体排除 = `fsSelection` bit0**（consolai=1 / consolaz=33 实测——nameID1='Consolas' 能穿族名过滤）；候选结构瘦身为 `{filePath, faceIndexHint}`（P2-7 死参数删除，单参签名）；GDI tmWeight 与 usWeightClass 对真实字面逐一相等 = 双仪器互证。⑥ ★ **P1-6**：A2 双载体落位（库内 T36-2 串宽带 + 库外 A6 墨迹比复现），批次表补行。⑦ P2-8（FaceEntry 字段归 △7）· P2-9（T36-6 改 `MeasureTextCacheMissCount()` 观测缝；无缝键 = 盯防走查）· P2-10（T36-8 改断 face 身份，宽度同义反复废除）· P2-11（注释面补 `TextWidget.cpp:312`/`GDIBackend.h:119`/`GDITextMeasurer.h:80/:88`）· P3-13（familyCache = `:56`；措辞改「键一律含 weight」）· P3-14（490 = 运行自报口径备查）· P3-15（PickNearestTier 返回下标、WeightTier 删）· P3-16（空 family 键 = ("", ClampWeight(weight))）全部吸收。⑧ 评审正面确认（K8 穷尽性复核 · 行号 ±1 · Segoe@900 分歧自我撤回）记录在案。⑨ 头部 v1.0 → **v1.1，PASS**。
+- **v1.0**（2026-10-24）初稿。探针 3 证伪初设 `family_name` 假设（nameID-16 偏好）⇒ 过滤直读 nameID-1。
