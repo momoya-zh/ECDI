@@ -226,7 +226,7 @@ void GLRenderer::DrawText(const Point& pos, const std::string& text,
 
 	// ★ 契约：pos = 物理像素（Renderer 已折）；font.size = DIP ⇒ 经 FontEngine 换算（D26-2 唯一路径）
 	const int pixelSize = m_fontEngine->PixelSize(font);
-	const FaceId faceId = m_fontEngine->FaceIdFor(font.family);
+	const FaceId faceId = m_fontEngine->FaceIdFor(font.family, font.weight);   // Phase 36 批二：显式传参（详设 PD36-8）
 	if (faceId == 0)
 	{
 		return;                          // 无可用 face（FontEngine 已告警）

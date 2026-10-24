@@ -2,7 +2,9 @@
 
 #include "Render/FontSource.h"   // ★ Platform → Render 单向依赖（Render 不得反向依赖 Platform）
 
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace ECDI{
 
@@ -33,6 +35,13 @@ class Win32FontSource : public FontSource{
 public:
 	std::string ResolveFile(const std::string& family) const override;
 
+	/// @brief family → 候选文件列表（Phase 36 批二 △9；详设 §2.2）
+	/// @details **双源**：① 文件名直查（镜像 legacy 路径①，候选序首位，`directFile=true`）
+	///          ② 注册表逐项（键名剥后缀 → ` & ` 拆项 → 每项独立判「== family / family+␣ 前缀」）。
+	///          ★ 档位**不在此判定**（face 自身 `OS/2.usWeightClass`——样式词映射表废除）；
+	///          注册表命中项经存在性检查（镜像 legacy :150-157）。
+	std::vector<FontSourceCandidate> ResolveFileCandidates(const std::string& family) const override;
+
 	/// @brief 默认字体文件路径（空 family 时用）
 	/// @details 按**优先级列表**取第一个存在的（抗系统差异）——
 	///          `msyh.ttc`（微软雅黑，含 CJK）→ `simsun.ttc`（宋体）→ `segoeui.ttf` → `arial.ttf`。
@@ -52,6 +61,9 @@ private:
 	///          ★ **样式变体排序**：常规体优先（无 Bold/Italic/Light/Semibold/Black 等后缀），
 	///          避免「请求族名却拿到粗体」（本件不做样式区分——见头文件局限声明）。
 	///          ★ **不做** `find()` 式包含匹配、不做大小写归一以外的模糊匹配。
+	/// @brief 注册表字体键枚举（Phase 36 批二 △10 提取）——新旧两路共用同一份循环
+	/// @param onEntry 每条回调（键名 UTF-8、文件名 UTF-8；空文件名/非 REG_SZ 已过滤）
+	static void ForEachFontRegistryKey(const std::function<void(const std::string&, const std::string&)>& onEntry);
 	static std::string FamilyToFileName(const std::string& familyU8);
 };
 

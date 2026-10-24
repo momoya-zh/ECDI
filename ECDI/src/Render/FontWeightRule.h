@@ -7,6 +7,8 @@
 // ════════════════════════════════════════════════════════════════════════
 
 #include <algorithm>
+#include <cstddef>
+#include <vector>
 #include <cstdint>
 
 namespace ECDI
@@ -18,6 +20,27 @@ namespace ECDI
 inline std::uint16_t ClampWeight(std::uint32_t weight)
 {
 	return static_cast<std::uint16_t>((std::min)(weight, 1000u));   // (std::min)：本头会被 windows.h 之后的 TU 包含，防 min 宏污染
+}
+
+/// @brief 档位归并（C36-2 第 3 层）：|w-request| 最小者；**平手取轻**（w 小者）；再平手取下标小者。
+/// @details 与 GDI 映射器实测语义一致（探针 1：550→400 / 560→700，边界 ≈555——
+///          ★ 探针定位为该规则的**验证样本**而非契约来源，Phase 31 铁律）。
+///          纯函数无 FT 依赖 ⇒ T36-3 真值表零环境。
+/// @param tiers 存活档位（候选过滤后的 face `OS/2.usWeightClass` 集合，**非空**）
+/// @return 选中档位的**下标**（P3-⑮：`WeightTier` 结构已删，直接下标）
+inline std::size_t PickNearestTier(const std::vector<std::uint16_t>& tiers, std::uint16_t request)
+{
+	std::size_t best = 0;
+	for (std::size_t i = 1; i < tiers.size(); ++i)
+	{
+		const unsigned dNew = (tiers[i] > request) ? tiers[i] - request : request - tiers[i];
+		const unsigned dBest = (tiers[best] > request) ? tiers[best] - request : request - tiers[best];
+		if (dNew < dBest || (dNew == dBest && tiers[i] < tiers[best]))
+		{
+			best = i;
+		}
+	}
+	return best;
 }
 
 }

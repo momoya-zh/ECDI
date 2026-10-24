@@ -4,11 +4,14 @@
 #include "ECDI/Core/String.h"   // UTF8ToWide（告警消息用）
 #include "ECDI/Core/UTF8.h"     // ★ Phase 29 △3：CodepointIndexToByteOffset（码点数上界/切片换算）
 #include "Render/Utf8Decode.h"  // ★ Phase 26 批三：与 GLRenderer **共用同一解码**
+#include "Render/FontWeightRule.h"  // ★ Phase 36 批二：档位归并纯函数 + ClampWeight（C36-1/2）
 
 // ★★ `FT_*` 出现在**本编译单元内**（pimpl —— 头文件与框架其余部分零 FreeType：详设盯防①）
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
+#include FT_SFNT_NAMES_H      // ★ Phase 36 批二：nameID-1 直读（family_name 偏好 nameID-16——探针 3 证伪）
+#include FT_TRUETYPE_TABLES_H // ★ Phase 36 批二：OS/2 usWeightClass / fsSelection（档位 + 斜体位）
 
 #include <algorithm>
 #include <cmath>
@@ -28,6 +31,57 @@ constexpr std::size_t kMaxGlyphCache = 8192;
 constexpr std::size_t kMaxMeasureCache = 4096;
 constexpr std::size_t kMaxLineHeightCache = 256;
 constexpr std::size_t kMaxAdvanceCache = 8192;   ///< Phase 28 批一：advance memo 上界（与 glyphCache 同策略）
+
+// ★ Phase 36 批二：name 记录 UTF-16BE → UTF-8（name 表字符串字节序为大端——盯防②）
+std::string Utf16BEToUtf8(const unsigned char* data, FT_UShort len)
+{
+	std::string out;
+	for (FT_UShort i = 0; i + 1 < len; i += 2)
+	{
+		const unsigned cp = (static_cast<unsigned>(data[i]) << 8) | data[i + 1];
+		if (cp < 0x80)
+		{
+			out += static_cast<char>(cp);
+		}
+		else if (cp < 0x800)
+		{
+			out += static_cast<char>(0xC0 | (cp >> 6));
+			out += static_cast<char>(0x80 | (cp & 0x3F));
+		}
+		else
+		{
+			out += static_cast<char>(0xE0 | (cp >> 12));
+			out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+			out += static_cast<char>(0x80 | (cp & 0x3F));
+		}
+	}
+	return out;
+}
+
+/// ★ Phase 36 批二：nameID-1 EN 直读（platform 3 · language 0x409）——
+///    **不得用 `family_name`**（探针 3：FT 偏好 nameID-16，msyhl f0 会读成 'Microsoft YaHei'）。
+///    无记录 ⇒ 空串 ⇒ 过滤判据恒 false（该 face 出局——盯防③）。
+std::string ReadNameId1En(FT_Face face)
+{
+	FT_UInt count = FT_Get_Sfnt_Name_Count(face);
+	if (count > 256)
+	{
+		count = 256;
+	}
+	for (FT_UInt i = 0; i < count; ++i)
+	{
+		FT_SfntName n{};
+		if (FT_Get_Sfnt_Name(face, i, &n) != 0)
+		{
+			continue;
+		}
+		if (n.name_id == 1 && n.platform_id == 3 && n.language_id == 0x409)
+		{
+			return Utf16BEToUtf8(n.string, n.string_len);
+		}
+	}
+	return {};
+}
 /// advance memo 缺字形哨兵（成功 advance = `advance.x >> 6`，量级远小于此 ⇒ 不会混淆）
 constexpr long kMissingAdvance = (std::numeric_limits<long>::min)();
 
@@ -46,20 +100,24 @@ struct FontEngine::Impl{
 	struct FaceEntry{
 		FaceId id = 0;
 		FT_Face face = nullptr;
+		long numFaces = 1;               ///< Phase 36 批二：该文件 face 总数（face0 打开时读得——先开 0 再扫）
+		std::string nameId1En;           ///< Phase 36 批二：nameID-1 EN 直读（过滤判据——**非** family_name）
+		std::uint16_t os2Weight = 400;   ///< Phase 36 批二：档位 = `OS/2.usWeightClass`（缺表记 400 + 告警）
+		bool italic = false;             ///< Phase 36 批二：`OS/2.fsSelection` bit0（斜体面穿族名过滤——consolaz 实测——显式排除）
 	};
 
 	/// ★ 缓存键用**解析后的路径**（不是 family 原串）：空 family 与显式默认文件名
 	///   因此**复用同一 face**（比"按 family 字符串"更准——实现相对详设的细化）
-	std::map<std::string, FaceEntry> faces;
+	std::map<std::pair<std::string, int>, FaceEntry> faces;   ///< Phase 36 批二：键 = (解析后路径, faceIndex)
 	std::map<FaceId, FT_Face> facesById;   ///< id → face（O(log n) 反查）
 	int nextFaceId = 1;                    ///< ★ 从 1 起（**0 恒为「无效」**）；单调递增、**永不复用**
-	std::map<std::string, FaceId> familyCache;   ///< family 原串 → FaceId（★ v1.1：含**失败结果**——
+	std::map<std::pair<std::string, std::uint16_t>, FaceId> familyCache;   ///< Phase 36 批二：(family, weight) → FaceId   ///< family 原串 → FaceId（★ v1.1：含**失败结果**——
 	                                             ///< 未命中 family 每帧每标签重复「探测文件 + 告警」的刷屏与开销由此消除）
 
 	/// ── CPU 两级缓存（Phase 26 详设 §3-③）──
 	std::map<GlyphKey, GlyphBitmap> glyphCache;                                     ///< 渲染链：栅格化结果
-	std::map<std::tuple<std::string, float, std::string, int>, Size> measureCache;  ///< 测量链：metrics
-	std::map<std::tuple<float, std::string, int>, float> lineHeightCache;
+	std::map<std::tuple<std::uint16_t, std::string, float, std::string, int>, Size> measureCache;   ///< Phase 36 批二 K8-⑤：键含 weight  ///< 测量链：metrics
+	std::map<std::tuple<std::uint16_t, float, std::string, int>, float> lineHeightCache;   ///< Phase 36 批二 K8-⑥：键含 weight
 	std::map<std::pair<FaceId, int>, float> ascentCache;                            ///< (faceId, px) → ascent(px)
 	std::map<GlyphKey, long> advanceCache;                                          ///< Phase 28 批一：per-glyph advance memo（复用 GlyphKey——C28-2）
 	std::size_t advanceMemoMissCount = 0;                                           ///< 观测缝（T28-1 真命中断言）
@@ -74,6 +132,11 @@ struct FontEngine::Impl{
 		const auto it = facesById.find(id);
 		return (it != facesById.end()) ? it->second : nullptr;
 	}
+
+		/// @brief 按 (路径, faceIndex) 取/载 face（Phase 36 批二；详设 §2.3-④）
+		/// @details 打开成功 ⇒ 读 nameID-1 EN / OS/2 档位 / 斜体位入 entry；
+		///          打开失败 ⇒ 告警 + nullptr（family 级缓存兜底防重试——T26-13 锚）。
+		FaceEntry* EnsureFace(const std::string& path, long index);
 
 	/// @brief 单码点 advance 求值（★ Phase 29 △3 提取：`MeasureText` 与 `FitText` **共用同一路径**）
 	/// @details ★ 共享是**逐位一致**的前提：两方法若各自实现 memo/哨兵逻辑，一旦某侧漂移
@@ -187,7 +250,40 @@ int FontEngine::PixelSize(const Font& font) const
 	return static_cast<int>((std::max)(1LL, px));   // ★ 下限 1（字号 0/负会让 FreeType 拒绝）
 }
 
-FaceId FontEngine::FaceIdFor(const std::string& family)
+FontEngine::Impl::FaceEntry* FontEngine::Impl::EnsureFace(const std::string& path, long index)
+{
+	const auto key = std::make_pair(path, static_cast<int>(index));
+	const auto it = faces.find(key);
+	if (it != faces.end())
+	{
+		return &it->second;   // 命中 ⇒ 复用（legacy「同一文件只加载一次」语义保持）
+	}
+	FT_Face face = nullptr;
+	if (FT_New_Face(library, path.c_str(), static_cast<FT_ULong>(index), &face) != 0 || face == nullptr)
+	{
+		Logger::Log(LogLevel::Warning, L"FontEngine: FT_New_Face failed for resolved font file");
+		return nullptr;
+	}
+	FaceEntry e;
+	e.id = nextFaceId++;   // ★ 单调递增、永不复用（既有不变量）
+	e.face = face;
+	e.numFaces = face->num_faces > 0 ? face->num_faces : 1;
+	e.nameId1En = ReadNameId1En(face);
+	TT_OS2* os2 = static_cast<TT_OS2*>(FT_Get_Sfnt_Table(face, ft_sfnt_os2));
+	if (os2 != nullptr)
+	{
+		e.os2Weight = static_cast<std::uint16_t>(os2->usWeightClass);
+		e.italic = (os2->fsSelection & 0x0001) != 0;   // bit0 = ITALIC（consolai=1 / consolaz=33 实测）
+	}
+	else
+	{
+		Logger::Log(LogLevel::Warning, L"FontEngine: OS/2 table missing; assuming weight 400");   // 盯防⑨
+	}
+	facesById.emplace(e.id, face);
+	return &faces.emplace(key, std::move(e)).first->second;
+}
+
+FaceId FontEngine::FaceIdFor(const std::string& family, std::uint16_t weight)
 {
 	Impl& impl = *m_impl;
 	if (impl.library == nullptr || !impl.source)
@@ -195,62 +291,140 @@ FaceId FontEngine::FaceIdFor(const std::string& family)
 		return 0;
 	}
 
-	// ★ v1.1：family 原串 → FaceId 缓存（**含失败结果**）——否则解析失败的 family
-	//   （如 "Consolas" 被当作文件名找不到）每帧每标签重复「探测文件 + 告警」刷屏
-	const auto famCached = impl.familyCache.find(family);
+	// ★ Phase 36 批二：familyCache 键 = (family, weight)——**weight 原值入键**（C36-1：
+	//   clamp 仅作用于归并 / lfWeight 消费；键存原值 ⇒ 用户改回合法值不残留污染）
+	const auto famKey = std::make_pair(family, weight);
+	const auto famCached = impl.familyCache.find(famKey);
 	if (famCached != impl.familyCache.end())
 	{
-		return famCached->second;
+		return famCached->second;   // ★ v1.1 语义保持：**含失败/回退结果**——T26-13 防刷屏锚
 	}
 
-	// ① 解析文件路径（空 family ⇒ 默认字体）
-	std::string path = impl.source->ResolveFile(family);
-	if (path.empty() && !family.empty())
+	// 回退：默认 face（legacy 语义——告警由调用分支负责，此处不重复打）
+	const auto fallbackToDefault = [&]() -> FaceId {
+		const std::string path = impl.source->ResolveFile(std::string());
+		if (path.empty())
+		{
+			impl.familyCache.emplace(famKey, 0);   // 失败结果也缓存（防每帧重试）
+			return 0;
+		}
+		// ★ v1.5 语义保持：默认 face 通常**早已加载** ⇒ faces 命中即复用——否则每个新 key
+		//   都会重新探测 + 重新告警（实机刷屏；T26-13 回归锚点）
+		Impl::FaceEntry* entry = impl.EnsureFace(path, 0);
+		const FaceId id = entry ? entry->id : 0;
+		impl.familyCache.emplace(famKey, id);
+		return id;
+	};
+
+	// ① 空 family ⇒ legacy 默认路径**原样**（不进候选机制——A1 红线）
+	if (family.empty())
+	{
+		return fallbackToDefault();
+	}
+
+	// ② 候选（详设 §2.2：文件直查**首位** + 注册表逐项；档位由 face 自身 OS/2 提供）
+	const std::vector<FontSourceCandidate> candidates = impl.source->ResolveFileCandidates(family);
+	if (candidates.empty())
 	{
 		// ★ **不静默降级**：明确告警，再回退默认 face（详设 △2 / 外部评审 §11）
 		Logger::Log(LogLevel::Warning,
 		            L"FontEngine: font family not found; falling back to the default face: "
 		            + UTF8ToWide(family));
-		path = impl.source->ResolveFile(std::string());
-	}
-	if (path.empty())
-	{
-		impl.familyCache.emplace(family, 0);   // 失败结果也缓存（防每帧重试）
-		return 0;
+		return fallbackToDefault();
 	}
 
-	// ② 路径命中 ⇒ 复用（★ 同一文件只加载一次）
-	const auto cached = impl.faces.find(path);
-	if (cached != impl.faces.end())
+	// ③ 按路径分组（**保持候选序**——归并平手取下标小者 = 直查优先序，评审 P0-①）
+	struct PathGroup
 	{
-		// ★ ★ v1.5：**回退路径也会走到这里**——family 解析失败 ⇒ `path` 已是**默认**字体文件，
-		//   而默认 face 通常**早已加载**（空 family 的控件先于它建立）⇒ 在此**提前 return**。
-		//   若漏写 familyCache，该 family **永不入缓存** ⇒ 每个**新**的 `(text, size, family, dpi)`
-		//   都**重新探测文件 + 重新告警**（实机刷屏；T26-13 的回归锚点）。
-		impl.familyCache.emplace(family, cached->second.id);
-		return cached->second.id;
+		std::string path;
+		bool direct = false;      // 任一直查候选命中该路径 ⇒ 整路径**豁免族名过滤**
+		std::vector<long> hints;  // 扫描起点序（hint 优先、升序去重；其余 face 升序殿后）
+	};
+	std::vector<PathGroup> groups;
+	std::map<std::string, std::size_t> groupOf;
+	for (const auto& cand : candidates)
+	{
+		const auto it = groupOf.find(cand.filePath);
+		if (it == groupOf.end())
+		{
+			groupOf.emplace(cand.filePath, groups.size());
+			groups.push_back({cand.filePath, cand.directFile, {cand.faceIndexHint}});
+		}
+		else
+		{
+			PathGroup& g = groups[it->second];
+			g.direct = g.direct || cand.directFile;
+			g.hints.push_back(cand.faceIndexHint);
+		}
 	}
 
-	// ③ 加载 face
-	FT_Face face = nullptr;
-	if (FT_New_Face(impl.library, path.c_str(), 0, &face) != 0 || face == nullptr)
+	// ④⑤ 扫描 + 过滤（nameID-1 直读 ∧ 非斜体；**直查路径豁免**——P0-①实施期勘误）
+	std::vector<std::uint16_t> tiers;
+	std::vector<std::pair<std::size_t, long>> tierLoc;
+	for (std::size_t gi = 0; gi < groups.size(); ++gi)
 	{
-		Logger::Log(LogLevel::Warning, L"FontEngine: FT_New_Face failed for resolved font file");
-		impl.familyCache.emplace(family, 0);   // ★ v1.5：失败结果同样入缓存（否则每次重试）
-		return 0;
+		PathGroup& g = groups[gi];
+		Impl::FaceEntry* f0 = impl.EnsureFace(g.path, 0);
+		if (f0 == nullptr)
+		{
+			continue;   // 打不开 ⇒ 整路径出局（告警在 EnsureFace）
+		}
+		const long numFaces = f0->numFaces;
+		std::vector<long> order;   // hint 优先（升序去重）→ 其余 face 升序
+		for (long h : g.hints)
+		{
+			if (h >= 0 && h < numFaces)
+			{
+				order.push_back(h);
+			}
+		}
+		std::sort(order.begin(), order.end());
+		order.erase(std::unique(order.begin(), order.end()), order.end());
+		for (long i = 0; i < numFaces; ++i)
+		{
+			if (std::find(order.begin(), order.end(), i) == order.end())
+			{
+				order.push_back(i);
+			}
+		}
+		for (long idx : order)
+		{
+			Impl::FaceEntry* e = impl.EnsureFace(g.path, idx);
+			if (e == nullptr)
+			{
+				continue;
+			}
+			if (!g.direct && (e->nameId1En != family || e->italic))
+			{
+				continue;   // 族名不匹配 / 斜体面（consolaz 实测能穿族名过滤）⇒ 出局
+			}
+			tiers.push_back(e->os2Weight);
+			tierLoc.emplace_back(gi, idx);
+		}
 	}
 
-	// ④ 分配**新** FaceId（单调递增、永不复用）+ family 原串入缓存
-	const FaceId id = impl.nextFaceId++;
-	impl.faces.emplace(path, Impl::FaceEntry{ id, face });
-	impl.facesById.emplace(id, face);
-	impl.familyCache.emplace(family, id);
+	// ⑥ 全灭 ⇒ 告警 + 回退（不静默——ZH 族名等非目标 3 边界在此落地）
+	if (tiers.empty())
+	{
+		Logger::Log(LogLevel::Warning,
+		            L"FontEngine: font family not found; falling back to the default face: "
+		            + UTF8ToWide(family));
+		return fallbackToDefault();
+	}
+
+	// ⑥ 归并：最近字面、平手取轻（C36-2；ClampWeight = 消费边界 C36-1）
+	const std::size_t pick = PickNearestTier(tiers, ClampWeight(weight));
+	const std::size_t gi = tierLoc[pick].first;
+	const long idx = tierLoc[pick].second;
+	Impl::FaceEntry* chosen = impl.EnsureFace(groups[gi].path, idx);
+	const FaceId id = chosen ? chosen->id : 0;
+	impl.familyCache.emplace(famKey, id);
 	return id;
 }
 
 std::uint32_t FontEngine::GlyphIndex(const Font& font, char32_t cp)
 {
-	FT_Face face = m_impl->FaceOf(FaceIdFor(font.family));
+	FT_Face face = m_impl->FaceOf(FaceIdFor(font.family, font.weight));
 	if (face == nullptr)
 	{
 		return 0;
@@ -282,7 +456,7 @@ Size FontEngine::MeasureText(const Font& font, const std::string& text)
 	const int px = PixelSize(font);
 
 	// ★ metrics cache（键含 **dpi**）——消掉「每帧 × 每行」的重复度量（性能方向②）
-	const auto key = std::make_tuple(text, font.size, font.family, dpi);
+	const auto key = std::make_tuple(font.weight, text, font.size, font.family, dpi);   // Phase 36 批二 K8-⑤：键含 weight
 	const auto cached = impl.measureCache.find(key);
 	if (cached != impl.measureCache.end())
 	{
@@ -291,7 +465,7 @@ Size FontEngine::MeasureText(const Font& font, const std::string& text)
 	++impl.measureMissCount;
 
 	Size result{};
-	const FaceId faceId = FaceIdFor(font.family);
+	const FaceId faceId = FaceIdFor(font.family, font.weight);
 	FT_Face face = impl.FaceOf(faceId);
 	if (face != nullptr)
 	{
@@ -340,7 +514,7 @@ TextFit FontEngine::FitText(const Font& font, const std::string& text,
 
 	const int dpi = (impl.dpi > 0) ? impl.dpi : 96;
 	const int px = PixelSize(font);
-	const FaceId faceId = FaceIdFor(font.family);
+	const FaceId faceId = FaceIdFor(font.family, font.weight);
 	FT_Face face = impl.FaceOf(faceId);
 	if (face == nullptr)
 	{
@@ -386,7 +560,7 @@ float FontEngine::LineHeight(const Font& font){
 	const int dpi = (impl.dpi > 0) ? impl.dpi : 96;
 	const int px = PixelSize(font);
 
-	const auto key = std::make_tuple(font.size, font.family, dpi);
+	const auto key = std::make_tuple(font.weight, font.size, font.family, dpi);   // Phase 36 批二 K8-⑥：键含 weight
 	const auto cached = impl.lineHeightCache.find(key);
 	if (cached != impl.lineHeightCache.end())
 	{
@@ -394,7 +568,7 @@ float FontEngine::LineHeight(const Font& font){
 	}
 
 	float height = font.size;   // 兜底：字号（**已是 DIP**——与返回值单位一致）
-	FT_Face face = impl.FaceOf(FaceIdFor(font.family));
+	FT_Face face = impl.FaceOf(FaceIdFor(font.family, font.weight));
 	if (face != nullptr)
 	{
 		FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
@@ -415,14 +589,14 @@ float FontEngine::Ascent(const Font& font)
 	Impl& impl = *m_impl;
 	const int px = PixelSize(font);
 
-	const auto cached = impl.ascentCache.find({ FaceIdFor(font.family), px });
+	const auto cached = impl.ascentCache.find({ FaceIdFor(font.family, font.weight), px });
 	if (cached != impl.ascentCache.end())
 	{
 		return cached->second;
 	}
 
 	float ascent = 0.0f;
-	FT_Face face = impl.FaceOf(FaceIdFor(font.family));
+	FT_Face face = impl.FaceOf(FaceIdFor(font.family, font.weight));
 	if (face != nullptr)
 	{
 		FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
@@ -432,7 +606,7 @@ float FontEngine::Ascent(const Font& font)
 		ascent = static_cast<float>(face->size->metrics.ascender) / 64.0f;
 	}
 
-	impl.ascentCache.emplace(std::make_pair(FaceIdFor(font.family), px), ascent);
+	impl.ascentCache.emplace(std::make_pair(FaceIdFor(font.family, font.weight), px), ascent);
 	return ascent;
 }
 
@@ -445,7 +619,7 @@ bool FontEngine::AdvancePx(const Font& font, char32_t cp, long& out)
 	//      有意为之，审计 M15 要求修 H2 时保持该处不动）——本方法只是把结果外传。
 	Impl& impl = *m_impl;
 	const int px = PixelSize(font);
-	const FaceId faceId = FaceIdFor(font.family);
+	const FaceId faceId = FaceIdFor(font.family, font.weight);
 	FT_Face face = impl.FaceOf(faceId);
 	if (face == nullptr)
 	{
@@ -464,7 +638,7 @@ bool FontEngine::Glyph(const Font& font, char32_t cp, GlyphBitmap& out)
 		return false;   // 该 face 无此字形（或 face 无效）
 	}
 
-	const GlyphKey key{ FaceIdFor(font.family), glyphIndex, PixelSize(font),
+	const GlyphKey key{ FaceIdFor(font.family, font.weight), glyphIndex, PixelSize(font),
 	                    static_cast<std::uint8_t>(HintingMode::Normal) };
 	return GlyphByKey(key, out);
 }

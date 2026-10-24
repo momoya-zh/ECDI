@@ -164,29 +164,20 @@ std::string Win32FontSource::ResolveFile(const std::string& family) const
 	return {};
 }
 
-std::string Win32FontSource::FamilyToFileName(const std::string& familyU8)
+void Win32FontSource::ForEachFontRegistryKey(
+	const std::function<void(const std::string&, const std::string&)>& onEntry)
 {
-	// ★★ REQ-09 的落点：注册表 `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`
-	//   是「(复合)族名 + (TrueType)" → 文件名」的表。本机实测（探针 `t69_family_map.cpp`）：
-	//     `Consolas (TrueType)` → `consola.ttf` · `SimSun & NSimSun (TrueType)` → `simsun.ttc`
-	//     `Microsoft YaHei & Microsoft YaHei UI (TrueType)` → `msyh.ttc`
-	//   ★ **只用注册表、不用 `EnumFontFamiliesExW`**：后者能枚举族名但**拿不到文件名**，
-	//     而本类要交回的是**可 `FT_New_Face` 的路径**。
+	// ★ Phase 36 批二（△10）：从 FamilyToFileName 提取的**共享枚举**——注册表
+	//   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` 的
+	//   「(复合)族名 + (TrueType)" → 文件名」表。★ 只用注册表、不用 EnumFontFamiliesExW：
+	//   后者能枚举族名但拿不到文件名（REQ-09 实测结论）。
 	const wchar_t* const kKey =
-		L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
-
+	L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
 	HKEY key = nullptr;
 	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kKey, 0, KEY_READ, &key) != ERROR_SUCCESS)
 	{
-		return {};   // 读不到注册表 ⇒ 空串（由调用方回退 + 告警，不静默换字体）
+		return;   // 读不到注册表 ⇒ 空串（由调用方回退 + 告警，不静默换字体）
 	}
-
-	// ★ 匹配强度：3 = 完全相等 · 2 = `<family> ` 前缀（样式变体）· 1 = `<family> & `（复合族名首项）
-	//   ★ **禁止** `find()` 式子串匹配——实测反例：`宋体` 会命中 **`华文宋体`**（另一个字体）。
-	int bestStrength = 0;
-	std::string bestFile;
-	bool bestIsRegular = false;
-
 	DWORD index = 0;
 	wchar_t nameBuf[512]{};
 	BYTE valueBuf[1024]{};
@@ -205,16 +196,36 @@ std::string Win32FontSource::FamilyToFileName(const std::string& familyU8)
 		{
 			continue;
 		}
-
-		// ★★ `RegEnumValueW` 的 `REG_SZ` 数据是 **UTF-16**（不是窄串）——首版探针按 `char*`
-		//    直读只得到首字符（"consola.ttf" → "c"）。此处按 `wchar_t*` 读再转 UTF-8。
+		// ★★ `RegEnumValueW` 的 `REG_SZ` 数据是 **UTF-16**（不是窄串）——按 `wchar_t*` 读再转 UTF-8
 		const std::string keyU8 = WideToUtf8(nameBuf);
 		const std::string fileU8 = WideToUtf8(reinterpret_cast<const wchar_t*>(valueBuf));
 		if (fileU8.empty())
 		{
 			continue;
 		}
+		onEntry(keyU8, fileU8);
+	}
+	RegCloseKey(key);
+}
 
+
+std::string Win32FontSource::FamilyToFileName(const std::string& familyU8)
+{
+	// ★★ REQ-09 的落点：注册表 `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`
+	//   是「(复合)族名 + (TrueType)" → 文件名」的表。本机实测（探针 `t69_family_map.cpp`）：
+	//     `Consolas (TrueType)` → `consola.ttf` · `SimSun & NSimSun (TrueType)` → `simsun.ttc`
+	//     `Microsoft YaHei & Microsoft YaHei UI (TrueType)` → `msyh.ttc`
+	//   ★ **只用注册表、不用 `EnumFontFamiliesExW`**：后者能枚举族名但**拿不到文件名**，
+	//     而本类要交回的是**可 `FT_New_Face` 的路径**。
+	int bestStrength = 0;
+	std::string bestFile;
+	bool bestIsRegular = false;
+	// ★ 匹配强度：3 = 完全相等 · 2 = `<family> ` 前缀（样式变体）· 1 = `<family> & `（复合族名首项）
+	//   ★ **禁止** `find()` 式子串匹配——实测反例：`宋体` 会命中 **`华文宋体`**（另一个字体）。
+	// ★ Phase 36 批二（△10）：枚举循环提取为 ForEachFontRegistryKey（新旧两路共用，杜绝双份循环漂移）；
+	//   本函数的**匹配 / 常规体优先 / 择优**逻辑逐字保留（T26-6 / T69 回归锚）。
+	//   读不到注册表 ⇒ 零条目 ⇒ bestFile 保持空串（= 原早返回语义）。
+	ForEachFontRegistryKey([&](const std::string& keyU8, const std::string& fileU8) {
 		// 去掉键名的 ` (TrueType)` / ` (OpenType)` 等后缀 ⇒ 得到「(复合)族名」
 		std::string base = keyU8;
 		const std::size_t suffix = base.find(" (");
@@ -238,7 +249,7 @@ std::string Win32FontSource::FamilyToFileName(const std::string& familyU8)
 		}
 		if (strength == 0)
 		{
-			continue;
+			return;   // lambda 版 continue
 		}
 
 		// ★ 常规体优先：请求**纯族名**（`Consolas`）时不得拿到样式变体（`consolab.ttf`）。
@@ -273,10 +284,78 @@ std::string Win32FontSource::FamilyToFileName(const std::string& familyU8)
 			bestFile = fileU8;
 			bestIsRegular = isRegular;
 		}
-	}
-
-	RegCloseKey(key);
+	});
 	return bestFile;
+}
+
+std::vector<FontSourceCandidate> Win32FontSource::ResolveFileCandidates(const std::string& family) const
+{
+	std::vector<FontSourceCandidate> out;
+	if (family.empty())
+	{
+		return out;
+	}
+	const std::wstring dir = FontsDirectoryWide();
+	if (dir.empty())
+	{
+		return out;
+	}
+	const std::wstring wideFamily = UTF8ToWide(family);
+	if (wideFamily.empty())
+	{
+		return out;
+	}
+	// ① 文件名直查（镜像 legacy ResolveFile 路径①，**候选序首位**——评审 P0-①）。
+	//    ★ directFile = true ⇒ FontEngine **豁免族名过滤**：显式文件名（`consola.ttf`）的
+	//    face nameID1（'Consolas'）≠ 请求串，无豁免会被过滤误杀回退 SimSun（实施期发现）。
+	const std::wstring direct = dir + L"\\" + wideFamily;
+	if (FileExistsWide(direct))
+	{
+		out.push_back({WideToAnsi(direct), 0, true});
+	}
+	// ② 注册表逐项：键名剥后缀 → ` & ` 拆项 → **每一项**独立判
+	//    「== family（完全相等）/ family+␣ 前缀（样式变体）」→ 命中项产出候选。
+	//    ★ 档位**不在此判定**（face 自身 OS/2.usWeightClass 提供——样式词映射表废除）；
+	//    复合键第二项由此自然可达（`Microsoft YaHei UI` = 第二项完全相等）。
+	ForEachFontRegistryKey([&](const std::string& keyU8, const std::string& fileU8) {
+		std::string base = keyU8;
+		const std::size_t suffix = base.find(" (");
+		if (suffix != std::string::npos)
+		{
+			base.erase(suffix);
+		}
+		std::size_t pos = 0;
+		int itemIndex = 0;
+		int hint = -1;
+		for (;;)
+		{
+			const std::size_t amp = base.find(" & ", pos);
+			const std::string item =
+				base.substr(pos, amp == std::string::npos ? std::string::npos : amp - pos);
+			if (hint < 0 &&
+			    (item == family || item.compare(0, family.size() + 1, family + " ") == 0))
+			{
+				hint = itemIndex;
+			}
+			if (amp == std::string::npos)
+			{
+				break;
+			}
+			pos = amp + 3;
+			++itemIndex;
+		}
+		if (hint < 0)
+		{
+			return;   // 本键无命中项
+		}
+		const std::wstring resolved = dir + L"\\" + UTF8ToWide(fileU8);
+		if (!FileExistsWide(resolved))
+		{
+			return;   // 注册表有但文件不在（镜像 legacy 的存在性检查）
+		}
+		out.push_back({WideToAnsi(resolved), hint, false});
+	});
+	return out;
 }
 
 }

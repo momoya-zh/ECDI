@@ -82,11 +82,18 @@ public:
 	/// @return 像素高度（**>= 1**）
 	int PixelSize(const Font& font) const;
 
-	/// @brief family → 稳定 `FaceId`（★ D26-1；**不返回 `FT_Face`**）
-	/// @details 命中 face 缓存即返回；未命中 ⇒ `FontSource::ResolveFile` → 加载 → 分配**新** id。
-	///          ★ 解析不到（空串）⇒ **回退默认 face + 写告警日志**（**不静默降级**）。
+	/// @brief family（+ 字重）→ 稳定 `FaceId`（★ D26-1；**不返回 `FT_Face`**）
+	/// @details ★ Phase 36 批二（三层规则，详设 §2.3）：候选（`ResolveFileCandidates` =
+	///          文件直查 + 注册表逐项；**直查候选豁免族名过滤**——`directFile`）→
+	///          **nameID-1 直读过滤 ∧ 非斜体**（`family_name` 偏好 nameID-16——探针 3 证伪）
+	///          → **OS/2.usWeightClass 档位**最近平手取轻（不跨族）。
+	///          命中 family 缓存即返回；未命中 ⇒ 候选扫描 → 加载 → 分配**新** id。
+	///          ★ 解析不到 ⇒ **回退默认 face + 写告警日志**（**不静默降级**）。
+	///          ★ ZH 族名不解析（需求非目标 3——注册表键名无中文项）⇒ 回退默认 face + 告警。
+	/// @param weight 0–1000（C36-1）；**默认 400 = 既有行为**（单参调用点零改动编译；
+	///        ★ 有 `Font` 在手的内部调用点必须显式传 `font.weight`）
 	/// @return 有效 `FaceId`；**无可用 face ⇒ 0**（0 恒为无效——id 从 1 起分配）
-	FaceId FaceIdFor(const std::string& family);
+	FaceId FaceIdFor(const std::string& family, std::uint16_t weight = 400);
 
 	/// @brief codepoint → glyph index（★ 修正：调用方经此取，**不直调 `FT_Get_Char_Index`**）
 	/// @details 内部 = `FT_Get_Char_Index` ⇒ ★ **`FT_*` 仍只出现在本类 `.cpp`**（契约 C-4）。
