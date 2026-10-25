@@ -58,7 +58,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Anti-aliasing**: supersampled corner coverage masks for rounded rects (`S=8`), cached per radius — GDI has no native AA, so arcs are composited through a premultiplied alpha path that composes with the theme's corner radius
 - **Window chrome**: borderless mode (`WM_NCCALCSIZE` interception) with a self-drawn caption bar — title plus vector min/max/close buttons — and `NCHITTEST` delegated into the widget tree, so interactive controls inside the caption stay clickable while the rest drags the window
 - **Shell integration**: tray icon (application-level — lives on `PlatformApplication`, not on any `Window`, so closing/rebuilding every window leaves it intact) with a native popup menu, plus window-level file drop (`WM_DROPFILES` → UTF-8 path list; the `HDROP` is released before the event is emitted). Both stay behind platform seams — the public API exposes no Win32 types.
-- **Testing**: self-hosted test framework (502 cases as of 2026-10-25, zero dependencies) with a recording backend for paint assertions
+- **Testing**: self-hosted test framework (505 cases as of 2026-10-25, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -85,7 +85,7 @@ Targets:
 | Target | Type | Description |
 |---|---|---|
 | `ECDI` | static library | The framework (`include/ECDI/*.h` — 99 public headers; internal implementation lives in `src/`) |
-| `ecdi_tests` | executable | Self-hosted test suite — 502 cases (2026-10-25), zero dependencies |
+| `ecdi_tests` | executable | Self-hosted test suite — 505 cases (2026-10-25), zero dependencies |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `visualtest` | executable | Side-by-side visual check for image decoding (Phase 11) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |

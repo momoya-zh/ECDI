@@ -279,6 +279,134 @@ void TestGDIBackendAlphaBlend()
     DestroyWindow(hwnd);
 }
 
+// ── #71：GDI 链 alpha 消费收口（DrawText / DrawFocusRect / AA 关线——修复前恒丢 alpha）──
+// 修复前读数（探针 `.workbuddy/spike/p71/readout-1-before-fix.txt`）：三处墨迹
+// gMean=0.0（纯不透明红）；修复后（readout-2）：文本/焦点框 gMean=127.0、线走覆盖度路径
+// 无纯墨。GL 链全原语消费（对照读数同文件）——#71 收口 = GDI 对齐 GL。
+namespace {
+
+/// @brief 墨迹统计（白底上的红系半透明墨）：inkCount / g 通道和 / 纯墨（g<=16 = 丢 alpha 特征）
+struct AlphaInkStat
+{
+    int inkCount = 0;
+    long gSum = 0;
+    int pureInk = 0;
+
+    double GMean() const { return inkCount > 0 ? static_cast<double>(gSum) / inkCount : -1.0; }
+};
+
+AlphaInkStat ScanAlphaInk(HDC dc, int x0, int y0, int x1, int y1)
+{
+    AlphaInkStat st;
+    for (int y = y0; y <= y1; ++y)
+    {
+        for (int x = x0; x <= x1; ++x)
+        {
+            const COLORREF c = GetPixel(dc, x, y);
+            if (c == CLR_INVALID) continue;
+            if (GetRValue(c) > 240 && GetGValue(c) > 240 && GetBValue(c) > 240) continue;   // 白背景
+            ++st.inkCount;
+            st.gSum += GetGValue(c);
+            if (GetGValue(c) <= 16) ++st.pureInk;
+        }
+    }
+    return st;
+}
+
+/// @brief #71 用例共用窗口（右下角短暂显示、不抢焦点——TestGDIBackendAlphaBlend 同款）
+HWND MakeAlphaTestWindow(const wchar_t* title)
+{
+    static bool registered = false;
+    if (!registered)
+    {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"ECDI_P71_Class";
+        RegisterClassW(&wc);
+        registered = true;
+    }
+    const int screenW = GetSystemMetrics(SM_CXSCREEN);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    HWND hwnd = CreateWindowExW(0, L"ECDI_P71_Class", title, WS_POPUP,
+                                screenW - 210, screenH - 210, 200, 200,
+                                nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    return hwnd;
+}
+
+}   // namespace
+
+// #71ⓐ：半透明文本——修复前 `SetTextColor(ToColorRef)` 只取 RGB（墨迹纯红 gMean=0）；
+// 修复后白墨光栅 luminance 覆盖度 + `BlendCoverageSolid` 预乘合成（内部墨 ≈ (255,128,128)）。
+void TestGDIBackendTextAlphaConsumed()
+{
+    HWND hwnd = MakeAlphaTestWindow(L"ECDI_P71_Text");
+    {
+        GDIBackend backend;
+        backend.Initialize(Win32RenderContext(hwnd));
+        backend.BeginFrame(Color::White());
+        backend.DrawText(Point{ 20, 20 }, "MMMM", Color{ 1.0f, 0.0f, 0.0f, 0.5f }, Font{ 16.0f, "" });
+        backend.EndFrame();
+
+        HDC dc = GetDC(hwnd);
+        const AlphaInkStat st = ScanAlphaInk(dc, 10, 10, 120, 50);
+        ReleaseDC(hwnd, dc);
+
+        EXPECT_TRUE(st.inkCount > 30);                       // 有墨（字体光栅成功）
+        EXPECT_EQ(st.pureInk, 0);                            // ★ 修复前恒纯红（红）
+        EXPECT_TRUE(st.GMean() > 90 && st.GMean() < 170);    // ≈127（探针实测 127.0）
+    }
+    DestroyWindow(hwnd);
+}
+
+// #71：半透明焦点框——修复前 `CreatePen(PS_SOLID,1,ToColorRef)` 恒丢 alpha；修复后
+// 段状周界走白墨光栅 → 覆盖度合成（段墨 ≈ (255,128,128)）。
+void TestGDIBackendFocusRectAlphaConsumed()
+{
+    HWND hwnd = MakeAlphaTestWindow(L"ECDI_P71_Focus");
+    {
+        GDIBackend backend;
+        backend.Initialize(Win32RenderContext(hwnd));
+        backend.BeginFrame(Color::White());
+        backend.DrawFocusRect(Rect{ 20, 60, 120, 40 }, 0.0f, Color{ 1.0f, 0.0f, 0.0f, 0.5f });
+        backend.EndFrame();
+
+        HDC dc = GetDC(hwnd);
+        const AlphaInkStat st = ScanAlphaInk(dc, 10, 55, 150, 110);
+        ReleaseDC(hwnd, dc);
+
+        EXPECT_TRUE(st.inkCount > 20);                       // 段状墨存在
+        EXPECT_EQ(st.pureInk, 0);                            // ★ 修复前恒纯红（红）
+        EXPECT_TRUE(st.GMean() > 90 && st.GMean() < 170);    // ≈127（探针实测 127.0）
+    }
+    DestroyWindow(hwnd);
+}
+
+// #71ⓑ：AA 关 + a<1 的轴对齐线——修复前该边角走 legacy 笔（丢 alpha，纯红）；
+// 修复后移入覆盖度路径（消费 alpha；1px 线获得 AA 边缘 ⇒ gMean 偏高，探针实测 191.4）。
+void TestGDIBackendLineAlphaAAOffConsumed()
+{
+    HWND hwnd = MakeAlphaTestWindow(L"ECDI_P71_Line");
+    {
+        GDIBackend backend;
+        backend.Initialize(Win32RenderContext(hwnd));
+        backend.BeginFrame(Color::White());
+        backend.SetAntiAliasing(false);
+        backend.DrawLine(Point{ 20, 150 }, Point{ 180, 150 }, 1.0f, Color{ 1.0f, 0.0f, 0.0f, 0.5f });
+        backend.EndFrame();
+
+        HDC dc = GetDC(hwnd);
+        const AlphaInkStat st = ScanAlphaInk(dc, 10, 144, 190, 158);
+        ReleaseDC(hwnd, dc);
+
+        EXPECT_TRUE(st.inkCount > 50);                       // 线墨存在
+        EXPECT_EQ(st.pureInk, 0);                            // ★ 修复前 legacy 笔恒纯红（红）
+        EXPECT_TRUE(st.GMean() > 120 && st.GMean() < 240);   // 覆盖度路径（探针实测 191.4）
+    }
+    DestroyWindow(hwnd);
+}
+
 // ── 9.5 Alpha Primitive 补强：DrawRect 半透明（Color.a < 1 → 预乘 DIB + AlphaBlend）──
 // ── Phase 32/#64（审计 H8）：长文本前缀截断的水平滚动跨度 ────────────────────
 // 300 个 W（≈ 数千 px）从 clip.left − 100 起画：修复前 maxSpan 退化为裁剪区宽，
@@ -660,6 +788,9 @@ void ECDI::Test::RegisterRendererTests(){
     GetTestRegistry().Add("Renderer.PaintContextNewCommands", &TestPaintContextNewCommands);
     GetTestRegistry().Add("Renderer.ImageValueSemantic", &TestImageValueSemantic);
     GetTestRegistry().Add("Renderer.GDIBackendAlphaBlend", &TestGDIBackendAlphaBlend);
+    GetTestRegistry().Add("Renderer.TextAlphaConsumed",      &TestGDIBackendTextAlphaConsumed);      // #71ⓐ
+    GetTestRegistry().Add("Renderer.FocusRectAlphaConsumed", &TestGDIBackendFocusRectAlphaConsumed); // #71
+    GetTestRegistry().Add("Renderer.LineAlphaAAOffConsumed", &TestGDIBackendLineAlphaAAOffConsumed); // #71ⓑ
     GetTestRegistry().Add("Renderer.DrawRectAlpha", &TestDrawRectAlpha);
     GetTestRegistry().Add("Renderer.ScaleIdentity", &TestRendererScaleIdentity);
     GetTestRegistry().Add("Renderer.ScaleRectAndClip", &TestRendererScaleRectAndClip);

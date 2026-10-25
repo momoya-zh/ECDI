@@ -83,6 +83,12 @@ private:
 	HFONT GetOrCreateFont(const Font& font);   ///< D1+D3+Phase20：缓存取/建 HFONT（键 = size+family+**dpi**；按**窗口 DPI** 把 DIP 字号换算为**物理** lfHeight）
 	static COLORREF ToColorRef(const Color& color);   ///< 决策 21/23：ToByte Clamp（DrawRect/DrawText 共用）
 
+	/// @brief 文本发射统一口（★ #71ⓐ：a<1 走字形覆盖度合成；a=1 原样 `TextOutW` 逐位不变）
+	/// @details x,y/count 语义与 `TextOutW` 完全一致（TA_LEFT|TA_TOP——`DrawTextImpl` 的
+	///          四个发射点共用）。a<1 分支 = 临时白墨黑底光栅 → luminance 覆盖度 →
+	///          `BlendCoverageSolid`（与 GL 链「字形光栅 × alpha」的合成语义对齐）。
+	void EmitText(LONG x, LONG y, const wchar_t* text, int count, const Color& color, HFONT hfont);
+
 	// ── Phase 32 批三：每命令 alpha 修补（K①..K④——仅衬底模式激活，None 零开销直返）──
 
 	/// @brief 修补矩形 = 命令矩形 ∩ 当前裁剪盒（C32-3；无效/空交集返回 false）

@@ -257,6 +257,98 @@ void BlendAlphaSolid(HDC target, const Rect& rect, const Color& color, float cor
 	DeleteDC(dibDC);
 }
 
+/// @brief 覆盖度驱动的半透明合成（★ #71ⓐ：文本 / 焦点框的 alpha 通路）
+/// @param target  目标 DC（内存缓冲）
+/// @param dstX,dstY 目标左上角（整数像素——调用方已量化）
+/// @param color   墨色（假定 a < 1）
+/// @param cov     每像素覆盖度 [0,255]（字形/段状墨的 luminance；行距 covStride 字节）
+/// @param w,h     覆盖度缓冲尺寸
+/// @details 与 `BlendAlphaSolid` 同构（预乘 DIB + `AlphaBlend(AC_SRC_ALPHA)`），
+///          差别仅在每像素 alpha = color.a × cov/255、RGB 同乘——覆盖度来自**外部光栅**
+///          （白墨黑底的临时缓冲 luminance）而非几何掩码。整缓冲 cov=0 时 no-op。
+void BlendCoverageSolid(HDC target, int dstX, int dstY, const Color& color,
+                        const BYTE* cov, int w, int h, int covStride)
+{
+	if (target == nullptr || cov == nullptr || w <= 0 || h <= 0)
+	{
+		return;
+	}
+	if (color.a <= 0.0f)
+	{
+		return;   // 全透明 no-op（与 BlendAlphaSolid 同语义）
+	}
+
+	const auto ToByte = [](float v)
+	{
+		const float clamped = std::clamp(v, 0.0f, 1.0f);
+		return static_cast<BYTE>(clamped * 255.0f + 0.5f);
+	};
+	const float ba = color.b * color.a;
+	const float ga = color.g * color.a;
+	const float ra = color.r * color.a;
+
+	BITMAPINFO bmi{};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = w;
+	bmi.bmiHeader.biHeight = -h;
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	HDC dibDC = CreateCompatibleDC(target);
+	if (!dibDC)
+	{
+		return;
+	}
+	void* dibBits = nullptr;
+	HBITMAP dibBitmap = CreateDIBSection(dibDC, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+	if (!dibBitmap || !dibBits)
+	{
+		if (dibBitmap) DeleteObject(dibBitmap);
+		DeleteDC(dibDC);
+		return;
+	}
+
+	bool anyInk = false;
+	const int dibStride = w * 4;
+	for (int row = 0; row < h; ++row)
+	{
+		BYTE* line = static_cast<BYTE*>(dibBits) + static_cast<size_t>(row) * dibStride;
+		const BYTE* covLine = cov + static_cast<size_t>(row) * covStride;
+		for (int col = 0; col < w; ++col)
+		{
+			const float c = static_cast<float>(covLine[col]) / 255.0f;
+			if (c <= 0.0f)
+			{
+				line[col * 4 + 0] = 0;
+				line[col * 4 + 1] = 0;
+				line[col * 4 + 2] = 0;
+				line[col * 4 + 3] = 0;
+				continue;
+			}
+			anyInk = true;
+			line[col * 4 + 0] = ToByte(ba * c);
+			line[col * 4 + 1] = ToByte(ga * c);
+			line[col * 4 + 2] = ToByte(ra * c);
+			line[col * 4 + 3] = ToByte(color.a * c);
+		}
+	}
+
+	if (anyInk)
+	{
+		HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(dibDC, dibBitmap));
+		BLENDFUNCTION blend{};
+		blend.BlendOp = AC_SRC_OVER;
+		blend.SourceConstantAlpha = 255;
+		blend.AlphaFormat = AC_SRC_ALPHA;
+		AlphaBlend(target, dstX, dstY, w, h, dibDC, 0, 0, w, h, blend);
+		SelectObject(dibDC, oldBitmap);
+	}
+
+	DeleteObject(dibBitmap);
+	DeleteDC(dibDC);
+}
+
 } // namespace
 
 GDIBackend::GDIBackend() = default;
@@ -712,6 +804,86 @@ void GDIBackend::DrawText(const Point& pos, const std::string& text,
 	FixupSentinelFrosted(textRect);
 }
 
+void GDIBackend::EmitText(LONG x, LONG y, const wchar_t* text, int count,
+                          const Color& color, HFONT hfont)
+{
+	// ★ #71ⓐ：a=1 原样 `TextOutW`（既有内容零回归红线）；a<1 走字形覆盖度合成——
+	//   修复前 GDI 链 `SetTextColor(ToColorRef)` 恒丢 alpha（探针实测墨迹 gMean=0.0，
+	//   `.workbuddy/spike/p71/readout-1-before-fix.txt`），GL 链消费（gMean=161.5）。
+	if (color.a >= 1.0f)
+	{
+		TextOutW(m_memoryDC, x, y, text, count);
+		return;
+	}
+
+	// ── a<1：白墨黑底临时光栅 → luminance 覆盖度 → 预乘一次合成 ──
+	// 光栅在临时缓冲里重画一遍（同一 HFONT / 同一对齐状态），取每像素 luminance 为
+	// 覆盖度（ClearType 的彩色亚像素条纹经平均 ≈ 覆盖度——半透明文本的已知近似，
+	// 与 GL 链「灰度字形光栅 × alpha」语义对齐）。pad=2 容 hang/负 bearing。
+	SIZE extent{};
+	if (!GetTextExtentPoint32W(m_memoryDC, text, count, &extent) || extent.cx <= 0 || extent.cy <= 0)
+	{
+		return;   // 决策 30：测量失败跳过（同 DrawTextImpl 既有容错语义）
+	}
+	constexpr int kPad = 2;
+	const int w = extent.cx + kPad * 2;
+	const int h = extent.cy + kPad * 2;
+
+	BITMAPINFO bmi{};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = w;
+	bmi.bmiHeader.biHeight = -h;
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	HDC dibDC = CreateCompatibleDC(m_memoryDC);
+	if (!dibDC)
+	{
+		return;
+	}
+	void* dibBits = nullptr;
+	HBITMAP dibBitmap = CreateDIBSection(dibDC, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+	if (!dibBitmap || !dibBits)
+	{
+		if (dibBitmap) DeleteObject(dibBitmap);
+		DeleteDC(dibDC);
+		return;
+	}
+	// 黑底（预乘语义：无墨 = 0 覆盖度——luminance 直读即可）
+	std::memset(dibBits, 0, static_cast<size_t>(w) * h * 4);
+
+	HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(dibDC, dibBitmap));
+	HFONT oldFont = static_cast<HFONT>(SelectObject(dibDC, hfont));
+	SetTextColor(dibDC, RGB(255, 255, 255));
+	SetBkMode(dibDC, TRANSPARENT);
+	SetTextAlign(dibDC, GetTextAlign(m_memoryDC));   // 与主 DC 同对齐（默认 TA_LEFT|TA_TOP）
+	TextOutW(dibDC, kPad, kPad, text, count);
+	SetTextAlign(dibDC, TA_LEFT | TA_TOP);
+	GdiFlush();
+
+	// luminance → 覆盖度（BGRA 行序；GDI 不写 alpha——只读 RGB）
+	std::vector<BYTE> cov(static_cast<size_t>(w) * h);
+	const int stride = w * 4;
+	for (int row = 0; row < h; ++row)
+	{
+		const BYTE* src = static_cast<const BYTE*>(dibBits) + static_cast<size_t>(row) * stride;
+		BYTE* dstLine = cov.data() + static_cast<size_t>(row) * w;
+		for (int col = 0; col < w; ++col)
+		{
+			// 白墨 luminance = (R+G+B)/3（整数近似——覆盖率到 255 的满刻度）
+			dstLine[col] = static_cast<BYTE>((src[col * 4 + 0] + src[col * 4 + 1] + src[col * 4 + 2]) / 3);
+		}
+	}
+
+	SelectObject(dibDC, oldFont);
+	SelectObject(dibDC, oldBitmap);
+	DeleteObject(dibBitmap);
+	DeleteDC(dibDC);
+
+	BlendCoverageSolid(m_memoryDC, x - kPad, y - kPad, color, cov.data(), w, h, w);
+}
+
 void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
                               const Color& color, const Font& font)
 {
@@ -778,8 +950,7 @@ void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
 		if (!extentOk)
 		{
 			// v1.1 评审建议②：测量失败 ⇒ 回退原路径整串（测量失败 ≠ 文本不可见）
-			TextOutW(m_memoryDC, drawX, drawY, wideText.c_str(),
-			         static_cast<int>(wideText.size()));
+			EmitText(drawX, drawY, wideText.c_str(), static_cast<int>(wideText.size()), color, hfont);
 			return;
 		}
 
@@ -792,8 +963,7 @@ void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
 		// 分支 5：水平完全可见（含 maxSpan ≥ 串宽 ⇒ fit == len）⇒ 整串原路径
 		if (fit >= static_cast<INT>(wideText.size()))
 		{
-			TextOutW(m_memoryDC, drawX, drawY, wideText.c_str(),
-			         static_cast<int>(wideText.size()));
+			EmitText(drawX, drawY, wideText.c_str(), static_cast<int>(wideText.size()), color, hfont);
 			return;
 		}
 
@@ -821,27 +991,25 @@ void GDIBackend::DrawTextImpl(const Point& pos, const std::string& text,
 			}
 		}
 
-		TextOutW(m_memoryDC, drawX, drawY, wideText.c_str(), prefix);
+		EmitText(drawX, drawY, wideText.c_str(), prefix, color, hfont);
 		return;
 	}
 
-	TextOutW(m_memoryDC,
-	         drawX,
-	         drawY,
-	         wideText.c_str(),
-	         static_cast<int>(wideText.size()));
+	EmitText(drawX, drawY, wideText.c_str(), static_cast<int>(wideText.size()), color, hfont);
 }
 
 void GDIBackend::DrawLine(const Point& start, const Point& end,
                           float width, const Color& color)
 {
-	// 分支序即语义序（Phase 24 详设 △6-1 / 契约 C8）：
-	// ① AA 关 → legacy 逐位现状（R3——含 a<1 丢 alpha 的现状语义）
+	// 分支序即语义序（Phase 24 详设 △6-1 / 契约 C8；★ #71ⓑ 修订）：
+	// ① a≥1 且 AA 关 → legacy 逐位现状（R3 的实际保护域 = 既有内容全 a=1——#71 前全库
+	//    零 a<1 线消费者，故把「AA 关」从无条件改为「AA 关 ∧ a≥1」不触碰 R3 所护内容）
 	// ② a≥1 且 round 后轴对齐（含退化）→ legacy 逐位现状（R4 / D1——探针 A-2/A-3 的
 	//    cosmetic/几何笔足迹原样保留，不逆向 GDI）
-	// ③ 其余 → 覆盖度路径（斜线 a=1、一切 a<1——D0；L3：a<1 轴对齐在此获得 AA 边缘）
-	if (!m_antiAliasing ||
-	    (color.a >= 1.0f && IsAxisAlignedAfterRound(start.x, start.y, end.x, end.y)))
+	// ③ 其余 → 覆盖度路径（斜线、一切 a<1——D0；L3：a<1 轴对齐在此获得 AA 边缘；
+	//    ★ #71ⓑ 新增：AA 关 + a<1 从 ① 移入 ③——覆盖度路径消费 alpha，legacy 笔丢）
+	if (color.a >= 1.0f &&
+	    (!m_antiAliasing || IsAxisAlignedAfterRound(start.x, start.y, end.x, end.y)))
 	{
 		DrawLineLegacy(start, end, width, color);
 	}
@@ -1220,13 +1388,6 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 	// 周界 = 4 直线（直角）或 4 直线 + 4 圆弧（圆角），沿周界连续 3px 实 + 3px 空交替——
 	// 避免"采样段内再段状"导致的实心连串 + 断口（2026-08-27 修复）。
 	// 命令层（RenderCommand/RecordingBackend）语义不变。
-	HPEN pen = CreatePen(PS_SOLID, 1, ToColorRef(color));
-	if (!pen)
-	{
-		return;
-	}
-
-	HPEN oldPen = static_cast<HPEN>(SelectObject(m_memoryDC, pen));
 
 	// GDI 开区间约定：可见像素 = [left, right-1] × [top, bottom-1]（right/bottom 列被
 	// PushClip(控件边界 [x,x+w)) 裁掉——手动画段需显式内缩，2026-08-27 修复）
@@ -1243,6 +1404,59 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 	const float gRight = static_cast<float>(BackendContract::QuantizeEdge(rect.x + rect.width));
 	const float gBottom = static_cast<float>(BackendContract::QuantizeEdge(rect.y + rect.height));
 	const float r = (std::min)(cornerRadius, (std::min)((gRight - fLeft), (gBottom - fTop)) * 0.5f);
+
+	// ── #71：a<1 走白墨黑底临时光栅 → luminance 覆盖度 → 预乘一次合成 ──────────
+	// 段状墨的 alpha 通路；a=1 路径 target = m_memoryDC、偏移 0 ⇒ 逐位不变（红线）。
+	HDC targetDC = m_memoryDC;
+	int offX = 0;
+	int offY = 0;
+	HDC rasterDC = nullptr;
+	HBITMAP rasterBitmap = nullptr;
+	HBITMAP rasterOld = nullptr;
+	void* rasterBits = nullptr;
+	int rasterW = 0;
+	int rasterH = 0;
+	if (color.a < 1.0f && color.a > 0.0f)
+	{
+		rasterW = static_cast<int>(fRight) - static_cast<int>(fLeft) + 1;
+		rasterH = static_cast<int>(fBottom) - static_cast<int>(fTop) + 1;
+		if (rasterW > 0 && rasterH > 0)
+		{
+			BITMAPINFO bmi{};
+			bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+			bmi.bmiHeader.biWidth = rasterW;
+			bmi.bmiHeader.biHeight = -rasterH;
+			bmi.bmiHeader.biPlanes = 1;
+			bmi.bmiHeader.biBitCount = 32;
+			bmi.bmiHeader.biCompression = BI_RGB;
+			rasterDC = CreateCompatibleDC(m_memoryDC);
+			if (rasterDC)
+			{
+				rasterBitmap = CreateDIBSection(rasterDC, &bmi, DIB_RGB_COLORS, &rasterBits, nullptr, 0);
+				if (rasterBitmap && rasterBits)
+				{
+					std::memset(rasterBits, 0, static_cast<size_t>(rasterW) * rasterH * 4);
+					rasterOld = static_cast<HBITMAP>(SelectObject(rasterDC, rasterBitmap));
+					targetDC = rasterDC;
+					offX = static_cast<int>(fLeft);
+					offY = static_cast<int>(fTop);
+				}
+			}
+		}
+	}
+
+	HPEN pen = CreatePen(PS_SOLID, 1,
+	                     (targetDC == rasterDC) ? RGB(255, 255, 255) : ToColorRef(color));
+	if (!pen)
+	{
+		// 决策 30 风格：局部失败跳过（含临时光栅清理）
+		if (rasterOld) SelectObject(rasterDC, rasterOld);
+		if (rasterBitmap) DeleteObject(rasterBitmap);
+		if (rasterDC) DeleteDC(rasterDC);
+		return;
+	}
+
+	HPEN oldPen = static_cast<HPEN>(SelectObject(targetDC, pen));
 
 	// ── 周界子段（按顺序：上 → 右上 → 右 → 右下 → 下 → 左下 → 左 → 左上）──
 	// 每个子段 = 直线（起终点）或圆弧（圆心 + 起止角）。s 为沿周界的弧长参数。
@@ -1329,9 +1543,9 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 			for (int i = 1; i <= kSub; ++i)
 			{
 				const auto [x, y] = PointAt(t + (t2 - t) * static_cast<float>(i) / static_cast<float>(kSub));
-				// D6：手绘折线端点属于点，不属于矩形边，保留 lround。
-				MoveToEx(m_memoryDC, std::lround(px), std::lround(py), nullptr);
-				LineTo(m_memoryDC, std::lround(x), std::lround(y));
+				// D6：手绘折线端点属于点，不属于矩形边，保留 lround（#71：a<1 时光栅坐标 = 相对可见像素区）。
+				MoveToEx(targetDC, std::lround(px) - offX, std::lround(py) - offY, nullptr);
+				LineTo(targetDC, std::lround(x) - offX, std::lround(y) - offY);
 				px = x;
 				py = y;
 			}
@@ -1340,8 +1554,31 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 		draw = !draw;
 	}
 
-	SelectObject(m_memoryDC, oldPen);
+	SelectObject(targetDC, oldPen);
 	DeleteObject(pen);
+
+	// #71：a<1 —— 白墨光栅 luminance → 覆盖度 → 预乘一次合成（GDI 不写 alpha，只读 RGB）
+	if (targetDC == rasterDC && rasterBits != nullptr)
+	{
+		GdiFlush();
+		std::vector<BYTE> cov(static_cast<size_t>(rasterW) * rasterH);
+		const int rasterStride = rasterW * 4;
+		for (int row = 0; row < rasterH; ++row)
+		{
+			const BYTE* src = static_cast<const BYTE*>(rasterBits) + static_cast<size_t>(row) * rasterStride;
+			BYTE* dstLine = cov.data() + static_cast<size_t>(row) * rasterW;
+			for (int col = 0; col < rasterW; ++col)
+			{
+				dstLine[col] = static_cast<BYTE>((src[col * 4 + 0] + src[col * 4 + 1] + src[col * 4 + 2]) / 3);
+			}
+		}
+
+		SelectObject(rasterDC, rasterOld);
+		DeleteObject(rasterBitmap);
+		DeleteDC(rasterDC);
+
+		BlendCoverageSolid(m_memoryDC, offX, offY, color, cov.data(), rasterW, rasterH, rasterW);
+	}
 
 	// ── Phase 32 批三（K③）：焦点框哨兵修补（点线边界——线像素 ≠ 清屏 ⇒ A=255，
 	// 空隙 = 清屏 ⇒ 透材质；框外/内部不动）────────────────────────────────

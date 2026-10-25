@@ -16,7 +16,7 @@ struct Color
 	float r = 0.0f;		///< 红 [0,1]
 	float g = 0.0f;		///< 绿 [0,1]
 	float b = 0.0f;		///< 蓝 [0,1]
-	float a = 1.0f;		///< alpha／**不透明度** [0,1]：`1.0` = 完全不透明，`0.0` = 全透明（★ **不是「透明度」**——措辞反了会让「0.8」被误读成 80% 透明）。消费方**分后端**（★ 双链不对等 = deferred #71，2026-10-24 登记；当前零消费者，触发条件 = 首个半透明文本/焦点框消费者出现）：两链均消费 = `DrawRect` / `DrawRoundedRect`（经 `BlendAlphaSolid`，Phase 9）+ `DrawArc` / 覆盖度路径（经 `RasterizeMask` 预乘，Phase 8.6/24/33）；**GDI 链 `DrawText` / `DrawFocusRect` 恒丢弃**（`ToColorRef` 只取 RGB——GL 链全原语消费）；`DrawLine` 仅「AA 关 + a<1」边角丢弃。★ **窗口清屏路径不消费**（Phase 18 C4：`COLORREF` 无 alpha 通道——见 `Window::SetBackgroundColor` 注释）
+	float a = 1.0f;		///< alpha／**不透明度** [0,1]：`1.0` = 完全不透明，`0.0` = 全透明（★ **不是「透明度」**——措辞反了会让「0.8」被误读成 80% 透明）。★ **#71 收口后（2026-10-25）两链全原语消费**：GDI 侧 `DrawRect` / `DrawRoundedRect`（`BlendAlphaSolid`，Phase 9）· `DrawArc` / 覆盖度路径（`RasterizeMask` 预乘，Phase 8.6/24/33）· `DrawText` / `DrawFocusRect`（白墨光栅 luminance 覆盖度 + `BlendCoverageSolid` 预乘合成，#71ⓐ——半透明文本/焦点框的字形边缘为灰度近似，非 ClearType 亚像素）· `DrawLine`（含 AA 关 + a<1 的 ⓑ 收口——覆盖度路径消费）；GL 链全原语消费（`glColor4f` 携带 a）。a=1 的所有路径逐位不变（#71 红线）。★ **窗口清屏路径不消费**（Phase 18 C4：`COLORREF` 无 alpha 通道——见 `Window::SetBackgroundColor` 注释）
 
 	static constexpr Color White()   noexcept { return { 1.0f, 1.0f, 1.0f, 1.0f }; }
 	static constexpr Color Black()   noexcept { return { 0.0f, 0.0f, 0.0f, 1.0f }; }
