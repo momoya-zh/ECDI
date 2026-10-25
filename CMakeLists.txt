@@ -119,6 +119,15 @@ if(WIN32)
     # Phase 26 批三 GL 后端依赖（GLRenderer / WGL——唯一归属 opengl32；
     # PUBLIC 沿既有系统库惯例——公共头零 GL（盯防②），收紧为 PRIVATE 亦安全，登记开放项 O4）
     target_link_libraries(ECDI PUBLIC opengl32)
+    # gdi32：GDI 后端本体（TextOutW / SaveDC 族）+ WGL 像素格式与交换缓冲
+    # （ChoosePixelFormat / SetPixelFormat / DescribePixelFormat / SwapBuffers 均属 gdi32，
+    # 非 opengl32）。★ 2026-10-25 消费者评审抓出：此前靠 MSVC/MinGW 工具链**默认库集合**
+    # 兜底（CMAKE_CXX_STANDARD_LIBRARIES / cl 默认集均含 gdi32）——树内与默认 find_package
+    # 消费者皆不暴露；裸 cl 或裁掉默认库的消费者缺 27 符号。显式声明 = 导出自洽。
+    target_link_libraries(ECDI PUBLIC gdi32)
+    # advapi32：#69 Win32FontSource 字体注册表读（RegOpenKeyExW / RegEnumValueW / RegCloseKey）。
+    # ★ 同上（2026-10-25）：默认 CMake 消费者被 standard libs 兜住不暴露；裸 cl 恰缺这 3 符号。
+    target_link_libraries(ECDI PUBLIC advapi32)
 endif()
 
 # ── R5：version.h 生成（三宏——configure 注入 SemVer）──
