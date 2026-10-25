@@ -34,6 +34,9 @@ public:
 	// Phase 13 D9：交互控件消费鼠标输入——命中本控件时 caption 区返回 HTCLIENT（默认 false 见 Widget.h）
 	bool ConsumesMouseInput() const noexcept override { return true; }
 
+	// #72-②：文本编辑区悬停 = I 形光标（默认箭头见 Widget.h）
+	[[nodiscard]] CursorShape GetCursor() const noexcept override{ return CursorShape::IBeam; }
+
 	// ── P1：echo 掩码（Key 输入打点；显示层打点、数据层不变——GetText 永远真实值）──
 
 	enum class EchoMode{ Normal, Password };

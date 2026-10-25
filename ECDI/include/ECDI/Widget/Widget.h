@@ -3,6 +3,7 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Rect.h"
 #include "ECDI/Core/Size.h"
+#include "ECDI/Core/CursorShape.h"   // #72-②：GetCursor 返回形态（叶子头，零依赖）
 #include "ECDI/Render/PaintContext.h"
 #include "ECDI/Widget/WidgetState.h"
 
@@ -253,6 +254,13 @@ public:
 	/// @brief 鼠标移出通知（Hover 状态变化事实）
 	/// @details 默认空实现；契约：脱树导致的失效不派发此方法（Application 验证）
 	virtual void OnMouseLeave();
+
+	/// @brief 该控件悬停时应显示的光标形态（★ #72-②）
+	/// @details 平台层经 `WM_SETCURSOR` → `PlatformWindowHost::OnQueryCursor` →
+	///          窗口 HitTest 后询问**命中控件**；默认箭头，TextBox 等文本编辑区
+	///          override 为 `IBeam`。与 OnMouseEnter/Leave 同族——只自述、不持有状态
+	///          （光标切换由平台层每次 WM_SETCURSOR 重查，无框架侧缓存可失配）。
+	[[nodiscard]] virtual CursorShape GetCursor() const noexcept{ return CursorShape::Arrow; }
 
 	// ── Focus ──────────────────────────────────────
 

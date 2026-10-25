@@ -5,7 +5,9 @@ namespace ECDI{
 /// @brief 框架层键盘按键枚举（与 Win32 VK_* 解耦）
 /// @details
 /// 覆盖标准 VK_* 中所有键盘消息能传递的键。
-/// 不包含 Fn/Power/多媒体键（这些键不产生 WM_KEYDOWN/WM_CHAR）。
+/// 不包含 Fn/Power（键盘固件/电源管理消化，不产生应用可见的 WM_KEYDOWN/WM_CHAR）；
+/// 多媒体键（VK_VOLUME_* 等）**会产生 WM_KEYDOWN**，但映射表未收录——落 Unknown
+/// （`WindowMessageHandler` 尾分支；登记 deferred #73，消费者出现再立项）。
 /// 修饰键（Shift/Ctrl/Alt）通过 lParam 位区分左右。
 enum class KeyCode{
 	Unknown,

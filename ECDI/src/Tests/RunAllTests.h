@@ -49,6 +49,7 @@ void RegisterBackendQuantizationTests(); ///< Phase 34：GDI 几何边量化与�
 void RegisterVisibilityRepaintTests();   ///< ★ 审计 M9：可见性变化的重绘归属（SetVisible 内建 Invalidate + 同值守卫 + 范围边界）
 void RegisterAssertDisciplineTests();    ///< ★ 审计 #63 / §7.3：断言纪律推广（AddChild/RemoveChild/SetStretch 补 Release 运行时分支）
 void RegisterAuditRemainderTests();
+void RegisterPlatformQuickfixTests();   ///< ★ #72 平台面快修（① GL 失败态更新区域验证 / ② 光标 / ③ WM_MOUSELEAVE）
 void RegisterArcCoverageTests();   ///< Phase 33 批一：圆弧原语（T33-1..T33-9b——覆盖度生成层，零窗口依赖）
 void RegisterArcCommandTests();    ///< Phase 33 批二：命令层贯通（T33-10..T33-12——原样转发 / 不归一化 / 两角度不折 scale）
 void RegisterRingProgressBarTests();   ///< Phase 33 批三：环形进度控件（T33-13..T33-18——Theme 契约 / 值 / 动画 / 命令流 / 尺寸 / 真窗口 E2E）

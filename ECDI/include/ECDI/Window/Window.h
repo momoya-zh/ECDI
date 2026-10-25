@@ -378,6 +378,17 @@ class Window : public PlatformWindowHost {
 		///          修复前无此通路 ⇒ 丢 Up 后框架卡在按下态，只能等用户下一次任意点击自愈。
 		void OnCaptureLost() override;
 
+		/// @brief 光标形态查询（★ #72-②：PlatformWindowHost 契约实现）
+		/// @details 转 RootWidget::HitTest → Widget::GetCursor（命中控件自述）；
+		///          无命中 / RootWidget 未就绪 = Arrow（与 IsClientInteractiveAt 同款守卫）。
+		CursorShape OnQueryCursor(int x, int y) const noexcept override;
+
+		/// @brief 鼠标已离开窗口客户区（★ #72-③：PlatformWindowHost 契约实现）
+		/// @details = `UpdateHoverState(nullptr)`——正常离开语义（区别于 #59 的脱树
+		///          异常失效不补发）：对最后悬停控件派发 `OnMouseLeave` 并清 hover，
+		///          契约 D 的 Leave → 后续 Enter 顺序由 HoverTracker 保证。
+		void OnMouseLeftWindow() override;
+
 		/// @brief IME 组合发生（7.1.2 方案 B：平台层状态同步区上报，非事件系统成员）
 		/// @details 转发既有框架逻辑 NotifyIMEComposition（候选窗定位）
 		void OnIMEComposition() override;

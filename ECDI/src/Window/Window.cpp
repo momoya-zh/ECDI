@@ -95,6 +95,17 @@ Window::Window(Application& app,const std::string& title, int width, int height,
 	// ★ Phase 26：与后端**同源同序**（详设契约 C-3）——测量器亦取窗口 DPI（D-8 闭合）。
 	m_textMeasurer->Initialize(m_platformWindow->GetRenderContext());
 
+	// ★ #72-①ⓑ：失败信号——后端 Initialize 失败（RDP / 无 GPU 虚机 / WGL 不可用等）
+	//   不再「白屏 + 无声」：Initialize 内部已记录成因，此处补**后果级** Error（窗口将空白渲染）。
+	//   刻意不硬失败：GDI 链 IsReady 恒 true 永不触发；GL 失败时窗口仍可运行（空白帧 +
+	//   定时器活着——失败路径已验证更新区域）；调用方按 `BackendFactory.h` 契约自查
+	//   IsReady 决定退出策略，框架不代作决定。
+	if (!m_renderBackend->IsReady())
+	{
+		Logger::Log(LogLevel::Error,
+			L"Window: render backend not ready after Initialize; window will render blank (#72-1)");
+	}
+
 	// 创建 RootWidget（Widget 树的根节点，代表窗口客户区）
 	m_rootWidget = std::make_unique<Widget>();
 
@@ -552,6 +563,31 @@ void Window::OnCaptureLost(){
 	//   补发会让控件以为用户松了手（可能触发点击/提交等业务后果）。
 	//   若控件自身有按下态需要复位，由它在下一次 Down 时自愈（既有 F1 语义：Down 永远重走 HitTest）。
 	m_captureWidget = nullptr;
+
+}
+
+CursorShape Window::OnQueryCursor(int x, int y) const noexcept{
+
+	// ★ #72-②：窗口以 HitTest 代答命中控件的光标自述（平台层不认识 Widget——分层律）。
+	// 防御守卫与 IsClientInteractiveAt 同款（RootWidget 构造期未就绪）。
+	if (!m_rootWidget){
+
+		return CursorShape::Arrow;
+
+	}
+
+	Widget* hit = m_rootWidget->HitTest(x, y);
+
+	return (hit != nullptr) ? hit->GetCursor() : CursorShape::Arrow;
+
+}
+
+void Window::OnMouseLeftWindow(){
+
+	// ★ #72-③：鼠标真实离开窗口 = **正常离开**语义（区别于 #59 脱树异常失效的不补发）——
+	// 对最后悬停控件派发 OnMouseLeave 并清空 hover（Update(nullptr) 单入口：
+	// Leave → 后续 Enter 的顺序契约由 HoverTracker 保证）。
+	UpdateHoverState(nullptr);
 
 }
 

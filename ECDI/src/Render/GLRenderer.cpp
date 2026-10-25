@@ -140,6 +140,17 @@ void GLRenderer::BeginFrame(const Color& background)
 {
 	if (!m_ready)
 	{
+		// ★ #72-①：失败态仍须**验证更新区域**——空白帧的 BeginPaint/EndPaint 对。
+		//   跳过验证 ⇒ WM_PAINT 队列一空即重生成（正是下方注释预言的风暴）⇒ WM_TIMER
+		//   永不投递 ⇒ 一切定时器饿死（探针实测 4s 内 595571 帧重绘、0 tick——
+		//   `.workbuddy/spike/p72/readout-A-defect.txt`）。绘制弃用——此对仅承担
+		//   「验证」职责（与下方成功路径的 BeginPaint 同一理由）。
+		if (m_hwnd != nullptr)
+		{
+			PAINTSTRUCT ps;
+			BeginPaint(m_hwnd, &ps);
+			EndPaint(m_hwnd, &ps);
+		}
 		return;
 	}
 

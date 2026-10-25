@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "ECDI/Core/CursorShape.h"   // #72-②：OnQueryCursor 返回形态（叶子头，零依赖）
+
 namespace ECDI{
 
 class Window;   // 前置声明——GetWindow 返回框架窗口（平台层不 include Window.h，只认此契约）
@@ -78,6 +80,32 @@ public:
 	///   「**捕获已被别人拿走**」——此时**不得**再调 `::ReleaseCapture`（会释放别人的捕获
 	///   ／或触发二次 `WM_CAPTURECHANGED` 回环），只需清框架侧登记。
 	virtual void OnCaptureLost()
+	{
+	}
+
+	/// @brief 光标形态查询（★ #72-②：`WM_SETCURSOR` 客户区命中时代答）
+	/// @param x,y 鼠标位置（窗口局部 **DIP**——与 `IsClientInteractiveAt` 同口径，
+	///        物理像素 → DIP 的换算点唯一在平台层）
+	/// @return 命中控件自述的光标形态；无命中 / 未实现 = `Arrow`
+	/// @details 平台层**不认识 Widget**（分层律，同 `IsClientInteractiveAt`）——只问本契约；
+	///          实现方（Window）转 `RootWidget::HitTest` → `Widget::GetCursor`。
+	///          ★ **默认实现 = Arrow**（**非纯虚**——同 `OnCaptureLost` 先例）：
+	///          既有 4 个实现者（`Window` + 3 个测试 Host）不实现即语义正确（箭头 = 旧行为）。
+	[[nodiscard]] virtual CursorShape OnQueryCursor(int x, int y) const noexcept
+	{
+		(void)x;
+		(void)y;
+		return CursorShape::Arrow;
+	}
+
+	/// @brief 鼠标已离开窗口客户区（★ #72-③：`WM_MOUSELEAVE` 上报）
+	/// @details 平台层在每条 `WM_MOUSEMOVE` 上（重）武装 `TrackMouseEvent(TME_LEAVE)`、
+	///          系统投递 `WM_MOUSELEAVE` 时调本方法。框架据此清空 hover——修复前
+	///          最后一个悬停控件在鼠标**出窗后**永收不到 `OnMouseLeave`（hover 只靠
+	///          move 差分，悬停态卡死到下一次 move 才自愈）。
+	///          ★ **默认实现 = 空实现**（非纯虚，同上先例）：测试 Host 不驱动真实
+	///          鼠标踪迹，空实现即语义正确。
+	virtual void OnMouseLeftWindow()
 	{
 	}
 };

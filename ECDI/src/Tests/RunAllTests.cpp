@@ -51,6 +51,7 @@ int ECDI::Test::RunAllTests()
     RegisterArcCommandTests();          // Phase 33 批二：命令层贯通（T33-10..T33-12）
     RegisterRingProgressBarTests();     // Phase 33 批三：环形进度控件（T33-13..T33-18）
     RegisterEventConsumptionTests();    // Phase 35：事件消费 + 嵌套点击 + 派发期安全销毁
+    RegisterPlatformQuickfixTests();    // ★ #72 平台面快修（GL 失败态验证 / 光标 / WM_MOUSELEAVE）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

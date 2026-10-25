@@ -38,6 +38,27 @@ namespace ECDI{
 
 namespace{   // 匿名 namespace：Win32PlatformWindow 内部辅助（不暴露）
 
+/// @brief CursorShape → 系统共享 HCURSOR（★ #72-②：WM_SETCURSOR 用）
+/// @details 预定义系统光标（LoadCursorW 第二参 nullptr 实例）由系统共享、可重复加载——
+///          无需缓存/释放。新形态在此追加一行（默认回落箭头）。
+HCURSOR CursorHandleFor(CursorShape shape) noexcept{
+
+	switch (shape){
+
+	case CursorShape::IBeam:
+
+		return ::LoadCursorW(nullptr, IDC_IBEAM);
+
+	case CursorShape::Arrow:
+
+		break;
+
+	}
+
+	return ::LoadCursorW(nullptr, IDC_ARROW);
+
+}
+
 // ── Phase 32（D32-H/N）：衬底动态解析 + 失败注入（进程级——注册表串行假设）──
 // `SetWindowCompositionAttribute` / `ACCENTPOLICY` 为**未公开 API**（需求 §6 风险①）：
 // 动态解析 + 失败容忍（沿 Phase 12 R6 姿态）——全仓首个 GetProcAddress 用例。
@@ -610,6 +631,24 @@ LRESULT CALLBACK Win32PlatformWindow::WindowProc(HWND hwnd, UINT msg, WPARAM wPa
 
 LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
+	// ── #72-③：鼠标在窗——（重）武装 TrackMouseEvent(TME_LEAVE) ──────────────
+	//   每次 move 都调（系统侧幂等）：系统可能单方面取消跟踪（弹出系统菜单 / 捕获变化等）
+	//   ⇒ 依赖内存标志「只在首条 move 武装」会失配（标志真、跟踪假 = 永久漏 leave），
+	//   以逐 move 一条系统调用换**零状态机**（无成员、无重置路径）。
+	if (msg == WM_MOUSEMOVE && m_hwnd != nullptr){
+
+		TRACKMOUSEEVENT tme{};
+
+		tme.cbSize    = sizeof(tme);
+
+		tme.dwFlags   = TME_LEAVE;
+
+		tme.hwndTrack = m_hwnd;
+
+		TrackMouseEvent(&tme);   // 返回值不查：失败 ⇒ 下一条 move 再试（自愈型接线）
+
+	}
+
 	// ── 内部状态同步（在 Event 翻译前完成，经 Host 回调保证框架层看到最新状态）──
 	switch (msg){
 
@@ -1078,6 +1117,43 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		m_imeResultPendingChars = 0;
 		m_host.OnCaptureLost();
 		break;   // 继续 DefWindowProcW（焦点语义由系统维护）
+
+	// ── #72-③：鼠标离开客户区（TrackMouseEvent 投递；见 HandleMessage 开头的武装策略）──
+	case WM_MOUSELEAVE:
+
+		// 上报宿主清 hover（Window::OnMouseLeftWindow → UpdateHoverState(nullptr)——
+		// 对最后悬停控件派发 OnMouseLeave）。修复前 hover 只靠 move 差分 ⇒ 出窗即卡死。
+		m_host.OnMouseLeftWindow();
+
+		return 0;
+
+	// ── #72-②：客户区光标 = 命中控件自述形态（修复前无 WM_SETCURSOR 处理 ⇒
+	//    恒落类光标 IDC_ARROW——TextBox 上也是箭头）──────────────────────────
+	case WM_SETCURSOR:
+
+		if (LOWORD(lParam) == HTCLIENT){
+
+			// 位置自取（WM_SETCURSOR 的 lParam 不带坐标，只有命中码 + 触发消息号）
+			POINT pt{};
+
+			::GetCursorPos(&pt);
+
+			::ScreenToClient(hwnd, &pt);
+
+			// 物理 → DIP（换算点唯一在平台层——与 WM_NCHITTEST 同律，Q5/△12）
+			const int dpi = ::GetDpiForWindow(hwnd);
+
+			const CursorShape shape = m_host.OnQueryCursor(PixelsToDip(pt.x, dpi),
+
+			                                              PixelsToDip(pt.y, dpi));
+
+			::SetCursor(CursorHandleFor(shape));
+
+			return TRUE;   // 已设 → 不再让 DefWindowProcW 重设类光标
+
+		}
+
+		break;   // 非客户区（边框调整 / 标题栏移动等）→ DefWindowProcW 的系统光标
 
 	}
 
