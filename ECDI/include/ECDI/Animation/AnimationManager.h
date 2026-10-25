@@ -30,7 +30,7 @@ class AnimationManager{
 public:
 
 	// ── TimerId 保留段登记（d1：owner-held + 保留段——登记表见
-	//    docs/phase9.6-animation-detailed-design.md §7；新 timer 必须更新该表）──
+	//    docs/dev/phase9.6-animation-detailed-design.md §7；新 timer 必须更新该表）──
 	//    保留段 1–15 框架保留：TextBox=1（kCaretBlinkTimer，不迁移）、Animation=2（本常量）、
 	//    Desktop=3（Phase 16 A5：Win32PlatformWindow 的桌面跟随重试定时器）
 

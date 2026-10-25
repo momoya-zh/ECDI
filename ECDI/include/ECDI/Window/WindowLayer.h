@@ -7,7 +7,7 @@ namespace ECDI{
 /// 与任何平台实现手段（WorkerW / Progman / SetParent / SetWinEventHook / SetWindowPos）
 /// **完全解耦**——平台层如何达成该层级是实现的自由，公共 API 不做任何绑定。
 /// 档位按 **Win+D 行为** 区分：Normal / Bottom 会被 Win+D 一起隐藏，Desktop 不会
-/// （决策依据见 docs/desktopnest-roadmap.md §1.1）。
+/// （决策依据见 docs/dev/desktopnest-roadmap.md §1.1）。
 enum class WindowLayer{
 
 	/// @brief 默认：普通窗口层，无特殊 z 序处理

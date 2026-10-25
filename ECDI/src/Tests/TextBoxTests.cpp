@@ -1360,7 +1360,7 @@ void TestTextBoxShapeBorderRing()
 }
 
 
-// ── scrollbar-placement-and-appearance v1.1：垂直滚动条（T1–T8；契约见 docs/scrollbar-placement-and-appearance.md §6 / §7）──
+// ── scrollbar-placement-and-appearance v1.1：垂直滚动条（T1–T8；契约见 docs/dev/scrollbar-placement-and-appearance.md §6 / §7）──
 
 /// @brief 造 N 行文本（每行一个 'a'，`\n` 分隔）——行数驱动内容高（假测量器行高恒 16）
 std::string MakeLines(size_t n)

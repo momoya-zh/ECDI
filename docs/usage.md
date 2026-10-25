@@ -3,7 +3,7 @@
 > 本文是 **ECDI 框架的使用文档**——面向「要把 ECDI 用起来的第三方开发者」，讲清三件事：
 > **① 各控件怎么用**（每个控件的构造、配置、回调、常见组合）· **② 布局逻辑**（谁排谁、Stretch 与
 > Layout 的关系、`Arrange` 何时发生）· **③ 从零接一个新窗口的完整路径**（建 → 摆 → 交互 → 跑）。
-> 设计文档（「为什么这样设计」）在 [docs/README.md](README.md)；项目总览（定位 / 构建 / 四工具链）在
+> 设计文档（「为什么这样设计」）在 [dev/README.md](dev/README.md)；项目总览（定位 / 构建 / 四工具链）在
 > [仓库根 README.md](../README.md)。
 
 **声明与约定**
@@ -436,7 +436,7 @@ Win32 消息 → PlatformWindow 翻译 → Event → EventRouter::OnEvent
 | 子控件**不**消费、交还给父 | 什么都不写（默认即冒泡） |
 | 点击回调里删自己 / 删包含自己的祖先 | `Widget::RequestRemove()`（**不要**用 `RemoveChild`——它立即析构）。派发中 `RequestRemove` 只摘树、**整个派发结束后**才析构 |
 
-「父行要能切换、子按钮要能删除」的复合控件：**父行的业务动作不能放在父行自己的点击回调里**，放进子按钮的回调（先 `RequestRemove()` 再执行父级的切换语义），或干脆让父行不做点击控件。完整语义见 [docs/规范/事件消费与安全销毁规范.md](规范/事件消费与安全销毁规范.md)。
+「父行要能切换、子按钮要能删除」的复合控件：**父行的业务动作不能放在父行自己的点击回调里**，放进子按钮的回调（先 `RequestRemove()` 再执行父级的切换语义），或干脆让父行不做点击控件。完整语义见 [docs/dev/规范/事件消费与安全销毁规范.md](dev/规范/事件消费与安全销毁规范.md)。
 
 ### 9.2 动画（per-Window AnimationManager）
 
@@ -522,7 +522,7 @@ DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect / IsRectVisible
 | 8 | Win32 宏 `DrawText` 与 `PaintContext::DrawText` 同名 | 同时包 `Windows.h` 与 ECDI 头时 `#ifdef DrawText / #undef DrawText`（框架内部已防御性处理，用户侧照写无害） |
 | 9 | `WindowLayer::Bottom` 不承诺「绝对最底」；`Win+D` 时与普通窗口一起隐藏 | 桌面层需求用 `Desktop` |
 | 10 | DPI | 框架声明 Per-Monitor-V2；`Font::size` 是 DIP；`SetBounds/GetBounds` 用屏幕 DIP |
-| 11 | 输入层半抽象、多窗口焦点语义、光标色未主题化 | 均在 `docs/README.md` 技术债务表与 `roadmap-deferred.md`（v1.0 API 审查项） |
+| 11 | 输入层半抽象、多窗口焦点语义、光标色未主题化 | 均在 `dev/README.md` 技术债务表与 `dev/roadmap-deferred.md`（v1.0 API 审查项） |
 | 12 | `Button` 的 Down/Up 都会被自动消费（Phase 35） | **嵌套可点击控件时父行收不到点中子按钮的那次点击**——把父级动作放进子按钮回调（见 §9.1「事件消费」） |
 | 13 | `RemoveChild` 立即交回所有权（很可能马上析构） | 事件回调里删控件只用 `RequestRemove()`；延迟边界 = **整次派发结束**，不是单次回调 |
 
@@ -545,8 +545,8 @@ DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect / IsRectVisible
 
 | 想知道 | 去哪 |
 |---|---|
-| 为什么这样设计（逐 Phase 三件套） | [docs/README.md](README.md) 的逐阶段索引 |
+| 为什么这样设计（逐 Phase 三件套） | [dev/README.md](dev/README.md) 的逐阶段索引 |
 | 库化 / 安装 / 外部消费 | [仓库根 README](../README.md) §安装与消费 |
-| 各控件详设（契约级） | `docs/phase5.x-*` / `phase9.x-*` / `phase15-*` 等对应详设 |
-| 已知限制 / 排期 | `docs/README.md` 技术债务表 + `roadmap-deferred.md` |
+| 各控件详设（契约级） | `dev/phase5.x-*` / `dev/phase9.x-*` / `dev/phase15-*` 等对应详设 |
+| 已知限制 / 排期 | `dev/README.md` 技术债务表 + `dev/roadmap-deferred.md` |
 | 可运行样例 | `examples/`（MinimalApp · ModelProbe · VisualTest · DesktopNest） |

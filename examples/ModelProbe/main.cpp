@@ -343,7 +343,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	//   （GDIBackend 以本帧背景色清屏，不再是硬编码 WHITE_BRUSH）。
 	//   取值 = `Palette::WindowBackground()`——**取自 demo 调色板而非就地写死**（单一来源：`ModelProbe.h`）。
 	//   该值与页面底**同色** ⇒ 这圈留白**视觉无缝**（要的是"内容不贴边、但看不出边界"；
-	//   ③ 露底色从来不是需求——见 `docs/phase18.1-child-inset-requirements.md` §9.1）。
+	//   ③ 露底色从来不是需求——见 `docs/dev/phase18.1-child-inset-requirements.md` §9.1）。
 	//   想让它显形（确认留白真的生效）：改 `ModelProbe.h` 里那**一个值**即可。
 	win.SetBackgroundColor(ECDI::Demo::Palette::WindowBackground());
 

@@ -38,7 +38,7 @@ class Event;            // 前置声明（OnEvent 引用参数——7.1.2）
 ///
 /// 禁止拷贝和移动（Widget 树节点地址稳定 + PlatformWindow 生命周期绑定）。
 ///
-/// ── 所有权与生命周期契约（`docs/window-ownership.md` 初设 v1.1 §4.1 / §4.2）────────
+/// ── 所有权与生命周期契约（`docs/dev/window-ownership.md` 初设 v1.1 §4.1 / §4.2）────────
 /// Window 对象由 Application 持有并负责生命周期管理；**调用者不得对 Window\* 执行 delete**。
 /// Window::Release() 仅负责释放**平台窗口资源**，不负责销毁 Window 对象。
 /// 创建：Application::Create()（**当前唯一实际构造入口**——本类构造器为 private，

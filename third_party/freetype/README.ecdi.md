@@ -2,8 +2,8 @@
 
 本目录是 **FreeType 2.14.3** 的源码快照，**vendor 进仓库**（不从系统、包管理器或网络在构建时获取）。
 
-> 引入决策与判据见 `docs/roadmap-deferred.md` **#44**（后端可替换性 · M-4 文本栅格化）与
-> `docs/phase26-freetype-gl-*`；本文件只记录**这份快照本身的可核验事实**。
+> 引入决策与判据见 `docs/dev/roadmap-deferred.md` **#44**（后端可替换性 · M-4 文本栅格化）与
+> `docs/dev/phase26-freetype-gl-*`；本文件只记录**这份快照本身的可核验事实**。
 
 ## 冻结信息（可核验）
 
@@ -98,4 +98,4 @@ FreeType 是**双许可**项目（`LICENSE.TXT` 原文）：使用方须**择一
 1. 下载新版本归档，**核对官方 SHA256**；
 2. 以同样的裁剪规则替换 `include/` · `src/`（排除 `src/tools/`）· `builds/windows/` · `LICENSE.TXT` · `docs/FTL.TXT` · `docs/GPLv2.TXT`（**保持「零本地改动」**）；
 3. 更新本文件的**版本 / 大小 / SHA256** 三行；
-4. 在 `docs/roadmap-deferred.md` **#44** 记一行同步日志（日期 + 旧版本 → 新版本 + 触发原因）。
+4. 在 `docs/dev/roadmap-deferred.md` **#44** 记一行同步日志（日期 + 旧版本 → 新版本 + 触发原因）。

@@ -7,11 +7,11 @@
 这不是口号，而是**设计取舍的标尺**（任何设计分歧先回到这里判）：
 
 - **命名即语义**：公共 API 的名字直接说清用途；**一个概念只用一个词**，同义混用即缺陷。
-- **不引入投机抽象**：抽象等到**第二个真实消费者**出现再加；「暂时不需要」记进 `docs/roadmap-deferred.md`，而不是先写进代码。
+- **不引入投机抽象**：抽象等到**第二个真实消费者**出现再加；「暂时不需要」记进 `docs/dev/roadmap-deferred.md`，而不是先写进代码。
 - **过程即教材**：每个阶段交付 需求 → 初步设计 → 详细设计 三份文档（`docs/`），**理由**与结论同等重要。
 - **示例优先于描述**：能跑的示例胜过一段文字（`examples/MinimalApp` 约 20 行跑起来）。
 - **不强迫既有使用者改代码**：新能力的默认值一律**与现状逐位等价**（近年各 Phase 的硬契约）。
-- **非必要不引入第三方**：引入一个第三方库 ⇔ **三条同时成立** —— ① 该能力**不属于本项目的知识域**（GUI 框架本身）；② 自研的**验收标准无法独立建立**（只能拿该库自己当参照）；③ 愿意承担**长期跟版（含安全）义务**。★ 反例：「渲染四层管线 / 平台解耦」**两条都不满足** ⇒ **必须自研**。★ 当前唯一的第三方 = **FreeType**（字形栅格化 + hinting；决定见 `docs/roadmap-deferred.md` #44）。
+- **非必要不引入第三方**：引入一个第三方库 ⇔ **三条同时成立** —— ① 该能力**不属于本项目的知识域**（GUI 框架本身）；② 自研的**验收标准无法独立建立**（只能拿该库自己当参照）；③ 愿意承担**长期跟版（含安全）义务**。★ 反例：「渲染四层管线 / 平台解耦」**两条都不满足** ⇒ **必须自研**。★ 当前唯一的第三方 = **FreeType**（字形栅格化 + hinting；决定见 `docs/dev/roadmap-deferred.md` #44）。
 
 ## 目标
 
@@ -155,7 +155,7 @@ Window& operator=(Window&& other) noexcept;
 
 **例外：若资源与对象地址绑定，则禁止移动。**
 
-`Window` 的 `HWND` 通过 `GWLP_USERDATA` 与 C++ 对象地址绑定，移动对象会破坏句柄与对象的对应关系，并使 `m_application` 引用失效，导致消息分发崩溃。因此 `Window` 同时禁用复制和移动，仅通过 `Application` 持有的 `unique_ptr` 管理生命周期（**构造权限经 `friend class Application` 授予 `Application`**——`Application::Create()` 是当前唯一实际构造入口；详见 `docs/window-ownership.md`）：
+`Window` 的 `HWND` 通过 `GWLP_USERDATA` 与 C++ 对象地址绑定，移动对象会破坏句柄与对象的对应关系，并使 `m_application` 引用失效，导致消息分发崩溃。因此 `Window` 同时禁用复制和移动，仅通过 `Application` 持有的 `unique_ptr` 管理生命周期（**构造权限经 `friend class Application` 授予 `Application`**——`Application::Create()` 是当前唯一实际构造入口；详见 `docs/dev/window-ownership.md`）：
 
 ```cpp
 // 禁止复制

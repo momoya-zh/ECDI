@@ -35,7 +35,7 @@ Checks
        historical baselines on purpose).
   L13  metric anchors vs measured ground truth (rules 61(5), 115).  Scans only
        the designated current-state carriers -- the root README above
-       '## Status', and the 'current scale anchor' callout in docs/README.md.
+       '## Status', and the 'current scale anchor' callout in docs/dev/README.md.
        Per-phase numbers elsewhere are documented time-point values (rule 22)
        and are deliberately NOT flagged.
 
@@ -381,7 +381,7 @@ def check_line_refs(report, rel, lines, inside, opts):
             norm = target.replace("\\", "/")
             candidates = []
             if "/" in norm:
-                for prefix in ("", "docs/", "ECDI/", "ECDI/src/",
+                for prefix in ("", "docs/", "docs/dev/", "ECDI/", "ECDI/src/",
                                "ECDI/include/", "ECDI/include/ECDI/",
                                "examples/"):
                     candidate = prefix + norm
@@ -434,7 +434,7 @@ def metric_zones(rel, lines):
                 cut = i
                 break
         return list(range(cut))
-    if rel == "docs/README.md":
+    if rel == "docs/dev/README.md":
         zones = []
         for i, line in enumerate(lines):
             if "\u89c4\u6a21\u951a\u70b9" in line or "\u5f53\u524d\u89c4\u6a21" in line:

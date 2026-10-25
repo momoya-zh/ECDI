@@ -146,7 +146,7 @@ protected:
 private:
 
 	// ── ★ Phase 35：事件派发语义（消费 + 存活保护 + 延迟移除）────────────
-	// 详见 docs/规范/事件消费与安全销毁规范.md。本区块**全部为框架内部实现**，不进公共契约面：
+	// 详见 docs/dev/规范/事件消费与安全销毁规范.md。本区块**全部为框架内部实现**，不进公共契约面：
 	//   公共入口只有 `Widget::RequestRemove()`（+ 既有 `Event::SetHandled()`/`IsHandled()`）。
 	// ⚠️ **访问权限（实测口径）**：`Widget` 虽声明为 friend，但 clang-cl 下
 	//   **不**据此授予 Widget **成员函数体**访问本类私有成员（GCC 会，MSVC/clang-cl 不会——
@@ -216,7 +216,7 @@ private:
 	/// @brief 执行一次「有存活保护的事件派发」（★ 所有控件事件派发的唯一入口）
 	/// @param chain 本次派发路径上的控件（命中目标 → 根，按派发顺序）
 	/// @param fn     实际派发体（冒泡循环）
-	/// @details 语义（三段式，与 `docs/规范/事件消费与安全销毁规范.md` §3 一一对应）：
+	/// @details 语义（三段式，与 `docs/dev/规范/事件消费与安全销毁规范.md` §3 一一对应）：
 	///          ① **冻结**：`PrepareDispatchChain(chain)` —— 链上每个节点 `m_dispatchRefCount+1`，
 	///             在此后整个派发期间 `RequestRemove` 只摘树、不析构；
 	///          ② **派发**：`fn()`（冒泡循环内逐节点检查 `IsHandled()` / `IsRemovedDuringDispatch()`）；

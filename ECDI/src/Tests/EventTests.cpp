@@ -309,7 +309,7 @@ void TestEventHierarchy()
 }
 
 // ── P19：鼠标状态维度（T19-1..T19-9）——★ 全部经 FakeHost + Handle() 走真翻译路径 ──
-// 依据 docs/phase19-mouse-event-dimensions-detailed-design.md §5.2。
+// 依据 docs/dev/phase19-mouse-event-dimensions-detailed-design.md §5.2。
 // ★ 手工构造事件只能证明"字段存得下"，**不能**证明"平台信息没被丢掉" ⇒ 平台路径一律走翻译器；
 //   个别"位 ↔ 谓词"映射的自证用本地构造（probe），注释里标明它与平台路径的分工。
 

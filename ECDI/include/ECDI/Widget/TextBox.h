@@ -354,7 +354,7 @@ private:
 
 	/// @brief 同步条（可见性 + 范围 + 偏移）——在 OnPaint 起始被每帧调用（△6/D10），
 	/// ⇒ ★ **必须带「值变化才下发」守卫**：ScrollBar::SetRange 无同值守卫且无条件 Invalidate，
-	/// 无守卫 = 每帧请求重绘（自激励）。契约见 docs/scrollbar-placement-and-appearance.md §7 C-2。
+	/// 无守卫 = 每帧请求重绘（自激励）。契约见 docs/dev/scrollbar-placement-and-appearance.md §7 C-2。
 	void SyncScrollBar();
 
 	ScrollBar* m_vBar = nullptr;        ///< 垂直条（★ **非拥有**——子节点归 Widget 树；不 delete、不在析构解绑）

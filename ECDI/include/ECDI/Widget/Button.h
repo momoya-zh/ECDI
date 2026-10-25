@@ -33,7 +33,7 @@ public:
 	// ⚠️ 与「事件消费（`Event::SetHandled`）」是**两件事**：
 	//   · 本方法 = **命中测试**层（WM_NCHITTEST：控件"吃"鼠标输入，不让它落到 caption 拖拽区）；
 	//   · 事件消费 = **冒泡**层（`OnMouseButtonDown/Up` 里 `event.SetHandled()` 停止向祖先冒泡）。
-	//   同名"消费"不同层——见 `docs/规范/事件消费与安全销毁规范.md` §1.3 对照表。
+	//   同名"消费"不同层——见 `docs/dev/规范/事件消费与安全销毁规范.md` §1.3 对照表。
 	bool ConsumesMouseInput() const noexcept override { return true; }
 
 	// ★★ Phase 35：Button **自动消费**一次有效点按的 Down 与 Up（需求稿 F1「哪些内建控件自动消费」的定案）。

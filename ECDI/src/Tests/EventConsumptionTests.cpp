@@ -22,7 +22,7 @@
 // ══════════════════════════════════════════════════════════════════════
 // ★★ Phase 35：事件消费 + 嵌套点击 + 派发期安全销毁（回归组）
 // ══════════════════════════════════════════════════════════════════════
-// 需求稿（ECDI_fake_harness）验收 1..5 —— 语义见 docs/规范/事件消费与安全销毁规范.md。
+// 需求稿（ECDI_fake_harness）验收 1..5 —— 语义见 docs/dev/规范/事件消费与安全销毁规范.md。
 // 本组走**生产路径**：`Application::OnEvent(MouseButtonDownEvent/UpEvent)`
 //   → HitTest → 冻结链 → 冒泡（`Event::IsHandled()` 即停）⇒ 测的是真实行为。
 // ⚠️ 测试卫生：每个用例自建 Application + Window（真实 HWND、不 Show），结束时 Release()；

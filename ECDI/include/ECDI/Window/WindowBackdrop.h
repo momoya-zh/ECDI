@@ -2,7 +2,7 @@
 
 // ── Phase 32：窗口衬底（Frosted Backdrop）公共类型 ─────────────────────────────
 // 叶子头：零依赖（同 ChromeMode.h / WindowLayer.h 惯例——Phase 30 TextAlignment.h 先例）。
-// 详设：docs/phase32-frosted-backdrop-detailed-design.md v1.1（D32-B 取值域 / D32-M 状态语义 / D32-Q tint 契约）。
+// 详设：docs/dev/phase32-frosted-backdrop-detailed-design.md v1.1（D32-B 取值域 / D32-M 状态语义 / D32-Q tint 契约）。
 
 namespace ECDI {
 

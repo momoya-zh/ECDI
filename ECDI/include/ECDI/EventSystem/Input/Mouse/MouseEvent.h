@@ -26,7 +26,7 @@ protected:
 	/// @param modifiers 此刻的修饰键状态（与 `KeyEvent` 同类型同语义）
 	/// @note **Alt 恒不置位**——**当前 Win32 鼠标映射**不从 `wParam` 产生 Alt（`WM_*MOUSE*` 无
 	///       `MK_ALT`）。这是**映射边界**，**不是**事件模型不支持 Alt（`KeyModifier` 本就含 `Alt`）。
-	///       理由、措辞纪律与重启条件见 docs/phase19-mouse-event-dimensions-preliminary-design.md §2.3。
+	///       理由、措辞纪律与重启条件见 docs/dev/phase19-mouse-event-dimensions-preliminary-design.md §2.3。
 	MouseEvent(
 		Window* window,
 		int mouseX,
