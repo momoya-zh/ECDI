@@ -497,6 +497,26 @@ float TextBox::GetTextLeftInset() const{
 	return m_style.padding.value;
 }
 
+float TextBox::GetTextTopInset() const{
+
+	// ★★ Top 快路径：**不碰 m_lineStarts** —— A1「逐位不变」的结构性保证（D37-C）。
+	//    不是「算出来恰好相等」，而是根本没有计算；同时使行数时序风险在默认路径上归零。
+	if (m_style.verticalAlign.value == VerticalAlignment::Top)
+		return m_style.padding.value;
+
+	// Center：行缓存自查（兜底——正常路径三个调用点均已在重算之后，见 OnPaint/CalculateCaretPosition/CaretIndexFromPosition）
+	if (m_needsLineRecalc)
+		const_cast<TextBox*>(this)->RecalculateLines();
+
+	const float lineH = GetLineHeight();
+	// 内容高的唯一真相源 = 行缓存 × 行高（与 GetMaxScrollOffset 同源）
+	const float contentH = static_cast<float>(m_lineStarts.size()) * lineH;
+	// ★ max(0, ·)：内容超屏（含 A < 0 的负文本区）⇒ 偏移归零 ⇒ 与改前逐位同（C37-1 不变量 2）
+	const float offset = (std::max)(0.0f, (GetTextAreaHeight() - contentH) / 2.0f);
+	return m_style.padding.value + offset;
+
+}
+
 float TextBox::GetTextAreaHeight() const{
 	// 垂直可视文本区 = 控件高 − 内边距×2（与 GetTextAreaWidth 对称；内边距常驻不随焦点变化）
 	return static_cast<float>(GetHeight()) - m_style.padding.value * 2.0f;

@@ -2,6 +2,7 @@
 
 #include "ECDI/Theme/StyleField.h"
 #include "ECDI/Core/Color.h"
+#include "ECDI/Core/VerticalAlignment.h"   ///< ★ Phase 37 △1：verticalAlign 的枚举来源
 
 #include <optional>
 
@@ -19,6 +20,7 @@ struct TextBoxStyle{
 	StyleField<float> cornerRadius;  ///< 圆角半径（0 = 直角；P1 形态——Phase 8 DrawRoundedRect 消费）
 	StyleField<float> borderWidth;   ///< 恒显描边宽（0 = 无恒显边框；>0 = 双矩形描边环——⚠️ 与 border 焦点点线框并存，新语义非旧"焦点内缩"）
 	StyleField<Color> borderColor;   ///< 恒显边框色（默认透明 = 不画）
+	StyleField<VerticalAlignment> verticalAlign;   ///< ★ Phase 37：垂直对齐（缺省 Top = 逐位不变；Center 仅在内容不足一屏时生效）
 };
 
 /// @brief TextBox 样式运行时覆盖（无 foreground——文字经 TextStyleOverride）
@@ -33,6 +35,7 @@ struct TextBoxStyleOverride{
 	std::optional<float> cornerRadius;
 	std::optional<float> borderWidth;
 	std::optional<Color> borderColor;
+	std::optional<VerticalAlignment> verticalAlign;   ///< ★ Phase 37：垂直对齐覆盖
 };
 
 }

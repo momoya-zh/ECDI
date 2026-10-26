@@ -45,6 +45,7 @@ TextBoxStyle DefaultTheme::GetTextBoxStyle() const{
 	s.cornerRadius.value = 0.0f;
 	s.borderWidth.value  = 0.0f;
 	s.borderColor.value  = Color::FromRGBA8(0, 0, 0, 0);
+	s.verticalAlign.value = VerticalAlignment::Top;   // ★ Phase 37 △4：垂直对齐缺省 = Top（与枚举零值同值——显式注入是纪律，不是正确性依赖；零行为变化）
 	return s;
 }
 

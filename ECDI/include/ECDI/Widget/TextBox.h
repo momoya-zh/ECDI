@@ -247,6 +247,17 @@ protected:
 	// ── 多行与滚动（8.5.2；B4/B5——测试经 TestableTextBox using 暴露，同 Composition 先例；
 	//    外部 API 面不变（protected 外部不可见））──
 
+	/// @brief 文本绘制原点相对控件原点的 **Y**（= padding + 居中外缩量）。
+	/// 逻辑上与 `GetTextLeftInset()` 成对（后者 private：**X 恒用 Left**（≡ padding），
+	/// **Y 恒用本函数**（含居中））；本函数落 protected 仅为测试可达（T37-2 `using` 暴露），
+	/// X/Y 语义对称性由 C37-6（任一函数体内禁引另一个）保证。
+	/// ★ 不变量 1（A1 依赖）：`verticalAlign == Top` ⇒ **恒等于** `GetTextLeftInset()`
+	///   —— 快路径直接返回 padding，**不读行数**（故无时序依赖、无浮点误差）。
+	/// ★ 不变量 2：内容高 > 文本区高 ⇒ **恒等于** padding（超屏退化，与改前逐位同）。
+	/// @note 非 const 风险：Center 路径依赖 `m_lineStarts.size()`；若 `m_needsLineRecalc` 未清则自查重算
+	///   （与 `CalculateCaretPosition` 同手法 `const_cast`，`TextBox.cpp:657-658`）。
+	float GetTextTopInset() const;
+
 	/// @brief 重算行起始缓存（扫描 \n；仅 m_needsLineRecalc 时调用——惰性；码点级解码）
 	void RecalculateLines();
 

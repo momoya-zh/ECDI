@@ -49,6 +49,7 @@ public:
     using TextBox::OnMouseButtonDown;   ///< scrollbar-placement-and-appearance T9：手势隔离守卫（protected override——无头验证）
     using TextBox::OnMouseMove;         ///< scrollbar-placement-and-appearance T9：拖选扩展（同上）
     using TextBox::OnFocusGained;       ///< ★ Phase 30 T30-1：置 m_showCaret=true（TextBox.cpp:212——窗口访问判空 ⇒ 无窗口/真窗口两可）
+    using TextBox::GetTextTopInset;     ///< ★ Phase 37 T37-2：垂直对齐内缩（protected——using 暴露）
 
     /// @brief 文本内边距（protected `m_style` 的中转）——scrollbar-placement-and-appearance v1.5：条内缩 = max(padding, 2)
     [[nodiscard]] float Padding() const noexcept{ return m_style.padding.value; }
@@ -1672,6 +1673,57 @@ void Test30CaretColorStyle(){
 	}
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 37 · T37-1：Top 逐位基准（A1 红线判据）
+// 基准采集记录：详设 §3.4 第 5 步——源码基准 5adcbedb、FakeTextMeasurer（L≡16）采集，
+// 改前/批一后两轮探针读数逐位一致（0 / 4,20 / 4,20,36,52）；常量表只断言、不重算公式。
+// ══════════════════════════════════════════════════════════════════════
+
+/// T37-1：缺省 Top 路径 pos.y 序列逐格等于常量表（B1/B2/B3——含单行 / 多行不足一屏 / 多行超屏）
+void Test37BaselineTextY(){
+	struct Case{ const char* text; int h; float pad; size_t n; const float* ys; };
+	const float y1[] = { 0.0f };
+	const float y2[] = { 4.0f, 20.0f };
+	const float y4[] = { 4.0f, 20.0f, 36.0f, 52.0f };
+	const Case cases[] = {
+		{ "abc",        30, 0.0f, 1, y1 },
+		{ "abc\ndef",   60, 4.0f, 2, y2 },
+		{ "a\nb\nc\nd", 60, 4.0f, 4, y4 },
+	};
+	for (const auto& c : cases){
+		TestableTextBox box(std::string(c.text));
+		box.SetSize(80, c.h);
+		if (c.pad != 0.0f){
+			TextBoxStyleOverride o; o.padding = c.pad; box.SetStyle(o);
+		}
+		CommandBuffer commands;
+		FakeTextMeasurer measurer;
+		PaintContext ctx(commands, measurer);
+		box.Paint(ctx, 0, 0);   // 命令坐标 = 控件局部 ⇒ 期望 pos.y = padding + i×L
+		std::vector<float> ys;
+		for (const auto& cmd : commands){
+			if (const auto* t = std::get_if<DrawTextCommand>(&cmd))
+				ys.push_back(t->pos.y);
+		}
+		EXPECT_EQ(ys.size(), c.n);
+		const size_t check = (ys.size() < c.n) ? ys.size() : c.n;
+		for (size_t i = 0; i < check; ++i)
+			EXPECT_NEAR(ys[i], c.ys[i], kEps);
+	}
+}
+
+/// T37-7：主题缺省 = Top（A5；C37-4 双保险——显式注入 + 枚举零值一致，缺省路径零行为变化）
+void Test37ThemeDefaultTop(){
+	// ① DefaultTheme 注入值直查（TextBoxStyle 公共结构体，字段 public 可读）
+	EXPECT_EQ(GetDefaultTheme().GetTextBoxStyle().verticalAlign.value, VerticalAlignment::Top);
+	// ② 缺省路径：ApplyTheme 后 Top 快路径 ⇒ inset == padding。
+	//    判别力：H=30 / p=0 / n=1 若误为 Center 则 O=(30-16)/2=7 ⇒ inset=7 ≠ 0 ⇒ 断言必失败。
+	TestableTextBox box(std::string("abc"));
+	box.SetSize(80, 30);
+	box.ApplyTheme(GetDefaultTheme());
+	EXPECT_NEAR(box.GetTextTopInset(), box.Padding(), kEps);
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -1705,4 +1757,6 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.ScrollBarLazySyncOnPaint", &TestTextBoxScrollBarLazySyncOnPaint);
     GetTestRegistry().Add("TextBox.ScrollBarIgnoresPressOnBar", &TestTextBoxScrollBarIgnoresPressOnBar);
     GetTestRegistry().Add("TextBox.ScrollBarInset", &TestTextBoxScrollBarInset);
+    GetTestRegistry().Add("TextBox.BaselineTextY", &Test37BaselineTextY);       // T37-1（Phase 37 批一）
+    GetTestRegistry().Add("TextBox.ThemeDefaultTop", &Test37ThemeDefaultTop);   // T37-7（Phase 37 批一）
 }
