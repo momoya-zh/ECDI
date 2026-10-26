@@ -311,7 +311,7 @@ tb->SetSingleLine(true);                 // Enter 不插 \n（粘贴含换行仍
 tb->SetEchoMode(TextBox::EchoMode::Password);  // 显示层打点 •，数据层仍是真实文本
 tb->SetReadOnly(true);                   // 禁编辑，不禁导航/选择/复制/程序 SetText
 tb->SetOnTextChanged([](const std::string& s) { /* 编辑操作才触发；SetText 不触发 */ });
-tb->SetStyle(TextBoxStyleOverride{});    // 背景/边框/选区色/光标色/内距/圆角
+tb->SetStyle(TextBoxStyleOverride{});    // 背景/边框/选区色/光标色/内距/圆角/垂直对齐（verticalAlign：Top 缺省 / Center 内容不足一屏时居中）
 tb->SetSize(300, 28);                    // ★ 多行 TextBox 的尺寸由你 SetSize（GetPreferredSize 返回当前尺寸）
 tb->SetText("初始值");                   // 只失效缓存 + Invalidate；不触发 OnTextChanged
 ```
@@ -403,7 +403,7 @@ bar->SetTitle("新标题");
 | `PanelStyle` | `background, cornerRadius, borderWidth, borderColor` | `borderWidth>0` 双矩形描边环 |
 | `ProgressBarStyle` | `trackColor, fillColor, cornerRadius` | `cornerRadius=0` = 自动半圆（高度/2），**当前无法表达方角** |
 | `RingProgressBarStyle` | `trackColor, fillColor, thickness` | `thickness<=0` 后端判定不绘制 |
-| `CheckBoxStyle` / `RadioStyle` / `ScrollBarStyle` / `TextBoxStyle` | 各有专属字段 | `TextBoxStyle` 无 `foreground`（文字走 `TextStyle`）；`ScrollBarStyle.thickness` 参与 `ScrollView` 视口计算 |
+| `CheckBoxStyle` / `RadioStyle` / `ScrollBarStyle` / `TextBoxStyle` | 各有专属字段 | `TextBoxStyle` 无 `foreground`（文字走 `TextStyle`）；`verticalAlign`（Phase 37）= 垂直对齐，缺省 `Top` 逐位不变，`Center` 仅在内容高 ≤ 文本区高时居中（超屏自动退化 `Top`）；`ScrollBarStyle.thickness` 参与 `ScrollView` 视口计算 |
 
 换肤 = 给控件 `SetStyle(...)`（控件级覆盖）或进入 `ApplyTheme` 路径（全局刷新）；
 `StyleField::Reset()` 只清标志**不恢复值**，Widget 层无清除 API。
