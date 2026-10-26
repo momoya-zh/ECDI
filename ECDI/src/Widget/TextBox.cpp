@@ -86,6 +86,7 @@ void TextBox::ApplyTheme(const Theme& theme){
 	m_style.cornerRadius.Apply(defaults.cornerRadius.value);
 	m_style.borderWidth.Apply(defaults.borderWidth.value);
 	m_style.borderColor.Apply(defaults.borderColor.value);
+	m_style.verticalAlign.Apply(defaults.verticalAlign.value);   // ★ Phase 37 △10：对齐缺省随主题（D7：不覆盖已 Set 的 override）
 	// scrollbar-placement-and-appearance △7 / C-4：主题**下传条自身**（条有自己的 ApplyTheme / ScrollBarStyle）——
 	// ★ 不在此复制 ScrollBarStyle 的各字段，否则 ScrollBarStyle 一演变就会长出平行的主题逻辑
 	if (m_vBar != nullptr){
@@ -108,6 +109,7 @@ void TextBox::SetStyle(TextBoxStyleOverride override){
 	if (override.cornerRadius)  m_style.cornerRadius.Set(*override.cornerRadius);
 	if (override.borderWidth)   m_style.borderWidth.Set(*override.borderWidth);
 	if (override.borderColor)   m_style.borderColor.Set(*override.borderColor);
+	if (override.verticalAlign) m_style.verticalAlign.Set(*override.verticalAlign);   // ★ Phase 37 △11
 	// v1.5：padding 是**条内缩的输入** ⇒ 摆位必须重算。★ 调用方常用「先 SetSize 后 SetStyle」的次序
 	// （ModelProbe 即是）——只在 SetSize 里算摆位会漏掉这次样式变更，条会停在旧内缩上。
 	LayoutScrollBar();
@@ -692,8 +694,9 @@ Point TextBox::CalculateCaretPosition(TextMeasurer& measurer) const{
 	const float caretX = (std::clamp)(prefixSize.width - m_scrollOffsetX, 0.0f, maxCaretX);
 	const float caretY = static_cast<float>(lineIndex) * lineH - m_scrollOffsetY;
 	// 返回光标顶部（系统 caret 语义 = caret 左上角）；float 直传（Point 成员 float——narrowing 隐患）
-	// Y 与 X 同源加内缩——光标与文本第一行顶部对齐（绘制 textY = fy + inset 同一几何）
-	return Point{ GetTextLeftInset() + caretX, GetTextLeftInset() + caretY };
+	// Y 与 X **各自**单一来源：X 恒 GetTextLeftInset（= padding），Y 恒 GetTextTopInset（含居中）——★ Phase 37 △8
+	// ★ 禁止把两者合并回一个函数——那正是 Phase 37 前「padding 三耦合」的根因（N1）
+	return Point{ GetTextLeftInset() + caretX, GetTextTopInset() + caretY };
 }
 
 CaretGeometry TextBox::GetCaretClientGeometry(){
@@ -766,11 +769,12 @@ size_t TextBox::CaretIndexFromPosition(Point localPos){
 		return 0;
 	if (m_needsLineRecalc)
 		RecalculateLines();   // 惰性重算（非 const——直接调）
-	// 1. Y 定行：可视 Y − 文本区原点（内缩） + scrollOffsetY → 逻辑 Y → 行号
+	// 1. Y 定行：可视 Y − **Y 原点**（含居中） + scrollOffsetY → 逻辑 Y → 行号——★ Phase 37 △9
 	//（Y 映射契约：任意 Y → 最近有效文本行；与 X 的 innerX = localPos.x − inset 同源对称）
+	// ★ 必须与绘制/光标用同一个 Y 原点，否则「画居中了、点还算顶部」（A4-2/A4-3 的判别对象）
 	const float lineH = GetLineHeight();
 	const int logicalLine = (std::max)(0,
-		static_cast<int>((localPos.y - GetTextLeftInset() + m_scrollOffsetY) / lineH));
+		static_cast<int>((localPos.y - GetTextTopInset() + m_scrollOffsetY) / lineH));
 	const size_t lineIndex = (std::min)(static_cast<size_t>(logicalLine), m_lineStarts.size() - 1);
 	// 2. X 定行内（提取的辅助——CaretIndexFromLineX 与 Up/Down 跨行共用，防漂移）
 	// 9.5 R1：点击可视位置 → 逻辑 x = 可视 x + 滚动偏移（横向滚动后点击定位跟手）
@@ -1353,14 +1357,16 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 	const float lineH = GetLineHeight();
 	// 文本区原点 = 控件客户区绝对位置 + 内缩（焦点态 2px / 非焦点 0）——与 8.5.1 单行版
 	// CalculateTextPosition(x, y, ...) 同构（控件位置 + 相对偏移），多行改为顶部对齐
-	const float inset = GetTextLeftInset();
-	const float textX = fx + inset;   // 客户区绝对 X（绘制/Selection/下划线同源）
-	const float textY = fy + inset;   // 客户区绝对 Y（顶部对齐 + 焦点框内缩——与 X 同值内缩）
+	const float insetX = GetTextLeftInset();   // X：恒 padding（textX / viewX / clip 用）
+	const float insetY = GetTextTopInset();    // Y：含居中（textY / lineY 用）——★ Phase 37 △7
+	const float textX = fx + insetX;   // 客户区绝对 X（绘制/Selection/下划线同源）
+	const float textY = fy + insetY;   // 客户区绝对 Y（含垂直居中外缩量——Top 时 == padding 逐位同）
+	const float areaTop = fy + insetX; // ★ clip 的 y = 文本区顶，不随居中外缩量变化（C37-3 / D37-D）
 	// 9.5 R1 横向滚动：绘制统一可视 X = 文本区原点 − 滚动偏移（logical → viewport；§4.6 坐标契约）
 	const float viewX = textX - m_scrollOffsetX;
 	// 9.5 R1 修复：文本区 Clip = 背景区（控件内缩 inset）——超宽文本/Selection/下划线/光标
 	// 全部限制在背景区内，不压聚焦框环（聚焦框环在 [inset 外，fw-inset 内] 之外；2026-08-27）
-	ctx.PushClip(Rect{ textX, textY, GetTextAreaWidth(), GetTextAreaHeight() });
+	ctx.PushClip(Rect{ textX, areaTop, GetTextAreaWidth(), GetTextAreaHeight() });
 	const size_t lineCount = m_lineStarts.size();
 	// 可视行范围（滚动裁剪——不画屏幕外的行）
 	const int firstVisible = (std::max)(0, static_cast<int>(m_scrollOffsetY / lineH));

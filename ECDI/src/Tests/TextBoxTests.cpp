@@ -1724,6 +1724,146 @@ void Test37ThemeDefaultTop(){
 	EXPECT_NEAR(box.GetTextTopInset(), box.Padding(), kEps);
 }
 
+/// T37-2：Center 生效（A2）——inset = padding + O，O = 7 / 10 / 0（v1.1 详设 §5 订正后的期望值）
+void Test37CenterInset(){
+	struct Case{ int h; float pad; const char* text; float expectInset; const char* note; };
+	const Case cases[] = {
+		{ 30, 0.0f, "abc",      7.0f,  "A=30 C=16 O=7" },          // 单行不足一屏
+		{ 60, 4.0f, "abc\ndef", 14.0f, "A=52 C=32 O=10" },         // 多行不足一屏
+		{ 40, 4.0f, "abc\ndef", 4.0f,  "A=32 C=32 O=0 上边界" },   // C=A ⇒ O=0
+	};
+	for (const auto& c : cases){
+		TestableTextBox box(std::string(c.text));
+		box.SetSize(80, c.h);
+		TextBoxStyleOverride o; o.padding = c.pad;
+		o.verticalAlign = VerticalAlignment::Center;
+		box.SetStyle(o);
+		EXPECT_NEAR(box.GetTextTopInset(), c.expectInset, kEps);   // note: c.note
+	}
+}
+
+/// T37-3：三态原点（A3）——C=A / C>A / C>A+滚动（C37-1 不变量 2 + C37-7 行为等价）
+void Test37CenterDegenerate(){
+	// ① C=A：H=40 / p=4 / n=2 ⇒ A=32 C=32 ⇒ O=0 ⇒ inset == padding
+	{
+		TestableTextBox box(std::string("abc\ndef"));
+		box.SetSize(80, 40);
+		TextBoxStyleOverride o; o.padding = 4.0f;
+		o.verticalAlign = VerticalAlignment::Center;
+		box.SetStyle(o);
+		EXPECT_NEAR(box.GetTextTopInset(), 4.0f, kEps);
+	}
+	// ② C>A：H=40 / p=4 / n=4 ⇒ C=64>A=32 ⇒ O=0（超屏退化）
+	{
+		TestableTextBox box(std::string("a\nb\nc\nd"));
+		box.SetSize(80, 40);
+		TextBoxStyleOverride o; o.padding = 4.0f;
+		o.verticalAlign = VerticalAlignment::Center;
+		box.SetStyle(o);
+		EXPECT_NEAR(box.GetTextTopInset(), 4.0f, kEps);
+	}
+	// ③ C>A + 预置滚动（点击行 3 → EnsureCaretVisible；scrollOffsetY 为 private，点击是唯一无头预置手段）：
+	//    滚动自证（点击前后序列必须变化）+ Top/Center 滚动后绘制序列逐位同（O 未混入滚动范围——C37-7）
+	{
+		auto paintTextY = [](TestableTextBox& b){
+			CommandBuffer commands;
+			FakeTextMeasurer measurer;
+			PaintContext ctx(commands, measurer);
+			b.Paint(ctx, 0, 0);
+			std::vector<float> ys;
+			for (const auto& cmd : commands)
+				if (const auto* t = std::get_if<DrawTextCommand>(&cmd))
+					ys.push_back(t->pos.y);
+			return ys;
+		};
+		std::vector<float> topBefore, topAfter, centerAfter;
+		{
+			TestableTextBox box(std::string("a\nb\nc\nd"));   // H=60 / p=4 / n=4 ⇒ A=52 C=64 超屏
+			box.SetSize(80, 60);
+			TextBoxStyleOverride o; o.padding = 4.0f; box.SetStyle(o);
+			topBefore = paintTextY(box);                       // 未滚动：4,20,36,52
+			box.OnMouseButtonDown(MouseButtonDownEvent(nullptr, 1, 59, MouseButton::Left));   // (1,59) 控件内、行 3 ⇒ caret=6 ⇒ 滚动 s=12
+			topAfter = paintTextY(box);
+		}
+		{
+			TestableTextBox box(std::string("a\nb\nc\nd"));
+			box.SetSize(80, 60);
+			TextBoxStyleOverride o; o.padding = 4.0f;
+			o.verticalAlign = VerticalAlignment::Center;
+			box.SetStyle(o);
+			box.OnMouseButtonDown(MouseButtonDownEvent(nullptr, 1, 59, MouseButton::Left));
+			centerAfter = paintTextY(box);
+		}
+		EXPECT_EQ(topBefore.size(), static_cast<size_t>(4));   // 4 行全可见（滚动前）
+		EXPECT_EQ(topAfter.size(), centerAfter.size());
+		bool scrolled = topBefore.size() != topAfter.size();   // 行数变化 = 滚动发生的充分自证之一
+		if (!scrolled){
+			for (size_t i = 0; i < topBefore.size() && i < topAfter.size(); ++i)
+				if (topBefore[i] != topAfter[i]) { scrolled = true; break; }
+		}
+		EXPECT_TRUE(scrolled);   // EnsureCaretVisible 确实滚动了（否则 ③ 退化为 ②）
+		for (size_t i = 0; i < topAfter.size() && i < centerAfter.size(); ++i)
+			EXPECT_NEAR(topAfter[i], centerAfter[i], kEps);   // C37-7：O 未混入滚动状态（s=12 时 O=0 ⇒ 两配置同序列）
+	}
+}
+
+/// T37-4：光标与绘制同源（A4-1——真窗口；GetCaretClientGeometry 无条件解引用 GetWindow，TextBox.cpp:682）
+void Test37CaretAlignsWithPaint(){
+	CaretProbe probe;   // "abc" 1 行 / 150×30 ⇒ Center 时 O=(30−16)/2=7（判别力：光标若未跟随则 caretY=0 ≠ 7）
+	TextBoxStyleOverride o;
+	o.verticalAlign = VerticalAlignment::Center;
+	probe.box->SetStyle(o);
+	const Point abs = probe.box->GetAbsolutePosition();
+	CommandBuffer commands;
+	PaintContext ctx(commands, probe.window->GetTextMeasurer());
+	probe.box->Paint(ctx, abs.x, abs.y);   // 命令坐标 = 客户区绝对（与 GetCaretClientGeometry 同系——初设 §1.7）
+	float firstTextY = -1.0f;
+	for (const auto& cmd : commands){
+		if (const auto* t = std::get_if<DrawTextCommand>(&cmd)) { firstTextY = t->pos.y; break; }
+	}
+	EXPECT_NEAR(probe.box->GetCaretClientGeometry().rect.y, firstTextY, kEps);
+}
+
+/// T37-5：Center 下点击命中跟随绘制（A4-2）——y=22 = p+O+L/2（O=10 ≥ L/2=8，判别窗口内）
+void Test37HitFollowsAlignCenter(){
+	TestableTextBox box(std::string("abc\ndef"));   // H=60 / p=4 / n=2 ⇒ O=10
+	box.SetSize(80, 60);
+	TextBoxStyleOverride o; o.padding = 4.0f;
+	o.verticalAlign = VerticalAlignment::Center;
+	box.SetStyle(o);
+	box.OnMouseButtonDown(MouseButtonDownEvent(nullptr, 1, 22, MouseButton::Left));
+	EXPECT_EQ(box.GetCaret(), 0);   // 行 0 首码点（若命中未跟随 ⇒ (22−4)/16=1 ⇒ 得 4 ⇒ 失败）
+}
+
+/// T37-6：同坐标 Top 必得行 1（A4-3——判别力配对，排除 T37-5 因坐标选错而假通过）
+void Test37HitFollowsAlignTop(){
+	TestableTextBox box(std::string("abc\ndef"));
+	box.SetSize(80, 60);
+	TextBoxStyleOverride o; o.padding = 4.0f;   // Top（缺省，显式不设）
+	box.SetStyle(o);
+	box.OnMouseButtonDown(MouseButtonDownEvent(nullptr, 1, 22, MouseButton::Left));
+	EXPECT_EQ(box.GetCaret(), 4);   // 行 1 首码点（floor((22−4)/16)=1；行 1 首 = "abc\n" 之后 = 码点 4）
+}
+
+/// T37-8：SetStyle 覆盖链（A5）——override 生效 / ApplyTheme 不覆盖 override（D7）/ 回 Top
+void Test37SetStyleOverrideChain(){
+	TestableTextBox box(std::string("abc\ndef"));
+	box.SetSize(80, 60);
+	TextBoxStyleOverride base; base.padding = 4.0f; box.SetStyle(base);
+	{
+		TextBoxStyleOverride c; c.verticalAlign = VerticalAlignment::Center;
+		box.SetStyle(c);
+	}
+	EXPECT_NEAR(box.GetTextTopInset(), box.Padding() + 10.0f, kEps);   // ① Center 生效（O=10）
+	box.ApplyTheme(GetDefaultTheme());                                  // ② 主题不覆盖 override（D7）
+	EXPECT_NEAR(box.GetTextTopInset(), box.Padding() + 10.0f, kEps);
+	{
+		TextBoxStyleOverride t; t.verticalAlign = VerticalAlignment::Top;
+		box.SetStyle(t);
+	}
+	EXPECT_NEAR(box.GetTextTopInset(), box.Padding(), kEps);           // ③ 回 Top
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -1759,4 +1899,10 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.ScrollBarInset", &TestTextBoxScrollBarInset);
     GetTestRegistry().Add("TextBox.BaselineTextY", &Test37BaselineTextY);       // T37-1（Phase 37 批一）
     GetTestRegistry().Add("TextBox.ThemeDefaultTop", &Test37ThemeDefaultTop);   // T37-7（Phase 37 批一）
+    GetTestRegistry().Add("TextBox.CenterInset", &Test37CenterInset);           // T37-2（Phase 37 批二）
+    GetTestRegistry().Add("TextBox.CenterDegenerate", &Test37CenterDegenerate); // T37-3（Phase 37 批二）
+    GetTestRegistry().Add("TextBox.CaretAlignsWithPaint", &Test37CaretAlignsWithPaint);   // T37-4（Phase 37 批二）
+    GetTestRegistry().Add("TextBox.HitFollowsAlignCenter", &Test37HitFollowsAlignCenter); // T37-5（Phase 37 批二）
+    GetTestRegistry().Add("TextBox.HitFollowsAlignTop", &Test37HitFollowsAlignTop);       // T37-6（Phase 37 批二）
+    GetTestRegistry().Add("TextBox.SetStyleOverrideChain", &Test37SetStyleOverrideChain); // T37-8（Phase 37 批二）
 }
