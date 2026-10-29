@@ -186,7 +186,7 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 | # | 项 |
 |---|---|
 | O1 | 行内对齐（#51③：每行居中/右对齐经 `Line.width` 接入）——本 Phase 每行左对齐 |
-| O2 | TextBox 编辑器内 wrap（独立挂账——需求 §3.2） |
+| O2 | TextBox 编辑器内 wrap（独立挂账——需求 §3.2）。★★ **2026-10-28 已立项 = deferred #77 / Phase 38**（★ 2026-10-28 当日推进：需求稿 `phase38-textbox-soft-wrap-requirements.md` **v1.2**（外部评审「有条件通过」已吸收）+ 初设稿 `phase38-textbox-soft-wrap-preliminary-design.md` **v1.2**（其审核稿 = `phase38-textbox-soft-wrap-design-review.md`，结论同为「有条件通过」）均已落盘，**下一步 = 详设**；来源 = harness `REQ-15` 落点摘要）。★ 立项时对码复核证伪原「独立挂账、改一处真相源即可」的形态：真相源**两处**（`MultilinePreferred` 自己数 `\n`）· `LineRange` 的行尾靠下一行起点 `-1` 反推 ⇒ **起始表承载不了视觉行** · `GetTextAreaWidth` ↔ 条可见性 ↔ 行数 = **结构性环**。本行仅登记当时的挂账口径，改造面以 Phase 38 稿 §1 为准 |
 | O3 | 禁则字面集扩充（按消费者反馈增补） |
 | O4 | GDI FitText 的 UTF8ToWide 每调用 O(n)（k 行 ⇒ O(n·k) memcpy——量级可接受；实测瓶颈则缓存宽串）。★ **批一实测**：`FitText` 内**只转换一次**（`text.substr(byteStart)` ⇒ 尾段），未按行重复；债务成立但常数极小 |
 | O5 | wrap 行宽二次测量（软断行每行 +1 MeasureText——FT 侧可省[布局即知]、GDI 侧必要）。★ **批一实测**：GDI `FitText` 在 `fit < 全长` 时**必补一次** `GetTextExtentPoint32W`（取消费前缀宽——`GetTextExtentExPointW` 的 `extent` 是**全串**宽不可用）⇒ 该成本已落在**每个 FitText 调用**上，不止软断行回退路径。★ **批二实测**：wrap 布局已按 v1.1 必修②实现——`emitLine` 仅当 **`end != fitEnd`**（回退/尾部空白裁剪改变了终止位置）时才补测一次；无回退（整段放得下）直接采用 `fit.width` ⇒ **零二次测量**（T29-1 的 6 行全走 fast path） |
@@ -333,7 +333,7 @@ virtual TextFit FitText(const Font& font, const std::string& text,
 
 - 公共头 **94 → 94**（`TextMeasurer.h`/`TextWidget.h`/`PaintContext.h` 扩员不加文件）；公共 API **+4**（详设原预算 +3，超 1 项 = E6 `PaintContext::GetTextMeasurer()`，如实记账）；**CMake 0**（GLOB 自动入库）；用例 **335 → 349**（+14：批一 4 + 批二 6 + 批三 4）。
 - **批次流水**：批一 `cdafbcf`（FitText 三链）→ 批二 `9be3e7a`（wrap 路径）→ 批三（本节 + 收口提交）。
-- **遗留（不阻塞收口）**：① harness gui 侧气泡启用 wrap = 一行 `SetWordWrap(true)`（harness 会话）；② **O1** 行内对齐（#51③ 消费 `Line.width`）/ **O2** TextBox 编辑器内 wrap（独立挂账）/ **O3** 禁则字面集扩充（按消费者反馈）/ **O4** GDI 每调用 UTF8ToWide（量级可接受）/ **O5** GDI 回退后补测（已在 emitLine 收敛为「仅回退时一次」）。
+- **遗留（不阻塞收口）**：① harness gui 侧气泡启用 wrap = 一行 `SetWordWrap(true)`（harness 会话）。★★ **2026-10-28 订正：该「一行即可」不成立**——`SetWordWrap(true)` 对 `TextBox` 是**半激活**（`GetPreferredSize` 的闸 `m_text.find('\n')` 漏空 ⇒ 落到基类 wrap 分支返回多行高，而 `OnPaint` 仍只画 1 行），且**单段落聊天框恰是命中那一支**；改前不得在 harness 侧加该行。见 `phase38-textbox-soft-wrap-requirements.md` §1.2 N0；② **O1** 行内对齐（#51③ 消费 `Line.width`）/ **O2** TextBox 编辑器内 wrap（独立挂账 → ★ 2026-10-28 已立项 **#77 / Phase 38**，见本稿 O2 挂账行）/ **O3** 禁则字面集扩充（按消费者反馈）/ **O4** GDI 每调用 UTF8ToWide（量级可接受）/ **O5** GDI 回退后补测（已在 emitLine 收敛为「仅回退时一次」）。
 - **环境教训（如实记档）**：① **DPI 舍入缺陷会随显示环境迟到曝光**（E8——用户切缩放 100% 揭出批一潜伏缺陷）；② 改公共头布局后**必须全量重建**（批二教训）；③ MSVC 生成器产物在 `Release/` 子目录——跑错路径 = 跑了陈旧二进制。
 
 ---
