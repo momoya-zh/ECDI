@@ -80,11 +80,15 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 				return TextFit{ 0, 0.0f };   // 窗口在串尾之后（含空串）
 			}
 
+			// ★ Phase 39 R2：`startCp` 的字节偏移在二分体内**恒定**（`startCp` 不变、`mid` 只影响终点）
+			//   ⇒ 提到循环外算一次；收尾处（原 `:113`）同表达式复用。函数体内换算调用点 **7 → 4**（C39-4）。
+			const std::size_t byteStart = CodepointIndexToByteOffset(text, startCp);
 			// ★ 「至少能放一个」是二分的前置不变式：若连**首码点**都放不下 ⇒ 返回 0
 			//   （否则二分区间无解）。单码点宽 = 该码点**单独**测一次——O(1) 次 MeasureText。
+			//   `startCp + 1` 推不出来（省它需要「序列长」，而那是 `Core/UTF8.cpp` 匿名 namespace 的内部
+			//   辅助）⇒ 这次换算保留。
 			const std::size_t firstEnd = CodepointIndexToByteOffset(text, startCp + 1);
-			const std::string firstCpText = text.substr(
-				CodepointIndexToByteOffset(text, startCp), firstEnd - CodepointIndexToByteOffset(text, startCp));
+			const std::string firstCpText = text.substr(byteStart, firstEnd - byteStart);
 			if (MeasureText(font, firstCpText).width > (std::max)(0.0f, maxWidth))
 			{
 				return TextFit{ 0, 0.0f };
@@ -97,7 +101,6 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 			while (lo < hi)
 			{
 				const std::size_t mid = lo + (hi - lo + 1) / 2;   // ★ 上取整 ⇒ 无死循环（lo 必推进）
-				const std::size_t byteStart = CodepointIndexToByteOffset(text, startCp);
 				const std::size_t byteEnd = CodepointIndexToByteOffset(text, startCp + mid);
 				if (MeasureText(font, text.substr(byteStart, byteEnd - byteStart)).width
 				    <= (std::max)(0.0f, maxWidth))
@@ -110,7 +113,6 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 				}
 			}
 
-			const std::size_t byteStart = CodepointIndexToByteOffset(text, startCp);
 			const std::size_t byteEnd = CodepointIndexToByteOffset(text, startCp + lo);
 			const Size consumed = MeasureText(font, text.substr(byteStart, byteEnd - byteStart));
 			return TextFit{ lo, consumed.width };

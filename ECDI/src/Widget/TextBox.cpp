@@ -473,21 +473,26 @@ void TextBox::RecalculateLines(){
 		m_scrollOffsetX = 0.0f;
 	}
 	else{
-		// ── 非折行支：原 `\n` 扫描**逐位保留**（红线①）──
-		// 每行 {startCp, cpCount, width=0, ownedEnd}：`ownedEnd` 恰为「下一行起点 −1」的旧口径值
-		// （`\n` 不属任何一行）⇒ `LineRange` 与改前逐位相等，绘制口径（裁剪）也相等。
-		const size_t count = GetCodepointCount();
-		size_t start = 0;
-		for (size_t i = 0; i < count; ++i){
-			const size_t byte     = CodepointIndexToByteOffset(m_text, i);
-			const size_t nextByte = CodepointIndexToByteOffset(m_text, i + 1);
-			const char32_t cp = DecodeFirstCodepoint(m_text.substr(byte, nextByte - byte));
-			if (cp == U'\n'){
-				m_lines.push_back(TextLine{ start, i - start, 0.0f, i });   // `\n` 不属任何一行
-				start = i + 1;
+		// ── 非折行支：单趟推进（Phase 39 R1——`\n` 扫描与码点计数同一趟）──
+		// 每码点 O(1)：就地解码 + 按前导**声称**的长度步进 ⇒ 整体 O(N)（原：每码点两次 O(i) 换算 + 一次 substr）。
+		// 行表口径与改前**逐位相同**：`\n` 不属任何一行（行末 `ownedEnd` = 该 `\n` 的码点索引）。
+		// ★ 命名：`textSize`（全串长）≠ `DecodeCodepointAt` 的 `size`（剩余长度）——不同义，故不共用名字。
+		const size_t textSize = m_text.size();
+		const char* const data = m_text.data();
+		size_t byte  = 0;   // 当前码点首字节偏移（★ 末段截断时**可越过 textSize**——与旧走的换算同形，刻意不钳制）
+		size_t cp    = 0;   // 已消费码点数 == 当前码点索引
+		size_t start = 0;   // 当前行首码点索引
+		while (byte < textSize){
+			char32_t ch = 0;
+			const size_t len = DecodeCodepointAt(data + byte, textSize - byte, ch);   // 就地解码（不切子串）
+			byte += len;
+			if (ch == U'\n'){
+				m_lines.push_back(TextLine{ start, cp - start, 0.0f, cp });   // `\n` 不属任何一行
+				start = cp + 1;
 			}
+			++cp;
 		}
-		m_lines.push_back(TextLine{ start, count - start, 0.0f, count });   // 末段（可为空 = 尾部空行）
+		m_lines.push_back(TextLine{ start, cp - start, 0.0f, cp });           // 末段（可为空 = 尾部空行）
 	}
 
 	// ★ 空表兜底**必需**：原实现恒 `push_back(0)`（表永不为空）；漏掉本行则

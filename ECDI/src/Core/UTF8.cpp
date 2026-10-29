@@ -52,31 +52,44 @@ size_t ByteOffsetToCodepointIndex(const std::string& text, size_t byteOffset){
 	return cpIndex;
 }
 
-char32_t DecodeFirstCodepoint(const std::string& text){
-	if (text.empty())
+size_t DecodeCodepointAt(const char* data, size_t size, char32_t& codepoint){
+	if (size == 0){
+		codepoint = 0;                                  // ★ 无条件写（公共 API 不留脚枪）
 		return 0;
-	// 按前导字节解码（与 SequenceLength 同规则——非法前导按 1 字节 ASCII 处理）
-	const unsigned char lead = static_cast<unsigned char>(text[0]);
-	if ((lead & 0x80) == 0)
-		return static_cast<char32_t>(lead);   // 1 字节 ASCII
-	const size_t len = SequenceLength(lead);
-	if (len == 2 && text.size() >= 2){
-		return static_cast<char32_t>(((lead & 0x1F) << 6) |
-			(static_cast<unsigned char>(text[1]) & 0x3F));
 	}
-	if (len == 3 && text.size() >= 3){
-		return static_cast<char32_t>(((lead & 0x0F) << 12) |
-			((static_cast<unsigned char>(text[1]) & 0x3F) << 6) |
-			(static_cast<unsigned char>(text[2]) & 0x3F));
+	const unsigned char lead = static_cast<unsigned char>(data[0]);
+	if ((lead & 0x80) == 0){
+		codepoint = static_cast<char32_t>(lead);        // 1 字节 ASCII
+		return 1;
 	}
-	if (len == 4 && text.size() >= 4){
-		return static_cast<char32_t>(((lead & 0x07) << 18) |
-			((static_cast<unsigned char>(text[1]) & 0x3F) << 12) |
-			((static_cast<unsigned char>(text[2]) & 0x3F) << 6) |
-			(static_cast<unsigned char>(text[3]) & 0x3F));
+	const size_t len = SequenceLength(lead);            // ★ 与换算函数同一份规则（单源）
+	if (len == 2 && size >= 2){
+		codepoint = static_cast<char32_t>(((lead & 0x1F) << 6) |
+			(static_cast<unsigned char>(data[1]) & 0x3F));
+		return len;
 	}
-	// 连续字节/非法前导/序列不完整：按 1 字节 ASCII 处理（与 SequenceLength 同语义）
-	return static_cast<char32_t>(lead);
+	if (len == 3 && size >= 3){
+		codepoint = static_cast<char32_t>(((lead & 0x0F) << 12) |
+			((static_cast<unsigned char>(data[1]) & 0x3F) << 6) |
+			(static_cast<unsigned char>(data[2]) & 0x3F));
+		return len;
+	}
+	if (len == 4 && size >= 4){
+		codepoint = static_cast<char32_t>(((lead & 0x07) << 18) |
+			((static_cast<unsigned char>(data[1]) & 0x3F) << 12) |
+			((static_cast<unsigned char>(data[2]) & 0x3F) << 6) |
+			(static_cast<unsigned char>(data[3]) & 0x3F));
+		return len;
+	}
+	// 截断 / 非法前导 / 连续字节：按 1 字节 ASCII 处理（与 SequenceLength 同语义）
+	codepoint = static_cast<char32_t>(lead);
+	return len;                                         // ★ 步进仍按声称长（可能 > size）
+}
+
+char32_t DecodeFirstCodepoint(const std::string& text){
+	char32_t codepoint = 0;
+	(void)DecodeCodepointAt(text.data(), text.size(), codepoint);   // size == 0 ⇒ 写成 0
+	return codepoint;
 }
 
 }
