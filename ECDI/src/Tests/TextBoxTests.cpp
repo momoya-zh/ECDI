@@ -55,6 +55,13 @@ public:
     /// @brief 文本内边距（protected `m_style` 的中转）——scrollbar-placement-and-appearance v1.5：条内缩 = max(padding, 2)
     [[nodiscard]] float Padding() const noexcept{ return m_style.padding.value; }
 
+    /// @brief ★ 当前字体（`m_style` 的中转，Phase 38 批 4）
+    /// @details T38-16② 要「按控件自己的字度量出行宽的一半」——`MeasureText` 的 Font 形参必须与绘制同源，
+    ///   否则量的是另一套字宽，中点判据就没有意义（`TextWidget` 没有 public 的字体 getter，故在此中转）。
+    /// @details ★ 必须写 `TextWidget::` 限定：`TextBox` 自己有同名 `m_style`（`TextBoxStyle`，无 font 字段）
+    ///   遮蔽了基类的 `TextStyle` ⇒ 裸写 `m_style.font` 编译不过（本批实测报错，已订正）。
+    [[nodiscard]] Font FontForTest() const noexcept{ return TextWidget::m_style.font.value; }
+
     /// @brief ★ 视觉行数（Phase 38 批 2）
     /// @details ★★ **为什么不直接 `m_lines.size()`**：`m_lines` 是 `TextBox` 的 **private** 成员
     ///   （行表数据私有是 D38-E 的一部分），派生类**不可访问** ⇒ 详设 §2.9① 那句
@@ -1797,17 +1804,21 @@ struct CaretProbe{
 	Window* window = nullptr;
 	TestableTextBox* box = nullptr;
 
-	CaretProbe(){
+	CaretProbe() : CaretProbe(std::string("abc"), 150, 30) {}
+
+	/// @brief ★ Phase 38 T38-11/T38-16：可配文本与尺寸的形态（默认构造委托到本构造 ⇒ 既有用例零改动）
+	/// @details 折行用例必须能自己选「文本长度 × 控件宽」，否则折行宽（= 宽 − 条槽 14）无从设定。
+	CaretProbe(std::string initialText, int width, int height){
 		RenderServices services{
 			std::make_unique<GDIBackend>(),
 			std::make_unique<GDITextMeasurer>()
 		};
 		window = &app.Create("ECDI_T30_Caret", 200, 120, std::move(services));
 
-		auto owned = std::make_unique<TestableTextBox>(std::string("abc"));
+		auto owned = std::make_unique<TestableTextBox>(std::move(initialText));
 		box = owned.get();
 		window->GetRootWidget().AddChild(std::move(owned));
-		box->SetSize(150, 30);
+		box->SetSize(width, height);
 		box->OnFocusGained();   // m_showCaret = true（真窗口 ⇒ SyncTextInputCaret/StartTimer 均可达）
 	}
 	~CaretProbe(){ window->Release(); }
@@ -1826,6 +1837,84 @@ struct CaretProbe{
 		return out;
 	}
 };
+
+/// @brief 记录型假测量器（★ T38-14 的量具）
+/// @details 与 `CountingFakeMeasurer` 同型（三个虚函数均**非 const**，见 `Render/TextMeasurer.h`），
+///   额外把 `FitText` 每次收到的**布局串**按原样追加进 `fed`——掩码维（h）要求「喂进去的是不是显示串」
+///   在**串内容层**可判，计数不够。
+class RecordingFakeMeasurer final : public TextMeasurer{
+public:
+	int fitCalls = 0;
+	int measureCalls = 0;
+	std::vector<std::string> fed;   ///< 每次 FitText 收到的串（同一轮重建里的各段都是同一个整串）
+
+	void Reset(){ fitCalls = 0; measureCalls = 0; fed.clear(); }
+
+	Size MeasureText(const Font&, const std::string& text) override{
+		++measureCalls;
+		return Size{ static_cast<float>(CountCp(text)) * 8.0f, 16.0f };
+	}
+
+	/// ★ 必须覆写：默认体用码点二分反调 `MeasureText` ⇒ 两个计数互相污染，且 `fed` 拿不到整串。
+	TextFit FitText(const Font&, const std::string& text, std::size_t startCp, float maxWidth) override{
+		++fitCalls;
+		fed.push_back(text);
+		const std::size_t total = CountCp(text);
+		if (startCp >= total)
+			return TextFit{ 0, 0.0f };
+		const std::size_t byWidth = static_cast<std::size_t>((std::max)(0.0f, maxWidth) / 8.0f);
+		const std::size_t n = (std::min)(byWidth, total - startCp);   // fitCp 相对、不越串尾（C29-1）
+		return TextFit{ n, static_cast<float>(n) * 8.0f };
+	}
+
+	float LineHeight(const Font&) override{ return 16.0f; }
+
+	/// @brief 全部喂入串拼成一条（跨行检测子串/明文用）
+	[[nodiscard]] std::string Joined() const{
+		std::string out;
+		for (const auto& one : fed)
+			out += one;
+		return out;
+	}
+
+private:
+	static std::size_t CountCp(const std::string& s){
+		std::size_t n = 0;
+		for (char c : s)
+			if ((static_cast<unsigned char>(c) & 0xC0) != 0x80)
+				++n;
+		return n;
+	}
+};
+
+/// @brief 记录型可测 TextBox（理由同 `CountingTextBox`：`TestableTextBox` 的测量器焊死为静态 `ms_fake`）
+class RecordingTextBox : public TextBox{
+public:
+	using TextBox::TextBox;
+	using TextBox::RecalculateLines;
+	using TextBox::LineRange;
+	using TextBox::LineDrawRange;
+	// ★ 组合入口是 protected（Window 转发口）——T38-14i 要用它翻组合三维
+	using TextBox::UpdateComposition;
+	using TextBox::CancelComposition;
+
+	/// @brief 视觉行数（`m_lines` 是基类 private ⇒ 经 preferred 反推；同 `TestableTextBox` 的理由）
+	[[nodiscard]] size_t RowCountForTest() const{
+		return static_cast<size_t>(GetPreferredSize().height / 16.0f + 0.5f);
+	}
+
+	[[nodiscard]] std::pair<size_t, size_t> OwnForTest(size_t i){ RecalculateLines(); return LineRange(i); }
+
+	static RecordingFakeMeasurer& Recorder() noexcept{ return ms_rec; }
+
+protected:
+	TextMeasurer* ResolveMeasurer() const override{ return &ms_rec; }
+
+private:
+	static RecordingFakeMeasurer ms_rec;
+};
+
+RecordingFakeMeasurer RecordingTextBox::ms_rec;
 
 } // anonymous namespace
 
@@ -2651,6 +2740,280 @@ void Test38SoftWrapClipIsInnerBoundary(){
 	}
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 38 · 批 4：收口（T38-11 / T38-14 / T38-16）
+// ══════════════════════════════════════════════════════════════════════
+
+/// T38-11：Undo/Redo 后行表一致 + ★ 钉 0 的**切换相**（D38-G 写点 3 的判别面）
+/// @details 切换相是 v1.0 两写点下的必红项：`SetWordWrap` 只置失效 + `Invalidate()`，
+///   **不调** `EnsureCaretVisible`（全仓 25 个调用点无一在 setter 之后）⇒ 旧 `m_scrollOffsetX`
+///   若不在这里归零，首帧 `viewX = textX − 旧 offset`，整段折行文本左移且左侧被 clip 吃掉。
+///   ★ 本相**必须真窗口**——横向偏移只在 `EnsureCaretVisible` 的 `else if (Window*)` 支写入
+///   （无头恒 0，连前置条件都立不起来）。这是本 Phase 第二条真窗口用例（详设 §9 v1.5 ②）。
+void Test38SoftWrapUndoRedoAndPinX(){
+	// ── ① Undo / Redo 后行表与「直接构造同文本」逐项相等（无头）──
+	{
+		TestableTextBox box(std::string(""));
+		box.SetSize(26 + kWrapBarSlot, 64);
+		box.SetWordWrap(true);
+		box.InsertText(std::string("abcdef"));   // 6 码点 @26 ⇒ 3+3 ⇒ 2 行
+		box.InsertText(std::string("ghij"));     // 10 码点 ⇒ 3+3+3+1 ⇒ 4 行
+		EXPECT_EQ(box.RowCountForTest(), 4u);
+
+		box.Undo();                              // 撤销第二次插入 ⇒ 回到 "abcdef"
+		EXPECT_EQ(box.RowCountForTest(), 2u);
+
+		TestableTextBox ref(std::string("abcdef"));   // 同配置的干净实例（无缓存 ⇒ 必是正解）
+		ref.SetSize(26 + kWrapBarSlot, 64);
+		ref.SetWordWrap(true);
+		for (std::size_t i = 0; i < 2; ++i){
+			EXPECT_EQ(box.OwnForTest(i).first,   ref.OwnForTest(i).first);
+			EXPECT_EQ(box.OwnForTest(i).second,  ref.OwnForTest(i).second);
+			EXPECT_EQ(box.DrawForTest(i).first,  ref.DrawForTest(i).first);
+			EXPECT_EQ(box.DrawForTest(i).second, ref.DrawForTest(i).second);
+		}
+
+		box.Redo();                              // 重做 ⇒ 回到 10 码点
+		EXPECT_EQ(box.RowCountForTest(), 4u);
+	}
+
+	// ── ② 切换相三段（真窗口）──
+	{
+		CaretProbe probe(std::string("abcdefghijklmnopqrst"), 40, 64);   // 20 × 8 = 160 > 40
+		EXPECT_NEAR(probe.box->GetScrollOffsetX(), 0.0f, kEps);
+
+		// ① 前置：非折行态把光标推到行尾 ⇒ 横向偏移真的 > 0
+		probe.box->MoveCaretToEnd();
+		EXPECT_TRUE(probe.box->GetScrollOffsetX() > 0.0f);
+
+		// ② 只改判据（不经光标移动、不经 EnsureCaretVisible）⇒ 折行重建把偏移钉 0
+		probe.box->SetWordWrap(true);
+		probe.box->RecalculateLines();            // 写点 3 所在的重建分支
+		EXPECT_NEAR(probe.box->GetScrollOffsetX(), 0.0f, kEps);
+
+		// ③ 同一帧内绘制：viewX = textX − 0（若残留旧偏移，这里会是负的大数）
+		const PaintProbe painted = PaintOnce(*probe.box, probe.window->GetTextMeasurer());
+		EXPECT_TRUE(painted.texts.size() >= 2u);   // 20 码点 @26 ⇒ 多行（前置成立）
+		if (!painted.texts.empty())
+			EXPECT_NEAR(painted.texts[0].pos.x, probe.box->Padding(), kEps);
+		EXPECT_NEAR(probe.box->GetScrollOffsetX(), 0.0f, kEps);   // 绘制后仍恒 0（不变式 U）
+	}
+}
+
+/// T38-14：10 维自比键**逐维**判别（每维「只变这一维 ⇒ 必须重算」）
+/// @details 判据 = `FitText` 被再次调用（= 键未命中 ⇒ 行表重建）。★ **不用「行数变了」当判据**：
+///   假测量器忽略字体 ⇒ b/c/d 三维改字体不会改布局，旧表与新表**逐位相同**——那时「行数变了」
+///   是假绿（残表看不出来），而「量了没有」才是真判据。而 e/f/g 三维会改布局，另配表形断言。
+///   ★ f/g 两维（`SetWordWrap(false)` / `SetSingleLine(true)`）走非折行支，**不调 `FitText`** ⇒
+///   判据换成「表形变成单行」（旧表是折行表 ⇒ 不重建就露馅）。
+void Test38SoftWrapKeyPerDimension(){
+	RecordingTextBox box(std::string("abcdefgh"));
+	box.SetSize(26 + kWrapBarSlot, 64);
+	box.SetWordWrap(true);
+	RecordingFakeMeasurer& rec = RecordingTextBox::Recorder();
+	box.RecalculateLines();
+	EXPECT_EQ(box.RowCountForTest(), 3u);        // 8 码点 @26 ⇒ 3+3+2
+
+	// 负对照：什么都不改 ⇒ 零测量（与 T38-15 同源；下面每一维都必须打破它）
+	rec.Reset();
+	box.RecalculateLines();
+	EXPECT_EQ(rec.fitCalls, 0);
+
+	// 字体基线显式化：三维只能从**已知值**出发才谈得上「只变一维」
+	Font base;
+	base.size   = 14.0f;
+	base.family = std::string();
+	base.weight = 400;
+	box.SetFont(base);
+	box.RecalculateLines();
+
+	// a) 维 1 文本版本（编辑 ⇒ revision++）
+	rec.Reset();
+	box.InsertCodepoint(U'z');                   // 9 码点
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+
+	// b) 维 2 font.size
+	Font f = base;
+	f.size = 16.0f;
+	rec.Reset();
+	box.SetFont(f);
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+
+	// c) 维 3 font.family
+	f = base;
+	f.family = std::string("Consolas");
+	rec.Reset();
+	box.SetFont(f);
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+
+	// d) 维 4 font.weight（Phase 36 K8-④ 同族账：漏加过一维）
+	f = base;
+	f.weight = 700;
+	rec.Reset();
+	box.SetFont(f);
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+
+	// e) 维 6 折行宽（改控件宽 ⇒ 条槽恒定 14 ⇒ 折行宽 26 → 40）
+	rec.Reset();
+	box.SetSize(40 + kWrapBarSlot, 64);
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+	EXPECT_EQ(box.RowCountForTest(), 2u);        // 9 码点 @40 ⇒ 5+4
+
+	// f) 维 8 的 SetWordWrap 分量（折行 → 非折行：不调 FitText，改断表形）
+	rec.Reset();
+	box.SetWordWrap(false);
+	box.RecalculateLines();
+	EXPECT_EQ(rec.fitCalls, 0);                  // 非折行支只扫 `\n`
+	EXPECT_EQ(box.OwnForTest(0).second, 9u);     // 单行表覆盖全串（旧表 2 行 ⇒ 这里是 5）
+
+	// g) 维 8 的 SetSingleLine 分量（★ 该维已删、断言保留：判别的是「维 8 覆盖了它」）
+	box.SetWordWrap(true);
+	box.RecalculateLines();
+	EXPECT_EQ(box.RowCountForTest(), 2u);
+	rec.Reset();
+	box.SetSingleLine(true);                     // WrapRequested() == false
+	box.RecalculateLines();
+	EXPECT_EQ(rec.fitCalls, 0);
+	EXPECT_EQ(box.OwnForTest(0).second, 9u);     // 又是单行表 ⇒ 重建确实发生了
+	box.SetSingleLine(false);
+	box.RecalculateLines();
+	EXPECT_EQ(box.RowCountForTest(), 2u);        // 回到折行表
+
+	// h) 维 9 回显模式（★ 判据在**串内容层**：喂进去的必须是掩码串，一个明文字节都不许有）
+	rec.Reset();
+	box.SetEchoMode(TextBox::EchoMode::Password);
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+	const std::string fedMask = rec.Joined();
+	EXPECT_TRUE(fedMask.find("\xE2\x80\xA2") != std::string::npos);   // U+2022 •
+	for (char plain : std::string("abcdefghz"))
+		EXPECT_TRUE(fedMask.find(plain) == std::string::npos);
+
+	// i) 维 10 组合三维（★ 必须 Password：Normal 态显示串直通 m_text ⇒ 组合标志不入串 ⇒ 无判别力）
+	//    i-a 组合开（isComposing 0→1，且组合区显示**原文**）
+	rec.Reset();
+	box.UpdateComposition(std::string("一二"));
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+	EXPECT_TRUE(rec.Joined().find("一二") != std::string::npos);
+	//    i-c 组合长度（2 → 3）
+	rec.Reset();
+	box.UpdateComposition(std::string("一二三"));
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+	EXPECT_TRUE(rec.Joined().find("一二三") != std::string::npos);
+	//    i-a 组合关（1→0 ⇒ 原文重新被打点）
+	rec.Reset();
+	box.CancelComposition();
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+	EXPECT_TRUE(rec.Joined().find("一") == std::string::npos);
+	//    i-b 组合起点：★ **无法只变这一维**——`m_compositionStart` 只在 `!m_isComposing` 时写入
+	//    （`UpdateComposition` 首次分支）⇒ 换起点必须「先取消再重新组合」，中间 `isComposing` 必然翻转。
+	//    因此本维只能断言「换起点那一轮必重建、且新位置的原文确实进了布局串」，隔离性由键的
+	//    单条 `&&` 链结构保证（三项写在同一个 return 表达式里），不能由行为隔离证明 —— 已登记在详设 §9 v1.5 ③。
+	rec.Reset();
+	box.MoveCaretToStart();
+	box.MoveCaret(TextBox::CaretDirection::Right);
+	box.MoveCaret(TextBox::CaretDirection::Right);
+	box.UpdateComposition(std::string("四"));
+	box.RecalculateLines();
+	EXPECT_TRUE(rec.fitCalls > 0);
+	EXPECT_TRUE(rec.Joined().find("四") != std::string::npos);
+}
+
+/// T38-16：真窗口白名单四件合一（唯一需要真窗口的一组——`Invalidate()` 无头是 no-op，A-10）
+/// @details 四件各自有一条**无头不可替代**的理由：
+///   ① 焦点态绘制路径（`m_showCaret` 为真才走 caret 分支）· ② `CaretIndexFromLineX` 的
+///   `GetWindow() != nullptr` 守卫（无头恒返回行首）· ③ 无测量器 → 挂窗后有测量器（键维 7 翻转）
+///   ④ `Invalidate()` 的真实语义（无头 no-op ⇒ 只能在窗口里验）。
+void Test38SoftWrapRealWindowWhitelist(){
+	// ① 焦点态绘制：折行态光标落在**末行**（y 与末行 DrawText 同源，不是行 0）
+	{
+		CaretProbe probe(std::string("abcdef"), 40, 64);   // 折行宽 26 ⇒ 2 行（3+3）
+		probe.box->SetWordWrap(true);
+		probe.box->MoveCaretToEnd();
+		probe.box->RecalculateLines();
+		const PaintProbe painted = PaintOnce(*probe.box, probe.window->GetTextMeasurer());
+		EXPECT_EQ(painted.texts.size(), 2u);
+		EXPECT_EQ(probe.PaintCaretColors().size(), static_cast<std::size_t>(1));   // 聚焦 ⇒ 光标被绘制
+		if (painted.texts.size() == 2){
+			const float caretY = probe.box->GetCaretClientGeometry().rect.y;
+			EXPECT_NEAR(caretY, painted.texts[1].pos.y, kEps);   // 与末行同源
+			EXPECT_TRUE(caretY > painted.texts[0].pos.y);
+		}
+	}
+
+	// ② 行内 x 精确定位（真窗口才走测量支；无头恒返回行首 ⇒ 本件区分得出两种实现）
+	{
+		CaretProbe probe(std::string("abcdef"), 40, 64);
+		probe.box->SetWordWrap(true);
+		probe.box->RecalculateLines();
+		const auto line0 = probe.box->OwnForTest(0);
+		EXPECT_EQ(line0.first, 0u);
+		EXPECT_EQ(line0.second, 3u);   // L0 = "abc"
+		const float lineWidth = probe.window->GetTextMeasurer().MeasureText(
+			probe.box->FontForTest(), std::string("abc")).width;
+		EXPECT_TRUE(lineWidth > 0.0f);
+		const std::size_t mid = probe.box->CaretIndexFromLineX(0, lineWidth / 2.0f);
+		EXPECT_TRUE(mid > 0u);         // 无头 ⇒ 恒 0
+		EXPECT_TRUE(mid < 3u);         // 中点必须落在行内，不许越到行尾
+		const std::size_t tail = probe.box->CaretIndexFromLineX(0, lineWidth * 4.0f);
+		EXPECT_EQ(tail, 3u);           // 行尾外 ⇒ 本行末（不属于归属区间的空白不越界）
+	}
+
+	// ③ 无头求 preferred → 挂窗 ⇒ 重排（键维 7：hasMeasurer 翻转）
+	{
+		Application app;
+		RenderServices services{
+			std::make_unique<GDIBackend>(),
+			std::make_unique<GDITextMeasurer>()
+		};
+		Window& window = app.Create("ECDI_T38_Attach", 200, 120, std::move(services));
+
+		auto owned = std::make_unique<TextBox>(std::string("abcdefghijklmnopqrst"));
+		TextBox* raw = owned.get();
+		raw->SetWordWrap(true);
+		raw->SetSize(40, 64);
+
+		// 未挂窗 ⇒ `ResolveMeasurer()` == nullptr（基类：无窗口返回 nullptr）⇒ 折行不生效 ⇒ 单条命令
+		FakeTextMeasurer fake;
+		EXPECT_EQ(PaintOnce(*raw, fake).texts.size(), static_cast<std::size_t>(1));
+		// ★ 无测量能力时 preferred = **当前尺寸**（不是编出来的内容高）：
+		//   `TextBox::GetPreferredSize` 走单行支 → `TextWidget::GetPreferredSize` 的
+		//   「nullptr ⇒ Widget::GetPreferredSize()」兜底 ⇒ {GetWidth(), GetHeight()}（`p = 0`）
+		EXPECT_EQ(raw->GetPreferredSize().height, 64.0f);
+		EXPECT_EQ(raw->GetPreferredSize().width, 40.0f);
+
+		window.GetRootWidget().AddChild(std::move(owned));   // ★ 此刻起有窗口测量器
+
+		const PaintProbe attached = PaintOnce(*raw, window.GetTextMeasurer());
+		EXPECT_TRUE(attached.texts.size() >= 2u);            // 重排发生了（维 7 翻转 ⇒ 键未命中）
+		EXPECT_TRUE(raw->GetPreferredSize().height > 64.0f);  // 折行后内容高真的长出来了
+
+		window.Release();
+	}
+
+	// ④ `SetSingleLine` 切换后**无需外部失效**即重排（C38-9；无头 `Invalidate()` 是 no-op）
+	//    ★ 可观察的是「下一次绘制用的是新判据」；「是否请求了重绘」本身没有公开观察面
+	//      （`Window` 不暴露待绘制标志）⇒ 那一半由 C38-9 的机检（3 个 setter 体内均有 Invalidate）兜住。
+	{
+		CaretProbe probe(std::string("abcdef"), 40, 64);
+		probe.box->SetWordWrap(true);
+		EXPECT_EQ(PaintOnce(*probe.box, probe.window->GetTextMeasurer()).texts.size(), 2u);
+		probe.box->SetSingleLine(true);      // 折行请求 ⇒ false ⇒ 单行表
+		EXPECT_EQ(PaintOnce(*probe.box, probe.window->GetTextMeasurer()).texts.size(), 1u);
+		probe.box->SetSingleLine(false);     // 回来 ⇒ 又是两行
+		EXPECT_EQ(PaintOnce(*probe.box, probe.window->GetTextMeasurer()).texts.size(), 2u);
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -2706,4 +3069,7 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SoftWrapSelectionAndImeContinuous", &Test38SoftWrapSelectionAndImeContinuous); // T38-10（批 3）
     GetTestRegistry().Add("TextBox.SoftWrapPreferredStable", &Test38SoftWrapPreferredStable);               // T38-12（批 3）
     GetTestRegistry().Add("TextBox.SoftWrapClipIsInnerBoundary", &Test38SoftWrapClipIsInnerBoundary);       // T38-17（批 3）
+    GetTestRegistry().Add("TextBox.SoftWrapUndoRedoAndPinX", &Test38SoftWrapUndoRedoAndPinX);                // T38-11（批 4）
+    GetTestRegistry().Add("TextBox.SoftWrapKeyPerDimension", &Test38SoftWrapKeyPerDimension);                // T38-14（批 4）
+    GetTestRegistry().Add("TextBox.SoftWrapRealWindowWhitelist", &Test38SoftWrapRealWindowWhitelist);        // T38-16（批 4）
 }
