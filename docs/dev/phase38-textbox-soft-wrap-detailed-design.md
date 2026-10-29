@@ -1,6 +1,6 @@
 ﻿# Phase 38 详细设计 — TextBox 编辑器软折行（O2 兑现）
 
-> **版本**：**v1.2**（2026-10-29——v1.1 = 独立对码复核订正；v1.2 = **批 0 / 批 1 实施回流**，两处判据口径订正，详见 §9）　**基线**：HEAD `6a3807b`（`docs(phase37): full-chain closure`）　**账目**：`roadmap-deferred.md` #77（v2.57）
+> **版本**：**v1.3**（2026-10-29——v1.1 = 独立对码复核订正；v1.2 = 批 0 / 批 1 实施回流；v1.3 = **批 2 实施回流 + 批 2/3 合并登记**，详见 §9）　**基线**：HEAD `6a3807b`（`docs(phase37): full-chain closure`）　**账目**：`roadmap-deferred.md` #77（v2.57）
 > **上游**：需求稿 [`phase38-textbox-soft-wrap-requirements.md`](phase38-textbox-soft-wrap-requirements.md) **v1.2** · 初设稿 [`phase38-textbox-soft-wrap-preliminary-design.md`](phase38-textbox-soft-wrap-preliminary-design.md) **v1.2**（其审核稿 = [`phase38-textbox-soft-wrap-design-review.md`](phase38-textbox-soft-wrap-design-review.md)，审核对象为**初设 v1.0**）
 > **下游**：实现（批 0..4，见 §6）· `tools/phase38_wrap_probe.py`（样本表**唯一**期望值来源）
 > **五阶段定位**：需求确认 ✓ → 初步设计 ✓ → **详细设计（本稿）** → 实现 → 测试
@@ -526,15 +526,21 @@ void TextBox::SetSingleLine(bool singleLine){
 **① `TestableTextBox`（`:44-69`）追加暴露**（**add-only**：既有 12 个 `using` 一个不动；★ `using TextBox::LineRange;`（`:61`）**签名不变** ⇒ 既有断言零改动）：
 
 ```cpp
-	// ★ Phase 38：折行三件 + 行数访问器（m_lines 是 private ⇒ using 不够，需一个 public 中转）
+	// ★ Phase 38：折行三件（protected ⇒ using 暴露）
 	using TextBox::LineDrawRange;
 	using TextBox::IsWrapActive;
 	using TextBox::WrapRequested;
-	[[nodiscard]] size_t LineCountForTest(){ RecalculateLines(); return m_lines.size(); }
+	using TextBox::CaretIndexFromLineX;
+
+	/// ★ 视觉行数 —— 见下方「v1.3 订正」：不能直接读 m_lines
+	[[nodiscard]] size_t RowCountForTest() const{
+		return static_cast<size_t>(GetPreferredSize().height / 16.0f + 0.5f);
+	}
 	[[nodiscard]] std::pair<size_t,size_t> OwnForTest(size_t i){ RecalculateLines(); return LineRange(i); }
 	[[nodiscard]] std::pair<size_t,size_t> DrawForTest(size_t i){ RecalculateLines(); return LineDrawRange(i); }
 ```
-★ 三个 `*ForTest` **必须自带 `RecalculateLines()`**：本 Phase 退役了 `m_needsLineRecalc`，行表只在**键未命中**时重建；若夹具忘了先调一次，断言读到的是**上一轮的表**（假绿的经典形态）。`RecalculateLines()` 非 const ⇒ 三个中转也不能是 const。
+★★ **v1.3 订正（v1.2 及更早写的是 `LineCountForTest(){ … return m_lines.size(); }`——编译不过）**：`m_lines` 是 `TextBox` 的 **private** 成员（行表数据私有是 D38-E 的一部分），**派生类的成员函数同样访问不到**——「加一个中转」绕不过访问控制，中转只是换了个函数名。⇒ 行数改用 **public 面反推**：`p = 0` 且假测量器行高 16 ⇒ `preferred.height == ceil(n × 16)` ⇒ `n = height / 16`。★ 这不是凑数：它顺带把「行表行数」与「preferred 高度」钉成一致——两者若分叉本条就红（T38-12 也走同一路径）。★ 若将来确实需要暴露行数，正确做法是在 `TextBox` 加一个 protected `LineCount()`（protected 面 +1），而不是在夹具里绕。
+★ 两个 `*ForTest` **必须自带 `RecalculateLines()`**：本 Phase 退役了旧失效布尔位，行表只在**键未命中**时重建；若夹具忘了先调一次，断言读到的是**上一轮的表**（假绿的经典形态）。`RecalculateLines()` 非 const ⇒ 两个中转也不能是 const（`RowCountForTest` 反而是 const——它走 `GetPreferredSize`，内部自己 `const_cast` 重算）。
 
 **② 折行探针（无头）**——`TestableTextBox::ResolveMeasurer()`（`:66`）恒返回静态假测量器 ⇒ **无需窗口即可折行**（这正是 D38-D 不把 `GetWindow()` 放进判据的收益）；形态沿 `:1606-1624` 的 `CaretProbe`：
 
@@ -586,7 +592,10 @@ class CountingTextBox : public TextBox{
 public:
 	using TextBox::TextBox;
 	using TextBox::RecalculateLines;
-	[[nodiscard]] size_t LineCountForTest(){ RecalculateLines(); return m_lines.size(); }
+	/// ★ 同 §2.9① 的 v1.3 订正：行数经 preferred 反推（`m_lines` 是基类 private）
+	[[nodiscard]] size_t RowCountForTest() const{
+		return static_cast<size_t>(GetPreferredSize().height / 16.0f + 0.5f);
+	}
 	static CountingFakeMeasurer& Counter() noexcept{ return ms_counter; }
 protected:
 	TextMeasurer* ResolveMeasurer() const override{ return &ms_counter; }
@@ -707,11 +716,11 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 |---|---|---|---|---|
 | **T38-1** | `TextBox.SoftWrapOffPaintBaseline` | TextBoxTests | 非折行态**三组**（含 `\n` 多行 / 单行超宽 / **空文本**）的 `RecordingBackend` 命令流：`get_if<DrawTextCommand>` 的 `pos.x`/`pos.y`/`text`、`get_if<PushClipCommand>` 的 `rect` 逐字段 == 常量表 | 常量表 = **批 0 在 HEAD 上采集**（§6；源码基准 `6a3807be19a30d8512e18ef2d68bf2d1b7842cbf`） |
 | **T38-2** | `TextWidget.WrapLayoutOutputUnchanged` | WidgetTests | `TestableLabel`（§2.10 追加的 3 个 `using`）⇒ 对 T29 的既有串逐字段断言 `startCp`/`cpCount`/`width`/`totalHeight`；★ **并断言 `ownedEnd` 不参与 `Label` 的任何输出**（`DrawTextCommand.text` 与改前逐位同） | 既有 T29-1..6 / T29-WRAP-1..3 的常量 + §3.1 |
-| **T38-3** | `TextBox.SoftWrapS1FourWaySameSource` | TextBoxTests | S1@48：① `LineDrawRange(0) == (0,5)` ② `LineRange(0) == (0,6)` ③ `CaretIndexFromPosition` 在 L1 的 y 带内命中 **6**（无头 ⇒ 恒行首，A2②）④ `CalculateCaretPosition` 的 y == `1 × L_geom` ⑤ Up/Down 的行号 | §3.1 S1 |
+| **T38-3** | `TextBox.SoftWrapS1FourWaySameSource` | TextBoxTests | S1@48：① `LineDrawRange(0) == (0,5)` ② `LineRange(0) == (0,6)` ③ `CaretIndexFromPosition` 在 L1 的 y 带内命中 **6**（无头 ⇒ 恒行首，A2②）④ ★ **v1.3 换形**：改断 `DrawTextCommand.pos.y == {0, 16}`——`CalculateCaretPosition` 是 **private**（派生类不可 `using` 暴露）；命令级断言更硬（同时证明布局行高与发射行高同源）⑤ Up/Down 的行号 | §3.1 S1 ✅ |
 | **T38-4** | `TextBox.SoftWrapS2CjkNoSpace` | TextBoxTests | S2@40：`drawEnd == ownedEnd`（**无空格可裁** ⇒ 证明归属规则不凭空吞码点） | §3.1 S2 |
 | **T38-5** | `TextBox.SoftWrapS3HardSoftMixed` | TextBoxTests | S3@40（3 行）与 S3@24（4 行）：硬行 `own+1 == start`（L1→L2：`6+1=7`）与软行 `own == start`（L0→L1：`3==3`）**同表混存** | §3.1 S3 |
 | **T38-6** | `TextBox.SoftWrapKinsokuFiveSamples` | TextBoxTests | **五**样本四路同源：S4@24（悬挂 w32 > 折行宽 24）· S5@24（④ 行尾开括号回退 ⇒ `（` 挪到 L1）· S5b@8（④b 守卫 ⇒ 不产生空行）· S5c@32（**对照组：④ 在纯 CJK 串上不可达**）· S6@26（超长词硬断） | §3.1 |
-| **T38-7** | `TextBox.SoftWrapCodepointConservation` | TextBoxTests | **遍历** §3.1 全表 9 样本 × 2 档 = **18 次** + **§3.4 的 S8 组 4 串 = 22 次**，每次逐行断言（★ v1.1 判据换形，**只允许两态**）：`gap(i) = start(i+1) − ownedEnd(i)` **== 0**（软行）**或** `== 1 ∧ cps[ownedEnd(i)] == U'\n'`（硬行）；+ 三条边界等式：`start(0)==0` · `ownedEnd(last)==count` · `drawEnd(i) ≤ ownedEnd(i)`。★ **v1.0 的 `gap ∈ {0,1}` 写法已作废**——它在 `ownedEnd = b` 下会把「`gap==1` 且 `cps[ownedEnd]==' '`」判成违反而在 `ownedEnd = nextScan` 下永不出现，判据必须与选定的取法同形 | §3.1 + §3.4（脚本 `A3 gap check` 全表 OK） |
+| **T38-7** | `TextBox.SoftWrapCodepointConservation` | TextBoxTests | **遍历** §3.1 全表 9 样本 × 2 档 = **18 次** + `tail` 1 次 + **§3.4 的 S8 组 4 串 = 23 次**（★ v1.3：v1.1 写 22，漏数了 `tail`——它是 §3.1 表里独立的一行，且是「空行 `ownedEnd` 取自身」的唯一形态），每次逐行断言（★ v1.1 判据换形，**只允许两态**）：`gap(i) = start(i+1) − ownedEnd(i)` **== 0**（软行）**或** `== 1 ∧ cps[ownedEnd(i)] == U'\n'`（硬行）；+ 三条边界等式：`start(0)==0` · `ownedEnd(last)==count` · `drawEnd(i) ≤ ownedEnd(i)`。★ **v1.0 的 `gap ∈ {0,1}` 写法已作废**——它在 `ownedEnd = b` 下会把「`gap==1` 且 `cps[ownedEnd]==' '`」判成违反而在 `ownedEnd = nextScan` 下永不出现，判据必须与选定的取法同形 | §3.1 + §3.4（脚本 `A3 gap check` 全表 OK） |
 | **T38-8** | `TextBox.SoftWrapWidthIndependentOfBar` | TextBoxTests | `W=40/p=0/"abcdefgh"`，`H=64` 与 `H=24` 两态：`GetTextAreaWidth()` **相等**（均 26）且逐行区间**逐项相等**（均 3 行） | §3.2 |
 | **T38-9** | `TextBox.SoftWrapSpaceReachable` | TextBoxTests | S1@48：caret 可停 `cp5`、`Left`/`Right` 可穿过、点击 L0 行尾空格落该行（无头 ⇒ 行首归属形态） | §3.1 S1 |
 | **T38-10** | `TextBox.SoftWrapSelectionAndImeContinuous` | TextBoxTests | 跨软行 `Shift` 拖选：`DrawRectCommand` 序列相邻行 `x+w` 衔接（**无 8px 断口**）；IME 组合下划线跨软行**切段**（每段落在本行） | §3.1 S1/S3 |
@@ -736,17 +745,17 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 |---|---|---|---|
 | **C38-1** | 一张行表、两个口径 | `grep -c "LineDrawRange" $TB` | **2**（定义 1 + `OnPaint` 消费 1）★ 初设写「命中 == 1」= 只数消费点；本稿订正为**含定义共 2**，且**消费点 == 1** |
 | | | `sed -n '/^std::pair<size_t, size_t> TextBox::LineRange/,/^}/p' $TB \| grep -c -- "- 1"` | **0**（`−1` 退场） |
-| | | `grep -rn "m_lineStarts" ECDI/` | **0** |
-| **C38-2** | 码点守恒（★ v1.1 判据收紧：`gap` 只允许 **0**（软行）或 **1 且 `cps[ownedEnd]=='\n'`**（硬行），**无第三态**） | T38-7 全表遍历（**非抽样**） | **22/22** 绿（9 样本 × 2 档 + S8 组 4 串） |
+| | | `grep -rn --include=*.cpp --include=*.h "m_lineStarts" ECDI/` | **0** ✅ 实测 · ★ v1.3 加 `--include`：`ECDI/` 下有未跟踪的草稿（`.scratch_p37.md`，10-27 遗留）会命中，它不是代码 |
+| **C38-2** | 码点守恒（★ v1.1 判据收紧：`gap` 只允许 **0**（软行）或 **1 且 `cps[ownedEnd]=='\n'`**（硬行），**无第三态**） | T38-7 全表遍历（**非抽样**） | ✅ **23/23 绿**（★ v1.3：9 样本 × 2 档 + `tail` + S8 组 4 串；v1.1 的 22 漏数了 `tail`）· 实测 2026-10-29 |
 | | | `grep -n "lines.back().ownedEnd = nextScan" $TW` | **1**（§2.1 ⑨ 的归属回填；★ 缺它则 S8 组全红） |
-| **C38-3** | 三个宽度、各自单一来源、互不成环 | `grep -c "GetTextAreaWidth" $TB` | **5**（代码 4：`:569`/定义/`:693`/`:1369` + 注释 1：`:523`）★ A-11 已核 |
+| **C38-3** | 三个宽度、各自单一来源、互不成环 | `grep -c "GetTextAreaWidth" $TB` | ★★ **v1.3 实测订正（5 → 9）**：**代码 5 处** = `RecalculateLines` 的折行宽采集 · `EnsureCaretVisible` 的 clamp 宽 · 定义 · `CalculateCaretPosition` 的 `maxCaretX` · `OnPaint` 的 clip 非折行支；**注释 4 处** = 折行宽来源说明 · `GetTextAreaHeight` 的对称说明 · D38-I 的两句（「取控件内边界，**不取** `GetTextAreaWidth()`」）。★ 比 v1.0 估的 4+1 多出**一处代码 + 三处注释**：① `RecalculateLines` 折行支必须在这里取折行宽（批次合并的直接结果，见 §6 的 v1.3 注记）；② D38-I 的论证**必须**点名 `GetTextAreaWidth()` 才说得清「为什么不取它」——为凑机检数字删掉理由，是把判据换成了装饰 |
 | | | `sed -n '/^float TextBox::GetTextAreaWidth/,/^}/p' $TB \| grep -c "钻到条下\|无循环依赖"` | **0**（两条在案注释均已改写；★ 不得静默改码） |
 | | | `grep -n "IsWrapActive" $TB \| grep PushClip` 附近三目 | clip 表达式**必须**含 `IsWrapActive()` 三目 |
 | **C38-4** | 显示串唯一 | `sed -n '202,310p' $TW \| grep -c "m_text"` | **0**（★ 范围 `:202-310`，A-1；改前实测 4 行 5 处 = `:210/228/229/230/269`） |
 | | | `sed -n '392,400p' $TW \| grep -c "m_text"` | **≥ 2**（`:396-398` 的发射点**必须保留**） |
 | | | T38-14h 的 `RecordingTextMeasurer` | 喂入串含 `E2 80 A2`、不含明文 |
 | **C38-5** | `Label` 零参与 | `grep -n "ownedEnd" $TW` | ★★ **v1.2 实测订正（4 → 2）**：命中 **2 处** = **1 处注释** + **1 处写**（`layout.lines.back().ownedEnd = nextScan;`）。v1.1 写「3 处构造 + 1 处写 = 4」**是错的**——三处构造都用**位置初始化**（`TextLine{ 0, 0, 0.0f, 0 }` / `{ lineStart, end - lineStart, width, lineEnd }` / `{ segStart, 0, 0.0f, segStart }`），**字段名不出现在源码里**。⇒ 判据的正确形态 = 「2 处，且**无任何读取表达式**（无 `ownedEnd` 作右值 / 无 `->ownedEnd`）」；另可加 `grep -c "\.ownedEnd"` == **1**（唯一成员访问 = 那一处写） |
-| **C38-6** | 失效只经键 + 显示串不变式 | `grep -rn "m_needsLineRecalc" ECDI/` | **0** |
+| **C38-6** | 失效只经键 + 显示串不变式 | `grep -rn --include=*.cpp --include=*.h "m_needsLineRecalc" ECDI/` | **0** ✅ 实测 · ★ v1.3：**注释里也不许留这个标识符**——否则「反正是注释」会变成真残留的掩护。实现在注释里统一改称「旧失效布尔位」 |
 | | | `grep -n "m_isComposing = \|m_compositionStart = \|m_compositionLength = " $TB` | 逐处核对 bump 成对：`:898/899/908`→`:913`、`:928/930/931`→`:935`、`:955/957`→**越序**（`RestoreSnapshot` 在 **`:953`**，A-8）、`:964/966`→`:970` |
 | **C38-7** | 配套语义边界 | `grep -n "m_scrollOffsetX *=" $TB` | **3**（★ v1.1 再订正：初设写 1、v1.0 写 2）——**2 处**在 `EnsureCaretVisible` 体内（折行支钉 0 / 非折行支跟手写）+ **1 处**在 `RecalculateLines` 折行重建分支（§2.2 写点 3，覆盖**切换相**）；+ `.h` 字段初值 ⇒ 全仓 **4**。★ 三缺一即破不变式 `U`（§2.5④） |
 | | | `git diff HEAD -- $TB \| grep -A3 "case KeyCode::Home"` | **零 diff**（`Home`/`End` 不动 = D38-H；折行后 `Home` 落全文首 ⇒ 与 Up/Down **不同源 = 已知现状**，占号 #82） |
@@ -763,12 +772,18 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 |---|---|---|---|---|
 | **批 0** ✅ | ★ **基准采集（前置、不可后补）**：在 HEAD `6a3807b` 上写 T38-1 / T38-13 的常量表并跑绿，**只加测试、零产品码改动** | +2 | **515** | ✅ **2026-10-29 实测 515/515**（MinGW g++ Debug）；★ 采集时订正一处断言口径：`Widget::Paint` 自带 `PushClip(self)`（`Widget.cpp:506`）⇒ clip 条数 **非空 2 / 空文本 1**，rect 取 `clips.back()` |
 | **批 1** ✅ | **add-only**：`TextWidget.h` 可见性下移 + `ownedEnd` + `TextRevision()` + `:61-70` 注释扩写；`TextWidget.cpp` **九处**（§2.1，含 ⑨ 的归属回填）；`TestableLabel` 加 3 个 `using`；T38-2 | +1 | **516** | ✅ **2026-10-29 实测 516/516**；C38-4 = **0** ✓ · C38-5 = **2 处（1 注释 + 1 写）** ✓（见 §5 的 v1.2 订正）· ★ 本批**不动 `TextBox`** ⇒ 红线① 结构性成立 |
-| **批 2** | **行表换芯**：`TextBox.h`（`m_lines` + 10 键字段 + 3 protected + 2 private 辅助 + 七处注释 + 删两字段）；`TextBox.cpp`（§2.2 / §2.3 / §2.4 / §2.7 / §2.8）；夹具（§2.9）；T38-3..7 + T38-15 + **T38-18** | **+7** | **523** | 523/523 绿 · C38-1 / C38-2 / C38-6 机检 · ★ 本批结束时**折行仍不可达**（`GetPreferredSize` 的闸与 clip 未改）⇒ 513 存量必须逐位绿 |
-| **批 3** | **接线**：`GetTextAreaWidth`（§2.5①+注释）· `GetPreferredSize`（②）· `MultilinePreferred`（③）· `EnsureCaretVisible` 钉 X（④）· `OnPaint` clip（⑤）+ 行循环拆口径（§2.6）· `SetSingleLine`（⑥）；T38-8/9/10/12/17 | +5 | **528** | 528/528 绿 · C38-3 / C38-7 / C38-8 / C38-9 机检 · ★ **本批是红线① 的真正考场**（首次让折行可达） |
+| **批 2** ✅ | **行表换芯**：`TextBox.h`（`m_lines` + 10 键字段 + 3 protected + 2 private 辅助 + 七处注释 + 删两字段）；`TextBox.cpp`（§2.2 / §2.3 / §2.4 / §2.7 / §2.8）；夹具（§2.9）；T38-3..7 + T38-15 + **T38-18** | **+7** | **523** | ✅ **2026-10-29 实测 523/523**（MinGW g++ Debug）· C38-1 = `LineDrawRange` 2 ✓ / `LineRange` 内 `- 1` 0 ✓ / `m_lineStarts` 0 ✓ · C38-2 = 23/23 ✓ · C38-6 = 0 ✓ · C38-7 = 3 ✓ · 516 存量逐位绿 · ★★ **本批与批 3 的**产品码**合并落地**（见下方 v1.3 注记）；**测试**仍按批次分两批加，故本条只计 +7 |
+| **批 3** ◐ | **接线**：`GetTextAreaWidth`（§2.5①+注释）· `GetPreferredSize`（②）· `MultilinePreferred`（③）· `EnsureCaretVisible` 钉 X（④）· `OnPaint` clip（⑤）+ 行循环拆口径（§2.6）· `SetSingleLine`（⑥）；T38-8/9/10/12/17 | +5 | **528** | ★★ **产品码已随批 2 合并落地**（§9 v1.3 ①，理由见下）；**用例 T38-8/9/10/12/17 仍未加** ⇒ 本行待办。已实测：C38-3 = 9（订正后）· C38-7 = 3 · C38-9 = 3/3 含 `Invalidate` |
 | **批 4** | **收口**：T38-11（Undo/Redo + 钉 X 切换相）· T38-14（键 a–i）· T38-16（真窗口白名单四件） | +3 | **531** | **531/531 绿** · 全部 C38 机检 · `doc_lint` 0 defect · 锚点 100 / 198 / 197 |
 
 ★ **每批的通用门**（沿 Phase 37 惯例）：① `ecdi_tests.exe` 全绿且计数 == 累计值；② `python tools/doc_lint.py --select L02..L11 --quiet` == 0 defect；③ 改动文件 BOM=True / CR=0（`.py` 除外）；④ `git status` 与批内容**逐项对上**（不得夹带）。
 ★ **批间不得合并提交**：批 2 与批 3 之间必须有一次全绿快照——批 3 一旦出问题，回退面是「接线」而不是「行表」。
+★★★ **v1.3 实施注记（这条纪律在本 Phase 无法按原样执行，理由如下，已如实登记而非绕过）**：批 2 的**产品码**与批 3 的**产品码**在同一次编辑里落地了。三条硬理由：
+  ① **`RecalculateLines()` 的折行支本身就调 `GetTextAreaWidth()`**（§2.2 的 `wrapWidth`）⇒ 若 `GetTextAreaWidth()` 的谓词还停在「条可见才让位」，折行宽就会**随条显隐变化**：首次建表时条不可见 ⇒ 折行宽 = 全宽；条出现后 ⇒ 折行宽 −14 ⇒ 行表变 ⇒ 内容高变 ⇒ 条又可能消失 ⇒ **自指环仍然在**。E3 的独立性证明依赖 §2.5① 与 §2.2 **同时**成立，拆开做等于把环留着过一个批次。
+  ② **T38-3..7 的期望值对不上**：样本表写的是「折行宽 = w」，而测试只能设**控件宽**（`w + 14`）。§2.5① 不落地 ⇒ 折行宽不确定 ⇒ 批 2 的七条用例无法与样本表对账，只能等批 3 才能验 —— 那「批 2 全绿」就失去了内容。
+  ③ 两批改的是**同一批函数**（`RecalculateLines` / `GetPreferredSize` / `MultilinePreferred` / `EnsureCaretVisible` / `OnPaint`），文件级无法分离；`git add -p` 式的行级拆分只会造出「编译过但语义自相矛盾」的中间态。
+  ⇒ **保留的回归门**：测试仍按批次分两次加（批 2 的 7 条已绿 = 523，批 3 的 5 条待加 = 528），因此「行表是否正确」与「接线是否正确」在**测试层面**仍可分别归因；且 516 条存量在换芯 + 接线同时到位的情况下**逐位全绿**，这是红线① 更强的实证（而不只是「未接线时没坏」）。
+  ⇒ **对后续 Phase 的建议**：批次切分应按「**同一函数内的改动能独立成立**」划，而不是按「文件 / 概念层次」划。本 Phase 的 §6 是按后者划的，所以撞上了这个耦合。
 ★ **外部动作（只登记、不执行）**：harness 侧 `ComposerBox` 构造里的 `SetWordWrap(true)`，**在拿到含批 3 的前缀之前不得加**（加了 = 长高 + 宽度棘轮）。`--grow-probe` 的软折行相同理。**本仓不代对方仓执行任何写回。**
 
 ---
@@ -807,6 +822,15 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 
 ## §9 修订记录
 
+- **v1.3（2026-10-29）** **批 2 实施回流 + 批 2/3 合并登记**——批 2 实测 **523/523**；四条判据/口径订正，一条纪律偏差登记：
+  ① ★★★ **批 2 与批 3 的产品码合并落地**（§6 已就地注记三条硬理由：`RecalculateLines` 的折行支依赖 `GetTextAreaWidth()` 的常驻槽谓词、T38-3..7 的期望值依赖确定的折行宽、两批改的是同一批函数）。**测试仍按批次分两次加**（批 2 的 7 条已绿），故「行表」与「接线」在测试层面仍可分别归因；516 条存量在换芯 + 接线同时到位时**逐位全绿**。★ 这条偏差不是「省事」——若按原批次做，中间态会带着 E3 的自指环。
+  ② ★★ **§2.9① 的夹具 `LineCountForTest(){ return m_lines.size(); }` 编译不过**（v1.0–v1.2 均有此错）：`m_lines` 是 `TextBox` 的 **private** 成员，**派生类的成员函数同样访问不到**——原文注释自己写着「`m_lines` 是 private ⇒ using 不够，需一个 public 中转」，但「中转」绕不过访问控制，只是换了个函数名。⇒ 改为 `RowCountForTest()`，用 **public 面反推**：`p = 0` + 假测量器行高 16 ⇒ `preferred.height == ceil(n × 16)`。★ 副产品是判据更强了（行表行数与 preferred 高度必须一致）。§2.9③ 的 `CountingTextBox` 同步订正。
+  ③ ★★ **C38-3 的期望值错（5 → 9）**：**代码 5**（`RecalculateLines` 的折行宽采集 / `EnsureCaretVisible` 的 clamp / 定义 / `CalculateCaretPosition` 的 `maxCaretX` / `OnPaint` 的 clip 非折行支）+ **注释 4**。v1.0 估的「4 代码 + 1 注释」漏了两项：折行宽采集（批次合并的直接产物）与 D38-I 的两句论证（**必须**点名 `GetTextAreaWidth()` 才说得清「不取它」）。★ 为凑机检数字删掉 D38-I 的理由，等于把判据换成装饰。
+  ④ ★ **T38-7 的样本数错（22 → 23）**：`tail`（`"ab\n"`）是 §3.1 表里独立的一行，v1.1 的「9 样本 × 2 档 + S8 组 4 = 22」把它漏了。它恰恰是「空行 `ownedEnd` 取自身」的唯一形态 ⇒ 漏它则边界等式② 少一半判别力。实测 **23/23 全绿**。
+  ⑤ ★ **T38-3④ 的判据换形**：`CalculateCaretPosition` 是 **private**（`TextBox.h`），派生类不可 `using` 暴露 ⇒ 改断 `DrawTextCommand.pos.y == {0, 16}`。这更硬——它同时证明「布局行高」与「发射行高」是同一份（正是四路同源要证的那件事）。
+  ⑥ **机检命令加 `--include=*.cpp --include=*.h`**（两条 `== 0` 硬门）：`ECDI/` 下有未跟踪草稿 `.scratch_p37.md` 会被 `-r` 命中。★ 同时定纪律：**注释里也不许留退役标识符**（统一改称「旧失效布尔位」/「旧行起点表」），否则「反正是注释」会成为真残留的掩护。这两条硬门现已实测 0/0。
+  ⑦ **实测读数汇总**：`523 passed / 0 failed / 523 total`（MinGW g++ Debug，断言启用；全部无头用例 ⇒ 与显示器缩放无关）。★ **两次独立验证**：一次是增量构建（13:0x），一次是**删掉 153 MB 构建产物后冷全量重编**（14:3x，CLion 构建）⇒ 同一读数，排除「增量构建残留旧 obj 蒙对」的可能· C38-1 = 2/0/0 ✓ · C38-2 = 23/23 ✓ · C38-3 = 9（订正后）✓ · C38-6 = 0 ✓ · C38-7 = 3 ✓ · C38-9 = 3/3 setter 含 `Invalidate` ✓。
+  ★ **未改动**：D38-A..I、10 维键、PD38-1..9 落点划分、T38-1..18 预算（531）、C38-1..9 条数、R38-1..10 条数**全部不变**。
 - **v1.2（2026-10-29）** **实施回流（批 0 / 批 1 落地后）**——两处**判据口径**订正，方案本体与预算不变：
   ① ★★ **C38-5 的机检期望值错（4 → 2）**：v1.1 写「3 处构造 + 1 处写 = 4 处 `ownedEnd` 命中」，实测 **2 处**（1 注释 + 1 写）。根因 = 三处构造全用**位置初始化**（`TextLine{ 0, 0, 0.0f, 0 }` 等），**字段名不出现在源码**。⇒ 判据改为「2 处且无读取表达式」+ 可选的 `grep -c "\.ownedEnd"` == 1。★ 这一条**不影响红线② 的证明**（`TextWidget` 仍无任何读取），只是原期望值写错了。
   ② ★ **批 0 的 clip 断言口径**（v1.0 未提，写测试时才核出）：`Widget::Paint` 自己 `PushClip(self)`（`Widget.cpp:506`）⇒ 每次 `Paint` 至少 1 条 `PushClipCommand`；非空文本 **2 条**（Widget self + `TextBox.cpp:1369`）、空文本（`:1345` 早退）**1 条**。T38-1 据此断言条数 + 取 `clips.back()` 的 rect。★ 该结论对 **T38-17** 同样适用（判 clip 必须取**最后一条**，否则断的是 Widget 自身矩形——两者在 `p=0`、条不可见时数值相同，只有条数能区分）。

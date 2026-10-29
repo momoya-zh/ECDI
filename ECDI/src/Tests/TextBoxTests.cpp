@@ -1,6 +1,7 @@
 ﻿#include "RunAllTests.h"
 #include "TestFramework.h"
 #include "ECDI/Widget/TextBox.h"
+#include "ECDI/Core/UTF8.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyModifier.h"
 #include "ECDI/EventSystem/Window/TimerEvent.h"
@@ -53,6 +54,23 @@ public:
 
     /// @brief 文本内边距（protected `m_style` 的中转）——scrollbar-placement-and-appearance v1.5：条内缩 = max(padding, 2)
     [[nodiscard]] float Padding() const noexcept{ return m_style.padding.value; }
+
+    /// @brief ★ 视觉行数（Phase 38 批 2）
+    /// @details ★★ **为什么不直接 `m_lines.size()`**：`m_lines` 是 `TextBox` 的 **private** 成员
+    ///   （行表数据私有是 D38-E 的一部分），派生类**不可访问** ⇒ 详设 §2.9① 那句
+    ///   `return m_lines.size();` 编译不过（v1.3 订正，见文档 §9）。
+    ///   改用 **public 面反推**：`p = 0` 且假测量器行高 16 ⇒ `preferred.height == ceil(n × 16)`
+    ///   ⇒ `n = height / 16`。★ 这不是凑数——它顺带把「行表行数」与「preferred 高度」钉成一致，
+    ///   两者若分叉本条就红（T38-12 也走同一路径）。
+    [[nodiscard]] size_t RowCountForTest() const{
+        return static_cast<size_t>(GetPreferredSize().height / 16.0f + 0.5f);
+    }
+
+    /// @brief 归属口径区间（自带重算——★ 漏调会读到上一轮的表 = 假绿的经典形态）
+    [[nodiscard]] std::pair<size_t, size_t> OwnForTest(size_t i){ RecalculateLines(); return LineRange(i); }
+
+    /// @brief 裁剪口径区间（同上）
+    [[nodiscard]] std::pair<size_t, size_t> DrawForTest(size_t i){ RecalculateLines(); return LineDrawRange(i); }
     using TextBox::OnTimer;     ///< 8.5.1：光标闪烁（protected override——无窗口环境允许验证翻转逻辑）
     using TextBox::UpdateComposition;   ///< 8.5.1：Composition 状态机（protected——Window 转发入口）
     using TextBox::CommitComposition;
@@ -62,6 +80,11 @@ public:
     using TextBox::CaretIndexFromPosition;   ///< 8.5.2：多行坐标定位（private——Y 定行无窗口可测）
     using TextBox::GetWordBounds;      ///< 8.5.2：双击选词（private——纯码点逻辑）
     using TextBox::OnMouseWheel;       ///< 8.5.2：滚轮（protected override）
+    // ── ★ Phase 38 批 2：折行两口径 + 折行判据（protected——using 暴露）──
+    using TextBox::LineDrawRange;      ///< 裁剪口径（软断点行尾空格不发射）
+    using TextBox::IsWrapActive;       ///< 折行生效（请求 ∧ 有测量器）
+    using TextBox::WrapRequested;      ///< 折行请求（纯配置，noexcept）
+    using TextBox::CaretIndexFromLineX;///< 行内 X → 全局码点（T38-18④ 的可达性判据）
 protected:
     TextMeasurer* ResolveMeasurer() const override{ return &ms_fake; }   // 9.8：preferred 测量接缝
 private:
@@ -101,6 +124,172 @@ private:
 FractionalLineHeightTextBox::FracMeasurer FractionalLineHeightTextBox::ms_frac;
 
 FakeTextMeasurer TestableTextBox::ms_fake;
+
+// ══════════════════════════════════════════════════════════════════════════
+// Phase 38 批 2 夹具：折行样本表 / 折行探针 / 计数测量器
+// ══════════════════════════════════════════════════════════════════════════
+
+/// @brief 常驻条槽（★ 折行请求态恒扣）：条厚 12（`ScrollBarStyle` 缺省）+ 内缩 max(0, 2) = 14
+/// @details ⇒ 「样本折行宽 w」对应的**控件宽 = w + 14**。这条换算只在这里出现一次；
+///   若将来缺省条厚变了，**样本表全体会一起红**（而不是悄悄偏移 14px 后仍然绿）。
+constexpr int kWrapBarSlot = 14;
+
+struct WrapLineExpect{
+	std::size_t drawStart;   ///< 绘制起点（= 归属起点）
+	std::size_t drawEnd;     ///< 绘制终点（裁剪口径 —— 软断点行尾空格不进命令）
+	std::size_t ownEnd;      ///< 归属终点（可达性 / 选区口径）
+};
+
+/// @brief 一个折行样本（= 详设 §3.1 的一行；`width` 是**折行宽**，不是控件宽）
+struct WrapSample{
+	const char* text;
+	float       width;
+	bool        password;      ///< S7 走 `EchoMode::Password`（掩码串与明文同宽同码点数）
+	std::size_t lineCount;
+	WrapLineExpect lines[4];   ///< 本表最多 4 行（S3@24）
+};
+
+/// @brief ★ 全表 23 项 = §3.1 的 9 样本 × 2 档（18）+ `tail`（1）+ §3.4 的 S8 组（4）
+/// @details **期望值一字不改地来自 `tools/phase38_wrap_probe.py` 的实算**（详设 §3 的样本表纪律）。
+///   本文件里不得出现手推出来的行区间——要改先改脚本、重跑、再抄表。
+const WrapSample kWrapSamples[] = {
+	// ── §3.1 S1：拉丁软断点（分隔空格归前行）──
+	{ "ab cd ef",  48.0f, false, 2, { { 0, 5, 6 }, { 6, 8, 8 } } },
+	{ "ab cd ef",  24.0f, false, 3, { { 0, 2, 3 }, { 3, 5, 6 }, { 6, 8, 8 } } },
+	// ── S2：纯 CJK（无空格可裁 ⇒ 两口径同值）──
+	{ "一二三四五六", 40.0f, false, 2, { { 0, 5, 5 }, { 5, 6, 6 } } },
+	{ "一二三四五六", 24.0f, false, 2, { { 0, 3, 3 }, { 3, 6, 6 } } },
+	// ── S3：硬行 + 软行混存 ──
+	{ "ab cd \nef gh", 40.0f, false, 3, { { 0, 2, 3 }, { 3, 5, 6 }, { 7, 12, 12 } } },
+	{ "ab cd \nef gh", 24.0f, false, 4, { { 0, 2, 3 }, { 3, 5, 6 }, { 7, 9, 10 }, { 10, 12, 12 } } },
+	// ── S4：悬挂闭标点（行宽 32 > 折行宽 24 —— D38-I 的判别面）──
+	{ "一二三。四", 24.0f, false, 2, { { 0, 4, 4 }, { 4, 5, 5 } } },
+	{ "一二三。四", 16.0f, false, 3, { { 0, 2, 2 }, { 2, 4, 4 }, { 4, 5, 5 } } },
+	// ── S5：行首禁则（开括号回退到下一行行首）──
+	{ "ab（cd",    24.0f, false, 2, { { 0, 2, 2 }, { 2, 5, 5 } } },
+	{ "ab（cd",    16.0f, false, 3, { { 0, 2, 2 }, { 2, 4, 4 }, { 4, 5, 5 } } },
+	// ── S5b：④b 守卫（不产生空行）──
+	{ "（a",        8.0f, false, 2, { { 0, 1, 1 }, { 1, 2, 2 } } },
+	{ "（a",       16.0f, false, 1, { { 0, 2, 2 } } },
+	// ── S5c：对照组（④ 在纯 CJK 串上不可达）──
+	{ "一二三（四", 32.0f, false, 2, { { 0, 3, 3 }, { 3, 5, 5 } } },
+	{ "一二三（四", 16.0f, false, 3, { { 0, 2, 2 }, { 2, 3, 3 }, { 3, 5, 5 } } },
+	// ── S6：超长词硬断 ──
+	{ "abcdefgh",  26.0f, false, 3, { { 0, 3, 3 }, { 3, 6, 6 }, { 6, 8, 8 } } },
+	{ "abcdefgh",  40.0f, false, 2, { { 0, 5, 5 }, { 5, 8, 8 } } },
+	// ── S7：掩码（Password ⇒ 显示串是 ••，码点数与宽度同明文）──
+	{ "secret",    40.0f, true,  2, { { 0, 5, 5 }, { 5, 6, 6 } } },
+	{ "secret",    24.0f, true,  2, { { 0, 3, 3 }, { 3, 6, 6 } } },
+	// ── tail：尾部空行（末行 w0、零 DrawText 命令）──
+	{ "ab\n",      40.0f, false, 2, { { 0, 2, 2 }, { 3, 3, 3 } } },
+	// ── §3.4 S8 组：分隔空格归属（A-15 的判别面）──
+	{ "一二三 四",  24.0f, false, 2, { { 0, 3, 4 }, { 4, 5, 5 } } },
+	{ "一二三  四", 24.0f, false, 2, { { 0, 3, 5 }, { 5, 6, 6 } } },
+	{ "一二三 \n四", 24.0f, false, 2, { { 0, 3, 4 }, { 5, 6, 6 } } },
+	{ "abc   ",    40.0f, false, 1, { { 0, 3, 6 } } },
+};
+
+/// @brief 按 (文本, 折行宽) 查样本 —— 用例只写「哪一串、哪一档」，不写下标
+/// @details 用下标会让「表顺序调一下」变成一堆沉默的错位；用键则顺序无关。
+const WrapSample& FindSample(const char* text, float width){
+	for (const auto& sample : kWrapSamples){
+		if (std::string(sample.text) == text && sample.width == width)
+			return sample;
+	}
+	EXPECT_TRUE(false);   // 表里没有 ⇒ 用例写错了（不是产品码错）
+	return kWrapSamples[0];
+}
+
+/// @brief 取第 `cpIndex` 个码点（越界返回 U'\0'）——T38-7 的硬行判据（`cps[ownedEnd] == '\n'`）
+char32_t CodepointAt(const std::string& s, std::size_t cpIndex){
+	std::size_t byte = 0;
+	for (std::size_t i = 0; i < cpIndex; ++i){
+		if (byte >= s.size())
+			return U'\0';
+		byte = CodepointIndexToByteOffset(s, i + 1);
+	}
+	if (byte >= s.size())
+		return U'\0';
+	return DecodeFirstCodepoint(s.substr(byte));
+}
+
+/// @brief 折行探针（无头）——`TestableTextBox::ResolveMeasurer()` 恒返回假测量器 ⇒ 无需窗口即可折行
+/// @details 这正是 D38-D 不把 `GetWindow()` 放进折行判据的收益：折行逻辑可以在纯无头环境验。
+struct WrapProbe{
+	TestableTextBox box{ std::string("") };
+
+	WrapProbe(){
+		box.SetSize(40 + kWrapBarSlot, 64);
+		box.SetWordWrap(true);
+	}
+
+	void Set(const WrapSample& s, int h = 64){
+		box.SetEchoMode(s.password ? TextBox::EchoMode::Password : TextBox::EchoMode::Normal);
+		box.SetText(std::string(s.text));
+		box.SetSize(static_cast<int>(s.width) + kWrapBarSlot, h);
+	}
+};
+
+/// @brief 计数型假测量器（T38-15）——先例 `WidgetTests.cpp` 的 CountingMeasurer 是 final 且
+///        只覆写 `MeasureText`/`LineHeight` ⇒ 不可复用（要计数 `FitText`）
+/// @details ★ 三个虚函数**均非 const**（`Render/TextMeasurer.h`）——写成 const override 不可编译。
+class CountingFakeMeasurer final : public TextMeasurer{
+public:
+	int fitCalls = 0;
+	int measureCalls = 0;
+
+	Size MeasureText(const Font&, const std::string& text) override{
+		++measureCalls;
+		return Size{ static_cast<float>(CountCp(text)) * 8.0f, 16.0f };
+	}
+
+	/// ★ **必须覆写**：默认体用码点二分反调 `MeasureText` ⇒ 两个计数互相污染，
+	///   T38-15 的「行数 == fitCalls」线性判据就不成立。
+	TextFit FitText(const Font&, const std::string& text, std::size_t startCp, float maxWidth) override{
+		++fitCalls;
+		const std::size_t total = CountCp(text);
+		if (startCp >= total)
+			return TextFit{ 0, 0.0f };
+		const std::size_t byWidth = static_cast<std::size_t>((std::max)(0.0f, maxWidth) / 8.0f);
+		const std::size_t n = (std::min)(byWidth, total - startCp);   // ★ fitCp 是相对数、不得越串尾（C29-1）
+		return TextFit{ n, static_cast<float>(n) * 8.0f };
+	}
+
+	float LineHeight(const Font&) override{ return 16.0f; }
+
+private:
+	static std::size_t CountCp(const std::string& s){
+		std::size_t n = 0;
+		for (char c : s)
+			if ((static_cast<unsigned char>(c) & 0xC0) != 0x80)
+				++n;
+		return n;
+	}
+};
+
+/// @brief 计数型可测 TextBox（★ 不能复用 `TestableTextBox`：它的测量器焊死为静态 `ms_fake`）
+class CountingTextBox : public TextBox{
+public:
+	using TextBox::TextBox;
+	using TextBox::RecalculateLines;
+	using TextBox::LineRange;
+	using TextBox::LineDrawRange;
+
+	/// @brief 视觉行数（同 `TestableTextBox::RowCountForTest` 的理由：`m_lines` 是基类 private）
+	[[nodiscard]] size_t RowCountForTest() const{
+		return static_cast<size_t>(GetPreferredSize().height / 16.0f + 0.5f);
+	}
+
+	static CountingFakeMeasurer& Counter() noexcept{ return ms_counter; }
+
+protected:
+	TextMeasurer* ResolveMeasurer() const override{ return &ms_counter; }
+
+private:
+	static CountingFakeMeasurer ms_counter;
+};
+
+CountingFakeMeasurer CountingTextBox::ms_counter;
 
 void TestTextBoxInsertDelete()
 {
@@ -1960,6 +2149,258 @@ void Test38BaselineOffPreferred(){
 	}
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 38 · 批 2：行表换芯（T38-3..7 / T38-15 / T38-18）——全无头
+// 期望值全部来自 kWrapSamples（= 详设 §3.1/§3.4 的脚本实算）
+// ══════════════════════════════════════════════════════════════════════
+
+/// @brief 逐行比对样本表：行数 + 每行 draw/own 三字段
+/// @details ★ 行数用 `RowCountForTest()`（preferred 反推）而不是行表 `.size()`——
+///   `m_lines` 是基类 private，派生类不可访问；顺带把「行表行数 == preferred 行数」钉死。
+static void ExpectRows(TestableTextBox& box, const WrapSample& sample){
+	EXPECT_EQ(box.RowCountForTest(), sample.lineCount);
+	const std::size_t check = (sample.lineCount < 4) ? sample.lineCount : 4;
+	for (std::size_t i = 0; i < check; ++i){
+		const auto draw = box.DrawForTest(i);
+		const auto own  = box.OwnForTest(i);
+		EXPECT_EQ(draw.first,  sample.lines[i].drawStart);
+		EXPECT_EQ(draw.second, sample.lines[i].drawEnd);
+		EXPECT_EQ(own.first,   sample.lines[i].drawStart);   // 两口径起点同值
+		EXPECT_EQ(own.second,  sample.lines[i].ownEnd);
+	}
+}
+
+/// T38-3：S1@48 —— 绘制 / 归属 / 点击 / 行 y / Up-Down **四路同源**
+/// @details 「四路」= `LineDrawRange`（绘制）· `LineRange`（归属）· `CaretIndexFromPosition`（Y 定行）·
+///   `DrawTextCommand.pos.y`（发射行 y）。任一路用了自己的行数/行高口径，本条就分叉。
+void Test38SoftWrapS1FourWaySameSource(){
+	const WrapSample& sample = FindSample("ab cd ef", 48.0f);
+	WrapProbe probe;
+	probe.Set(sample);
+
+	EXPECT_TRUE(probe.box.WrapRequested());
+	EXPECT_TRUE(probe.box.IsWrapActive());   // 无头 + 注入测量器 ⇒ 折行**生效**（K6 的直接证据）
+	ExpectRows(probe.box, sample);           // ① 绘制口径 + ② 归属口径
+
+	// ③ Y 定行：L1 的 y 带 ⇒ 无头下退化为「返回行首」（`CaretIndexFromLineX` 的 GetWindow() 守卫）
+	EXPECT_EQ(probe.box.CaretIndexFromPosition(Point{ 10.0f, 8.0f }), 0u);
+	EXPECT_EQ(probe.box.CaretIndexFromPosition(Point{ 10.0f, 16.0f + 8.0f }), 6u);
+
+	// ④ 行 y：命令级。★ 不用 `CalculateCaretPosition`（private，派生类不可暴露）——
+	//    DrawText 的 pos.y 更硬：它同时证明布局行高与发射行高是同一份。
+	CommandBuffer commands;
+	FakeTextMeasurer measurer;
+	PaintContext ctx(commands, measurer);
+	probe.box.Paint(ctx, 0, 0);
+	std::vector<float> ys;
+	for (const auto& cmd : commands){
+		if (const auto* text = std::get_if<DrawTextCommand>(&cmd))
+			ys.push_back(text->pos.y);
+	}
+	EXPECT_EQ(ys.size(), 2u);
+	if (ys.size() == 2){
+		EXPECT_NEAR(ys[0], 0.0f, kEps);    // 行 0：textY = padding 0
+		EXPECT_NEAR(ys[1], 16.0f, kEps);   // 行 1：+1 × lineH
+	}
+
+	// ⑤ Up/Down 行号：L1 → Up → L0；再 Down → L1 行首。
+	//    ★ 只断行号：无头下 `CaretIndexFromLineX` 恒返回行首，「跨行保持列」必须在
+	//    真窗口相验（T38-16②）——这里不假装验了它。
+	probe.box.MoveCaretToEnd();
+	EXPECT_EQ(probe.box.GetCaret(), 8u);   // 行 1
+	probe.box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Up, KeyModifier::None));
+	EXPECT_EQ(probe.box.GetCaret(), 0u);   // 行 0 行首
+	probe.box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Down, KeyModifier::None));
+	EXPECT_EQ(probe.box.GetCaret(), 6u);   // 行 1 行首
+}
+
+/// T38-4：S2@40 —— 纯 CJK 无空格 ⇒ 两口径**逐行同值**
+/// @details 这一条是「归属规则不凭空吞码点」的对照：没有分隔空格可归还，`drawEnd == ownedEnd`。
+void Test38SoftWrapS2CjkNoSpace(){
+	const WrapSample& sample = FindSample("一二三四五六", 40.0f);
+	WrapProbe probe;
+	probe.Set(sample);
+	ExpectRows(probe.box, sample);
+	for (std::size_t i = 0; i < sample.lineCount; ++i){
+		EXPECT_EQ(probe.box.DrawForTest(i).second, probe.box.OwnForTest(i).second);
+		EXPECT_EQ(probe.box.DrawForTest(i).second - probe.box.DrawForTest(i).first,
+		          probe.box.OwnForTest(i).second - probe.box.OwnForTest(i).first);
+	}
+}
+
+/// T38-5：S3@40 / S3@24 —— 硬行与软行在**同一张表**里混存
+/// @details 判据只两条：软行 `ownedEnd == 下一行 start`、硬行 `ownedEnd + 1 == 下一行 start`。
+///   之所以值得单独一条：这两种相邻关系**同时**出现在一张表里，任何「统一 +1」或「统一 −1」
+///   的实现都会在其中一半上红。
+void Test38SoftWrapS3HardSoftMixed(){
+	{
+		const WrapSample& sample = FindSample("ab cd \nef gh", 40.0f);   // 3 行：软 · 硬
+		WrapProbe probe;
+		probe.Set(sample);
+		ExpectRows(probe.box, sample);
+		EXPECT_EQ(probe.box.OwnForTest(0).second, probe.box.OwnForTest(1).first);       // 软行：空格归前行
+		EXPECT_EQ(probe.box.OwnForTest(1).second + 1, probe.box.OwnForTest(2).first);   // 硬行：`\n` 无主
+	}
+	{
+		const WrapSample& s24 = FindSample("ab cd \nef gh", 24.0f);      // 4 行：软 · 硬 · 软
+		WrapProbe probe;
+		probe.Set(s24);
+		ExpectRows(probe.box, s24);
+		EXPECT_EQ(probe.box.OwnForTest(1).second + 1, probe.box.OwnForTest(2).first);   // 仍在 `\n` 处
+		EXPECT_EQ(probe.box.OwnForTest(2).second, probe.box.OwnForTest(3).first);       // 第 4 行是软行
+	}
+}
+
+/// T38-6：五个禁则样本的四路同源（S4 悬挂 / S5 行首禁则 / S5b 守卫 / S5c 对照 / S6 超长词）
+/// @details 禁则的三条语义（悬挂闭标点、开括号回退、不产生空行）在引擎里只有一份实现；
+///   本条验的是「`TextBox` 把它原样用上了」，不是「引擎对不对」（那归 Phase 29）。
+void Test38SoftWrapKinsokuFiveSamples(){
+	struct Case{ const char* text; float width; };
+	const Case cases[] = {
+		{ "一二三。四", 24.0f },   // S4：悬挂行宽 32 > 折行宽 24
+		{ "ab（cd",     24.0f },   // S5：④ 行尾开括号回退 ⇒ `（` 挪到 L1
+		{ "（a",         8.0f },   // S5b：④b 守卫 ⇒ 不产生空行
+		{ "一二三（四",  32.0f },   // S5c：对照组——④ 在纯 CJK 串上不可达
+		{ "abcdefgh",   26.0f },   // S6：超长词硬断（无软断点）
+	};
+	for (const auto& one : cases){
+		const WrapSample& sample = FindSample(one.text, one.width);
+		WrapProbe probe;
+		probe.Set(sample);
+		ExpectRows(probe.box, sample);
+		// 四路同源之二：每行 y 带点击 ⇒ 落该行起点（Y 定行与行表同源）
+		for (std::size_t i = 0; i < sample.lineCount; ++i){
+			EXPECT_EQ(probe.box.CaretIndexFromPosition(
+				Point{ 0.0f, static_cast<float>(i) * 16.0f + 8.0f }), sample.lines[i].drawStart);
+		}
+	}
+}
+
+/// T38-7：★★ **码点守恒**（全表遍历，非抽样）——22 个样本 × 逐行
+/// @details 判据（v1.1 换形，**只允许两态**）：
+///   `gap = start(i+1) − ownedEnd(i)` **== 0**（软行）或 **== 1 且 `cps[ownedEnd] == '\n'`**（硬行）；
+///   三条边界等式：`start(0) == 0` · `ownedEnd(last) == count` · `drawEnd(i) ≤ ownedEnd(i)`。
+///   ★ v1.0 的 `gap ∈ {0,1}` 写法已作废：它在 `ownedEnd = b` 下把「gap==1 且 cps==' '」
+///   （S8a/S8c 实测）判成合规，而那正是 A-15 的缺陷本体。
+///   ★ 表里 23 项（18 + tail + S8 组 4）——含 `tail` 是因为尾部空行是 `ownedEnd == count` 的
+///   独立形态（空行的 `ownedEnd` 取自身起点），漏它则边界等式② 少一半判别力。
+void Test38SoftWrapCodepointConservation(){
+	for (const auto& sample : kWrapSamples){
+		WrapProbe probe;
+		probe.Set(sample);
+		const std::string text(sample.text);
+		const std::size_t count = ByteOffsetToCodepointIndex(text, text.size());
+
+		EXPECT_EQ(probe.box.RowCountForTest(), sample.lineCount);
+		EXPECT_EQ(probe.box.OwnForTest(0).first, 0u);   // 边界等式①
+
+		std::size_t lastOwn = 0;
+		for (std::size_t i = 0; i < sample.lineCount; ++i){
+			const auto draw = probe.box.DrawForTest(i);
+			const auto own  = probe.box.OwnForTest(i);
+			EXPECT_EQ(draw.first, own.first);
+			EXPECT_TRUE(draw.second <= own.second);   // 边界等式③：裁剪 ⊆ 归属
+			lastOwn = own.second;
+
+			if (i + 1 < sample.lineCount){
+				const std::size_t nextStart = probe.box.OwnForTest(i + 1).first;
+				EXPECT_TRUE(nextStart >= own.second);   // 绝不重叠
+				const std::size_t gap = (nextStart >= own.second) ? (nextStart - own.second) : 0;
+				if (gap != 0){
+					EXPECT_EQ(gap, static_cast<std::size_t>(1));        // 只允许 `\n` 那一个缺口
+					EXPECT_EQ(CodepointAt(text, own.second), U'\n');   // 且缺口处必须是换行符
+				}
+			}
+		}
+		EXPECT_EQ(lastOwn, count);   // 边界等式②
+	}
+}
+
+/// T38-15：键命中零测量 + 重建的线性判据
+/// @details ★ 样本**必须**是无 `\n` 的单段串（A-16）：空段走引擎的 `continue`、**不调 `FitText`**
+///   ⇒ 含 `\n` 的串会让「行数 == fitCalls」假红（`"ab\n"` 是 2 行但 `fitCalls == 1`）。
+void Test38SoftWrapKeyHitZeroMeasure(){
+	CountingTextBox box(std::string("abcdefgh"));   // S6@26 ⇒ 3 行
+	box.SetSize(26 + kWrapBarSlot, 64);
+	box.SetWordWrap(true);
+	box.RecalculateLines();                          // 首次建表（键未命中）
+	CountingFakeMeasurer& counter = CountingTextBox::Counter();
+
+	// ① 键全同 ⇒ 零 FitText / 零 MeasureText（含 `GetPreferredSize` 这条每帧路径）
+	counter.fitCalls = 0;
+	counter.measureCalls = 0;
+	box.RecalculateLines();
+	EXPECT_EQ(counter.fitCalls, 0);
+	EXPECT_EQ(counter.measureCalls, 0);
+	EXPECT_EQ(box.RowCountForTest(), 3u);
+	EXPECT_EQ(counter.fitCalls, 0);      // preferred 也走键守卫 ⇒ 仍为零
+
+	// ② 重建一次 ⇒ `行数 == fitCalls`（线性：3 行 3 次，不是 O(行数²) 也不是 1 次全串）
+	counter.fitCalls = 0;
+	counter.measureCalls = 0;
+	box.SetText(std::string("abcdefgh"));   // revision++ ⇒ 键变 ⇒ 必重建
+	EXPECT_EQ(box.RowCountForTest(), 3u);
+	EXPECT_EQ(counter.fitCalls, 3);
+	EXPECT_EQ(counter.measureCalls, 0);     // 覆写 FitText ⇒ 不再反调 MeasureText
+}
+
+/// T38-18：★★ 分隔空格归属（A-15 的判别面）
+/// @details 旧口径（`ownedEnd = b`）下：S8a/S8c 的分隔空格**不属于任何行** ⇒ 点不到、选不了、
+///   `Left/Right` 跨不过去；S8d 的尾部空格串让末行 `ownedEnd < count`（边界等式② 破）。
+///   ★ 负对照（手工）：注释掉 `TextWidget.cpp` 的 `layout.lines.back().ownedEnd = nextScan;`
+///   ⇒ 本条 ①③ 必红——这是「回归到旧口径会被抓住」的直接证据，不是推测。
+void Test38SoftWrapSeparatorSpaceOwned(){
+	// ① S8a：分隔空格归前行、但不发射 —— 两口径分离在软断点空格上的实证
+	{
+		const WrapSample& sample = FindSample("一二三 四", 24.0f);
+		WrapProbe probe;
+		probe.Set(sample);
+		ExpectRows(probe.box, sample);
+		EXPECT_EQ(probe.box.OwnForTest(0).second, 4u);    // 归属含空格（cp3）
+		EXPECT_EQ(probe.box.DrawForTest(0).second, 3u);   // 绘制不含（软断点行尾被裁）
+		EXPECT_EQ(probe.box.OwnForTest(1).first, 4u);     // 与前行归属连续
+	}
+	// ② S8b：**连续两个**空格都归前行（旧口径下 gap == 2）
+	{
+		const WrapSample& sample = FindSample("一二三  四", 24.0f);
+		WrapProbe probe;
+		probe.Set(sample);
+		ExpectRows(probe.box, sample);
+		EXPECT_EQ(probe.box.OwnForTest(0).second, 5u);
+		EXPECT_EQ(probe.box.OwnForTest(1).first, 5u);
+	}
+	// ③ S8c：空格归前行、`\n` 无主（gap == 1 且是换行符 —— 唯一的合法缺口）
+	{
+		const WrapSample& sample = FindSample("一二三 \n四", 24.0f);
+		WrapProbe probe;
+		probe.Set(sample);
+		ExpectRows(probe.box, sample);
+		EXPECT_EQ(probe.box.OwnForTest(0).second, 4u);
+		EXPECT_EQ(probe.box.OwnForTest(1).first, 5u);
+		EXPECT_EQ(CodepointAt(std::string(sample.text), probe.box.OwnForTest(0).second), U'\n');
+	}
+	// ④ S8d：尾部空格串不得丢 —— 末行归属终点 == 码点总数
+	{
+		const WrapSample& sample = FindSample("abc   ", 40.0f);
+		WrapProbe probe;
+		probe.Set(sample);
+		ExpectRows(probe.box, sample);
+		EXPECT_EQ(probe.box.OwnForTest(0).second,
+		          ByteOffsetToCodepointIndex(std::string("abc   "), 6));   // == 6
+	}
+	// ⑤ 可达性：行内 X 的落点必须在本行**归属**区间内
+	//    （无头下 `CaretIndexFromLineX` 走「返回行首」退化 ⇒ 只断区间归属，行内精确定位归 T38-16②）
+	{
+		const WrapSample& sample = FindSample("一二三 四", 24.0f);
+		WrapProbe probe;
+		probe.Set(sample);
+		const std::size_t hit = probe.box.CaretIndexFromLineX(0, 24.0f);
+		EXPECT_TRUE(hit >= probe.box.OwnForTest(0).first);
+		EXPECT_TRUE(hit <  probe.box.OwnForTest(0).second);
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -2003,4 +2444,11 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SetStyleOverrideChain", &Test37SetStyleOverrideChain); // T37-8（Phase 37 批二）
     GetTestRegistry().Add("TextBox.SoftWrapOffPaintBaseline", &Test38BaselineOffPaint);           // T38-1（Phase 38 批 0）
     GetTestRegistry().Add("TextBox.SoftWrapOffPreferredBaseline", &Test38BaselineOffPreferred);   // T38-13（Phase 38 批 0）
+    GetTestRegistry().Add("TextBox.SoftWrapS1FourWaySameSource", &Test38SoftWrapS1FourWaySameSource);       // T38-3（批 2）
+    GetTestRegistry().Add("TextBox.SoftWrapS2CjkNoSpace", &Test38SoftWrapS2CjkNoSpace);                     // T38-4（批 2）
+    GetTestRegistry().Add("TextBox.SoftWrapS3HardSoftMixed", &Test38SoftWrapS3HardSoftMixed);               // T38-5（批 2）
+    GetTestRegistry().Add("TextBox.SoftWrapKinsokuFiveSamples", &Test38SoftWrapKinsokuFiveSamples);         // T38-6（批 2）
+    GetTestRegistry().Add("TextBox.SoftWrapCodepointConservation", &Test38SoftWrapCodepointConservation);   // T38-7（批 2）
+    GetTestRegistry().Add("TextBox.SoftWrapKeyHitZeroMeasure", &Test38SoftWrapKeyHitZeroMeasure);           // T38-15（批 2）
+    GetTestRegistry().Add("TextBox.SoftWrapSeparatorSpaceOwned", &Test38SoftWrapSeparatorSpaceOwned);      // T38-18（批 2）
 }

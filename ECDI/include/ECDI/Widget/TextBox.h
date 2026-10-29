@@ -58,6 +58,8 @@ public:
 	// ── P1：单行模式（BaseURL/API Key 等单行输入——Enter 不再换行）──
 
 	/// @brief 设置单行（true = Enter/NumpadEnter no-op，不插入 `\n`；粘贴含换行仍按多行渲染——单行是键盘语义非数据约束）
+	/// @note ★ Phase 38：本开关现在是 `WrapRequested()` 的一个分量 ⇒ `true` 时**折行不生效**
+	///   （单行输入没有「第二行」可折）。切换会改变行表 / 内容高 / 条显隐 ⇒ setter 内 `Invalidate()`（C38-9）。
 	void SetSingleLine(bool singleLine);
 
 	bool IsSingleLine() const noexcept { return m_singleLine; }
@@ -74,8 +76,8 @@ public:
 	///      一条内部滚动条、末行被切掉零点几像素；
 	///   ② **无测量器 / 无窗口 ⇒ 退回当前尺寸**（与 wrap「无有限宽 ⇒ 退化单行」同构，
 	///      保住无头测试）；
-	///   ③ 行数口径 = `\n` 数 + 1，与 `RecalculateLines` **同源**——编辑器内 wrap（O2）
-	///      兑现时只需改这一处真相源。
+	///   ③ 行数口径 = **`m_lines.size()`**（视觉行数）。非折行态恰 = `\n` 数 + 1（与改前逐位相等）；
+	///      折行态 = 引擎产出的视觉行数。★ **唯一真相源 = 行表**——`MultilinePreferred` 不再自数 `\n`。
 	/// 单行 → TextWidget 内容测量 + padding×2（§3.6 验证项：height = lineH + padding×2 → 自然垂直居中）
 	[[nodiscard]] Size GetPreferredSize() const override;
 
@@ -93,8 +95,10 @@ public:
 	void SetSize(int w, int h) override;
 
 	// ── SetText override（9.7 修：外部替换文本绕过编辑操作路径，必须置行缓存失效）──
-	/// @details TextWidget::SetText 直接改 m_text——多行内容（\n）不失效 m_lineStarts 会按旧缓存画成
+	/// @details TextWidget::SetText 直接改 m_text——多行内容（\n）不失效 `m_lines` 会按旧缓存画成
 	/// 单行。override 只做缓存失效 + Invalidate，**不触发 RaiseTextChanged/callback**（D7 契约保持）。
+	/// ★ Phase 38：失效方式 = 清 `m_linesValid`（`MarkLinesDirty()`），与旧失效布尔位退役后的
+	/// 键守卫同源——行表只在**键未命中**时重建。
 	void SetText(const std::string& text) override;
 
 	void SetText(std::string&& text) override;
@@ -254,15 +258,25 @@ protected:
 	/// ★ 不变量 1（A1 依赖）：`verticalAlign == Top` ⇒ **恒等于** `GetTextLeftInset()`
 	///   —— 快路径直接返回 padding，**不读行数**（故无时序依赖、无浮点误差）。
 	/// ★ 不变量 2：内容高 > 文本区高 ⇒ **恒等于** padding（超屏退化，与改前逐位同）。
-	/// @note 非 const 风险：Center 路径依赖 `m_lineStarts.size()`；若 `m_needsLineRecalc` 未清则自查重算
-	///   （与 `CalculateCaretPosition` 同手法 `const_cast`，`TextBox.cpp:657-658`）。
+	/// @note 非 const 风险：Center 路径依赖行表（`m_lines.size()`）⇒ **无条件**调一次 `RecalculateLines()`
+	///   （键守卫在体内，命中即返回；与 `CalculateCaretPosition` 同手法 `const_cast`）。
+	///   ★ Phase 38：旧失效布尔位已退役——行表只在键未命中时重建，「该不该算」由 10 维键回答。
 	float GetTextTopInset() const;
 
-	/// @brief 重算行起始缓存（扫描 \n；仅 m_needsLineRecalc 时调用——惰性；码点级解码）
+	/// @brief 重建视觉行表（**键守卫**：10 维自比命中 ⇒ 直接返回）
+	/// @details 折行态（`WrapRequested() && 有测量器`）走基类 `BuildTextLayout`（喂**显示串**）；
+	///   非折行态走 `\n` 扫描（码点级解码——B10 索引单位契约），与改前**逐位等价**。
+	///   ★ 本函数是**唯一**的重建入口：8 处消费点**无条件**调用，13 处置脏语句已随旧失效位一并退役。
+	///   ★ 折行重建分支末尾把 `m_scrollOffsetX` 钉 0（D38-G 写点 3）——切换相首帧即生效。
 	void RecalculateLines();
 
-	/// @brief 行号 → 该行码点区间 [start, end)（end 不含行尾 \n）
-	/// @details 尾部空行契约：以 \n 结尾存在空的最后一行（"ab\n" → line1=[3,3]）
+	/// @brief 行号 → 该行**归属**码点区间 `[startCp, ownedEnd)`（可达性 / 选区 / 命中 / 复制 的唯一口径）
+	/// @details ★ Phase 38 D38-E / A-15 四态契约（`end` 一律 `ownedEnd`，`−1` 反推已退场）：
+	///   · **软行**（软断点换行）：`ownedEnd(i) == startCp(i+1)`——行尾分隔空格归**前行**（可点、可选、可跨）；
+	///   · **硬行**（`\n` 换行）：`ownedEnd(i) + 1 == startCp(i+1)`——`\n` 不属任何一行（同改前口径）；
+	///   · **末行**：`ownedEnd == GetCodepointCount()`；
+	///   · **尾部空行**（`"ab\n"` → line1）：`drawEnd == ownedEnd == segStart`。
+	///   ★ 绘制**不用**本函数——行文本发射走 `LineDrawRange`（裁剪口径）。两口径在非折行态逐位相等。
 	std::pair<size_t, size_t> LineRange(size_t lineIndex) const;
 
 	/// @brief 文本内位置 → 最近码点索引（多行：Y 定行（含 scrollOffset）→ 行起始 → X 定行内 → 全局；
@@ -287,6 +301,23 @@ protected:
 	/// @brief 横向滚动偏移纯规则（9.5 R1；跟手模式——光标越右缘滚到光标右、越左缘滚到光标左、clamp ≥ 0）
 	/// @details 纯数学无测量（caretX 由调用方测量传入）——无窗口测试可直测（ClipTests S7/S8）；EnsureCaretVisible 调用
 	static float ClampScrollOffsetX(float current, float caretX, float viewWidth);
+
+	// ── 折行判据与两口径区间（Phase 38 D38-C / D38-I；protected——派生类可复用、外部 API 面不变）──
+
+	/// @brief 折行是否被**请求**（纯配置，`noexcept` ⇒ 可进 `GetTextAreaWidth()` 的 `noexcept` 体）
+	/// @details ★ 分层理由（D38-C）：`GetTextAreaWidth() const noexcept` 只能调 `noexcept`；
+	///   而 `ResolveMeasurer()` 是 **virtual 非 noexcept** ⇒ 两层判据**不可合并**。
+	[[nodiscard]] bool WrapRequested() const noexcept{ return IsWordWrap() && !m_singleLine; }
+
+	/// @brief 折行是否**生效**（= 请求 ∧ 有测量能力）
+	/// @details ★ **不含** `GetWindow()`（无头可折行，K6）· ★ **不含**「折行宽 > 0」——含它则
+	///   `0 < W ≤ 2p+14` 的窄带会让 preferred 落回基类 wrap 支、宽度棘轮照旧（D38-D）。
+	[[nodiscard]] bool IsWrapActive() const;
+
+	/// @brief 行**绘制**区间 `[startCp, startCp + cpCount)`（裁剪口径——软断点行尾空格不发射）
+	/// @details ★ 唯一消费者 = `OnPaint` 的行文本 `DrawText`（C38-1）；其余一律 `LineRange`（归属口径）。
+	///   两口径在非折行态**逐位相等**（`cpCount == ownedEnd − startCp`）⇒ 红线① 结构性成立。
+	[[nodiscard]] std::pair<size_t, size_t> LineDrawRange(size_t lineIndex) const;
 
 private:
 
@@ -326,7 +357,7 @@ private:
 
 	// ── 多行与滚动数据（8.5.2；B4/B5——方法在 protected 区，数据私有）──
 
-	/// @brief 码点索引 → 行号（0-based；二分 m_lineStarts）
+	/// @brief 码点索引 → 行号（0-based；二分 `m_lines[].startCp`——仍严格递增：软行 `==`、硬行 `+1`）
 	size_t LineIndexFromCodepoint(size_t cp) const;
 
 	/// @brief 单行行高（全系统唯一行高来源——OnPaint/CaretIndexFromPosition/CalculateCaretPosition/EnsureCaretVisible/Scroll 共用；
@@ -346,10 +377,41 @@ private:
 	/// @brief 滚动使光标可见（上边界：滚到光标顶；下边界：滚到光标底；统一 clamp）
 	void EnsureCaretVisible();
 
-	std::vector<size_t> m_lineStarts;      ///< 每行起始码点索引缓存（m_lineStarts[0]=0；行数 = size()-1）
-	bool m_needsLineRecalc = true;         ///< 编辑后标记需重算行信息（失效责任见 B4）
+	// ── 视觉行表 + 10 维自比键（Phase 38 D38-E——取代旧「行起点表 + 启发式失效位」两件）──
+	//
+	// ★ 为什么行表**不是** `vector<size_t>` 而是 `vector<TextLine>`：折行后行不再是「只由 `\n` 产生的
+	//   起点序列」——每行还带裁剪宽（`cpCount` / `width`）与归属终点（`ownedEnd`）。基类引擎的输出
+	//   原样落盘 ⇒ 零转换、零重算（D38-A ⓐ：复用而非重写）。
+	// ★ 为什么不需要显式失效布尔位：行表的**全部**输入已被 10 维键涵盖，「该不该重建」由键回答；
+	//   布尔位只是「键的子集」的冗余副本（13 处 `MarkTextChanged()` 与 13 处置脏严格成对 ⇒ 维 1 覆盖）。
+
+	/// @brief 键比对（`true` = 行表仍有效，可零测量返回）
+	/// @details ★ 动态量由 `RecalculateLines()` **一次采集后传入**，与 `LineKeySave` 共用同一份
+	///   ⇒ 不存在「比对的宽与存的宽不同」。★ **无 `wrap` 形参**：它等于 `WrapRequested() && hasMeasurer`，
+	///   被维 7 + 维 8 严格覆盖（键里不留可推导的冗余字段——与删 `singleLine` 维同一条纪律）。
+	[[nodiscard]] bool LineKeyMatches(float wrapWidth, bool hasMeasurer) const;
+
+	/// @brief 存键（与 `LineKeyMatches` 同一次采集、同一组量）
+	void LineKeySave(float wrapWidth, bool hasMeasurer);
+
+	std::vector<TextLine> m_lines;   ///< ★ 视觉行表（**行数 = `size()`**，含尾部空行；非空恒成立——空表兜底一行）
+
+	// ── 10 维自比键（D38-E）──
+	bool        m_linesValid = false;                              ///< 是否已建过（与键分开：首帧必建）
+	std::size_t m_linesRevision = 0;                               ///< 维 1  文本版本
+	Font        m_linesFont{};                                     ///< 维 2/3/4  size / family / weight
+	int         m_linesDpi = 0;                                    ///< 维 5  无窗口 = 0（**不短路**——0 是合法值）
+	float       m_linesWrapWidth = 0.0f;                           ///< 维 6  折行宽（非折行态存 0）
+	bool        m_linesHasMeasurer = false;                        ///< 维 7  有无测量能力
+	bool        m_linesWrapRequested = false;                      ///< 维 8  含 `!m_singleLine` 分量
+	EchoMode    m_linesEcho = EchoMode::Normal;                    ///< 维 9  回显模式（掩码串长度同、字节不同）
+	bool        m_linesComposing = false;                          ///< 维 10-a 组合态
+	std::size_t m_linesCompStart = 0;                              ///< 维 10-b 组合起点
+	std::size_t m_linesCompLen = 0;                                ///< 维 10-c 组合长度
 	float m_scrollOffsetY = 0.0f;          ///< 垂直滚动偏移（像素；clamp [0, GetMaxScrollOffset()]）
 	float m_scrollOffsetX = 0.0f;          ///< 水平滚动偏移（像素；跟手模式——光标边界推导，clamp ≥ 0，无上限）
+	                                       ///< ★ 折行期**恒 0**（D38-G：三个写点——`EnsureCaretVisible` 折行支钉 0 /
+	                                       ///<   非折行支跟手写 / `RecalculateLines` 折行重建钉 0，覆盖切换相）
 	float m_preferredColumn = 0.0f;        ///< 目标列（像素宽——Up/Down 跨行保持的 X；Left/Right/Home/End/点击/编辑后重置）
 
 	// ── 垂直滚动条（scrollbar-placement-and-appearance v1.1；★ C-3 非拥有缓存指针 + ★ C-2 下发守卫）──

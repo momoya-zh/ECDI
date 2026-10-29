@@ -94,7 +94,8 @@ protected:
 
 	/// @brief 文本内容变更标记（Phase 28 批二：preferred 指纹的失效唯一入口）
 	/// @details `SetText` 双载调用；★ **子类直接改 `m_text` 的路径必须同样调用**
-	///          （TextBox 的编辑/组合/Undo 六处 —— 见其 `m_needsLineRecalc` 站点）。
+	///          （TextBox 的编辑/组合/Undo 站点）。★ Phase 38：它同时是 `TextBox` 行表键的
+	///          **维 1**——旧失效布尔位退役后，行表的重建判据就是本 revision。
 	///          递增 revision ⇒ 下一次 `GetPreferredSize` 指纹失配 ⇒ 重测（C28-5）。
 	void MarkTextChanged() noexcept{ ++m_textRevision; }
 
