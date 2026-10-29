@@ -64,6 +64,13 @@ public:
 	/// @details ★ **双缓存失效**：本开关影响 preferred（Phase 28 指纹）**和** wrap 布局指纹
 	///          （C29-10 五元组）⇒ 两个缓存同时置无效 + `Invalidate()`（重绘）。
 	///          ★ 默认 **false**（零回归根基——A1/A2 验收前提）。
+	/// @note ★★ **Phase 38：`true` 的语义现覆盖两类消费者**（K12④）——
+	///   · `Label` / `Button`：折行宽 = `GetWidth()`，逐行发射，**裁剪口径**（`startCp`/`cpCount`）；
+	///   · `TextBox`：折行宽 = `GetTextAreaWidth()`（含常驻滚动条槽让位），
+	///     **归属口径**可达（`ownedEnd`，行尾分隔空格可点击/可选中），`m_scrollOffsetX` 钉 0，
+	///     绘制 clip 取**控件内边界**（悬挂闭标点可见），`m_singleLine == true` 时**不生效**。
+	///   ★ **回滚边界**：`TextBox` 上的折行**不依赖 `GetWindow()`**（判据 = `ResolveMeasurer() != nullptr`）
+	///     ⇒ 无窗口即可重排（无头测试可验），与基类 `IsWrapLayoutActive()` 的三条件**不同源**。
 	void SetWordWrap(bool wrap);
 
 	/// @brief 断行开关查询（★ Phase 29 批二 △5——公共 API +1 对的后半）
@@ -96,13 +103,21 @@ protected:
 	/// @brief 文本样式（foreground + font）——所有文本控件的文字视觉唯一来源（Phase 9）
 	TextStyle m_style;
 
-private:
+protected:
 
 	/// @brief 断行后的单行（★ Phase 29 D29-C：**码点区间**而非 string——布局零 substr/零拷贝）
+	/// @details ★ Phase 38：本结构、`TextLayout`、`BuildTextLayout` 由 private **下移到 protected**
+	///          ——第二个真实消费者 = `TextBox`（D38-A ⓐ：0 新增公共头 + protected 面 +3，
+	///          优于「抽内部头」（公共头必须见 `m_wrapLayout` 的类型 ⇒ 依赖方向倒置）与「重写」（禁则字面集必漂移））。
+	///          派生类只**读**输出；`GetTextLayout` / `IsWrapLayoutActive` / `BlockWidth` / 全部缓存字段仍 private。
 	struct TextLine{
 		std::size_t startCp = 0;    ///< 行首码点索引（**绝对**——相对全串）
-		std::size_t cpCount = 0;    ///< 本行码点数（**已做尾部空白裁剪**——D29-Ⅰ ⑥）
+		std::size_t cpCount = 0;    ///< 本行码点数（**已做尾部空白裁剪**——D29-Ⅰ ⑥；★ 口径不变 = 红线②）
 		float width = 0.0f;         ///< 本行宽（DIP——由扫描状态直接得到，**非** per-line MeasureText）
+		std::size_t ownedEnd = 0;   ///< ★ Phase 38 新增（**声明在末尾**——聚合初始化序不破既有三件，C7560）：
+		                            ///<   归属终点 = **下一行起点**（含软断点处被 ⑦ 终化跳过的分隔空格、不含硬断 `\n`）。
+		                            ///<   `TextWidget` 自身**不读**它（C38-5：`Label` 输出逐位不变）；
+		                            ///<   编辑器的可达性 / 选区 / 命中经 `TextBox::LineRange` 消费它。
 	};
 
 	/// @brief 断行布局结果（★ D29-C 共享 TextLayout：`GetPreferredSize` 与 `DrawTextContent` 双消费端）
@@ -111,15 +126,25 @@ private:
 		float totalHeight = 0.0f;      ///< `lines.size() × 行高`——含空行（占行高零命令）
 	};
 
+	/// @brief 断行布局（★ Phase 29 批二 △5——D29-Ⅰ 状态机正式化；★ Phase 38：**+`text` 参数**）
+	/// @param measurer  测量器（`FitText`/`LineHeight` 来源——与绘制**同源**）
+	/// @param text      参与布局的串（★ 折行**只吃显示串**：`TextBox` 传 `BuildDisplayText()`；
+	///                  `Label` 侧唯一调用点传 `m_text` ⇒ 输出逐位不变 = 红线②）
+	/// @param maxWidth  可用宽（DIP = `GetWidth()`；**<= 0 不得传入**——调用方已退化单行）
+	/// @return 布局结果；空文本 ⇒ 1 个空行（`lines.size()` == 1——「零行」会让 preferred 高度归零）
+	[[nodiscard]] TextLayout BuildTextLayout(TextMeasurer& measurer,
+	                                        const std::string& text, float maxWidth) const;
+
+	/// @brief 文本版本（★ Phase 38 新增：`m_textRevision` 保持 private，派生类经此读）
+	/// @details `TextBox` 的 10 维自比键用它做**维 1**（「行表是否过期」的第一判据）——
+	///          比暴露 `m_text` 引用或 `MarkTextChanged` 更窄：只能读、不能写、不泄漏成员。
+	[[nodiscard]] std::size_t TextRevision() const noexcept{ return m_textRevision; }
+
+private:   // ← ★ Phase 38：原 `:99` 的 private 区**从这一行起**（上面三件已上移 protected）
+
 	/// @brief preferred 内容测量实现（9.8——private：TextWidget 语义组成部分，非 cpp 匿名辅助）
 	/// @details Label/Button 0 inset（§3.2 冻结）：{文本测量宽, 行高}——空文本 MeasureText 返回 {0,0} → 宽 0 诚实
 	[[nodiscard]] Size DoMeasureText(TextMeasurer& measurer) const;
-
-	/// @brief 断行布局（★ Phase 29 批二 △5——D29-Ⅰ 状态机正式化）
-	/// @param measurer  测量器（`FitText`/`LineHeight` 来源——与绘制**同源**）
-	/// @param maxWidth  可用宽（DIP = `GetWidth()`；**<= 0 不得传入**——调用方已退化单行）
-	/// @return 布局结果；空文本 ⇒ 1 个空行（`lines.size()` == 1——「零行」会让 preferred 高度归零）
-	[[nodiscard]] TextLayout BuildTextLayout(TextMeasurer& measurer, float maxWidth) const;
 
 	/// @brief 布局缓存入口（★ C29-10：**五元组指纹显式列键**，入口每次判定）
 	/// @details 键 = `(m_textRevision, font.size, font.family, dpi, GetWidth())`——任一变 ⇒ 重建。

@@ -445,6 +445,11 @@ class TestableLabel : public Label
 {
 public:
 	using Label::Label;
+	// ★ Phase 38 T38-2：断言 Label 侧 `BuildTextLayout` 输出逐位不变（红线②）——
+	//   三个 using 是**纯增量**（既有 T29/T28/T36 用例只用 GetPreferredSize / Paint，不受影响）。
+	using TextWidget::BuildTextLayout;
+	using TextWidget::TextLayout;
+	using TextWidget::TextLine;
 protected:
 	TextMeasurer* ResolveMeasurer() const override{ return &ms_fake; }
 private:
@@ -1676,6 +1681,52 @@ void Test31LineHeightEmptyLineOccupies()
 	}
 }
 
+// ── Phase 38 T38-2：Label 侧红线——`BuildTextLayout` 输出逐位不变 ───────────────
+
+/// T38-2：`startCp` / `cpCount` / `width` / `totalHeight` 逐字段等于改前常量，
+///        新增的 `ownedEnd` 为「下一行起点」口径（编辑器专用——`Label` 的任何输出都不读它）
+/// @note 期望值 = Phase 38 详设 §3.1 / §3.4 的脚本实算（同一 FakeTextMeasurer 口径：8 宽 / 16 行高）。
+///       ★ 改前拿不到该函数（private 且无 `text` 参数）⇒ 常量由「一比一复刻 HEAD 引擎」的
+///       `tools/phase38_wrap_probe.py` 产出（本 Phase 的样本表纪律：不得手推）。
+///       ★ 六串覆盖：拉丁软断点 · 硬/软混排 · 超长词硬断 · 尾部空格串 · 尾部空行 · CJK+紧随空格。
+void Test38WrapLayoutOutputUnchanged()
+{
+	TestableLabel label("");
+	FakeTextMeasurer measurer;
+
+	struct Line{ std::size_t start; std::size_t count; float width; std::size_t owned; };
+	struct Case{ const char* text; float maxWidth; std::size_t n; Line lines[3]; };
+	const Case cases[] = {
+		// ① 拉丁软断点：分隔空格归前行（ownedEnd(0) == start(1) == 6）
+		{ "ab cd ef",      48.0f, 2, { { 0, 5, 40.0f, 6 }, { 6, 2, 16.0f, 8 }, { 0, 0, 0.0f, 0 } } },
+		// ② 硬行 + 软行混排（L1→L2 是 \n 缺口：ownedEnd + 1 == start）
+		{ "ab cd \nef gh", 40.0f, 3, { { 0, 2, 16.0f, 3 }, { 3, 2, 16.0f, 6 }, { 7, 5, 40.0f, 12 } } },
+		// ③ 超长词硬断（无软断点 ⇒ 按字断）
+		{ "abcdefgh",      26.0f, 3, { { 0, 3, 24.0f, 3 }, { 3, 3, 24.0f, 6 }, { 6, 2, 16.0f, 8 } } },
+		// ④ 尾部空格串：末行 ownedEnd == count（A-15 的边界等式②）
+		{ "abc   ",        40.0f, 1, { { 0, 3, 24.0f, 6 }, { 0, 0, 0.0f, 0 }, { 0, 0, 0.0f, 0 } } },
+		// ⑤ 尾部空行（"ab\n" ⇒ L1 空、占行高零绘制）
+		{ "ab\n",          40.0f, 2, { { 0, 2, 16.0f, 2 }, { 3, 0, 0.0f, 3 }, { 0, 0, 0.0f, 0 } } },
+		// ⑥ CJK 断点 + 紧随空格（A-15 的判别面：空格归前行 ⇒ ownedEnd 4 == 下一行 start 4）
+		{ "一二三 四",      24.0f, 2, { { 0, 3, 24.0f, 4 }, { 4, 1, 8.0f, 5 }, { 0, 0, 0.0f, 0 } } },
+	};
+
+	for (const auto& c : cases)
+	{
+		const TestableLabel::TextLayout layout = label.BuildTextLayout(measurer, c.text, c.maxWidth);
+		EXPECT_EQ(layout.lines.size(), c.n);
+		EXPECT_NEAR(layout.totalHeight, static_cast<float>(c.n) * 16.0f, kEpsilon);
+		const std::size_t check = (layout.lines.size() < c.n) ? layout.lines.size() : c.n;
+		for (std::size_t i = 0; i < check; ++i)
+		{
+			EXPECT_EQ(layout.lines[i].startCp, c.lines[i].start);
+			EXPECT_EQ(layout.lines[i].cpCount, c.lines[i].count);      // ★ 裁剪口径（红线② 的主体）
+			EXPECT_NEAR(layout.lines[i].width, c.lines[i].width, kEpsilon);
+			EXPECT_EQ(layout.lines[i].ownedEnd, c.lines[i].owned);     // ★ 归属口径（新字段）
+		}
+	}
+}
+
 void ECDI::Test::RegisterWidgetTests()
 {
     GetTestRegistry().Add("Widget.PanelPaint", &TestPanelPaint);
@@ -1708,6 +1759,7 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.WrapDefaultOff",          &Test29WrapDefaultOff);           // T29-4（批三：命令流逐字段基线）
     GetTestRegistry().Add("TextWidget.WrapDegenerate",          &Test29WrapDegenerate);           // T29-5（批三：退化边界）
     GetTestRegistry().Add("TextWidget.WrapKinsukuOverflow",     &Test29WrapKinsukuOverflow);      // T29-WRAP-2（批三：微超不吞普通字符）
+    GetTestRegistry().Add("TextWidget.WrapLayoutOutputUnchanged", &Test38WrapLayoutOutputUnchanged); // T38-2（Phase 38 批 1）
     GetTestRegistry().Add("TextWidget.BubbleEndToEnd",          &Test29BubbleEndToEnd);           // T29-6（批三：气泡端到端 + A4）
     GetTestRegistry().Add("Button.TextAlignmentModes",          &Test30ButtonAlignmentModes);     // T30-2（批一）
     GetTestRegistry().Add("Button.TextAlignmentOverride",       &Test30ButtonAlignmentOverride);  // T30-3（批一）

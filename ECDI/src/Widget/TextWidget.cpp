@@ -199,7 +199,8 @@ std::size_t FindLastSoftBreak(const std::vector<char32_t>& cps,
 
 // ── Phase 29 批二：断行状态机（D29-Ⅰ——流水线序固定）──────────────────────
 
-TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer, float maxWidth) const{
+TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer,
+                                                    const std::string& text, float maxWidth) const{
 
 	TextLayout layout;
 	const Font& font = m_style.font.value;
@@ -207,9 +208,9 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer, float
 
 	// ★ 空文本 ⇒ 1 个空行（而非 0 行）：「零行」会让 preferred 高度归零、控件整块消失；
 	//   D29-Ⅴ 的空行语义在空串上的自然延伸（T29-5 空串断言锚）。
-	const std::vector<char32_t> cps = DecodeUtf8(m_text);
+	const std::vector<char32_t> cps = DecodeUtf8(text);
 	if (cps.empty()){
-		layout.lines.emplace_back(TextLine{ 0, 0, 0.0f });
+		layout.lines.emplace_back(TextLine{ 0, 0, 0.0f, 0 });
 		layout.totalHeight = lineHeight;
 		return layout;
 	}
@@ -225,11 +226,11 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer, float
 		const float width = (end == fitEnd)
 			? fitWidth                                            // ★ 无回退 ⇒ 直接采用（零二次测量）
 			: [&]{
-				const std::size_t b0 = CodepointIndexToByteOffset(m_text, lineStart);
-				const std::size_t b1 = CodepointIndexToByteOffset(m_text, end);
-				return measurer.MeasureText(font, m_text.substr(b0, b1 - b0)).width;
+				const std::size_t b0 = CodepointIndexToByteOffset(text, lineStart);
+				const std::size_t b1 = CodepointIndexToByteOffset(text, end);
+				return measurer.MeasureText(font, text.substr(b0, b1 - b0)).width;
 			}();
-		layout.lines.emplace_back(TextLine{ lineStart, end - lineStart, width });
+		layout.lines.emplace_back(TextLine{ lineStart, end - lineStart, width, lineEnd });
 	};
 
 	// ── 第一步：显式 `\n` 切硬段（D29-Ⅴ）──
@@ -255,7 +256,7 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer, float
 
 		// ★ 空段 ⇒ 空 TextLine（D29-Ⅴ：占行高、绘制零命令）
 		if (segStart >= segEnd){
-			layout.lines.emplace_back(TextLine{ segStart, 0, 0.0f });
+			layout.lines.emplace_back(TextLine{ segStart, 0, 0.0f, segStart });
 			continue;
 		}
 
@@ -266,7 +267,7 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer, float
 			const std::size_t lineStart = scan;
 
 			// ① 硬边界：从 scan 起最多放多少码点（C29-1 契约——FitText 不懂空格/CJK/禁则）
-			const TextFit fit = measurer.FitText(font, m_text, scan, limit);
+			const TextFit fit = measurer.FitText(font, text, scan, limit);
 			const std::size_t hardEnd = scan + fit.fitCp;   // 可能 == scan（一个码点都放不下）
 
 			// ② 整段放得下 ⇒ 一行收尾，本段结束
@@ -300,6 +301,14 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer, float
 			std::size_t nextScan = b;
 			while (nextScan < segEnd && cps[nextScan] == U' ') { ++nextScan; }
 			if (nextScan <= scan) { nextScan = scan + 1; }   // 防御：绝不零推进（Paint 死循环不可接受）
+
+			// ★★ Phase 38（A-15）：归属终点 = **下一行起点** —— 把上面 ⑥⑦ 跳过的连续分隔空格一并收进本行。
+			//    根因：`FindLastSoftBreak` 对空格断点返回「空格后一位」、对 CJK 断点返回「字后一位」，
+			//    后者紧跟空格时该空格落进「不属于任何行」的空隙。缺这行则 `"一二三 四"@24` 的
+			//    gap==1 而 cps 是空格（A3 第三态）、`"abc   "` 的末行 ownedEnd < count。
+			//    ★ 只改新字段 ⇒ 切分（startCp/cpCount/width/totalHeight）逐位不变 = 红线② 结构性成立。
+			layout.lines.back().ownedEnd = nextScan;
+
 			scan = nextScan;
 		}
 	}
@@ -330,7 +339,7 @@ const TextWidget::TextLayout& TextWidget::GetTextLayout(TextMeasurer& measurer) 
 		return m_wrapLayout;   // ★ 命中 ⇒ 零 FitText / 零 MeasureText 调用（T29-3 / T29-WRAP-3 锚）
 	}
 
-	m_wrapLayout = BuildTextLayout(measurer, static_cast<float>(width));
+	m_wrapLayout = BuildTextLayout(measurer, m_text, static_cast<float>(width));   // ★ 红线②：Label 传真实串，输出逐位不变
 	m_wrapRevision = m_textRevision;
 	m_wrapFont = m_style.font.value;
 	m_wrapDpi = dpi;

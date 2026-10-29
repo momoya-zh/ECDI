@@ -1,6 +1,6 @@
 ﻿# Phase 38 详细设计 — TextBox 编辑器软折行（O2 兑现）
 
-> **版本**：**v1.1**（2026-10-29——v1.0 同日落盘后的**独立对码复核订正**，三项实质 + 三项登记级，详见 §9）　**基线**：HEAD `6a3807b`（`docs(phase37): full-chain closure`）　**账目**：`roadmap-deferred.md` #77（v2.57）
+> **版本**：**v1.2**（2026-10-29——v1.1 = 独立对码复核订正；v1.2 = **批 0 / 批 1 实施回流**，两处判据口径订正，详见 §9）　**基线**：HEAD `6a3807b`（`docs(phase37): full-chain closure`）　**账目**：`roadmap-deferred.md` #77（v2.57）
 > **上游**：需求稿 [`phase38-textbox-soft-wrap-requirements.md`](phase38-textbox-soft-wrap-requirements.md) **v1.2** · 初设稿 [`phase38-textbox-soft-wrap-preliminary-design.md`](phase38-textbox-soft-wrap-preliminary-design.md) **v1.2**（其审核稿 = [`phase38-textbox-soft-wrap-design-review.md`](phase38-textbox-soft-wrap-design-review.md)，审核对象为**初设 v1.0**）
 > **下游**：实现（批 0..4，见 §6）· `tools/phase38_wrap_probe.py`（样本表**唯一**期望值来源）
 > **五阶段定位**：需求确认 ✓ → 初步设计 ✓ → **详细设计（本稿）** → 实现 → 测试
@@ -745,7 +745,7 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 | **C38-4** | 显示串唯一 | `sed -n '202,310p' $TW \| grep -c "m_text"` | **0**（★ 范围 `:202-310`，A-1；改前实测 4 行 5 处 = `:210/228/229/230/269`） |
 | | | `sed -n '392,400p' $TW \| grep -c "m_text"` | **≥ 2**（`:396-398` 的发射点**必须保留**） |
 | | | T38-14h 的 `RecordingTextMeasurer` | 喂入串含 `E2 80 A2`、不含明文 |
-| **C38-5** | `Label` 零参与 | `grep -n "ownedEnd" $TW` | 命中 **4 处** = **3 处构造**（`:212`/`:232`/`:258`）+ **1 处写**（`layout.lines.back().ownedEnd = nextScan;`，§2.1 ⑨）——★ v1.1 由 3 改 4；**仍无任何读取表达式**（`Label` 侧零参与不变） |
+| **C38-5** | `Label` 零参与 | `grep -n "ownedEnd" $TW` | ★★ **v1.2 实测订正（4 → 2）**：命中 **2 处** = **1 处注释** + **1 处写**（`layout.lines.back().ownedEnd = nextScan;`）。v1.1 写「3 处构造 + 1 处写 = 4」**是错的**——三处构造都用**位置初始化**（`TextLine{ 0, 0, 0.0f, 0 }` / `{ lineStart, end - lineStart, width, lineEnd }` / `{ segStart, 0, 0.0f, segStart }`），**字段名不出现在源码里**。⇒ 判据的正确形态 = 「2 处，且**无任何读取表达式**（无 `ownedEnd` 作右值 / 无 `->ownedEnd`）」；另可加 `grep -c "\.ownedEnd"` == **1**（唯一成员访问 = 那一处写） |
 | **C38-6** | 失效只经键 + 显示串不变式 | `grep -rn "m_needsLineRecalc" ECDI/` | **0** |
 | | | `grep -n "m_isComposing = \|m_compositionStart = \|m_compositionLength = " $TB` | 逐处核对 bump 成对：`:898/899/908`→`:913`、`:928/930/931`→`:935`、`:955/957`→**越序**（`RestoreSnapshot` 在 **`:953`**，A-8）、`:964/966`→`:970` |
 | **C38-7** | 配套语义边界 | `grep -n "m_scrollOffsetX *=" $TB` | **3**（★ v1.1 再订正：初设写 1、v1.0 写 2）——**2 处**在 `EnsureCaretVisible` 体内（折行支钉 0 / 非折行支跟手写）+ **1 处**在 `RecalculateLines` 折行重建分支（§2.2 写点 3，覆盖**切换相**）；+ `.h` 字段初值 ⇒ 全仓 **4**。★ 三缺一即破不变式 `U`（§2.5④） |
@@ -761,8 +761,8 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 
 | 批 | 内容（**只含本批**） | 用例增量 | 累计 | 回归门 |
 |---|---|---|---|---|
-| **批 0** | ★ **基准采集（前置、不可后补）**：在 HEAD `6a3807be19a30d8512e18ef2d68bf2d1b7842cbf` 上写 T38-1 / T38-13 的常量表并跑绿，**只加测试、零产品码改动** | +2 | **515** | 515/515 绿 · `git diff --stat` 只含 `TextBoxTests.cpp` |
-| **批 1** | **add-only**：`TextWidget.h` 可见性下移 + `ownedEnd` + `TextRevision()` + `:61-70` 注释扩写；`TextWidget.cpp` **九处**（§2.1，含 ⑨ 的归属回填）；`TestableLabel` 加 3 个 `using`；T38-2 | +1 | **516** | 516/516 绿 · C38-4 / C38-5 机检 · ★ 本批**不动 `TextBox`** ⇒ 红线① 结构性成立 |
+| **批 0** ✅ | ★ **基准采集（前置、不可后补）**：在 HEAD `6a3807b` 上写 T38-1 / T38-13 的常量表并跑绿，**只加测试、零产品码改动** | +2 | **515** | ✅ **2026-10-29 实测 515/515**（MinGW g++ Debug）；★ 采集时订正一处断言口径：`Widget::Paint` 自带 `PushClip(self)`（`Widget.cpp:506`）⇒ clip 条数 **非空 2 / 空文本 1**，rect 取 `clips.back()` |
+| **批 1** ✅ | **add-only**：`TextWidget.h` 可见性下移 + `ownedEnd` + `TextRevision()` + `:61-70` 注释扩写；`TextWidget.cpp` **九处**（§2.1，含 ⑨ 的归属回填）；`TestableLabel` 加 3 个 `using`；T38-2 | +1 | **516** | ✅ **2026-10-29 实测 516/516**；C38-4 = **0** ✓ · C38-5 = **2 处（1 注释 + 1 写）** ✓（见 §5 的 v1.2 订正）· ★ 本批**不动 `TextBox`** ⇒ 红线① 结构性成立 |
 | **批 2** | **行表换芯**：`TextBox.h`（`m_lines` + 10 键字段 + 3 protected + 2 private 辅助 + 七处注释 + 删两字段）；`TextBox.cpp`（§2.2 / §2.3 / §2.4 / §2.7 / §2.8）；夹具（§2.9）；T38-3..7 + T38-15 + **T38-18** | **+7** | **523** | 523/523 绿 · C38-1 / C38-2 / C38-6 机检 · ★ 本批结束时**折行仍不可达**（`GetPreferredSize` 的闸与 clip 未改）⇒ 513 存量必须逐位绿 |
 | **批 3** | **接线**：`GetTextAreaWidth`（§2.5①+注释）· `GetPreferredSize`（②）· `MultilinePreferred`（③）· `EnsureCaretVisible` 钉 X（④）· `OnPaint` clip（⑤）+ 行循环拆口径（§2.6）· `SetSingleLine`（⑥）；T38-8/9/10/12/17 | +5 | **528** | 528/528 绿 · C38-3 / C38-7 / C38-8 / C38-9 机检 · ★ **本批是红线① 的真正考场**（首次让折行可达） |
 | **批 4** | **收口**：T38-11（Undo/Redo + 钉 X 切换相）· T38-14（键 a–i）· T38-16（真窗口白名单四件） | +3 | **531** | **531/531 绿** · 全部 C38 机检 · `doc_lint` 0 defect · 锚点 100 / 198 / 197 |
@@ -806,6 +806,12 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 ---
 
 ## §9 修订记录
+
+- **v1.2（2026-10-29）** **实施回流（批 0 / 批 1 落地后）**——两处**判据口径**订正，方案本体与预算不变：
+  ① ★★ **C38-5 的机检期望值错（4 → 2）**：v1.1 写「3 处构造 + 1 处写 = 4 处 `ownedEnd` 命中」，实测 **2 处**（1 注释 + 1 写）。根因 = 三处构造全用**位置初始化**（`TextLine{ 0, 0, 0.0f, 0 }` 等），**字段名不出现在源码**。⇒ 判据改为「2 处且无读取表达式」+ 可选的 `grep -c "\.ownedEnd"` == 1。★ 这一条**不影响红线② 的证明**（`TextWidget` 仍无任何读取），只是原期望值写错了。
+  ② ★ **批 0 的 clip 断言口径**（v1.0 未提，写测试时才核出）：`Widget::Paint` 自己 `PushClip(self)`（`Widget.cpp:506`）⇒ 每次 `Paint` 至少 1 条 `PushClipCommand`；非空文本 **2 条**（Widget self + `TextBox.cpp:1369`）、空文本（`:1345` 早退）**1 条**。T38-1 据此断言条数 + 取 `clips.back()` 的 rect。★ 该结论对 **T38-17** 同样适用（判 clip 必须取**最后一条**，否则断的是 Widget 自身矩形——两者在 `p=0`、条不可见时数值相同，只有条数能区分）。
+  ③ **批次实测**：批 0 = `515/515`（MinGW g++ Debug，`f013e7e`）· 批 1 = `516/516`（C38-4 = 0 ✓ / C38-5 = 2 ✓）。★ 实现期未发现新的锚点漂移（`TextWidget.cpp` 九处落点与 §2.1 表逐行对上）。
+  ★ **未改动**：D38-A..I、10 维键、PD38-1..9 落点划分、T38-1..18 预算（531）、C38-1..9 条数、R38-1..10 条数**全部不变**。
 
 - **v1.1（2026-10-29）** **v1.0 落盘后的独立对码复核**（不是新一轮评审；方法 = 逐条 `grep -n` / `Read` 亲核锚点 + `exec` 载入 `tools/phase38_wrap_probe.py` 的 `build_layout` 跑两版对账）。**三项实质订正 + 三项登记级**，每条均先验证再落稿：
   ① ★★★ **`ownedEnd` 取值错（`= b` → `= nextScan`）**——**A-15**。`FindLastSoftBreak` 对空格断点与 CJK 断点**返回位置语义不同**（前者空格后一位、后者字后一位），而 ⑦ 终化（`TextWidget.cpp:299-303`）把 `b` 之后的连续空格跳给 `nextScan` ⇒ 旧取法让这些空格**既不在 `drawEnd` 也不在 `ownedEnd`**。**脚本实证 4 类违反**：`"一二三 四"@24`（`gap=1` 而 `cps=' '`）· `"一二三  四"@24`（`gap=2`）· `"一二三 \n四"@24`（`gap=2`）· `"abc   "`@40`（**末行 `ownedEnd=5 ≠ count=6`**）。⇒ 订正 = `layout.lines.back().ownedEnd = nextScan;`（**+1 行**，§2.1 ⑨）；`(startCp, cpCount, width)` 与 `totalHeight` **逐字段不变**（红线② 结构性成立，11 个既有样本脚本比对确认）⇒ 复验 **11 既有 + 7 新增 = 18 项 A3 全绿**。连带：§2.1 八行→**九行** · **§3.4 S8 组**（4 样本）· T38-7 判据换形（`gap` 只允许 0 或 1∧`\n`，**无第三态**）· **T38-18** 新增 · C38-2 / C38-5 计数订正 · **R38-10①** · 用例 530 → **531**。
