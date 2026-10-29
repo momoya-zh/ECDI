@@ -1864,6 +1864,102 @@ void Test37SetStyleOverrideChain(){
 	EXPECT_NEAR(box.GetTextTopInset(), box.Padding(), kEps);           // ③ 回 Top
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 38 · 批 0：非折行态逐位基准（红线① 的判据 / 实施前置，**只加测试**）
+// 采集口径 = 详设 §6 批 0：产品码一字未动（源码基准 6a3807b；Phase 38 本轮只入库文档）。
+// 夹具 = TestableTextBox + FakeTextMeasurer（8 宽 / L≡16）+ padding 0 ⇒ 命令坐标 = (0, i×L)，
+// 与 T37-1 同一手法（CommandBuffer 直读，不经 Window）。★ 三批实现后本块数值必须逐位不变。
+// ══════════════════════════════════════════════════════════════════════
+
+/// T38-1：非折行态命令级基准——`DrawTextCommand(pos.x / pos.y / text)` 与 `PushClipCommand.rect` 逐字段
+/// @details 三组：① 含 `\n` 两行 · ② 单行超宽（整串一次发射，超宽交 clip）· ③ 空文本（OnPaint 早退 ⇒ 零命令）
+void Test38BaselineOffPaint(){
+	struct Case{ const char* text; int w; int h; size_t nText; const char* line0; const char* line1; };
+	const Case cases[] = {
+		{ "abc\ndef",   80, 60, 2, "abc", "def" },           // pos.y = 0 / 16
+		{ "abcdefghij", 40, 30, 1, "abcdefghij", nullptr },  // 80 > 40：非折行 ⇒ 仍单条命令
+		{ "",           80, 30, 0, nullptr, nullptr },       // :1345 早退 ⇒ 无 DrawText / 无 PushClip
+	};
+	for (const auto& c : cases){
+		TestableTextBox box(std::string(c.text));
+		box.SetSize(c.w, c.h);
+		CommandBuffer commands;
+		FakeTextMeasurer measurer;
+		PaintContext ctx(commands, measurer);
+		box.Paint(ctx, 0, 0);   // 命令坐标 = 控件局部（传 0,0 ⇒ pos 即内缩量）
+
+		std::vector<const DrawTextCommand*> texts;
+		std::vector<const PushClipCommand*> clips;
+		for (const auto& cmd : commands){
+			if (const auto* t = std::get_if<DrawTextCommand>(&cmd))
+				texts.push_back(t);
+			else if (const auto* p = std::get_if<PushClipCommand>(&cmd))
+				clips.push_back(p);
+		}
+
+		EXPECT_EQ(texts.size(), c.nText);
+		// ★ clip 条数 = Widget 自身边界（`Widget.cpp:506`）+ TextBox 文本区（`TextBox.cpp:1369`）；
+		//   空文本时 OnPaint 早退（`:1345`）⇒ 只剩 Widget 那条。p=0 且条不可见时两者数值相同，
+		//   故取 **最后一条**（= TextBox 文本区）作判据，条数本身也一并钉住。
+		EXPECT_EQ(clips.size(), (c.nText == 0) ? static_cast<std::size_t>(1) : static_cast<std::size_t>(2));
+		if (!clips.empty()){
+			const Rect& r = clips.back()->rect;
+			EXPECT_NEAR(r.x, 0.0f, kEps);
+			EXPECT_NEAR(r.y, 0.0f, kEps);
+			EXPECT_NEAR(r.width, static_cast<float>(c.w), kEps);
+			EXPECT_NEAR(r.height, static_cast<float>(c.h), kEps);
+		}
+
+		const size_t check = (texts.size() < c.nText) ? texts.size() : c.nText;
+		for (size_t i = 0; i < check; ++i){
+			EXPECT_NEAR(texts[i]->pos.x, 0.0f, kEps);
+			EXPECT_NEAR(texts[i]->pos.y, static_cast<float>(i) * 16.0f, kEps);   // L_geom ≡ 16
+			const char* want = (i == 0) ? c.line0 : c.line1;
+			if (want != nullptr)
+				EXPECT_TRUE(texts[i]->text == std::string(want));
+		}
+	}
+}
+
+/// T38-13：非折行态 preferred 逐位基准——宽 = 当前宽（多行）/ 测量宽（单行）、高 = n×L + 2p
+void Test38BaselineOffPreferred(){
+	// ① 单行超宽：宽 = 测量宽（内容宽口径）、高 = L
+	{
+		TestableTextBox box(std::string("abcdefghij"));
+		box.SetSize(40, 30);
+		const Size s = box.GetPreferredSize();
+		EXPECT_NEAR(s.width, 80.0f, kEps);
+		EXPECT_NEAR(s.height, 16.0f, kEps);
+	}
+	// ② 含 \n（p = 4）：宽 = 当前宽、高 = 2×16 + 8 = 40（ceil 归属本函数——契约①）
+	{
+		TestableTextBox box(std::string("abc\ndef"));
+		box.SetSize(80, 60);
+		TextBoxStyleOverride o; o.padding = 4.0f;
+		box.SetStyle(o);
+		const Size s = box.GetPreferredSize();
+		EXPECT_NEAR(s.width, 80.0f, kEps);
+		EXPECT_NEAR(s.height, 40.0f, kEps);
+	}
+	// ③ 单行开关 on（无 \n）：仍走单行支——该开关在非折行态不影响 preferred
+	{
+		TestableTextBox box(std::string("abc"));
+		box.SetSize(80, 30);
+		box.SetSingleLine(true);
+		const Size s = box.GetPreferredSize();
+		EXPECT_NEAR(s.width, 24.0f, kEps);
+		EXPECT_NEAR(s.height, 16.0f, kEps);
+	}
+	// ④ 空文本：宽 0（诚实测量）+ 高 = L
+	{
+		TestableTextBox box(std::string(""));
+		box.SetSize(80, 30);
+		const Size s = box.GetPreferredSize();
+		EXPECT_NEAR(s.width, 0.0f, kEps);
+		EXPECT_NEAR(s.height, 16.0f, kEps);
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -1905,4 +2001,6 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.HitFollowsAlignCenter", &Test37HitFollowsAlignCenter); // T37-5（Phase 37 批二）
     GetTestRegistry().Add("TextBox.HitFollowsAlignTop", &Test37HitFollowsAlignTop);       // T37-6（Phase 37 批二）
     GetTestRegistry().Add("TextBox.SetStyleOverrideChain", &Test37SetStyleOverrideChain); // T37-8（Phase 37 批二）
+    GetTestRegistry().Add("TextBox.SoftWrapOffPaintBaseline", &Test38BaselineOffPaint);           // T38-1（Phase 38 批 0）
+    GetTestRegistry().Add("TextBox.SoftWrapOffPreferredBaseline", &Test38BaselineOffPreferred);   // T38-13（Phase 38 批 0）
 }
