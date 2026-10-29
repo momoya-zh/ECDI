@@ -555,6 +555,64 @@ TextFit FontEngine::FitText(const Font& font, const std::string& text,
 	return TextFit{ fitCp, static_cast<float>(advancePx) * toDip };
 }
 
+TextFit FontEngine::FitText(const Font& font, const std::string& text,
+                           std::size_t startCp, float maxWidth,
+                           const std::vector<char32_t>& cps,
+                           const std::vector<std::uint32_t>& byteOffsets)
+{
+	// ★ Phase 40：表感知重载。与 4 参的唯一差别 = **不再 `DecodeUtf8(text)` 整串解码**
+	//   （4 参 `:529` 那次：O(N) + 一个 `reserve(3N)` 的 vector ⇒ L 行 = L 次 × 240 KB churn）。
+	(void)text;   // 不读（码点由 cps 给出；保留形参只为与 4 参 / 其他实现签名统一）
+
+	Impl& impl = *m_impl;
+	if (byteOffsets.size() < 2)
+	{
+		return TextFit{ 0, 0.0f };   // 空 / 单元素表 ⇒ 码点数为 0（防 size()-1 下溢）
+	}
+	const std::size_t totalCp = byteOffsets.size() - 1;   // ★★ 不是 cps.size()（见头文件注释 / M3）
+	if (startCp >= totalCp)
+	{
+		return TextFit{ 0, 0.0f };   // 窗口在串尾之后（含空串）
+	}
+
+	const int dpi = (impl.dpi > 0) ? impl.dpi : 96;
+	const int px = PixelSize(font);
+	const FaceId faceId = FaceIdFor(font.family, font.weight);
+	FT_Face face = impl.FaceOf(faceId);
+	if (face == nullptr)
+	{
+		// ★ 无 face ⇒ 全部码点「装得下」（消费全串）——同 4 参 `:523`
+		return TextFit{ totalCp - startCp, 0.0f };
+	}
+	FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(px));
+
+	const float limit = (std::max)(0.0f, maxWidth);
+	const float toDip = 96.0f / static_cast<float>(dpi);
+	long advancePx = 0;
+	std::size_t fitCp = 0;
+	// ★★ 循环上界是 `cps.size()`、起点 `startCp` 是 `SequenceLength` 空间的索引 ——
+	//    这是**既有分歧**（4 参同形），**原样保留、不得顺手修**（修了就改脏字节行为）
+	for (std::size_t i = startCp; i < cps.size(); ++i)
+	{
+		long advance = 0;
+		if (!impl.AdvanceOf(face, faceId, px, cps[i], advance))
+		{
+			// ★ 缺字形 ⇒ advance 不计但**码点仍被消费**（同 4 参 `:541`——与 MeasureText 求和一致的必要条件）
+			++fitCp;
+			continue;
+		}
+		const long nextPx = advancePx + advance;
+		if (static_cast<float>(nextPx) * toDip > limit)
+		{
+			break;   // ★ 超宽 ⇒ 停在**本码点之前**（严格 >：恰好等于 maxWidth 仍算放得下）
+		}
+		advancePx = nextPx;
+		++fitCp;
+	}
+
+	return TextFit{ fitCp, static_cast<float>(advancePx) * toDip };
+}
+
 float FontEngine::LineHeight(const Font& font){
 	Impl& impl = *m_impl;
 	const int dpi = (impl.dpi > 0) ? impl.dpi : 96;

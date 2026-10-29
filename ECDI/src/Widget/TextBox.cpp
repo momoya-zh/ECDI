@@ -547,6 +547,20 @@ void TextBox::LineKeySave(float wrapWidth, bool hasMeasurer){
 	m_linesFont          = TextWidget::m_style.font.value;
 }
 
+// ── Phase 40：表身份（echo + 组合三维，D40-C）────────────────────────────
+
+TextWidget::ByteMapKey TextBox::CurrentByteMapKey() const{
+
+	// ★ `m_echoMode` / `m_isComposing` / `m_composition*` 均为 private（`TextBox.h` 的 private 区）——
+	//   本函数是成员函数可直接读；`ByteMapKey` 是基类 protected 嵌套类型，名字在派生类内可见。
+	//   ★ 这四项决定**显示串**的字节：echo ⇒ 每码点换成 U+2022（3 字节）；组合区间 ⇒ 保留原文。
+	//     font / dpi / 折行宽只影响**宽度**，不进键（D40-C）。
+	return ByteMapKey{ TextRevision(),
+	                   static_cast<int>(m_echoMode),
+	                   m_isComposing, m_compositionStart, m_compositionLength };
+
+}
+
 bool TextBox::IsWrapActive() const{
 	// ★ 不含 GetWindow()（无头可折行——正是无头测试能验折行的原因）
 	// ★ 不含「折行宽 > 0」（D38-D：含它则窄带内 preferred 落回基类 wrap 支、宽度棘轮照旧）
@@ -888,26 +902,35 @@ size_t TextBox::CaretIndexFromPosition(Point localPos){
 }
 
 size_t TextBox::CaretIndexFromLineX(size_t lineIndex, float innerX) const{
-	// 行内线性扫描 + 前缀测量（O(行长²) 短行够用——同 8.5.1 单行 CaretIndexFromX 逻辑按行）
+	// 行内线性扫描 + 前缀测量（O(行长) 次测量——★ Phase 40 后换算不再乘 O(行长)，见下）
 	// P1 echo：掩码时按显示串测量（点击定位对齐 `•`——码点索引 1:1 映射安全）
 	const std::string display = BuildDisplayText();
+	// ★ Phase 40（K9）：按显示串建/复用偏移表——原先本函数是 O(行长²)：
+	//   循环里每次 `CodepointIndexToByteOffset(lineText, i)` 都从头数一遍。
+	EnsureCpByteOffsets(display);
 	const auto [lineStartCp, lineEndCp] = LineRange(lineIndex);
-	const size_t startByte = CodepointIndexToByteOffset(display, lineStartCp);
-	const size_t endByte   = CodepointIndexToByteOffset(display, lineEndCp);
+	const size_t startByte = ByteOffsetAt(lineStartCp);
+	const size_t endByte   = ByteOffsetAt(lineEndCp);
 	const std::string lineText = display.substr(startByte, endByte - startByte);
 	size_t lineInnerCp = 0;
-	const size_t lineCpCount = ByteOffsetToCodepointIndex(lineText, lineText.size());
+	// ★ O(1) 码点数（原为 `ByteOffsetToCodepointIndex(lineText, lineText.size())`，O(行内)）：
+	//   切片边界 [startByte, endByte) 恰是表项边界 ⇒ 码点数 = 钳制后的索引差。
+	//   钳制是必要的：末段截断时 `endByte` 越过 `display.size()`、`substr` 会被截短，
+	//   此时末项对应的索引就是表的码点上限（`offsetLastCp`），做差才与旧式逐位等价。
+	const size_t offsetLastCp = m_cpByteOffsets.empty() ? 0 : m_cpByteOffsets.size() - 1;
+	const size_t lineCpCount  = (std::min)(lineEndCp, offsetLastCp) - (std::min)(lineStartCp, offsetLastCp);
 	// 无窗口（测试环境）跳过测量 → 返回行起始（行内 X 定位需最小窗口集成测试——同 F19b/F20b 债务）
 	if (!lineText.empty() && GetWindow() != nullptr){
 		// const 方法内 GetWindow() 返回 const Window*——GetTextMeasurer 非 const，只读测量经 const_cast（同 GetLineHeight）
 		TextMeasurer& measurer = const_cast<Window*>(GetWindow())->GetTextMeasurer();
 		for (size_t i = 0; i < lineCpCount; ++i){
-			const size_t byte = CodepointIndexToByteOffset(lineText, i + 1);
+			// ★ Phase 40：表项差 = 相对 `lineText` 的字节偏移（O(1)；`ByteOffsetAt` 内含钳制）
+			const size_t byte = ByteOffsetAt(lineStartCp + i + 1) - startByte;
 			const Size prefix = measurer.MeasureText(TextWidget::m_style.font.value, lineText.substr(0, byte));
 			if (innerX <= prefix.width){
 				// 落在第 i 个码点区间：中点判断四舍五入（左半 → i，右半 → i+1）
 				const Size prevPrefix = (i == 0) ? Size{}
-					: measurer.MeasureText(TextWidget::m_style.font.value, lineText.substr(0, CodepointIndexToByteOffset(lineText, i)));
+					: measurer.MeasureText(TextWidget::m_style.font.value, lineText.substr(0, ByteOffsetAt(lineStartCp + i) - startByte));
 				const float charWidth = prefix.width - prevPrefix.width;
 				lineInnerCp = (innerX >= prevPrefix.width + charWidth / 2.0f) ? i + 1 : i;
 				break;
@@ -1479,6 +1502,11 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 	const int lastVisible  = (std::min)(static_cast<int>(lineCount) - 1,
 		static_cast<int>((m_scrollOffsetY + fh) / lineH) + 1);
 
+	// ★ Phase 40（K7）：按**本帧的显示串**建/复用码点→字节偏移表（一次，0 分配命中）；
+	//   供下面六处换算查表。表建在 `textSource` 上——Normal = `m_text`、echo = 掩码串，
+	//   两者字节长可差数倍，故这里**必须**喂 `textSource` 而非 `m_text`。
+	EnsureCpByteOffsets(textSource);
+
 	for (int li = firstVisible; li <= lastVisible; ++li){
 		const size_t lineIndex = static_cast<size_t>(li);
 		// ★★ Phase 38（C38-1）：绘制吃**裁剪**口径、选区/下划线求交吃**归属**口径。
@@ -1486,8 +1514,8 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 		//   非折行态两者逐位相等（`cpCount == ownedEnd − startCp`）⇒ 命令流与改前同（红线①）。
 		const auto [startCp, drawEndCp] = LineDrawRange(lineIndex);
 		const size_t ownEndCp = LineRange(lineIndex).second;
-		const size_t startByte   = CodepointIndexToByteOffset(textSource, startCp);
-		const size_t drawEndByte = CodepointIndexToByteOffset(textSource, drawEndCp);
+		const size_t startByte   = ByteOffsetAt(startCp);       // ★ Phase 40：查表（含钳制）
+		const size_t drawEndByte = ByteOffsetAt(drawEndCp);
 		const std::string lineText = textSource.substr(startByte, drawEndByte - startByte);
 		const float lineY = textY + static_cast<float>(li) * lineH - m_scrollOffsetY;
 
@@ -1499,8 +1527,8 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 			if (selMin < ownEndCp && selMax > startCp){   // 有交集
 				const size_t hlStartCp = (std::max)(selMin, startCp);
 				const size_t hlEndCp   = (std::min)(selMax, ownEndCp);
-				const size_t hlStartByte = CodepointIndexToByteOffset(textSource, hlStartCp);
-				const size_t hlEndByte   = CodepointIndexToByteOffset(textSource, hlEndCp);
+				const size_t hlStartByte = ByteOffsetAt(hlStartCp);   // ★ Phase 40：查表
+				const size_t hlEndByte   = ByteOffsetAt(hlEndCp);
 				const Size hlMinSize = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, hlStartByte - startByte));
 				const Size hlMaxSize = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, hlEndByte - startByte));
 				// 9.5 R1：不再 clamp 到可视宽——高亮保持完整逻辑几何，超宽部分由 Clip 裁（视觉等价）
@@ -1523,8 +1551,8 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 			if (compStartCp < ownEndCp && compEndCp > startCp){   // 组合区间 ∩ 本行（**归属**口径，同 ①）
 				const size_t ulStartCp = (std::max)(compStartCp, startCp);
 				const size_t ulEndCp   = (std::min)(compEndCp, ownEndCp);
-				const size_t ulStartByte = CodepointIndexToByteOffset(textSource, ulStartCp);
-				const size_t ulEndByte   = CodepointIndexToByteOffset(textSource, ulEndCp);
+				const size_t ulStartByte = ByteOffsetAt(ulStartCp);   // ★ Phase 40：查表
+				const size_t ulEndByte   = ByteOffsetAt(ulEndCp);
 				const Size ulStartSize = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, ulStartByte - startByte));
 				const Size ulEndSize   = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, ulEndByte - startByte));
 				// 9.5 R1：x 用 viewX（跟随横向滚动）；宽度本无 clamp——超宽由 Clip 兜底

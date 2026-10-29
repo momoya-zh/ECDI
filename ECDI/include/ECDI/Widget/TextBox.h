@@ -210,6 +210,12 @@ protected:
 	void OnTimer(const TimerEvent&) override;         // 周期定时器（8.5.1：光标闪烁）
 	void OnPaint(PaintContext& ctx, int x, int y) override;
 
+	/// @brief 表身份 override（★ Phase 40 / D40-C：在基类 revision 之上补 echo + composing 三维）
+	/// @details 这三项决定「**显示串**的字节」——`BuildDisplayText` 的掩码替换（每码点 → U+2022，
+	///          3 字节）与组合区间保留原文；而 font / dpi / 折行宽**不影响字节** ⇒ 不进键。
+	///          ★ 基类只给 revision（`TextWidget::CurrentByteMapKey`），因为 Label / Button 无 echo/组合。
+	[[nodiscard]] ByteMapKey CurrentByteMapKey() const override;
+
 	/// @brief TextBox 专属样式（protected——测试派生类可访问；不含 foreground——TextStyle 是文字唯一来源）
 	/// @details 注意：隐藏 TextWidget::m_style（TextStyle）——本类内访问文字样式需显式 `TextWidget::m_style`
 	TextBoxStyle m_style;

@@ -8,9 +8,11 @@
 #include "ECDI/Render/TextMeasurer.h"
 
 #include <cstddef>
+#include <cstdint>   // ★ Phase 40：5 参重载的 byteOffsets 表项（std::uint32_t）
 #include <map>
 #include <string>
 #include <tuple>
+#include <vector>    // ★ Phase 40：5 参重载的 cps / byteOffsets 入参
 
 namespace ECDI{
 
@@ -43,6 +45,19 @@ public:
 	///          ★ **surrogate pair 不可拆分**（C29-2）——wchar fit 绝不停在代理对中间。
 	TextFit FitText(const Font& font, const std::string& text,
 	                std::size_t startCp, float maxWidth) override;
+
+	/// @brief 断行适配（★ Phase 40：**表感知重载**——`byteStart`/`totalCp` 全 O(1) + 倍增窗口）
+	/// @details ★★ **倍增窗口**（D40-D）：只把 `[byteStart, byteOffsets[startCp+W])` 转成 wchar，
+	///          `W` 从 `kFitWindowInitCp` 起倍增到「窗口内已有放不下的字符」或「`W == 剩余`」为止。
+	///          改前（4 参）转**整条尾部** `text.substr(byteStart)` ⇒ 早期行 O(N) memcpy × L 行。
+	///          等价性：`GetTextExtentExPointW` 的 `fitW` 只依赖**前缀**（累加到超过 `maxPx` 即停），
+	///          与窗口之后是否存在字节无关；且 `W == 剩余` 时窗口就是整尾 ⇒ 该分支**逐字复刻**
+	///          4 参的两条宽度分支（连判据 `fit >= wide.size()` 都相同）⇒ 脏字节也一致。
+	/// @param cps ★ **GDI 不读**（走 wchar 口径），保留只为与默认体 / FT 的签名统一
+	/// @param byteOffsets `SequenceLength` 空间的表（`size()-1 == totalCp`）
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth,
+	                const std::vector<char32_t>& cps,
+	                const std::vector<std::uint32_t>& byteOffsets) override;
 
 	float LineHeight(const Font& font) override;
 

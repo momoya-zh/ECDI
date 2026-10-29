@@ -141,6 +141,19 @@ public:
 	TextFit FitText(const Font& font, const std::string& text,
 	                std::size_t startCp, float maxWidth);
 
+	/// @brief 断行适配（★ Phase 40：**表感知重载**——复用入参 `cps`，不再整串 `DecodeUtf8`）
+	/// @details 语义与 4 参**完全相同**（同 `AdvanceOf` 路径 / 同缺字形消费语义 / 同求和顺序），
+	///          只是把「整串解码」换成「直接用调用方已解好的 `cps`」⇒ **零 `vector` 分配**。
+	///          ★★ `totalCp` 取 **`byteOffsets.size() - 1`**（`SequenceLength` 空间），
+	///          **不是** `cps.size()`——后者在「前导合法 + 续字节非法」的串上会**大于** `count`
+	///          （`"\xE0\x41\x41"` ⇒ cps=2 / count=1），而 `totalCp` 同时喂 `startCp >= totalCp`
+	///          守卫与无 face 兜底 ⇒ 取错就改脏字节行为（违反红线②）。
+	/// @param cps `DecodeUtf8` 空间的码点（与调用方行切分同源；从这里按 `startCp` 起扫 advance）
+	/// @param text ★ **不读**（只为与 4 参 / 其他实现签名统一）
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth,
+	                const std::vector<char32_t>& cps,
+	                const std::vector<std::uint32_t>& byteOffsets);
+
 	/// @brief 字体行高——★ **单位恒为 DIP**
 	float LineHeight(const Font& font);
 

@@ -22,6 +22,7 @@
 #include "ECDI/Core/TextAlignment.h"   // ★ Phase 30 T30-2/3：对齐枚举
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"
+#include "ECDI/Core/UTF8.h"   // ★ Phase 40：TableFor 的公共换算 API（CodepointIndexToByteOffset）
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonDownEvent.h"
 #include "ECDI/EventSystem/Input/Mouse/MouseButtonUpEvent.h"
 #include "ECDI/EventSystem/Input/KeyBoard/KeyDownEvent.h"     // ★ 审计 H7：Tab 驱动焦点导航
@@ -458,6 +459,135 @@ private:
 
 FakeTextMeasurer TestableLabel::ms_fake;
 
+// ── ★ Phase 40：表访问探针 + 表期望构造（T40-1 / T40-8 的接缝）─────────────
+
+/// @brief 表访问探针（`m_cpByteOffsets` 是 protected **成员** ⇒ 派生类可直接读 `size()`）
+/// @details ★ 为什么**不需要**「静态接缝」：`SetText` 会 `MarkTextChanged()` ⇒ `m_textRevision`++ ⇒
+///          `CurrentByteMapKey()` 必变 ⇒ `EnsureCpByteOffsets` **必然重建**，绝不会拿上一轮的旧表。
+///          （这条也是 T40-8 的判据基础：键变了就必须重建。）
+class ByteMapProbe : public TestableLabel{
+public:
+	using TestableLabel::TestableLabel;      // ★ 继承构造（`TestableLabel` 经 `using Label::Label` 转承）
+	using TextWidget::EnsureCpByteOffsets;   // protected ⇒ using 暴露
+	using TextWidget::ByteOffsetAt;
+
+	/// @brief 建表（每个样本都过一次 `SetText` ⇒ 键必失配 ⇒ 必重建）
+	void Build(const std::string& s){
+		SetText(s);
+		EnsureCpByteOffsets(s);
+	}
+	[[nodiscard]] std::size_t TableSize() const { return m_cpByteOffsets.size(); }
+	[[nodiscard]] std::size_t At(std::size_t k) const { return ByteOffsetAt(k); }
+};
+
+/// @brief 用**公共换算 API** 构造偏移表（★ 与产品 `BuildByteOffsets` **独立实现** ⇒ T40-1 才有意义）
+/// @details 逐 k 取 `CodepointIndexToByteOffset` 直到串尾（含空串：k=0 得 0 ⇒ 返回 `[0]`）
+static std::vector<std::uint32_t> TableFor(const std::string& s){
+	std::vector<std::uint32_t> t;
+	for (std::size_t k = 0;; ++k){
+		const std::size_t b = CodepointIndexToByteOffset(s, k);
+		t.push_back(static_cast<std::uint32_t>(b));
+		if (b >= s.size()){ return t; }
+	}
+}
+
+// ── ★ Phase 40 T40-1：表项 == CodepointIndexToByteOffset（不变式 T1 的唯一直接证据）────
+
+void Test40TableMatchesSequenceLength(){
+
+	ByteMapProbe probe("");
+
+	// ★★ 样本集必须同时覆盖三向：`cps == count`、`cps < count`、`cps > count`
+	//    （`cps > count` 是 D-9 的越界根源；v1.0 的样本集**全在 `<=` 一侧** ⇒ 测不出那个洞）
+	const char* samples[] = {
+		"abcdef",                                  // ASCII：cps == count == 6
+		"\xE4\xB8\x80\xE4\xB8\x81\xE4\xB8\x82",    // 一丁丂（3 字节 × 3）
+		"\xF0\x9F\x98\x80",                        // emoji（4 字节 ⇒ wchar 代理对）
+		"\xC0\x8A",                                // overlong U+000A（2 字节 / 1 码点）
+		"\xE0\x80\x8A",                            // overlong 三字节
+		"\xF0\x80\x80\x8A",                        // overlong 四字节
+		"A\xC0",                                   // ★ 截断：表 [0,1,3]，**末项越过 size**（D-10 的根源）
+		"\x80\x8A",                                // 非法首字节：cps(0) **<** count(2)
+		"\xE0\x41\x41",                            // ★ 合法前导 + 非法续字节：cps(2) **>** count(1)
+		"\xF0\x41\x41\x41",                        // ★ 同型四字节：cps(3) **>** count(1)
+		""                                         // 空串
+	};
+
+	for (const char* s : samples){
+		const std::string text(s);
+		probe.Build(text);                                   // SetText ⇒ revision++ ⇒ 必重建
+		const std::vector<std::uint32_t> expect = TableFor(text);
+		EXPECT_EQ(probe.TableSize(), expect.size());
+		for (std::size_t k = 0; k < expect.size(); ++k){
+			EXPECT_EQ(probe.At(k), static_cast<std::size_t>(expect[k]));
+		}
+	}
+}
+
+// ── ★ Phase 40 T40-8：表随键重建（键变 ⇒ 必重建，绝不记忆旧串）────────────────
+
+void Test40TableRebuiltOnKeyChange(){
+
+	ByteMapProbe probe("");
+
+	// "•••"（U+2022 × 3）= 9 字节 / 3 码点
+	probe.Build("\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2");
+	EXPECT_EQ(probe.TableSize(), static_cast<std::size_t>(4));
+	EXPECT_EQ(probe.At(3), static_cast<std::size_t>(9));
+
+	// 换成同码点数但不同字节长的串：若「复用旧表」则末项仍是 9 ⇒ 本条红
+	probe.Build("abc");                                      // 3 字节 / 3 码点
+	EXPECT_EQ(probe.TableSize(), static_cast<std::size_t>(4));
+	EXPECT_EQ(probe.At(3), static_cast<std::size_t>(3));
+
+	// 空串 ⇒ 只有末项
+	probe.Build("");
+	EXPECT_EQ(probe.TableSize(), static_cast<std::size_t>(1));
+	EXPECT_EQ(probe.At(0), static_cast<std::size_t>(0));
+}
+
+// ── ★ Phase 40 T40-7：GDI 倍增窗口 == 整尾拷贝（逐位；D40-D 的精确性）────────
+
+void Test40GdiWindowedEqualsLegacy(){
+
+	// ★ **相对自比**，不做绝对 golden：绝对宽度依赖系统字体（D-7）。
+	//   不 Initialize ⇒ `m_hwnd == nullptr` ⇒ `GetDpiForWindow(nullptr)` 得 0 ⇒ dpi fail-safe 96，
+	//   测量走 `GetDC(nullptr)`（`GDITextMeasurer.cpp` 的既有无头路径）⇒ 两条重载同基准。
+	GDITextMeasurer m;
+	const Font font{ .size = 14.0f, .family = "SimSun" };
+
+	// 样本：ASCII / CJK / astral（wchar 代理对——倍增窗口的 `wide.size() >= W` 只在
+	// 这类文本上多倍增几轮）/ 两类脏字节 / 空串
+	const char* samples[] = { "abcdef", "一丁丂", "\xF0\x9F\x98\x80 x", "\xE0\x41\x41", "A\xC0", "\x80\x8A", "" };
+	// maxWidth 若干档：0（一个都放不下）/ 窄 / 宽 / 极宽（全部放得下）
+	const float widths[] = { 0.0f, 8.0f, 200.0f, 400.0f, 100000.0f };
+
+	const auto check = [&](const std::string& text, float w){
+		const std::vector<std::uint32_t> off = TableFor(text);
+		const std::vector<char32_t> noCps;   // ★ GDI 不读 cps（走 wchar 口径）
+		const TextFit legacy = m.FitText(font, text, 0, w);
+		const TextFit aware  = m.FitText(font, text, 0, w, noCps, off);
+		EXPECT_EQ(aware.fitCp, legacy.fitCp);
+		EXPECT_NEAR(aware.width, legacy.width, kEpsilon);
+	};
+
+	for (const char* s : samples){
+		for (const float w : widths){ check(std::string(s), w); }
+	}
+
+	// ★ 跨窗口边界：窗口初值 64 码点 ⇒ 用 200 字符长串让「放得下 63 / 64 / 65 个」都出现
+	const std::string longText(200, 'a');
+	const std::size_t charW = static_cast<std::size_t>(m.MeasureText(font, "a").width + 0.5f);
+	if (charW > 0){
+		for (const std::size_t n : { std::size_t{63}, std::size_t{64}, std::size_t{65}, std::size_t{66} }){
+			check(longText, static_cast<float>(n * charW));
+			check(longText, static_cast<float>(n * charW) - 0.5f);
+		}
+	}
+	check(longText, 0.0f);
+	check(longText, 100000.0f);
+}
+
 void TestPreferredSizeDefault()
 {
 	// 非文本控件默认 = 当前尺寸（零回归锚点）
@@ -646,6 +776,16 @@ public:
 	/// ★ 观测缝：只计入口次数，计算**转发批一默认体**（真实二分跑，不是桩——否则断行逻辑没被测）
 	TextFit FitText(const Font& font, const std::string& text,
 	                std::size_t startCp, float maxWidth) override{
+		++m_fitCalls;
+		return TextMeasurer::FitText(font, text, startCp, maxWidth);
+	}
+
+	/// ★★ Phase 40（M1）：**必须**同时覆写 5 参——否则 `BuildTextLayout` 改调 5 参后本类
+	///   的 override 一次都不进（虚派发按 5 参签名找，基类默认体接手）⇒ `FitCalls()` 恒 0：
+	///   `== 0` / `== afterBuild` 类断言**假绿**、`> afterBuild` 类断言**假红**。
+	///   ★ 保持「转发默认体」语义：转发到 **4 参**（重载解析按 4 实参命中，不递归）。
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth,
+	                const std::vector<char32_t>&, const std::vector<std::uint32_t>&) override{
 		++m_fitCalls;
 		return TextMeasurer::FitText(font, text, startCp, maxWidth);
 	}
@@ -1779,4 +1919,10 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("Detach.HoverNoLeave",             &Test59DetachHoverNoLeave);
     GetTestRegistry().Add("Detach.DeepDescendant",           &Test59DetachDeepDescendant);
     GetTestRegistry().Add("Detach.DoesNotClearUnrelated",    &Test59DetachDoesNotClearUnrelated);
+
+    // ── ★ Phase 40：码点→字节偏移表（T40-1 表项等价 / T40-8 键变必重建）──
+    GetTestRegistry().Add("Text.CpByteTable.MatchesSequenceLength", &Test40TableMatchesSequenceLength);
+    GetTestRegistry().Add("Text.CpByteTable.RebuiltOnKeyChange",    &Test40TableRebuiltOnKeyChange);
+    // ── ★ Phase 40 批 2：GDI 倍增窗口等价（T40-7）──
+    GetTestRegistry().Add("Text.FitText.GdiWindowedEqualsLegacy",    &Test40GdiWindowedEqualsLegacy);
 }

@@ -6,8 +6,10 @@
 
 #include <algorithm>   // ★ Phase 29（△1）：默认 FitText 体的 (std::max)
 #include <cstddef>
+#include <cstdint>     // ★ Phase 40：5 参重载的 byteOffsets 表项（std::uint32_t）
 #include <limits>      // ★ Phase 29（△1）：默认 FitText 体的 numeric_limits（码点数上界探测）
 #include <string>
+#include <vector>      // ★ Phase 40：5 参重载的 cps / byteOffsets 入参
 
 namespace ECDI {
 
@@ -114,6 +116,68 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 			}
 
 			const std::size_t byteEnd = CodepointIndexToByteOffset(text, startCp + lo);
+			const Size consumed = MeasureText(font, text.substr(byteStart, byteEnd - byteStart));
+			return TextFit{ lo, consumed.width };
+		}
+
+		/// @brief 断行适配（★ Phase 40：**表感知重载**——不再每行 O(N) 换算 / 每行整串解码）
+		/// @details 语义与 4 参**完全相同**（`TextFit{fitCp, width}`，码点口径、`fitCp` 相对数），
+		///          只是**输入预算好**：`totalCp` / `byteStart` / `byteEnd` 全 O(1)。
+		///          ★ 4 参签名与其默认体**一字不动**（D40-G：自定义 measurer 零改动契约）；
+		///            本重载是**并列的第二个虚**，谁调谁选。
+		///          ★★ **两个入参的语义不同，不得混用**（D40-J）：
+		///            · `cps`：`DecodeUtf8` 语义（`src/Render/Utf8Decode.h`——跳过非法首字节、
+		///              截断即停），与调用方的行切分**同源**；FT 用它查 advance。
+		///            · `byteOffsets`：`SequenceLength` 语义（`Core/UTF8.cpp`——非法前导按 1 字节），
+		///              与 `CodepointIndexToByteOffset` **逐位同源**；GDI / 默认体用它切片。
+		///            合法文本二者对齐（`cps.size() == byteOffsets.size()-1`）；**脏字节分歧**
+		///            （`cps.size()` 可**大于**也**小于** `count`，如 `"\xE0\x41\x41"` ⇒ 2 vs 1），
+		///            `totalCp` 一律以 `byteOffsets.size()-1` 为准（M3）。
+		/// @param startCp 起始码点索引（绝对；`>= byteOffsets.size()-1` ⇒ 返回 `{0,0}`）
+		/// @param maxWidth 可用宽（DIP，`< 0` 视作 0）
+		virtual TextFit FitText(const Font& font, const std::string& text, std::size_t startCp,
+		                        float maxWidth, const std::vector<char32_t>& cps,
+		                        const std::vector<std::uint32_t>& byteOffsets)
+		{
+			// ★ 默认体与 4 参**逐行同构**，只有 4 处 `CodepointIndexToByteOffset(text, X)`
+			//   → `byteOffsets[X]` ⇒ 由「表项 == 换算」的 T1 得**逐位等价**（红线②）。
+			(void)cps;   // 默认体只走 `MeasureText(切片)`，只需 byteOffsets（`(void)` 保 /W4 干净）
+			if (byteOffsets.size() < 2)
+			{
+				return TextFit{ 0, 0.0f };   // 空 / 单元素表 ⇒ 码点数为 0（防 size()-1 下溢成 SIZE_MAX）
+			}
+			const std::size_t totalCp = byteOffsets.size() - 1;
+			if (startCp >= totalCp)
+			{
+				return TextFit{ 0, 0.0f };
+			}
+
+			const std::size_t byteStart = byteOffsets[startCp];
+			const std::size_t firstEnd  = byteOffsets[startCp + 1];
+			const std::string firstCpText = text.substr(byteStart, firstEnd - byteStart);
+			if (MeasureText(font, firstCpText).width > (std::max)(0.0f, maxWidth))
+			{
+				return TextFit{ 0, 0.0f };
+			}
+
+			std::size_t lo = 1;
+			std::size_t hi = totalCp - startCp;
+			while (lo < hi)
+			{
+				const std::size_t mid = lo + (hi - lo + 1) / 2;
+				const std::size_t byteEnd = byteOffsets[startCp + mid];
+				if (MeasureText(font, text.substr(byteStart, byteEnd - byteStart)).width
+				    <= (std::max)(0.0f, maxWidth))
+				{
+					lo = mid;
+				}
+				else
+				{
+					hi = mid - 1;
+				}
+			}
+
+			const std::size_t byteEnd = byteOffsets[startCp + lo];
 			const Size consumed = MeasureText(font, text.substr(byteStart, byteEnd - byteStart));
 			return TextFit{ lo, consumed.width };
 		}

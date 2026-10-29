@@ -260,6 +260,148 @@ TextFit GDITextMeasurer::FitText(const Font& font, const std::string& text,
 	return result;
 }
 
+namespace{   // ★ Phase 40：倍增窗口的初始码点数（文件内私有）
+// 「不太大也不太碎」：remaining <= 64 时**首轮即整尾** ⇒ 与改前完全零差异；
+// 长串早期行首轮只拷 64 码点（CJK 192 字节）而不是整尾。
+constexpr std::size_t kFitWindowInitCp = 64;
+}
+
+TextFit GDITextMeasurer::FitText(const Font& font, const std::string& text,
+                                 std::size_t startCp, float maxWidth,
+                                 const std::vector<char32_t>& cps,
+                                 const std::vector<std::uint32_t>& byteOffsets)
+{
+	// ★ Phase 40：表感知重载。`byteStart` / `totalCp` 都是 O(1)
+	//   （4 参路径：`:153` 数 totalCp 是 O(N)、`:170` 算 byteStart 是 O(startCp)）。
+	(void)cps;   // GDI 走 wchar 口径，不需要码点值（签名与 5 参默认体 / FT 统一）
+
+	if (byteOffsets.size() < 2)
+	{
+		return TextFit{ 0, 0.0f };   // 空 / 单元素表 ⇒ 码点数为 0（防 size()-1 下溢）
+	}
+	const std::size_t totalCp = byteOffsets.size() - 1;
+	if (startCp >= totalCp)
+	{
+		return TextFit{ 0, 0.0f };   // 窗口在串尾之后（含空串）
+	}
+
+	int dpi = GetDpiForWindow(m_hwnd);
+	if (dpi <= 0)
+	{
+		dpi = 96;   // fail-safe（与 4 参同口径）
+	}
+
+	const std::size_t byteStart = byteOffsets[startCp];   // ★ O(1)
+	const float limit = (std::max)(0.0f, maxWidth);
+	const LONG maxPx = static_cast<LONG>(limit * static_cast<float>(dpi) / 96.0);
+
+	HDC measureDC = GetDC(nullptr);
+	if (!measureDC)
+	{
+		return TextFit{ totalCp - startCp, 0.0f };   // ★ 无 DC ⇒ 放行全串（同 4 参）
+	}
+
+	const float toDip = 96.0f / static_cast<float>(dpi);
+	const std::size_t remaining = totalCp - startCp;
+	TextFit result{ totalCp - startCp, 0.0f };   // 兜底 = 放行全串
+	HFONT hfont = GetOrCreateFont(font, dpi);
+	if (hfont)
+	{
+		HGDIOBJ oldFont = SelectObject(measureDC, hfont);
+
+		// ★★ 倍增窗口（D40-D）：只拷 `[byteStart, byteOffsets[startCp + W])`。
+		//   等价性两条：① `fitW` 只依赖前缀（累加到超过 maxPx 即停）⇒ 窗口未耗尽时答案与整尾同；
+		//              ② `W == remaining` 时窗口就是整尾 ⇒ 下面第一个分支**逐字复刻** 4 参。
+		std::size_t W = (std::min)(remaining, kFitWindowInitCp);
+		for (;;)
+		{
+			const std::size_t windowEnd = byteOffsets[startCp + W];   // W <= remaining ⇒ 索引 <= totalCp
+			const std::wstring wide = UTF8ToWide(text.substr(byteStart, windowEnd - byteStart));
+			if (wide.empty())
+			{
+				result = TextFit{ 0, 0.0f };
+				break;
+			}
+
+			SIZE extent{};
+			INT fitW = 0;
+			if (!GetTextExtentExPointW(measureDC, wide.c_str(), static_cast<int>(wide.size()),
+			                           maxPx, &fitW, nullptr, &extent))
+			{
+				break;   // 失败 ⇒ 保持兜底（放行全串），同 4 参
+			}
+
+			// ── wchar fit → 码点数（与 4 参三步换算**逐字同源**，C29-2 / D29-Ⅳ）──
+			INT fit = fitW;
+			if (fit > 0)
+			{
+				const wchar_t last = wide[static_cast<std::size_t>(fit) - 1];
+				if (last >= 0xD800 && last <= 0xDBFF)
+				{
+					--fit;   // 停在代理对中间 ⇒ 退一格
+				}
+			}
+			std::size_t lowSurrogates = 0;
+			for (INT k = 0; k < fit; ++k)
+			{
+				const wchar_t c = wide[static_cast<std::size_t>(k)];
+				if (c >= 0xDC00 && c <= 0xDFFF)
+				{
+					++lowSurrogates;
+				}
+			}
+			const std::size_t cpFit = static_cast<std::size_t>(fit) - lowSurrogates;
+
+			if (W == remaining)
+			{
+				// ★★ 整尾 ⇒ **逐字复刻** 4 参的两条宽度分支（不得"优化"判据——脏字节/孤立高代理会漂）
+				float width = 0.0f;
+				if (fit >= static_cast<INT>(wide.size()))
+				{
+					width = static_cast<float>(extent.cx) * toDip;
+				}
+				else
+				{
+					SIZE prefixExtent{};
+					if (GetTextExtentPoint32W(measureDC, wide.c_str(), fit, &prefixExtent))
+					{
+						width = static_cast<float>(prefixExtent.cx) * toDip;
+					}
+				}
+				result = TextFit{ cpFit, width };
+				break;
+			}
+
+			// W < remaining：只有「窗口内确实有放不下的字符」才能提前定答案
+			// ★ 判据用**原始 fitW**（不是代理修正后的 fit）——后者在末位高代理时会小 1，
+			//   让"整窗放下"误判成"未耗尽"（结果仍对，但白倍增几轮）
+			if (fitW < static_cast<INT>(wide.size()))
+			{
+				float width = 0.0f;
+				SIZE prefixExtent{};
+				if (GetTextExtentPoint32W(measureDC, wide.c_str(), fit, &prefixExtent))
+				{
+					width = static_cast<float>(prefixExtent.cx) * toDip;
+				}
+				result = TextFit{ cpFit, width };
+				break;
+			}
+			W = (std::min)(remaining, W * 2);   // 窗口全放下但仍非整尾 ⇒ 倍增（不改任何状态）
+		}
+
+		SelectObject(measureDC, oldFont);
+	}
+
+	ReleaseDC(nullptr, measureDC);
+
+	// ★ 防御：cpFit 不得越过串尾（同 4 参 `:255-259`——逐位等价的一部分）
+	if (result.fitCp > totalCp - startCp)
+	{
+		result.fitCp = totalCp - startCp;
+	}
+	return result;
+}
+
 float GDITextMeasurer::LineHeight(const Font& font)
 {
 	// ★★ Phase 31（D31-A）：行高口径 = **hhea 行框**（asc − desc + lineGap）

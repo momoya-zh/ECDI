@@ -1,7 +1,9 @@
 ﻿#include "ECDI/Widget/TextWidget.h"
 
+#include "ECDI/Core/ECDIAssert.h"   // ★ Phase 40：表设施的 FRAMEWORK_ASSERT（截断 / 串身份自检）
 #include "ECDI/Core/Size.h"
 #include "ECDI/Core/UTF8.h"     // ★ Phase 29 批二（D29-C）：CodepointIndexToByteOffset（码点区间 → 字节切片）
+                                // ★ Phase 40：另加 DecodeCodepointAt（表构建的单源步进）
 #include "ECDI/Render/PaintContext.h"
 #include "ECDI/Render/TextMeasurer.h"
 #include "ECDI/Theme/DefaultTheme.h"
@@ -11,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>     // std::lround（Phase 28 批二：DPI 指纹）
+#include <cstdint>   // ★ Phase 40：std::uint32_t（表项）
+#include <limits>    // ★ Phase 40：numeric_limits（偏移的半宽表项上界断言）
 #include <utility>
 
 namespace ECDI{
@@ -195,7 +199,90 @@ std::size_t FindLastSoftBreak(const std::vector<char32_t>& cps,
 	return hardEnd;
 }
 
+// ── Phase 40：码点→字节偏移表（★ D40-J：SequenceLength 空间；★ D-9：钳制单源）──────────
+
+/// @brief 构建码点→字节偏移表（★ T1：`offsets[k] == CodepointIndexToByteOffset(text, k)`，逐位）
+/// @details ★★ **跨 TU 契约（R40-12）**：步进量**只取 `DecodeCodepointAt` 的返回值**，
+///          不得按 `lead` 自行重算——它返回的正是 `SequenceLength(lead)`（`Core/UTF8.cpp:65/86`），
+///          与 `CodepointIndexToByteOffset` 的推进式**同一函数**。若哪天有人把
+///          `DecodeCodepointAt` 的截断步进钳到 `size`，本表的等价性会**静默失效且不会编译报错**
+///          ⇒ 唯一护栏是 T40-1 的 `"A\xC0"` 样本（必测）。
+/// @note 末段截断时刻意**越过** `text.size()`（`"A\xC0"` 得 `[0,1,3]`）——做钳制反而与
+///       `CodepointIndexToByteOffset` 不逐位对应（那是既有行为，见 R40-2）。
+void BuildByteOffsets(const std::string& text, std::vector<std::uint32_t>& offsets){
+
+	// 半宽表项：偏移上限 = 串字节数（本框架文本远 < 4 GiB）⇒ 越界只可能来自编程错误
+	FRAMEWORK_ASSERT(text.size() <= (std::numeric_limits<std::uint32_t>::max)());
+
+	offsets.clear();
+	offsets.reserve(text.size() + 1);   // 上界（CJK 时明显过预留，但只在**重建**时一次，不是每行）
+	std::size_t byte = 0;
+	while (byte < text.size()){
+		offsets.push_back(static_cast<std::uint32_t>(byte));
+		char32_t cp = 0;
+		byte += DecodeCodepointAt(text.data() + byte, text.size() - byte, cp);
+	}
+	offsets.push_back(static_cast<std::uint32_t>(byte));   // 末项（截断时可越过 size——同换算函数）
+}
+
+/// @brief 读表项（★ **钳制规则的唯一实现**——基类 `ByteOffsetAt` 与 `emitLine` 都转它，D-9）
+/// @details `k` 可**超出末项**：行表 / `cps` 用的是 `DecodeUtf8` 空间的索引，而表只有
+///          `count+1` 项，二者在「前导合法 + 续字节非法」的串上会 `cps.size() > count`
+///          （探针：`"\xE0\x41\x41"` → `cps=2 / count=1`）⇒ 消费方**必然**会给出越界索引。
+///          ★ 钳制**逐位等价**于旧行为（不是保守近似）：任意 `k ≥ count` 时
+///          `CodepointIndexToByteOffset(text, k)` 恒等于 `offsets[count]`——两者步进式相同、
+///          退出条件同为 `byteOffset >= text.size()`。（探针 8/8 样本验证，含 overlong 三档。）
+std::size_t OffsetAt(const std::vector<std::uint32_t>& offsets, std::size_t k) noexcept{
+
+	if (offsets.empty()){
+		return 0;   // 未建表（理论上不可达——`BuildByteOffsets` 至少产出 1 项）
+	}
+	return offsets[(std::min)(k, offsets.size() - 1)];
+}
+
 }   // namespace
+
+// ── Phase 40：表设施（单写者 + 命中自检，D40-L）────────────────────────────
+
+TextWidget::ByteMapKey TextWidget::CurrentByteMapKey() const{
+
+	// 基类无 echo / 组合 ⇒ 只有 revision 是变量（维 2-5 恒初值）
+	return ByteMapKey{ m_textRevision, 0, false, 0, 0 };
+
+}
+
+void TextWidget::EnsureCpByteOffsets(const std::string& text) const{
+
+	if (m_cpByteValid && m_cpByteKey == CurrentByteMapKey())
+	{
+		// ★ D40-L-3 串身份自检：键相同但表不是这个串的 ⇒ 内部不变量被破（同键不同串）
+		//   ★★ D-10：比的是**建表时记下的串长**，**不是** `m_cpByteOffsets.back()`——
+		//      末段截断时末项会**越过** size（`"A\xC0"` → back()=3 > size=2）⇒ 用 back() 会
+		//      对**合法输入**假阳：debug 中止、release 每帧重建（静默废掉全部收益）。
+		if (m_cpByteTextSize != text.size())
+		{
+			FRAMEWORK_ASSERT(m_cpByteTextSize == text.size());   // debug 中止
+			// release 继续 ⇒ **不复用错串表**，落到下面重建
+		}
+		else
+		{
+			return;   // 命中 ⇒ 0 分配 0 扫描（正常路径）
+		}
+	}
+
+	BuildByteOffsets(text, m_cpByteOffsets);
+	m_cpByteTextSize = text.size();   // ★ D-10：连同表一起记
+	m_cpByteKey      = CurrentByteMapKey();
+	m_cpByteValid    = true;
+
+}
+
+std::size_t TextWidget::ByteOffsetAt(std::size_t cpIndex) const{
+
+	// ★★ D-9：**钳制**而非 assert——消费方给的是 `cps` 空间索引，可 > count（见 `OffsetAt` 的等价性证明）
+	return OffsetAt(m_cpByteOffsets, cpIndex);
+
+}
 
 // ── Phase 29 批二：断行状态机（D29-Ⅰ——流水线序固定）──────────────────────
 
@@ -215,6 +302,15 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer,
 		return layout;
 	}
 
+	// ── ★ Phase 40（D40-L-1）：**局部**偏移表——供下面 `emitLine`（`[&]` lambda 天然可见）与
+	//   5 参 `FitText` 用，**绝不写基类成员**。`BuildTextLayout` 的两个调用方喂**不同的串**
+	//   （`TextBox.cpp` 的 `RecalculateLines` 喂掩码串 `BuildDisplayText()`；
+	//    `TextWidget.cpp` 的 `GetTextLayout` 喂明文 `m_text`）⇒ 发布到基类会让
+	//   「键相同、串不同」静默复用（掩码串 3N 字节 vs 明文 N 字节 ⇒ 切片越界）。
+	//   插在 `cps.empty()` 早退之后：空串不需要表，可省一次构造。
+	std::vector<std::uint32_t> byteOffsets;
+	BuildByteOffsets(text, byteOffsets);
+
 	// ★ emit 一行：区间 [lineStart, lineEnd) + 尾部空白裁剪 + **行宽来源**（D29-Ⅵ / v1.1 必修②）
 	//   ——禁无条件对每行调 MeasureText；只在「发生过回退」（end != fitEnd）时补测一次
 	//   （FT 侧即逐码点 memo 求和 = O(n)；GDI 侧 = 一次原生 extent，记 O5）。
@@ -226,8 +322,11 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer,
 		const float width = (end == fitEnd)
 			? fitWidth                                            // ★ 无回退 ⇒ 直接采用（零二次测量）
 			: [&]{
-				const std::size_t b0 = CodepointIndexToByteOffset(text, lineStart);
-				const std::size_t b1 = CodepointIndexToByteOffset(text, end);
+				// ★ Phase 40：查局部表（O(1)）。`OffsetAt` **钳制**——`end` 是 `cps`(DecodeUtf8) 空间索引，
+				//   在「前导合法 + 续字节非法」的串上可 > 表的码点数（`"\xE0\x41\x41"`：cps=2 / count=1）；
+				//   钳到末项与旧行为 `CodepointIndexToByteOffset` 的退出行为**逐位等价**（见 `OffsetAt` 注释）。
+				const std::size_t b0 = OffsetAt(byteOffsets, lineStart);
+				const std::size_t b1 = OffsetAt(byteOffsets, end);
 				return measurer.MeasureText(font, text.substr(b0, b1 - b0)).width;
 			}();
 		layout.lines.emplace_back(TextLine{ lineStart, end - lineStart, width, lineEnd });
@@ -267,7 +366,8 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer,
 			const std::size_t lineStart = scan;
 
 			// ① 硬边界：从 scan 起最多放多少码点（C29-1 契约——FitText 不懂空格/CJK/禁则）
-			const TextFit fit = measurer.FitText(font, text, scan, limit);
+			// ★ Phase 40：**5 参**重载——`cps` / `byteOffsets` 复用上面的解码，量具无需再整串预备
+			const TextFit fit = measurer.FitText(font, text, scan, limit, cps, byteOffsets);
 			const std::size_t hardEnd = scan + fit.fitCp;   // 可能 == scan（一个码点都放不下）
 
 			// ② 整段放得下 ⇒ 一行收尾，本段结束
@@ -392,6 +492,11 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 		//   `CalculateTextPosition(x, y, 块宽, 块高)`，水平仍取控件的对齐策略）。
 		const Point block = CalculateTextPosition(x, y, BlockWidth(layout), layout.totalHeight);
 
+		// ★ Phase 40（M4）：必须**自己** Ensure——`GetTextLayout` 键命中时直接 return 缓存的
+		//   `m_wrapLayout`、根本不进 `BuildTextLayout`，不能指望上游替我们建表。
+		//   放在循环**之前**一次（命中 = 一次键比较、0 分配），不要每行一次。
+		EnsureCpByteOffsets(m_text);
+
 		std::size_t row = 0;
 		for (const TextLine& line : layout.lines)
 		{
@@ -402,8 +507,9 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 				continue;   // ★ 空行：占行高但**零 DrawText 命令**（D29-Ⅴ / C29-4）
 			}
 			// ★ UTF-8 切片**仅绘制时**（D29-C：布局零 substr；每行一次）
-			const std::size_t b0 = CodepointIndexToByteOffset(m_text, line.startCp);
-			const std::size_t b1 = CodepointIndexToByteOffset(m_text, line.startCp + line.cpCount);
+			// ★ Phase 40：查表 O(1)（`ByteOffsetAt` 内含钳制——行表索引是 `cps` 空间）
+			const std::size_t b0 = ByteOffsetAt(line.startCp);
+			const std::size_t b1 = ByteOffsetAt(line.startCp + line.cpCount);
 			ctx.DrawText(Point{ block.x, lineY }, m_text.substr(b0, b1 - b0), color, m_style.font.value);
 		}
 		return;

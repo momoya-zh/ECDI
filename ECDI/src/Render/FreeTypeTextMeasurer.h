@@ -3,7 +3,9 @@
 #include "ECDI/Render/TextMeasurer.h"
 #include "Render/FontEngine.h"
 
+#include <cstdint>   // ★ Phase 40：5 参重载的 byteOffsets 表项
 #include <memory>
+#include <vector>    // ★ Phase 40：5 参重载的 cps / byteOffsets 入参
 
 namespace ECDI{
 
@@ -29,6 +31,13 @@ public:
 	///          同为**生产链**，各自原生实现（FT = memo 累积 / GDI = `GetTextExtentExPointW`）。
 	TextFit FitText(const Font& font, const std::string& text,
 	                std::size_t startCp, float maxWidth) override;
+
+	/// @brief 断行适配（★ Phase 40：表感知重载——转发 `FontEngine::FitText` 的 5 参）
+	/// @details 与 4 参同语义；无 engine 时兜底「放行全串、宽 0」，但码点数取**表**（O(1)）而非
+	///          `ByteOffsetToCodepointIndex(text, text.size())`（O(N)）。
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth,
+	                const std::vector<char32_t>& cps,
+	                const std::vector<std::uint32_t>& byteOffsets) override;
 
 	float LineHeight(const Font& font) override;
 

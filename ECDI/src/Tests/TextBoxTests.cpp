@@ -19,12 +19,20 @@
 #include "ECDI/Theme/DefaultTheme.h"
 #include "Render/GDIBackend.h"
 #include "Render/GDITextMeasurer.h"
+#include "Render/Utf8Decode.h"   // ★ Phase 40：T40-3 的 cps 合计（行表就是 cps 空间）
 
 using namespace ECDI;
 
 namespace {
 
 constexpr float kEps = 0.001f;   // EXPECT_NEAR 精度（同 WidgetTests/ProgressBarTests）
+
+/// @brief 常驻条槽（★ 折行请求态恒扣）：条厚 12（`ScrollBarStyle` 缺省）+ 内缩 max(0, 2) = 14
+/// @details ⇒ 「样本折行宽 w」对应的**控件宽 = w + 14**。这条换算只在这里出现一次；
+///   若将来缺省条厚变了，**样本表全体会一起红**（而不是悄悄偏移 14px 后仍然绿）。
+///   ★ Phase 40 批 2：定义**上移**到 namespace 开头——T40-3/4/6 在 Phase 38 夹具区之前，
+///   而它的语义与 Phase 38 无关（任何折行夹具都要扣这条槽）。原位置不再重复定义。
+constexpr int kWrapBarSlot = 14;
 
 /// @brief 可测 TextBox：暴露 protected 键盘选择路径（无窗口安全——SyncTextInputCaret 有 Window 防御）
 /// @note CaretIndexFromX 为 private（点击定位算法），派生类不可访问——算法直测
@@ -155,6 +163,194 @@ static const FitGold kFitGolden[] = {
     { "\xC0\x8A", 0, 100.0f, 1,  8.0f },   // 脏字节（overlong U+000A，totalCp == 1）
 };
 
+/// @brief 用**公共换算 API** 构造偏移表（★ Phase 40：与产品 `BuildByteOffsets` 独立实现）
+/// @details 逐 k 取 `CodepointIndexToByteOffset` 直到串尾（含空串：k=0 得 0 ⇒ 返回 `[0]`）
+/// @note `WidgetTests.cpp` 有一份同实现（`static` 内部链接，各自 TU 私有——不为 6 行开新头）
+static std::vector<std::uint32_t> TableFor(const std::string& s){
+	std::vector<std::uint32_t> t;
+	for (std::size_t k = 0;; ++k){
+		const std::size_t b = CodepointIndexToByteOffset(s, k);
+		t.push_back(static_cast<std::uint32_t>(b));
+		if (b >= s.size()){ return t; }
+	}
+}
+
+// ── ★ Phase 40 T40-2：5 参表感知 `FitText` 与 4 参**逐位等价**（默认体，红线②）────────
+
+void Test40FitTextTableAwareEqualsLegacy(){
+
+	FakeTextMeasurer m;   // 不覆写 FitText ⇒ 两端都走默认体（旧默认体 vs 新默认体）
+	const Font font{};
+	const std::vector<char32_t> noCps;   // 默认体不读 cps（`(void)cps`）
+
+	const auto check = [&](const char* text, std::size_t startCp, float maxWidth){
+		const std::string t(text);
+		const std::vector<std::uint32_t> off = TableFor(t);
+		const TextFit legacy = m.FitText(font, t, startCp, maxWidth);
+		const TextFit aware  = m.FitText(font, t, startCp, maxWidth, noCps, off);
+		EXPECT_EQ(aware.fitCp, legacy.fitCp);
+		EXPECT_NEAR(aware.width, legacy.width, kEps);
+	};
+
+	// ① 既有 8 组 golden（已含 `startCp != 0` / overlong / 越界 / 空串——正是 P39 批 0 采的那张表）
+	for (const auto& g : kFitGolden){
+		check(g.text, g.startCp, g.maxWidth);
+	}
+
+	// ② ★ D-9 的两类「合法前导 + 非法续字节」（cps > count）+ 多个 startCp（含 ≥ totalCp 的早退）
+	const char* dirty[] = { "\xE0\x41\x41", "\xF0\x41\x41\x41" };
+	for (const char* s : dirty){
+		check(s, 0, 100.0f);
+		check(s, 1, 100.0f);
+		check(s, 2, 100.0f);
+		check(s, 3, 100.0f);   // startCp >= totalCp ⇒ 两端都必须返回 {0, 0}
+	}
+}
+
+// ── ★ Phase 40 T40-5：overlong `U+000A` 三档仍断行（表与 `cps` 同源，跨支判据）──────────
+
+void Test40OverlongSameSource(){
+
+	TestableTextBox box("");
+	box.SetSize(200, 200);
+
+	// 三种 overlong 编码的 U+000A 被 `DecodeUtf8` 解成 `'\n'` ⇒ 2 段 ⇒ 2 行。
+	// ★ 用 `LineCountForTest()`（读 `m_lines.size()`）而**不是** `RowCountForTest()`——
+	//   后者从 preferred 高反推，而这些样本**不含字面 0x0A 字节** ⇒ `GetPreferredSize` 走单行支
+	//   ⇒ 读回 1（Phase 39 的 P0 假绿，已由 `LineCountForTest` 的注释钉死）。
+	const char* overlong[] = { "\xC0\x8A", "\xE0\x80\x8A", "\xF0\x80\x80\x8A" };
+	for (const char* s : overlong){
+		box.SetText(std::string(s));
+		EXPECT_EQ(box.LineCountForTest(), static_cast<std::size_t>(2));
+	}
+}
+
+// ── ★ Phase 40 T40-3：折行行表在「cps > count」脏串上仍自洽（D-9 的唯一可达路径）──
+
+void Test40WrapLineTableDirtyBytes(){
+
+	// ★ 为什么必须有这条：`"\xE0\x41\x41"` 在折行下会走到 `emitLine` 的**回退分支**
+	//   （`end != fitEnd` ⇒ 走 `MeasureText(text.substr(...))`），而 `end` 来自
+	//   `cps`(DecodeUtf8) 空间（2）> 表的码点数（1）。
+	//   批 2 引入钳制**之前**，这里取 `byteOffsets[end]` 是**越界读**（debug 弹出
+	//   `FRAMEWORK_ASSERT` 中止进程、release 读野值）——3 字节输入即可触发，不是理论构造。
+	//   钳制后必须安静通过，且行结构自洽（覆盖全串、无缝、无重叠）。
+	//
+	// ★ 为什么不写死行数与行区间：本条的判据是**结构不变量**（与折行宽无关），
+	//   写死区间会把「FakeTextMeasurer 的 8px 口径」重复钉一遍（既有 T38 表已做）。
+	const char* dirty[] = { "\xE0\x41\x41", "\xF0\x41\x41\x41" };
+	const float widths[] = { 8.0f, 16.0f, 24.0f, 40.0f, 100.0f };
+
+	for (const char* s : dirty){
+		const std::string text(s);
+		const std::size_t cpTotal = DecodeUtf8(text).size();   // cps 空间合计（行表用的就是它）
+
+		for (const float w : widths){
+			TestableTextBox box("");
+			box.SetSize(static_cast<int>(w) + kWrapBarSlot, 200);
+			box.SetWordWrap(true);
+			box.SetText(text);
+
+			const std::size_t n = box.LineCountForTest();
+			EXPECT_TRUE(n >= 1);
+			if (n == 0){ continue; }
+
+			std::size_t expectStart = 0;   // 首行必须从 0 起
+			for (std::size_t i = 0; i < n; ++i){
+				const auto own = box.OwnForTest(i);
+				EXPECT_EQ(own.first, expectStart);       // 无缝、无重叠
+				EXPECT_TRUE(own.second >= own.first);    // 单调
+				expectStart = own.second;
+			}
+			// 末行必须覆盖到全串（这些样本不含 `\n` ⇒ 无「跳过 1 个码点」的段间空隙）
+			EXPECT_EQ(expectStart, cpTotal);
+		}
+	}
+}
+
+// ── ★ Phase 40 T40-4：`CaretIndexFromLineX` 行首语义不变（K9 的 O(1) 化不扰动定位）──
+
+void Test40CaretLineXBitIdentical(){
+
+	// ★ 判据的**真实边界（如实写）**：本用例在无窗口环境下跑，`GetWindow() == nullptr`
+	//   ⇒ 函数体内的行内测量循环被守卫短路，`CaretIndexFromLineX` 恒返回**行首**。
+	//   所以本条能守的是「表替换 + `lineCpCount` 简化之后，行首返回值与行表一致」，
+	//   **不能**守「行内 X 落在第几个码点」——那需要真窗口的测量器（R40-7 的人工核对项）。
+	const char* samples[] = { "ab cd ef", "一二三四五六", "\xE0\x41\x41", "ab\ncd" };
+	for (const char* s : samples){
+		TestableTextBox box("");
+		box.SetSize(24 + kWrapBarSlot, 200);
+		box.SetWordWrap(true);
+		box.SetText(std::string(s));
+
+		const std::size_t n = box.LineCountForTest();
+		for (std::size_t i = 0; i < n; ++i){
+			// 无窗口 ⇒ 恒行首；行内 X 取任何值都不该改变结果
+			const std::size_t lineStart = box.OwnForTest(i).first;
+			EXPECT_EQ(box.CaretIndexFromLineX(i, 0.0f), lineStart);
+			EXPECT_EQ(box.CaretIndexFromLineX(i, 6.0f), lineStart);
+			EXPECT_EQ(box.CaretIndexFromLineX(i, 1.0e6f), lineStart);   // 极端 X 也不得越界
+		}
+	}
+}
+
+// ── ★ Phase 40 T40-6：折行绘制每行 `DrawText` 的**字节**逐位（查表不改变切片）────────
+
+void Test40PaintWrapBytesBitIdentical(){
+
+	// ★ 判据：绘制出来的每行字节，必须等于「用**公共换算 API** 独立切出的字节」。
+	//   产品的 `ByteOffsetAt` 与这里的 `TableFor` 是**两份独立实现** ⇒ 这条不是自证。
+	//   含脏字节样本：它们同时覆盖「表项被钳制」时的切片。
+	const char* samples[] = { "ab cd ef", "一二三四五六", "\xE0\x41\x41", "ab cd \nef gh", "\xF0\x9F\x98\x80 x" };
+	const float widths[] = { 16.0f, 24.0f, 40.0f };
+
+	for (const char* s : samples){
+		const std::string text(s);
+		for (const float w : widths){
+			TestableTextBox box("");
+			box.SetSize(static_cast<int>(w) + kWrapBarSlot, 200);
+			box.SetWordWrap(true);
+			box.SetText(text);
+
+			CommandBuffer commands;
+			FakeTextMeasurer measurer;
+			PaintContext ctx(commands, measurer);
+			box.Paint(ctx, 0, 0);
+
+			std::vector<std::string> painted;
+			for (const auto& cmd : commands){
+				if (const auto* t = std::get_if<DrawTextCommand>(&cmd)){
+					painted.push_back(t->text);
+				}
+			}
+
+			// 期望：按行表（裁剪口径）+ 公共换算 API 切字节。
+			// ★★ 判空必须**镜像产品**：`OnPaint` 的判据是 `!lineText.empty()`——即
+			//   **切出来的字节**非空，不是「码点区间非空」。二者在脏字节上会分开：
+			//   `"\xE0\x41\x41"` 的 `totalCp`(SequenceLength) = 1 而 `cps` = 2 ⇒ 行表切成
+			//   2 行，第 2 行 `draw=(1,2)` 但 `b0 == b1 == 3`（都钳到末项）⇒ 切出 0 字节 ⇒
+			//   **产品不画**。若这里按码点区间判空，期望会多一条空串 ⇒ 判据假红。
+			const std::vector<std::uint32_t> off = TableFor(text);
+			const std::size_t last = off.empty() ? 0 : off.size() - 1;
+			std::vector<std::string> expect;
+			const std::size_t n = box.LineCountForTest();
+			for (std::size_t i = 0; i < n; ++i){
+				const auto draw = box.DrawForTest(i);
+				const std::size_t b0 = off[(std::min)(draw.first, last)];
+				const std::size_t b1 = off[(std::min)(draw.second, last)];
+				const std::string piece = text.substr(b0, b1 - b0);
+				if (piece.empty()){ continue; }   // ★ 同 `OnPaint` 的 `!lineText.empty()`
+				expect.push_back(piece);
+			}
+
+			EXPECT_EQ(painted.size(), expect.size());
+			for (std::size_t i = 0; i < expect.size() && i < painted.size(); ++i){
+				EXPECT_TRUE(painted[i] == expect[i]);
+			}
+		}
+	}
+}
+
 /// @brief 表 B 的一行：两口径区间（own = 归属 / draw = 裁剪）
 struct LineGoldRow{ size_t ownBeg, ownEnd, drawBeg, drawEnd; };
 
@@ -255,10 +451,7 @@ FakeTextMeasurer TestableTextBox::ms_fake;
 // Phase 38 批 2 夹具：折行样本表 / 折行探针 / 计数测量器
 // ══════════════════════════════════════════════════════════════════════════
 
-/// @brief 常驻条槽（★ 折行请求态恒扣）：条厚 12（`ScrollBarStyle` 缺省）+ 内缩 max(0, 2) = 14
-/// @details ⇒ 「样本折行宽 w」对应的**控件宽 = w + 14**。这条换算只在这里出现一次；
-///   若将来缺省条厚变了，**样本表全体会一起红**（而不是悄悄偏移 14px 后仍然绿）。
-constexpr int kWrapBarSlot = 14;
+// （`kWrapBarSlot` 已上移到 namespace 开头——Phase 40 批 2 的用例在它之前引用）
 
 struct WrapLineExpect{
 	std::size_t drawStart;   ///< 绘制起点（= 归属起点）
@@ -379,6 +572,14 @@ public:
 		const std::size_t byWidth = static_cast<std::size_t>((std::max)(0.0f, maxWidth) / 8.0f);
 		const std::size_t n = (std::min)(byWidth, total - startCp);   // ★ fitCp 是相对数、不得越串尾（C29-1）
 		return TextFit{ n, static_cast<float>(n) * 8.0f };
+	}
+
+	/// ★★ Phase 40（M1）：**必须**同时覆写 5 参——否则 `BuildTextLayout` 改调 5 参后本类 override
+	///   一次都不进（基类默认体接手）⇒ `fitCalls` 恒 0：`EXPECT_EQ(counter.fitCalls, 3)`（T38-15）
+	///   假红、`== afterBuild` 类**假绿**。★ 转发到**本类 4 参**（重载解析按 4 实参命中，不递归）。
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth,
+	                const std::vector<char32_t>&, const std::vector<std::uint32_t>&) override{
+		return CountingFakeMeasurer::FitText(font, text, startCp, maxWidth);
 	}
 
 	float LineHeight(const Font&) override{ return 16.0f; }
@@ -1986,6 +2187,13 @@ public:
 		return TextFit{ n, static_cast<float>(n) * 8.0f };
 	}
 
+	/// ★★ Phase 40（M1）：同上——必须覆写 5 参，否则 `fitCalls` / `fed` 全部空转
+	///   （`fed` 空掉会让 T38-14 掩码维「喂进去的是不是显示串」这条判据静默失效）。
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth,
+	                const std::vector<char32_t>&, const std::vector<std::uint32_t>&) override{
+		return RecordingFakeMeasurer::FitText(font, text, startCp, maxWidth);
+	}
+
 	float LineHeight(const Font&) override{ return 16.0f; }
 
 	/// @brief 全部喂入串拼成一条（跨行检测子串/明文用）
@@ -3362,4 +3570,13 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.Utf8ScanCrossBranch", &Test39Utf8ScanCrossBranch);    // T39-5
     GetTestRegistry().Add("TextBox.Utf8ScanTwoRanges", &Test39Utf8ScanTwoRanges);        // T39-6
     GetTestRegistry().Add("TextBox.Utf8ScanCountAgrees", &Test39Utf8ScanCountAgrees);    // T39-7
+
+    // ── ★ Phase 40 批 1：表感知 FitText 的等价性（538 → 542）──
+    GetTestRegistry().Add("Text.FitText.TableAwareEqualsLegacy", &Test40FitTextTableAwareEqualsLegacy);   // T40-2
+    GetTestRegistry().Add("Text.Wrap.OverlongSameSource",        &Test40OverlongSameSource);              // T40-5
+
+    // ── ★ Phase 40 批 2：消费站点切换（542 → 545）──
+    GetTestRegistry().Add("Text.Wrap.LineTableBitIdentical",     &Test40WrapLineTableDirtyBytes);         // T40-3
+    GetTestRegistry().Add("Text.Caret.LineXBitIdentical",        &Test40CaretLineXBitIdentical);          // T40-4
+    GetTestRegistry().Add("Text.Paint.WrapBytesBitIdentical",    &Test40PaintWrapBytesBitIdentical);      // T40-6
 }

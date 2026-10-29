@@ -7,6 +7,7 @@
 #include "ECDI/Theme/TextStyle.h"
 #include "ECDI/Widget/Widget.h"
 
+#include <cstdint>   // ★ Phase 40：码点→字节偏移表的半宽表项（std::uint32_t）
 #include <string>
 #include <vector>   // ★ Phase 29 批二（D29-C）：TextLayout::lines（布局零 substr——行 = 码点区间）
 
@@ -140,6 +141,50 @@ protected:
 	/// @details `TextBox` 的 10 维自比键用它做**维 1**（「行表是否过期」的第一判据）——
 	///          比暴露 `m_text` 引用或 `MarkTextChanged` 更窄：只能读、不能写、不泄漏成员。
 	[[nodiscard]] std::size_t TextRevision() const noexcept{ return m_textRevision; }
+
+	// ── Phase 40：码点→字节偏移表（★ D40-B/D40-C/D40-L：基类持有、单写者、消费者懒建）──
+	//    消费者 = BuildTextLayout 的局部表 / DrawTextContent / OnPaint / CaretIndexFromLineX。
+
+	/// @brief 表身份 = **决定「串的字节」的 5 维**（与 `TextBox::LineKeyMatches` 的 12 维**不同**——后者管宽度）
+	/// @details `byteOffsets[k]` 是纯 UTF-8 结构量：只取决于字符串的字节，
+	///          与 font / dpi / wrapWidth / hasMeasurer / wrapRequested **全无关**（这些只影响**宽度**）
+	///          ⇒ 5 维即充分（D40-C）。
+	///          ★ 充分性的**前提**是「单写者」（D40-L）：表只能由 `EnsureCpByteOffsets` 写，
+	///          否则两个不同的串可共享同一个键。
+	struct ByteMapKey{
+		std::size_t revision  = 0;       ///< 维 1：`TextRevision()`（`m_text` 每次变更递增）
+		int         echo      = 0;       ///< 维 2：`EchoMode`（基类恒 0 = Normal；`TextBox` 才有 Password）
+		bool        composing = false;   ///< 维 3：组合态（组合区间显示原文，字节与掩码不同）
+		std::size_t compStart = 0;       ///< 维 4：组合起点（码点）
+		std::size_t compLen   = 0;       ///< 维 5：组合长度（码点）
+		bool operator==(const ByteMapKey&) const = default;   // C++20
+	};
+
+	/// @brief 当前串身份（protected virtual——`TextBox` override 补齐 echo / composing 三维）
+	[[nodiscard]] virtual ByteMapKey CurrentByteMapKey() const;
+
+	/// @brief 确保偏移表匹配 `text`（**全仓唯一写者**——D40-L）
+	/// @details 键命中**且串长自洽** ⇒ 直接返回（0 分配 0 扫描）；否则重建。
+	///          ★ 键命中但 `m_cpByteTextSize != text.size()` ⇒ **同键不同串**（内部不变量被破）：
+	///          debug 下 `FRAMEWORK_ASSERT` 弹窗中止；**release 下不复用、直接重建**（正确性优先）。
+	///          ★★ **绝不能用 `m_cpByteOffsets.back()` 比串长**：末段截断时末项会越过 `text.size()`
+	///          （`"A\xC0"` → 末项 3 > 2）⇒ 对**合法输入**假阳（D-10）。
+	void EnsureCpByteOffsets(const std::string& text) const;
+
+	/// @brief 读表项（**唯一读法**——禁止裸下标散在消费站点）
+	/// @param cpIndex 码点索引；★ **超出末项时钳制到末项**（**不** assert）——见 `TextWidget.cpp`
+	///                `OffsetAt` 的等价性证明（消费方给的是 `cps` 空间索引，可 > count）
+	[[nodiscard]] std::size_t ByteOffsetAt(std::size_t cpIndex) const;
+
+	/// @brief 码点→字节偏移表：`m_cpByteOffsets[k]` = 第 k 个码点的首字节偏移
+	/// @details `size() == count + 1`（`count` 是 **`SequenceLength` 空间**的码点数，**不是** `cps.size()`）；
+	///          末项 = 最后一次步进后的字节位——★ **末段截断时可越过 `text.size()`**
+	///          （如 `"A\xC0"` → `[0,1,3]`，末项 3 > size 2；与 `CodepointIndexToByteOffset` 同形）
+	mutable std::vector<std::uint32_t> m_cpByteOffsets;
+	mutable bool        m_cpByteValid    = false;   ///< 表是否已建立
+	mutable std::size_t m_cpByteTextSize = 0;       ///< ★ 建表时那条串的 `size()`（串身份自检用——
+	                                                ///<   **绝不能用 `back()`**：末段截断时 `back() > size()`，D-10）
+	mutable ByteMapKey  m_cpByteKey{};              ///< 建立表时的键
 
 private:   // ← ★ Phase 38：原 `:99` 的 private 区**从这一行起**（上面三件已上移 protected）
 

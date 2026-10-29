@@ -51,6 +51,25 @@ TextFit FreeTypeTextMeasurer::FitText(const Font& font, const std::string& text,
 	return m_engine->FitText(font, text, startCp, maxWidth);
 }
 
+TextFit FreeTypeTextMeasurer::FitText(const Font& font, const std::string& text,
+                                      std::size_t startCp, float maxWidth,
+                                      const std::vector<char32_t>& cps,
+                                      const std::vector<std::uint32_t>& byteOffsets)
+{
+	// ★ Phase 40：表感知重载——生产路径直接转发 `FontEngine` 的 5 参（复用入参 `cps`，零分配）。
+	if (!m_engine)
+	{
+		// 无 engine ⇒ 放行全串、宽 0（与 4 参 `:46-49` 同口径），但码点数取表 = O(1)
+		if (byteOffsets.size() < 2)
+		{
+			return TextFit{ 0, 0.0f };
+		}
+		const std::size_t totalCp = byteOffsets.size() - 1;
+		return TextFit{ (startCp < totalCp) ? (totalCp - startCp) : 0, 0.0f };
+	}
+	return m_engine->FitText(font, text, startCp, maxWidth, cps, byteOffsets);
+}
+
 float FreeTypeTextMeasurer::LineHeight(const Font& font)
 {
 	return m_engine ? m_engine->LineHeight(font) : font.size;
