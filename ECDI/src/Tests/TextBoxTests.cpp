@@ -78,6 +78,34 @@ public:
 
     /// @brief 裁剪口径区间（同上）
     [[nodiscard]] std::pair<size_t, size_t> DrawForTest(size_t i){ RecalculateLines(); return LineDrawRange(i); }
+
+    /// @brief ★ Phase 39：行表行数 = `m_lines.size()`（**唯一可用通道**）
+    /// @details ★★ 为什么**不能**用 `RowCountForTest()`：它是从 preferred 高反推的，而
+    ///   `TextBox::GetPreferredSize`（`TextBox.cpp:201`）只在「含字面 `\n` 或折行生效」时
+    ///   才走 `MultilinePreferred()`（读 `m_lines.size()`）。Phase 39 的 overlong 样本
+    ///   （`C0 8A` / `E0 80 8A` / `F0 80 80 8A`）**不含字面 0x0A 字节** ⇒ 非折行态读回
+    ///   **1**、真值 **2** ⇒ 五条用例假红；若把 golden 迁就成 1，则 R39-3 的负对照
+    ///   **永远不红**（本 Phase 唯一的假绿护栏当场作废）。
+    /// @details 原理：Center 态下 `GetTextTopInset()`（protected，`TextBox.h:264`）在
+    ///   `TextBox.cpp:611` **直接读 `m_lines.size()`**、且自带 `RecalculateLines()`
+    ///   （`:607` 的 const_cast 调用）；无头行高兜底 16（`:589`）⇒
+    ///   `n = (areaH − 2·(inset − padding)) / 16`。
+    ///   ★ 前置：`n × 16 <= areaH`（内容高 > 文本区高时 `max(0, ·)` 把 offset 夹到 0、
+    ///   行数信息消失）⇒ 调用方必须给足高度（表 B 样本统一高 200）。
+    ///   ★ 用完**必须还原 Top**：`OnPaint` 的 `textY` 依赖 `GetTextTopInset()`，
+    ///   同用例里若还要断言绘制坐标，Center 会让它整体下移。
+    [[nodiscard]] size_t LineCountForTest(){
+        TextBoxStyleOverride c;
+        c.verticalAlign = VerticalAlignment::Center;
+        SetStyle(c);                                     // Top 分支会早退、不碰行表
+        const float inset = GetTextTopInset();           // 内含 RecalculateLines()
+        const float areaH = static_cast<float>(GetHeight()) - Padding() * 2.0f;
+        TextBoxStyleOverride t;
+        t.verticalAlign = VerticalAlignment::Top;
+        SetStyle(t);                                     // ★ 还原（不污染后续绘制断言）
+        return static_cast<size_t>((areaH - 2.0f * (inset - Padding())) / 16.0f + 0.5f);
+    }
+
     using TextBox::OnTimer;     ///< 8.5.1：光标闪烁（protected override——无窗口环境允许验证翻转逻辑）
     using TextBox::UpdateComposition;   ///< 8.5.1：Composition 状态机（protected——Window 转发入口）
     using TextBox::CommitComposition;
@@ -97,6 +125,97 @@ protected:
 private:
     static FakeTextMeasurer ms_fake;
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★ Phase 39 批 0：两张 golden 表（改前行为快照——批 1 改完必须仍绿）+ 两个 helper
+// ════════════════════════════════════════════════════════════════════════════
+
+/// @brief 表 A（Phase 39 批 0 采集）：默认 `FitText` 的等价性基线（A5）
+/// @details ★ #5 组 `startCp != 0` 是**唯一能测到 R2 的组**：`startCp == 0` 时被外提的
+///          `byteStart` 恒为 0，算一次与算两次结果相同 ⇒ 只用 `startCp == 0` 的样本，
+///          R2 的等价性测不到任何东西（同型假绿，见 R39-3）。
+/// @note 期望值 = 2026-10-29 手算（沿初设 §1.5）。★ **批 0 实跑若不符，以实测为准并回填**——
+///       手算只是首次运行的对齐校验，不是真理（C38-5 教训）。
+struct FitGold{
+    const char* text;
+    size_t      startCp;
+    float       maxWidth;
+    size_t      fitCp;
+    float       width;
+};
+
+static const FitGold kFitGolden[] = {
+    { "abcdef",   0, 100.0f, 6, 48.0f },   // 全部放得下
+    { "abcdef",   2,  24.9f, 3, 24.0f },   // 非整档宽（防「整除」巧合）
+    { "abcdef",   2,   7.9f, 0,  0.0f },   // 首码点都放不下
+    { "一丁丂",    0,  16.0f, 2, 16.0f },   // 多字节 + 恰好边界
+    { "一丁丂",    1, 100.0f, 2, 16.0f },   // ★ 关键组：startCp != 0
+    { "abcdef",   6, 100.0f, 0,  0.0f },   // startCp >= totalCp ⇒ 早退
+    { "",         0, 100.0f, 0,  0.0f },   // 空串
+    { "\xC0\x8A", 0, 100.0f, 1,  8.0f },   // 脏字节（overlong U+000A，totalCp == 1）
+};
+
+/// @brief 表 B 的一行：两口径区间（own = 归属 / draw = 裁剪）
+struct LineGoldRow{ size_t ownBeg, ownEnd, drawBeg, drawEnd; };
+
+/// @brief 表 B（Phase 39 批 0 采集）：非折行支行表的改前快照
+/// @details `lineCount` 字段 = **`m_lines.size()`**（经 `LineCountForTest()` 读），
+///          **不是** `RowCountForTest()`——后者在 overlong 三行上读成 1（P0）。
+///          `rows[3]` 用完的行留 `{0,0,0,0}`；本表最大行数 = 3（`"\n\n"`）。
+struct LineGold{
+    const char* text;
+    size_t      lineCount;
+    LineGoldRow rows[3];
+};
+
+static const LineGold kLineGolden[] = {
+    // 类别                    行数  逐行 (ownBeg, ownEnd, drawBeg, drawEnd)
+    { "",                 1, { { 0, 0, 0, 0 } } },                                  // 空串
+    { "\n",               2, { { 0, 0, 0, 0 }, { 1, 1, 1, 1 } } },                   // 仅 \n
+    { "\n\n",             3, { { 0, 0, 0, 0 }, { 1, 1, 1, 1 }, { 2, 2, 2, 2 } } },   // 连续 \n
+    { "ab\n",             2, { { 0, 2, 0, 2 }, { 3, 3, 3, 3 } } },                   // 尾 \n（尾部空行）
+    { "a\r\nb",           2, { { 0, 2, 0, 2 }, { 3, 4, 3, 4 } } },                   // CRLF（\r 不断行）
+    { "\x80\x8A",         1, { { 0, 2, 0, 2 } } },                                   // 非法首字节
+    { "a\xC0",            1, { { 0, 2, 0, 2 } } },                                   // 截断续字节
+    { "\xC0\x8A",         2, { { 0, 0, 0, 0 }, { 1, 1, 1, 1 } } },                   // overlong U+000A（2 字节）
+    { "\xE0\x80\x8A",     2, { { 0, 0, 0, 0 }, { 1, 1, 1, 1 } } },                   // overlong U+000A（3 字节）
+    { "\xF0\x80\x80\x8A", 2, { { 0, 0, 0, 0 }, { 1, 1, 1, 1 } } },                   // overlong U+000A（4 字节）
+    { "\xF0\x9F\x98\x80 a", 1, { { 0, 3, 0, 3 } } },                                 // 4 字节 emoji + 空格 + a
+    { "abcdefghij",       1, { { 0, 10, 0, 10 } } },                                 // 纯 ASCII 长串
+    { "一二三四五",         1, { { 0, 5, 0, 5 } } },                                  // CJK 长串
+};
+
+/// @brief 码点总数（**外部口径**，供 T39-4 / T39-7 交叉校验）
+/// @details ★ 不能直接调 `GetCodepointCount()`——它是 **private**（`TextBox.h:322` 的
+///          `private:` 早于 `:348` 的声明），而私有成员**不能用 `using` 暴露**
+///          （访问检查在 `using` 声明处）。公共通道：`MoveCaretToEnd()`（`:128`）的实现
+///          就是 `m_caret = GetCodepointCount()`（`TextBox.cpp:431`）⇒ 读回
+///          `GetCaret()`（`:129`）即得**同一个**私有实现的结果。
+///          ★ 副作用：移动 caret + Invalidate——caret **不在**行表的 10 维键里，故不干扰行表。
+static size_t CountViaCaret(TestableTextBox& box){
+    box.MoveCaretToEnd();
+    return box.GetCaret();
+}
+
+/// @brief 表 B 的通用断言：行数走 `LineCountForTest()`（P0），逐行走两口径
+/// @details 高 200 = 给 `n×16 <= areaH` 留足余量（最多 3 行 ⇒ 48）
+static void ExpectLines(TestableTextBox& box, const LineGold& g){
+    box.SetWordWrap(false);
+    box.SetSize(120, 200);
+    box.SetText(std::string(g.text));
+    const size_t n = box.LineCountForTest();
+    EXPECT_EQ(n, g.lineCount);
+    if (n != g.lineCount)
+        return;                                  // ★ 防越界：`LineRange` 是裸 `m_lines[i]`，越界 = UB
+    for (size_t i = 0; i < n && i < 3; ++i){
+        const auto own  = box.OwnForTest(i);
+        const auto draw = box.DrawForTest(i);
+        EXPECT_EQ(own.first,   g.rows[i].ownBeg);
+        EXPECT_EQ(own.second,  g.rows[i].ownEnd);
+        EXPECT_EQ(draw.first,  g.rows[i].drawBeg);
+        EXPECT_EQ(draw.second, g.rows[i].drawEnd);
+    }
+}
 
 /// @brief ★★ 2026-10-21：**小数行高**的可测 TextBox（取整方向的唯一可测面）。
 /// @details 为什么必须单独做一个：`FakeTextMeasurer::LineHeight` 恒返回 **16.0（整数）**，
@@ -3014,6 +3133,169 @@ void Test38SoftWrapRealWindowWhitelist(){
 	}
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ★ Phase 39 批 0：T39-1..7——**全部断言改前行为**，改后（批 1）必须仍绿。
+//   这是本 Phase 判定「逐位不变」的全部依据；批 0 在 HEAD 上先绿 = 采 golden。
+// ════════════════════════════════════════════════════════════════════════════
+
+/// @brief T39-1（A5）：默认 `FitText` 的等价性基线——表 A 全 8 组
+static void Test39Utf8ScanGoldenFit(){
+	FakeTextMeasurer m;
+	Font f{};
+	for (const FitGold& g : kFitGolden){
+		const TextFit fit = m.FitText(f, std::string(g.text), g.startCp, g.maxWidth);
+		EXPECT_EQ(fit.fitCp, g.fitCp);
+		EXPECT_NEAR(fit.width, g.width, kEps);
+	}
+}
+
+/// @brief T39-2（A1/A6）：非折行支行表逐位——表 B 全 13 行
+static void Test39Utf8ScanSamples(){
+	TestableTextBox box;
+	for (const LineGold& g : kLineGolden)
+		ExpectLines(box, g);
+}
+
+/// @brief T39-3：overlong `U+000A` 专项（表 B #8–#10）+ `C0 4A`（overlong × 非法续字节）
+/// @details ★ 用「只看首字节」的实现（`lead == 0x0A`）过不了这一条——R39-3 的负对照靶点。
+static void Test39Utf8ScanOverlongLf(){
+	TestableTextBox box;
+	for (size_t i = 7; i <= 9; ++i)
+		ExpectLines(box, kLineGolden[i]);
+
+	// `C0 4A`：不属 A6 十一类（overlong 前导 × **非法续字节**），故 inline 构造。
+	// 改前行为：`substr(0, 2)` 解码 ((0xC0 & 0x1F) << 6) | (0x4A & 0x3F) = U+000A ⇒ **断行**。
+	const LineGold c04a = { "\xC0\x4A", 2, { { 0, 0, 0, 0 }, { 1, 1, 1, 1 } } };
+	ExpectLines(box, c04a);
+}
+
+/// @brief T39-4：`\n` 边界族 + 尾截断（`byte` 越过 `textSize` 不产生额外行）
+static void Test39Utf8ScanBoundaries(){
+	TestableTextBox box;
+	for (size_t i = 0; i < 7; ++i)          // 空串 / \n / \n\n / ab\n / a\r\nb / 非法首字节 / 截断续字节
+		ExpectLines(box, kLineGolden[i]);
+
+	// "a\xC0"：末次迭代 byte 1 → 3 越过 textSize（= 2），不产生额外行
+	box.SetWordWrap(false);
+	box.SetSize(120, 200);
+	box.SetText("a\xC0");
+	EXPECT_EQ(box.LineCountForTest(), static_cast<size_t>(1));
+	EXPECT_EQ(box.OwnForTest(0).second, CountViaCaret(box));
+
+	// "\n\n"：尾部空行也在表内，末行 ownedEnd == 码点总数
+	box.SetText("\n\n");
+	const size_t n = box.LineCountForTest();
+	EXPECT_EQ(n, static_cast<size_t>(3));
+	EXPECT_EQ(box.OwnForTest(n - 1).second, CountViaCaret(box));
+}
+
+/// @brief T39-5：跨支对照（overlong 的 `\n` 在折行/非折行两支都断行）+ Down 键守卫两侧
+/// @details ★ 折行宽也是 **120**（不是 106）：无头夹具 `m_vBar == nullptr`
+///          ⇒ `GetTextAreaWidth` 的条槽让位分支（`TextBox.cpp:772`）不进；
+///          且默认 `padding == 0`（`DefaultTheme.cpp:43`）。
+///          ⇒ 本用例**没有**覆盖条槽让位路径（那条路要有真窗口 + 条可见）。
+static void Test39Utf8ScanCrossBranch(){
+	const char* kCross[] = { "\xC0\x8A", "\xE0\x80\x8A", "\xF0\x80\x80\x8A" };
+	for (const char* s : kCross){
+		TestableTextBox plain;
+		plain.SetWordWrap(false);
+		plain.SetSize(120, 200);
+		plain.SetText(s);
+		const size_t nPlain = plain.LineCountForTest();
+
+		TestableTextBox wrap;
+		wrap.SetWordWrap(true);
+		wrap.SetSize(120, 200);
+		wrap.SetText(s);
+		const size_t nWrap = wrap.LineCountForTest();
+
+		EXPECT_EQ(nPlain, static_cast<size_t>(2));
+		EXPECT_EQ(nWrap,  static_cast<size_t>(2));
+		EXPECT_EQ(nPlain, nWrap);
+	}
+
+	// ② 2 行箱：Down 越过行边界 ⇒ caret 0 → 1（走 `TextBox.cpp:1349`）
+	{
+		TestableTextBox box;
+		box.SetWordWrap(false);
+		box.SetSize(120, 200);
+		box.SetText("\xC0\x8A");
+		box.MoveCaretToStart();
+		box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Down, KeyModifier::None));
+		EXPECT_EQ(box.GetCaret(), static_cast<size_t>(1));
+	}
+	// ③ 单行负例：末行守卫（`TextBox.cpp:1345`）⇒ Down 是 no-op，caret 停在 0
+	//    ★ 只断 ② 时「Down 永远返回 1」的错误实现也能过 ⇒ ③ 是这条判据的另一半。
+	{
+		TestableTextBox box;
+		box.SetWordWrap(false);
+		box.SetSize(120, 200);
+		box.SetText("abc");
+		box.MoveCaretToStart();
+		box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Down, KeyModifier::None));
+		EXPECT_EQ(box.GetCaret(), static_cast<size_t>(0));
+	}
+}
+
+/// @brief T39-6：两口径一致性（非折行支）
+/// @details ① 无软断点可裁 ⇒ `draw.second == own.second`（逐位相等，不是 ≤）；
+///          ② 非末行 `own.second + 1 == 下一行 own.first`——**硬行**形态：
+///          `\n` 不属任何一行，行末 `ownedEnd` 恰为该 `\n` 的码点索引（Phase 38 A-15 在非折行支的重写）。
+static void Test39Utf8ScanTwoRanges(){
+	TestableTextBox box;
+	for (const LineGold& g : kLineGolden){
+		box.SetWordWrap(false);
+		box.SetSize(120, 200);
+		box.SetText(std::string(g.text));
+		const size_t n = box.LineCountForTest();
+		EXPECT_EQ(n, g.lineCount);
+		if (n != g.lineCount)
+			continue;
+		for (size_t i = 0; i < n; ++i){
+			const auto own  = box.OwnForTest(i);
+			const auto draw = box.DrawForTest(i);
+			EXPECT_EQ(draw.second, own.second);
+			if (i + 1 < n)
+				EXPECT_EQ(own.second + 1, box.OwnForTest(i + 1).first);
+		}
+	}
+}
+
+/// @brief T39-7：`count` 一致性——单趟累计的 `cp`（经末行 `ownedEnd` 读出）== 外部口径码点总数
+/// @details 直接验证 L2（迭代次数 == `count`）。20k 两条只断该等式，不查逐行（耗时）。
+static void Test39Utf8ScanCountAgrees(){
+	TestableTextBox box;
+	box.SetWordWrap(false);
+	box.SetSize(120, 200);
+	for (const LineGold& g : kLineGolden){
+		box.SetText(std::string(g.text));
+		const size_t n = box.LineCountForTest();
+		EXPECT_EQ(n, g.lineCount);
+		if (n == 0)
+			continue;
+		EXPECT_EQ(box.OwnForTest(n - 1).second, CountViaCaret(box));
+	}
+
+	// 两条 20k 长串（非折行 ⇒ 1 行）：`ownedEnd` 必须恰好等于 20000
+	{
+		std::string cjk;
+		cjk.reserve(20000 * 3);
+		for (int i = 0; i < 20000; ++i)
+			cjk += "\xE5\xAD\x97";          // U+5B57「字」
+		box.SetText(cjk);
+		EXPECT_EQ(box.LineCountForTest(), static_cast<size_t>(1));
+		EXPECT_EQ(box.OwnForTest(0).second, CountViaCaret(box));
+		EXPECT_EQ(box.OwnForTest(0).second, static_cast<size_t>(20000));
+	}
+	{
+		std::string ascii(20000, 'a');
+		box.SetText(ascii);
+		EXPECT_EQ(box.LineCountForTest(), static_cast<size_t>(1));
+		EXPECT_EQ(box.OwnForTest(0).second, CountViaCaret(box));
+		EXPECT_EQ(box.OwnForTest(0).second, static_cast<size_t>(20000));
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -3072,4 +3354,12 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SoftWrapUndoRedoAndPinX", &Test38SoftWrapUndoRedoAndPinX);                // T38-11（批 4）
     GetTestRegistry().Add("TextBox.SoftWrapKeyPerDimension", &Test38SoftWrapKeyPerDimension);                // T38-14（批 4）
     GetTestRegistry().Add("TextBox.SoftWrapRealWindowWhitelist", &Test38SoftWrapRealWindowWhitelist);        // T38-16（批 4）
+    // Phase 39 批 0：UTF-8 单趟扫描的改前基线（531 → 538）
+    GetTestRegistry().Add("TextBox.Utf8ScanGoldenFit", &Test39Utf8ScanGoldenFit);        // T39-1
+    GetTestRegistry().Add("TextBox.Utf8ScanSamples", &Test39Utf8ScanSamples);            // T39-2
+    GetTestRegistry().Add("TextBox.Utf8ScanOverlongLf", &Test39Utf8ScanOverlongLf);      // T39-3
+    GetTestRegistry().Add("TextBox.Utf8ScanBoundaries", &Test39Utf8ScanBoundaries);      // T39-4
+    GetTestRegistry().Add("TextBox.Utf8ScanCrossBranch", &Test39Utf8ScanCrossBranch);    // T39-5
+    GetTestRegistry().Add("TextBox.Utf8ScanTwoRanges", &Test39Utf8ScanTwoRanges);        // T39-6
+    GetTestRegistry().Add("TextBox.Utf8ScanCountAgrees", &Test39Utf8ScanCountAgrees);    // T39-7
 }
