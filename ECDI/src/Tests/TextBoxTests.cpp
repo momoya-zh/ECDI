@@ -2401,6 +2401,256 @@ void Test38SoftWrapSeparatorSpaceOwned(){
 	}
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 38 · 批 3：接线（T38-8 / 9 / 10 / 12 / 17）——全无头
+// 产品码已随批 2 落地，本批只补断言
+// ══════════════════════════════════════════════════════════════════════
+
+/// @brief 一次 Paint 的命令级快照（无头）
+/// @details ★★ **clip 必须按发射顺序收集，不能只取最后一条**——`Widget::Paint` 的顺序是
+///   `PushClip(self)` → `OnPaint`（里面 PushClip 文本区 / PopClip）→ **遍历子控件**
+///   （垂直条可见时它自己也 `PushClip`）→ `PopClip`。所以条出现时 `clips.back()` 是**条**
+///   （宽 12），不是文本区。⇒ `clipWidths[0]` 恒 = 控件自身边界、`clipWidths[1]` = 文本区
+///   （仅当 OnPaint 未早退，即文本非空）。★ 批 0 的 T38-1 用 `clips.back()` 是对的，
+///   因为那三组样本的条都不可见——但那不是「取 back 总是对的」，是「那些样本里恰好对」。
+struct PaintProbe{
+	std::vector<DrawTextCommand>  texts;
+	std::vector<DrawRectCommand>  rects;
+	std::vector<float>            clipWidths;
+};
+
+static PaintProbe PaintOnce(Widget& widget, TextMeasurer& measurer){
+	CommandBuffer commands;
+	PaintContext ctx(commands, measurer);
+	widget.Paint(ctx, 0, 0);
+	PaintProbe out;
+	for (const auto& cmd : commands){
+		if (const auto* text = std::get_if<DrawTextCommand>(&cmd))
+			out.texts.push_back(*text);
+		else if (const auto* rect = std::get_if<DrawRectCommand>(&cmd))
+			out.rects.push_back(*rect);
+		else if (const auto* clip = std::get_if<PushClipCommand>(&cmd))
+			out.clipWidths.push_back(clip->rect.width);
+	}
+	return out;
+}
+
+/// T38-8：折行宽**不随垂直条显隐变化**（D38-C 常驻槽的判别面）
+/// @details 判据 = 两态**行表逐项相等**。`GetTextAreaWidth()` 是 private，不能直接断它的值；
+///   但它一旦依赖 `barVisible`，`H=24`（条可见）就会少 14px ⇒ 折行宽 12 ⇒ `"abcdefgh"` 变 8 行，
+///   而行表相等这条会立刻红。⇒ 行表是折行宽的**行为指纹**，比读私有字段更结实。
+void Test38SoftWrapWidthIndependentOfBar(){
+	const std::string text("abcdefgh");   // 折行宽 26 ⇒ 3 行（S6 口径）
+	TestableTextBox tall(text);
+	TestableTextBox cramped(text);
+	tall.SetWordWrap(true);
+	cramped.SetWordWrap(true);
+	tall.SetSize(26 + kWrapBarSlot, 64);      // 折行宽 26 ⇒ 3 行；内容高 48 ≤ 64 ⇒ 条隐藏
+	cramped.SetSize(26 + kWrapBarSlot, 24);   // 同一折行宽；内容高 48 > 24 ⇒ 条可见
+
+	EXPECT_EQ(tall.RowCountForTest(), 3u);
+	EXPECT_EQ(cramped.RowCountForTest(), 3u);
+	for (std::size_t i = 0; i < 3; ++i){
+		const auto dt = tall.DrawForTest(i);
+		const auto df = cramped.DrawForTest(i);
+		EXPECT_EQ(dt.first,  df.first);
+		EXPECT_EQ(dt.second, df.second);
+		const auto ot = tall.OwnForTest(i);
+		const auto of = cramped.OwnForTest(i);
+		EXPECT_EQ(ot.first,  of.first);
+		EXPECT_EQ(ot.second, of.second);
+	}
+	// preferred 宽恒 == 当前宽：折行不制造宽度约束（与基类 wrap 支同一条纪律）
+	EXPECT_NEAR(tall.GetPreferredSize().width, static_cast<float>(tall.GetWidth()), kEps);
+	EXPECT_NEAR(cramped.GetPreferredSize().width, static_cast<float>(cramped.GetWidth()), kEps);
+}
+
+/// T38-9：软断点处的分隔空格**可达**（A-15 的用户可见面）
+/// @details 旧口径 `ownedEnd = b` 让 `"ab cd ef"@48` 的 L0 归属区间是 `[0,5)`，而空格在 cp5
+///   ⇒ 光标停不到、`Right` 跨不过、点击落不回本行（三个消费点全走 `LineRange`）。
+///   现在归属区间是 `[0,6)`，cp5 在内。
+void Test38SoftWrapSpaceReachable(){
+	const WrapSample& sample = FindSample("ab cd ef", 48.0f);
+	WrapProbe probe;
+	probe.Set(sample);
+
+	const auto own0 = probe.box.OwnForTest(0);
+	EXPECT_EQ(own0.first, 0u);
+	EXPECT_EQ(own0.second, 6u);            // ★ 含分隔空格 cp5（旧口径是 5）
+
+	// ① 光标能停在空格位 cp5
+	for (int i = 0; i < 5; ++i)
+		probe.box.MoveCaret(TextBox::CaretDirection::Right);
+	EXPECT_EQ(probe.box.GetCaret(), 5u);
+	// ② 该位落在本行**归属**区间内
+	EXPECT_TRUE(probe.box.GetCaret() >= own0.first && probe.box.GetCaret() < own0.second);
+	// ③ Right 跨过空格进下一行、Left 又回得来
+	probe.box.MoveCaret(TextBox::CaretDirection::Right);
+	EXPECT_EQ(probe.box.GetCaret(), 6u);
+	probe.box.MoveCaret(TextBox::CaretDirection::Left);
+	EXPECT_EQ(probe.box.GetCaret(), 5u);
+	// ④ 点击 L0 行尾（x 远大于行宽）仍落回本行归属区间
+	//    ★ 无头下 `CaretIndexFromLineX` 走「无窗口 ⇒ 返回行首」的守卫（`TextBox.cpp` 的
+	//      `GetWindow() != nullptr` 判断）⇒ 只断区间归属，行内精确定位归 T38-16②
+	const std::size_t hit = probe.box.CaretIndexFromPosition(Point{ 200.0f, 8.0f });
+	EXPECT_TRUE(hit >= own0.first && hit < own0.second);
+}
+
+/// T38-10：跨软行的选区高亮连续 + IME 组合下划线切段
+/// @details 两条都用**归属**口径求交（`ownEnd`），不是绘制口径：
+///   ① 选区：L0 高亮宽 = 6 码点 × 8 = **48**（含分隔空格）；若按绘制口径（5 码点）只有 40
+///      ⇒ 行尾留 8px 未高亮 = 用户看到的「高亮断口」。
+///   ② 下划线：组合区间跨几行就应有几段，每段落在本行——段数由行表算出，不硬编码。
+void Test38SoftWrapSelectionAndImeContinuous(){
+	const Color kSel = Color::FromRGBA8(1, 2, 3);   // 独特色：不与任何主题色相撞
+
+	// ① 全选（Shift+Right × 8）后按颜色取高亮矩形
+	{
+		const WrapSample& sample = FindSample("ab cd ef", 48.0f);
+		WrapProbe probe;
+		probe.Set(sample);
+		TextBoxStyleOverride style;
+		style.selection = kSel;
+		probe.box.SetStyle(style);
+		for (int i = 0; i < 8; ++i)
+			probe.box.OnKeyDown(KeyDownEvent(nullptr, KeyCode::Right, KeyModifier::Shift));
+
+		FakeTextMeasurer measurer;
+		const PaintProbe painted = PaintOnce(probe.box, measurer);
+		std::vector<DrawRectCommand> hl;
+		for (const auto& rect : painted.rects)
+			if (rect.color == kSel)
+				hl.push_back(rect);
+		EXPECT_EQ(hl.size(), 2u);   // 两行各一段
+		if (hl.size() == 2){
+			EXPECT_NEAR(hl[0].rect.width, 48.0f, kEps);   // ★ 6 码点（含空格），不是 40
+			EXPECT_NEAR(hl[1].rect.width, 16.0f, kEps);   // 2 码点
+			// 两段左缘都在文本区起点（L1 的行内偏移从 0 起）
+			EXPECT_NEAR(hl[0].rect.x, hl[1].rect.x, kEps);
+		}
+	}
+
+	// ② IME 组合下划线：段数 == 组合区间跨越的行数
+	{
+		const Color kComp = Color::FromRGBA8(4, 5, 6);
+		TestableTextBox box(std::string("ab cd ef"));
+		box.SetWordWrap(true);
+		box.SetSize(48 + kWrapBarSlot, 64);
+		TextBoxStyleOverride style;
+		style.composition = kComp;
+		box.SetStyle(style);
+		for (int i = 0; i < 4; ++i)
+			box.MoveCaret(TextBox::CaretDirection::Right);   // caret 4
+		box.UpdateComposition("一二三四");                    // 组合区间 = [4, 8)
+
+		const std::size_t compStart = 4;
+		const std::size_t compEnd   = 8;
+		const std::size_t rows = box.RowCountForTest();
+		std::size_t crossed = 0;
+		for (std::size_t i = 0; i < rows; ++i){
+			const auto own = box.OwnForTest(i);
+			if (own.first < compEnd && own.second > compStart)
+				++crossed;
+		}
+		EXPECT_TRUE(crossed >= 2);   // 前提：确实跨行（否则本条没有判别力）
+
+		FakeTextMeasurer measurer;
+		const PaintProbe painted = PaintOnce(box, measurer);
+		std::size_t segments = 0;
+		for (const auto& rect : painted.rects){
+			if (rect.color == kComp){
+				++segments;
+				EXPECT_TRUE(rect.rect.width > 0.0f);   // 每段非空
+			}
+		}
+		EXPECT_EQ(segments, crossed);
+	}
+}
+
+/// T38-12：preferred 稳定 + 窄带无宽度棘轮（D38-D 的判别面）
+/// @details `GetPreferredSize` 的闸若带「折行宽 > 0」合取项，`0 < W ≤ 2p+14` 的窄带会落回基类
+///   wrap 支（宽 = 测量宽 64）⇒ `AutoSize` 把宽撑开 ⇒ 再按新宽重排 ⇒ **宽度自激励**。
+///   判据 = 窄带两档 `AutoSize` 两次后宽都不变。
+void Test38SoftWrapPreferredStable(){
+	const WrapSample& sample = FindSample("abcdefgh", 26.0f);   // 3 行
+	WrapProbe probe;
+	probe.Set(sample);
+	const Size pref = probe.box.GetPreferredSize();
+	EXPECT_NEAR(pref.height, 48.0f, kEps);   // 3 × L_pref(16) + 2p(0)
+	EXPECT_NEAR(pref.width, static_cast<float>(probe.box.GetWidth()), kEps);
+
+	// preferred 行数 == OnPaint 发射的 DrawText 条数（本样本无空行 ⇒ 一一对应）
+	FakeTextMeasurer measurer;
+	EXPECT_EQ(PaintOnce(probe.box, measurer).texts.size(), 3u);
+
+	// 连续两次 AutoSize：高 64 → 48，第二次 no-op；宽全程不变
+	EXPECT_TRUE(probe.box.AutoSize());
+	EXPECT_EQ(probe.box.GetHeight(), 48);
+	EXPECT_EQ(probe.box.GetWidth(), 26 + kWrapBarSlot);
+	EXPECT_FALSE(probe.box.AutoSize());
+	EXPECT_EQ(probe.box.GetWidth(), 26 + kWrapBarSlot);
+
+	// ★ 窄带两档：W = 2p + 槽（折行宽 0）与 W = 1（折行宽 −13）
+	for (int width : { kWrapBarSlot, 1 }){
+		TestableTextBox box(std::string("abcdefgh"));
+		box.SetWordWrap(true);
+		box.SetSize(width, 64);
+		box.AutoSize();
+		EXPECT_EQ(box.GetWidth(), width);   // 宽没被撑成测量宽
+		box.AutoSize();
+		EXPECT_EQ(box.GetWidth(), width);   // 第二次也不动 ⇒ 无棘轮
+	}
+}
+
+/// T38-17：折行态 clip 取**控件内边界**（D38-I 的判别面）
+/// @details 夹具 = §3.3：`W=38 / H=40 / p=0 / wrap on / "一二三。四"` ⇒ 折行宽 24 ⇒ 2 行，
+///   L0 是 4 码点（行宽 32 > 24，悬挂闭标点）。折行期 `scrollOffsetX ≡ 0` ⇒ clip 必须放宽到
+///   控件内边界 38，否则 `。` 整字永久不可见。负对照（clip 仍取 24）会让第一条断言直接红。
+void Test38SoftWrapClipIsInnerBoundary(){
+	TestableTextBox box(std::string("一二三。四"));
+	box.SetWordWrap(true);
+	box.SetSize(38, 40);
+	EXPECT_EQ(box.OwnForTest(0).second, 4u);   // L0 悬挂（4 码点 = 32 > 24）
+	EXPECT_EQ(box.RowCountForTest(), 2u);
+
+	FakeTextMeasurer measurer;
+
+	// ① 条隐藏半段（内容高 32 ≤ 40）
+	{
+		const PaintProbe painted = PaintOnce(box, measurer);
+		EXPECT_EQ(painted.clipWidths.size(), 2u);    // Widget self + 文本区（条不可见 ⇒ 不参与）
+		if (painted.clipWidths.size() >= 2)
+			EXPECT_NEAR(painted.clipWidths[1], 38.0f, kEps);   // ★ 38，不是 GetTextAreaWidth() 的 24
+		EXPECT_EQ(painted.texts.size(), 2u);
+		if (!painted.texts.empty()){
+			// 悬挂行完整落在 clip 内：pos.x(0) + 行宽(32) ≤ clip 右缘(38)
+			EXPECT_TRUE(painted.texts[0].pos.x + 32.0f <= 38.0f + kEps);
+		}
+	}
+	// ② 条可见半段（H=24 ⇒ 内容高 32 > 24）：clip 宽**不因条出现而变**，命令仍发射
+	//    ★ 此时 clip 有三条（self / 文本区 / 条）——必须取 [1]，取 back 会读到条自身的高
+	{
+		box.SetSize(38, 24);
+		const PaintProbe painted = PaintOnce(box, measurer);
+		EXPECT_TRUE(painted.clipWidths.size() >= 2u);
+		if (painted.clipWidths.size() >= 2)
+			EXPECT_NEAR(painted.clipWidths[1], 38.0f, kEps);
+		EXPECT_EQ(painted.texts.size(), 2u);
+	}
+	// ③ 非折行半段（H=10 ⇒ 单行 16 > 10 ⇒ 条可见）：clip 回到 `GetTextAreaWidth()`
+	//    = 38 − (12 + 2) = 24 —— 与折行态的 38 形成对照，证明两态确实走了不同表达式
+	{
+		box.SetWordWrap(false);
+		box.SetSize(38, 10);
+		const PaintProbe painted = PaintOnce(box, measurer);
+		EXPECT_EQ(painted.texts.size(), 1u);         // 非折行 ⇒ 整串单条命令
+		EXPECT_TRUE(painted.clipWidths.size() >= 2u);
+		if (painted.clipWidths.size() >= 2)
+			EXPECT_NEAR(painted.clipWidths[1], 24.0f, kEps);   // GetTextAreaWidth()（条可见 ⇒ 让位 14）
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -2451,4 +2701,9 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("TextBox.SoftWrapCodepointConservation", &Test38SoftWrapCodepointConservation);   // T38-7（批 2）
     GetTestRegistry().Add("TextBox.SoftWrapKeyHitZeroMeasure", &Test38SoftWrapKeyHitZeroMeasure);           // T38-15（批 2）
     GetTestRegistry().Add("TextBox.SoftWrapSeparatorSpaceOwned", &Test38SoftWrapSeparatorSpaceOwned);      // T38-18（批 2）
+    GetTestRegistry().Add("TextBox.SoftWrapWidthIndependentOfBar", &Test38SoftWrapWidthIndependentOfBar);   // T38-8（批 3）
+    GetTestRegistry().Add("TextBox.SoftWrapSpaceReachable", &Test38SoftWrapSpaceReachable);                 // T38-9（批 3）
+    GetTestRegistry().Add("TextBox.SoftWrapSelectionAndImeContinuous", &Test38SoftWrapSelectionAndImeContinuous); // T38-10（批 3）
+    GetTestRegistry().Add("TextBox.SoftWrapPreferredStable", &Test38SoftWrapPreferredStable);               // T38-12（批 3）
+    GetTestRegistry().Add("TextBox.SoftWrapClipIsInnerBoundary", &Test38SoftWrapClipIsInnerBoundary);       // T38-17（批 3）
 }
