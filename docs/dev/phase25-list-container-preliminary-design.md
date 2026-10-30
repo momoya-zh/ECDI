@@ -48,7 +48,7 @@
 | # | 基线 | 证据 |
 |---|---|---|
 | **B1** | `Layout` 基类极简：`virtual void Arrange(Widget& parent) = 0;` 唯一纯虚 | `include/ECDI/Layout/Layout.h:13` |
-| **B2** | **Arrange 触发链 = 每帧**：`Window::OnPaint` → `m_rootWidget->Arrange()` → `ArrangeInternal()` 递归整树，**有 `m_layout` 的节点重排、无 Layout 的节点保持手摆**（渐进语义——9.7） | `src/Window/Window.cpp:478` · `src/Widget/Widget.cpp:188-208` |
+| **B2** | **Arrange 触发链 = 每帧**：`Window::OnPaint` → `m_rootWidget->Arrange()` → `ArrangeInternal()` 递归整树，**有 `m_layout` 的节点重排、无 Layout 的节点保持手摆**（渐进语义——9.7）★★ **2026-10-30 订正（Phase 41 对码，`roadmap` v2.64 ③）**：**本条当时就不成立**——`git log -S` 查证 `Window::PaintFrame` **全历史从未**调过 `Arrange`（唯一出现是 `81037ed` 把它放进 `OnResized`）；真实驱动点 = `Window::OnResized`（`WM_SIZE`，`:830-841`）+ `Application::OnWindowResized`（`:287-293`，**同帧重复**）。★ 这条错误陈述**直接生产了 `ModelProbe.cpp:326-333` 的活体 bug**（照「每帧 Arrange」写业务 ⇒ 只 `SetVisible` 不 `Arrange` ⇒ 搜索过滤后行不消失）。**Phase 41 起本句才成真**，但驱动者是帧首**结算**（`SettleLayoutIfDirty`，**脏才排**）而非无条件每帧 | ~~`src/Window/Window.cpp:478`~~（行号已失效：`PaintFrame` 现为 `:176-199`，其中**无** `Arrange`）· ~~`src/Widget/Widget.cpp:188-208`~~（`ArrangeInternal` 现为 `:398-412`） |
 | **B3** | **`SetLayout` 在 `Widget` 基类**（public）：`void SetLayout(std::unique_ptr<Layout>)` ⇒ `ScrollContent : public Widget`（内部头）**自动成为布局宿主**——`GetContentView().SetLayout(...)` 无需任何改动 | `include/ECDI/Widget/Widget.h:260` · `src/Widget/ScrollContent.h:23` |
 | **B4** | **`VerticalLayout::Arrange` 不跳过不可见子控件**（全量 `for i < count` 按序分配） | `src/Layout/VerticalLayout.cpp:23-63` |
 | **B5** | ★ **v1.2 勘误**：**`HitTest` 的可见性门控在入口**（`if (!IsVisible()) return nullptr;`）⇒ **不可见节点及其整棵子树均不可命中**；子节点逆序循环仅做深度优先遍历、**不再额外过滤**（由每个 child 的入口自查）（原记「无可见性过滤」**有误**） | `src/Widget/Widget.cpp:114-121`（门控）· `:137-153`（循环） |
