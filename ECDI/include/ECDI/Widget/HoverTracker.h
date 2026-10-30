@@ -17,6 +17,9 @@ public:
 	/// @param treeRoot 当前 Widget 树根（非拥有指针）
 	void SetTreeRoot(Widget* treeRoot) noexcept{ m_treeRoot = treeRoot; }
 
+	/// @brief 设置副树根（浮层根，支持双根树内校验 · Phase 42）
+	void SetSecondaryTreeRoot(Widget* secondaryRoot) noexcept{ m_secondaryRoot = secondaryRoot; }
+
 	/// @brief 更新 Hover 状态机（唯一入口）
 	/// @param newTarget HitTest 命中的新目标（nullable）
 	/// @pre newTarget == nullptr 或 属于当前树（调用方保证——HitTest 结果必然属于当前 Window Tree）
@@ -43,6 +46,7 @@ private:
 	bool IsInTree(Widget* widget) const noexcept;
 
 	Widget* m_treeRoot = nullptr;		///< 树根（契约 C 验证锚点，非拥有指针）
+	Widget* m_secondaryRoot = nullptr;	///< 副树根（浮层根，非拥有指针 · Phase 42）
 
 	Widget* m_hoverWidget = nullptr;	///< 当前 Hover 目标（非拥有指针——与 m_focusedWidget 同族）
 

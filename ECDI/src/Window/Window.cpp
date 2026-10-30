@@ -2,6 +2,7 @@
 
 #include "Platform/Win32/Win32PlatformWindow.h"
 #include "ECDI/Widget/TextBox.h"
+#include "ECDI/Widget/Panel.h"
 #include "ECDI/Application/Application.h"
 #include "ECDI/Widget/Widget.h"
 #include "ECDI/Core/ECDIAssert.h"
@@ -112,17 +113,45 @@ Window::Window(Application& app,const std::string& title, int width, int height,
 	// 5.4.1：根与 Window 建立关联（Widget::Invalidate/HasFocus 上溯到根后走它）
 	m_rootWidget->SetWindow(this);
 
+	// ★ Phase 42：构造浮层根节点与三级容器（全部冻结为 Panel 语义，ContainsPoint 恒 false）
+	m_overlayRoot = std::make_unique<Panel>();
+	m_overlayRoot->SetWindow(this);
+
+	auto normal = std::make_unique<Panel>();
+	auto modal = std::make_unique<Panel>();
+	auto tooltip = std::make_unique<Panel>();
+
+	m_normalLayer = normal.get();
+	m_modalLayer = modal.get();
+	m_tooltipLayer = tooltip.get();
+
+	// 挂载顺序冻结：Normal (0) -> Modal (1) -> Tooltip (2)
+	m_overlayRoot->AddChild(std::move(normal));
+	m_overlayRoot->AddChild(std::move(modal));
+	m_overlayRoot->AddChild(std::move(tooltip));
+
 	// 9.5 R4：Hover 状态机注入树根（契约 C 验证锚点——m_rootWidget 就绪后设置）
 	m_hoverTracker.SetTreeRoot(m_rootWidget.get());
+	m_hoverTracker.SetSecondaryTreeRoot(m_overlayRoot.get());
 
 	FRAMEWORK_ASSERT(m_rootWidget != nullptr);
+	FRAMEWORK_ASSERT(m_overlayRoot != nullptr);
 
 	// 初始客户区尺寸（平台窗口构造后查询——GetClientSize 返回框架层 Size；
 	// 不用 OnResized 回调：构造时 m_rootWidget 尚未创建，顺序问题）
 	// SetSize 接收 int（客户区像素本就是整数，float → int 显式转换消除 C4244）
 	const Size clientSize = m_platformWindow->GetClientSize();
+	const int clientWidth = static_cast<int>(clientSize.width);
+	const int clientHeight = static_cast<int>(clientSize.height);
 
-	m_rootWidget->SetSize(static_cast<int>(clientSize.width), static_cast<int>(clientSize.height));
+	m_rootWidget->SetSize(clientWidth, clientHeight);
+
+	// ★ P0-1/2 根治：强制初始化尺寸！防止 0×0 视口剔除导致浮层整树一帧都不画
+	m_overlayRoot->SetSize(clientWidth, clientHeight);
+	m_normalLayer->SetSize(clientWidth, clientHeight);
+	m_modalLayer->SetSize(clientWidth, clientHeight);
+	m_tooltipLayer->SetSize(clientWidth, clientHeight);
+	m_overlayRoot->Arrange();
 
 }
 
@@ -166,6 +195,13 @@ Widget& Window::GetRootWidget() noexcept {
 
 }
 
+Widget& Window::GetOverlayRoot() noexcept {
+
+	FRAMEWORK_ASSERT(m_overlayRoot != nullptr);
+	return *m_overlayRoot;
+
+}
+
 // ★ Phase 35：Application 访问器（实现在此——头文件只前置声明 Application，避免 Header 环）
 Application& Window::GetApplication() const noexcept {
 
@@ -175,32 +211,40 @@ Application& Window::GetApplication() const noexcept {
 
 void Window::PaintFrame()
 {
-	// ★ Phase 20（崩溃修复）：**构造期防御**。本函数可经 `WM_PAINT → OnPaint` 进入，
-	// 而 `m_rootWidget` 要到 `Window` 构造体里才创建 ⇒ 在它之前访问就是 UB
-	// （原实现**连判空都没有**——同类回调入口都应至少判空）。
 	if (m_rootWidget == nullptr){
-
 		return;
-
 	}
 
-	// ★★ Phase 41（R3）：**帧首布局结算**——有界（脏才排），空闲帧 O(1)。
-	//   位置必须在 `PaintContext` 构造与 `m_rootWidget->Paint()` **之前**：
-	//   本帧要画的几何 = 结算后的几何。
+	// 步骤 1：帧首双根布局结算（Phase 41 管线接缝）
 	m_rootWidget->SettleLayoutIfDirty();
+	if (m_overlayRoot != nullptr) {
+		m_overlayRoot->SettleLayoutIfDirty();
+	}
+
+	// 步骤 2：锚点跟随自动重定位（带同值守卫防每帧置脏）
+	UpdateOverlayPositions();
 
 	// 决策 10/13/33：完整编排，严格配对
 	m_commands.clear();                              // 决策 4：复用缓冲
-	// Phase 27：初始裁剪 = client 矩形（每帧经 GetClientSize 取——resize 天然跟随；
-	// 只进构建侧交集栈、不发命令——C27-5；D4 恒开，无运行期开关——D27-C）
 	const Size clientSize = m_platformWindow->GetClientSize();
 	PaintContext ctx(m_commands, *m_textMeasurer,
-	                 Rect{ 0.0f, 0.0f, static_cast<float>(clientSize.width), static_cast<float>(clientSize.height) });   // 7.1.4：测量独立指针（GDITextMeasurer）
-	m_rootWidget->Paint(ctx, 0, 0);                  // 决策 6：根从 (0,0)，offset 累加
+	                 Rect{ 0.0f, 0.0f, static_cast<float>(clientSize.width), static_cast<float>(clientSize.height) });
+
+	// 步骤 4：主内容树绘制（Layer 0）
+	m_rootWidget->Paint(ctx, 0, 0);
+
+	// 步骤 5：浮层树绘制（Layer 1 —— 初始全客户区裁切栈，完全隔离主树局部 PushClip）
+	if (m_overlayRoot != nullptr && HasVisibleOverlays()) {
+		m_overlayRoot->Paint(ctx, 0, 0);
+	}
+
 	SyncBackdropSurface();                            // Phase 32（D32-H）：衬底实际态 → 后端（变化才下发）
 	m_renderer.BeginFrame(m_backgroundColor);         // 决策 13：转发（Phase 18：携带本帧背景色）
 	m_renderer.Execute(m_commands, GetDpiScale());   // Phase 20.1：每帧取窗口 DPI 缩放（不缓存 ⇒ 跨屏下一帧自动跟随）
 	m_renderer.EndFrame();
+
+	// ★ P0-3 根治：帧末清空延迟析构队列，确保浮层对象不在回调栈中被提前释放
+	m_pendingDestroyOverlays.clear();
 }
 
 bool Window::Release() noexcept {
@@ -483,17 +527,53 @@ void Window::RequestClose(){
 
 // ── Phase 13：客户区可交互命中（R2——Host 契约实现）──────────────
 
-bool Window::IsClientInteractiveAt(int x, int y) const noexcept{
+Widget* Window::HitTestWindow(int x, int y) const noexcept {
+	// 1. 优先探测浮层树
+	if (m_overlayRoot != nullptr) {
+		// [A] 模态层最高优先
+		if (m_modalLayer != nullptr && m_modalLayer->GetChildCount() > 0) {
+			Widget* hit = m_modalLayer->HitTest(x, y);
+			if (hit != nullptr) {
+				return hit;
+			}
+			// ★ 模态兜底：只要存在活动模态层，点击无论是否命中浮层实体，绝不回落主树！
+			return nullptr;
+		}
 
-	// 防御：RootWidget 尚未就绪时早退（与 OnResized 的既有守卫同款）。
-	// 可达性：WM_NCHITTEST 需要窗口可见才有鼠标命中，此时 RootWidget 必已构造（构造期不产生鼠标命中）。
-	if (!m_rootWidget){
+		// [B] 普通浮层层
+		if (m_normalLayer != nullptr && m_normalLayer->GetChildCount() > 0) {
+			Widget* hit = m_normalLayer->HitTest(x, y);
+			if (hit != nullptr) {
+				return hit;
+			}
+		}
 
-		return false;
+		// [C] 直接挂在 m_overlayRoot 上的其它子节点（低阶原语挂载，排除 m_tooltipLayer）
+		for (size_t i = m_overlayRoot->GetChildCount(); i > 0; --i) {
+			Widget* child = m_overlayRoot->GetChildAt(i - 1);
+			if (child == m_tooltipLayer || child == m_modalLayer || child == m_normalLayer) {
+				continue;
+			}
+			const int localX = x - static_cast<int>(child->GetX());
+			const int localY = y - static_cast<int>(child->GetY());
+			if (Widget* hit = child->HitTest(localX, localY)) {
+				return hit;
+			}
+		}
 
+		// ★ m_tooltipLayer 故意跳过 HitTest：Tooltip 纯视觉，永不截留输入
 	}
 
-	Widget* hit = m_rootWidget->HitTest(x, y);
+	// 2. 回落探测主内容树
+	if (m_rootWidget != nullptr) {
+		return m_rootWidget->HitTest(x, y);
+	}
+	return nullptr;
+}
+
+bool Window::IsClientInteractiveAt(int x, int y) const noexcept{
+
+	Widget* hit = HitTestWindow(x, y);
 
 	// D9 判据：命中「消费鼠标输入的控件」才算可交互——命中纯显示控件（如标题 Label）仍走 HTCAPTION
 	return hit != nullptr && hit->ConsumesMouseInput();
@@ -573,16 +653,7 @@ void Window::OnCaptureLost(){
 
 CursorShape Window::OnQueryCursor(int x, int y) const noexcept{
 
-	// ★ #72-②：窗口以 HitTest 代答命中控件的光标自述（平台层不认识 Widget——分层律）。
-	// 防御守卫与 IsClientInteractiveAt 同款（RootWidget 构造期未就绪）。
-	if (!m_rootWidget){
-
-		return CursorShape::Arrow;
-
-	}
-
-	Widget* hit = m_rootWidget->HitTest(x, y);
-
+	Widget* hit = HitTestWindow(x, y);
 	return (hit != nullptr) ? hit->GetCursor() : CursorShape::Arrow;
 
 }
@@ -660,18 +731,18 @@ void Window::ForgetSubtree(const Widget* subtreeRoot) noexcept{
 
 bool Window::IsWidgetInTree(const Widget* widget) const noexcept{
 
-	if (widget == nullptr || m_rootWidget == nullptr){
+	if (widget == nullptr || (m_rootWidget == nullptr && m_overlayRoot == nullptr)){
 
 		return false;
 
 	}
 
-	// 沿父链上溯：到达 RootWidget 即「仍在树内」。
+	// 沿父链上溯：到达 RootWidget 或 OverlayRoot 即「仍在树内」。
 	// ⚠️ 本方法**不防悬垂指针**（上溯即 UAF）——只判「已脱树但**仍存活**」，
 	//    悬垂由 `ForgetSubtree` 在摘树时消除（头文件已写明这条边界）。
 	for (const Widget* current = widget; current != nullptr; current = current->GetParent()){
 
-		if (current == m_rootWidget.get()){
+		if (current == m_rootWidget.get() || current == m_overlayRoot.get()){
 
 			return true;
 
@@ -727,6 +798,15 @@ void Window::SetFocusedWidget(Widget* widget){
 }
 
 void Window::HandleKeyDown(const KeyDownEvent& event){
+
+	// ★ Phase 42：ESC 键框架层优先拦截关闭活动浮层（在 Tab 导航之前）
+	if (event.GetKeyCode() == KeyCode::Escape){
+		auto* topOverlay = GetTopActiveOverlay();
+		if (topOverlay != nullptr && topOverlay->options.closeOnEsc){
+			HideOverlay(nullptr);
+			return;
+		}
+	}
 
 	// 5.4.4 + 5.5.2：Tab 框架拦截（焦点导航是 Window 职责）；Shift+Tab 反向（5.4 债务落地）
 	if (event.GetKeyCode() == KeyCode::Tab){
@@ -834,20 +914,16 @@ void Window::OnPaint(){
 
 void Window::OnResized(int width, int height){
 
-	// 窗口大小变化时，同步 RootWidget 尺寸 + 重排布局链（9.7 触发链）
 	if (m_rootWidget){
-
-		// ★ Phase 41：`SetSize` 现在自带「置布局脏 + Invalidate」两条通道 ⇒ 此处**不再**显式
-		//   `Invalidate()`（原第三行）。同值 resize 被基类守卫吃掉，不产生任何失效。
 		m_rootWidget->SetSize(width, height);
-
-		// ★ 同步重排（**保留**）：`Win32PlatformWindow.cpp:940-941` 承诺「resize 事件到达时
-		//   RootWidget 已是新尺寸、布局已更新」——消费者在事件回调里读到的是新几何。
-		//   本调用在根上 ⇒ 完成即清根脏 ⇒ 随后的 `PaintFrame` **不再重排**（一次 WM_SIZE 恰一次）。
-		//   ⚠️ 历史：此前 `Application::OnWindowResized` 还会再 Arrange 一次（同帧两次，幂等
-		//   所以无害）——Phase 41 已删，本行是**唯一**的 resize 布局驱动点。
-		m_rootWidget->Arrange();   // 9.7：渐进语义——有 Layout 的节点重排 / 无 Layout 的保持手摆
-
+		m_rootWidget->Arrange();
+	}
+	if (m_overlayRoot){
+		m_overlayRoot->SetSize(width, height);
+		if (m_normalLayer) m_normalLayer->SetSize(width, height);
+		if (m_modalLayer) m_modalLayer->SetSize(width, height);
+		if (m_tooltipLayer) m_tooltipLayer->SetSize(width, height);
+		m_overlayRoot->Arrange();
 	}
 
 }
@@ -904,7 +980,17 @@ void Window::FocusNext(int direction){
 	// 5.4.4：树前序收集 CanFocus 控件 → 当前焦点 index + direction → 循环取模
 	std::vector<Widget*> focusables;
 
-	CollectFocusables(m_rootWidget.get(), focusables);
+	// ★ Phase 42：若存在活动的模态浮层，Focus Trap 闭环：只收集模态层内的可聚焦控件
+	if (m_modalLayer != nullptr && m_modalLayer->GetChildCount() > 0) {
+		CollectFocusables(m_modalLayer, focusables);
+	} else {
+		if (m_rootWidget != nullptr) {
+			CollectFocusables(m_rootWidget.get(), focusables);
+		}
+		if (m_normalLayer != nullptr && m_normalLayer->GetChildCount() > 0) {
+			CollectFocusables(m_normalLayer, focusables);
+		}
+	}
 
 	if (focusables.empty()){
 
@@ -934,4 +1020,203 @@ void Window::FocusNext(int direction){
 
 }
 
+bool Window::ShowOverlay(std::unique_ptr<Widget> overlayWidget, const OverlayOptions& options) {
+	if (overlayWidget == nullptr) return false;
+
+	Panel* targetLayer = nullptr;
+	switch (options.layer) {
+		case OverlayLayer::Normal:  targetLayer = m_normalLayer; break;
+		case OverlayLayer::Modal:   targetLayer = m_modalLayer; break;
+		case OverlayLayer::Tooltip: targetLayer = m_tooltipLayer; break;
+	}
+	if (targetLayer == nullptr) return false;
+
+	Widget* rawWidget = overlayWidget.get();
+	targetLayer->AddChild(std::move(overlayWidget));
+
+	OverlayEntry entry;
+	entry.widget = rawWidget;
+	entry.options = options;
+	entry.ownerOverlay = const_cast<Widget*>(options.ownerOverlay);
+	entry.previousFocus = m_focusedWidget;
+
+	// 若浮层内含可聚焦控件，转移焦点
+	std::vector<Widget*> focusables;
+	CollectFocusables(rawWidget, focusables);
+	if (!focusables.empty()){
+		SetFocusedWidget(focusables.front());
+	}
+
+	m_overlayEntries.push_back(entry);
+	UpdateOverlayPositions();
+	Invalidate();
+	return true;
 }
+
+bool Window::HideOverlay(Widget* overlayWidget){
+	if (m_isClosingOverlay || m_overlayEntries.empty()) {
+		return false;
+	}
+
+	Widget* target = overlayWidget;
+	if (target == nullptr) {
+		OverlayEntry* top = GetTopActiveOverlay();
+		if (top == nullptr) return false;
+		target = top->widget;
+	}
+
+	auto it = std::find_if(m_overlayEntries.begin(), m_overlayEntries.end(),
+	                       [target](const OverlayEntry& e){ return e.widget == target; });
+	if (it == m_overlayEntries.end()) {
+		return false;
+	}
+
+	m_isClosingOverlay = true;
+
+	// 1. 先收集所有以 target 为 owner 的子孙浮层（防迭代器失效与递归死循环）
+	std::vector<Widget*> childrenToClose;
+	for (const auto& e : m_overlayEntries) {
+		if (e.ownerOverlay == target) {
+			childrenToClose.push_back(e.widget);
+		}
+	}
+	for (Widget* child : childrenToClose) {
+		m_isClosingOverlay = false;
+		HideOverlay(child);
+		m_isClosingOverlay = true;
+	}
+
+	// 重新定位 target 项
+	it = std::find_if(m_overlayEntries.begin(), m_overlayEntries.end(),
+	                  [target](const OverlayEntry& e){ return e.widget == target; });
+	if (it == m_overlayEntries.end()) {
+		m_isClosingOverlay = false;
+		return true;
+	}
+
+	OverlayEntry entry = *it;
+	m_overlayEntries.erase(it);
+
+	// 2. 从对应的分层 Panel 中摘除，并移入延迟销毁队列（★ P0-3 彻底杜绝栈内立即析构 UAF）
+	Panel* targetLayer = nullptr;
+	switch (entry.options.layer) {
+		case OverlayLayer::Normal:  targetLayer = m_normalLayer; break;
+		case OverlayLayer::Modal:   targetLayer = m_modalLayer; break;
+		case OverlayLayer::Tooltip: targetLayer = m_tooltipLayer; break;
+	}
+	if (targetLayer != nullptr) {
+		auto removed = targetLayer->RemoveChild(entry.widget);
+		if (removed) {
+			m_pendingDestroyOverlays.push_back(std::move(removed));
+		}
+	}
+
+	// 3. 安全回焦
+	if (entry.previousFocus != nullptr && IsWidgetInTree(entry.previousFocus) && entry.previousFocus->IsEnabled()){
+		SetFocusedWidget(entry.previousFocus);
+	} else if (m_focusedWidget != nullptr && !IsWidgetInTree(m_focusedWidget)){
+		SetFocusedWidget(nullptr);
+	}
+
+	m_isClosingOverlay = false;
+
+	// 4. 触发关闭回调
+	if (entry.options.onClosed != nullptr){
+		entry.options.onClosed();
+	}
+
+	Invalidate();
+	return true;
+}
+
+bool Window::HasActiveOverlay(std::optional<OverlayLayer> layer) const noexcept {
+	if (!layer.has_value()){
+		return !m_overlayEntries.empty();
+	}
+	for (const auto& entry : m_overlayEntries){
+		if (entry.options.layer == *layer) return true;
+	}
+	return false;
+}
+
+bool Window::HasVisibleOverlays() const noexcept {
+	if (!m_overlayEntries.empty()) return true;
+	if (m_overlayRoot != nullptr) {
+		if (m_overlayRoot->GetChildCount() > 3) return true;
+		if (m_normalLayer && m_normalLayer->GetChildCount() > 0) return true;
+		if (m_modalLayer && m_modalLayer->GetChildCount() > 0) return true;
+		if (m_tooltipLayer && m_tooltipLayer->GetChildCount() > 0) return true;
+	}
+	return false;
+}
+
+Window::OverlayEntry* Window::GetTopActiveOverlay() noexcept {
+	if (m_overlayEntries.empty()) return nullptr;
+
+	// ★ 严格按最高非空层级倒查：Tooltip -> Modal -> Normal
+	const OverlayLayer searchTiers[] = { OverlayLayer::Tooltip, OverlayLayer::Modal, OverlayLayer::Normal };
+	for (OverlayLayer tier : searchTiers) {
+		for (auto it = m_overlayEntries.rbegin(); it != m_overlayEntries.rend(); ++it) {
+			if (it->options.layer == tier) {
+				return &(*it);
+			}
+		}
+	}
+	return nullptr;
+}
+
+bool Window::IsWithinSubtree(const Widget* node, const Widget* subtreeRoot) const noexcept {
+	if (node == nullptr || subtreeRoot == nullptr) return false;
+	for (const Widget* cur = node; cur != nullptr; cur = cur->GetParent()){
+		if (cur == subtreeRoot) return true;
+	}
+	return false;
+}
+
+void Window::UpdateOverlayPositions() {
+	if (m_overlayEntries.empty() || m_platformWindow == nullptr) return;
+	const Size clientSize = m_platformWindow->GetClientSize();
+	const int clientWidth = static_cast<int>(clientSize.width);
+	const int clientHeight = static_cast<int>(clientSize.height);
+
+	for (size_t i = 0; i < m_overlayEntries.size(); ++i) {
+		auto& entry = m_overlayEntries[i];
+		if (entry.options.anchorWidget == nullptr) continue;
+
+		// 锚点脱树守卫：自动关闭
+		if (!IsWidgetInTree(entry.options.anchorWidget)){
+			HideOverlay(entry.widget);
+			break;
+		}
+
+		const Point apt = entry.options.anchorWidget->GetAbsolutePosition();
+		const int aw = entry.options.anchorWidget->GetWidth();
+		const int ah = entry.options.anchorWidget->GetHeight();
+		const int ow = entry.widget->GetWidth();
+		const int oh = entry.widget->GetHeight();
+
+		int targetX = static_cast<int>(apt.x);
+		int targetY = static_cast<int>(apt.y) + ah; // 默认 Below
+
+		if (entry.options.placement == AnchorPlacement::Below) {
+			if (targetY + oh > clientHeight && static_cast<int>(apt.y) - oh >= 0) {
+				targetY = static_cast<int>(apt.y) - oh; // 翻转为 Above
+			}
+		} else if (entry.options.placement == AnchorPlacement::Above) {
+			targetY = static_cast<int>(apt.y) - oh;
+			if (targetY < 0 && static_cast<int>(apt.y) + ah + oh <= clientHeight) {
+				targetY = static_cast<int>(apt.y) + ah; // 翻转为 Below
+			}
+		}
+
+		targetX = std::clamp(targetX, 0, (std::max)(0, clientWidth - ow));
+		targetY = std::clamp(targetY, 0, (std::max)(0, clientHeight - oh));
+
+		// 同值守卫：防止每帧重布局
+		if (entry.widget->GetX() != targetX || entry.widget->GetY() != targetY) {
+			entry.widget->SetPosition(targetX, targetY);
+		}
+	}
+}
+
+} // namespace ECDI

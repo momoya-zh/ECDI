@@ -196,7 +196,7 @@ void Application::DrainDeferredRemoval(){
 
 }
 
-std::vector<Widget*> Application::BuildDispatchChain(Widget* target, Widget* root){
+std::vector<Widget*> Application::BuildDispatchChain(Widget* target, Widget* root, Widget* secondaryRoot){
 
 	// ★ 冻结祖先链：target → ... → root（root 为 nullptr 时上溯到真正的树根）。
 	//   为什么在**派发开始时**一次性算好（而不是在循环里 `current->GetParent()`）：
@@ -227,7 +227,7 @@ std::vector<Widget*> Application::BuildDispatchChain(Widget* target, Widget* roo
 
 	// Debug 校验：链尾理应就是 window 的 RootWidget。仅断言不修链——异常形态下
 	//   「按父链走完」仍是安全选择（宁可多派发一级，也不丢事件）。
-	FRAMEWORK_ASSERT(root == nullptr || chain.back() == root);
+	FRAMEWORK_ASSERT(root == nullptr || chain.back() == root || chain.back() == secondaryRoot);
 
 	return chain;
 
@@ -335,7 +335,7 @@ Widget* Application::FindTargetWidget(
 	int x,
 	int y)const noexcept {
 
-	return window.GetRootWidget().HitTest(x, y);
+	return window.HitTestWindow(x, y);
 
 }
 
@@ -357,7 +357,7 @@ Widget* Application::FindFocusedWidget(Window& window)const noexcept {
 // ── 鼠标事件处理（HitTest → Target Dispatch → Bubbling）────────────
 //
 // ★★ Phase 35 起，本区块**所有**冒泡派发都走同一套骨架（与「兄弟路径参数化」同一方法论）：
-//      chain = BuildDispatchChain(target, &window.GetRootWidget());
+//      chain = BuildDispatchChain(target, &window.GetRootWidget(), &window.GetOverlayRoot());
 //      DispatchWithChain(chain, [&]{ BubbleAlongChain(chain, event, [&](Widget& w){ w.OnXxx(event); }); });
 //   为什么必须统一：契约要的是「Down/Up/Move/Wheel/Drop **行为一致**」——
 //   三个循环各自实现 ⇒ 迟早出现「只拦 Up 不拦 Down」的漂移（本需求稿第 2 条明确禁止）。
@@ -375,7 +375,7 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 
 		// ★ 捕获通道与命通道骨架完全相同（只是目标来源不同）——
 		//   捕获者可能在派发中被移除：链照样冻结，已移除则跳过其自身回调。
-		std::vector<Widget*> chain = BuildDispatchChain(captureTarget, &window.GetRootWidget());
+		std::vector<Widget*> chain = BuildDispatchChain(captureTarget, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 		DispatchWithChain(chain, [&]{
 
@@ -402,7 +402,7 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 	}
 
 	// 3. Bubbling：沿**冻结链**逐级调用 OnMouseMove（消费 / 已移除 两种停止条件见头文件）
-	std::vector<Widget*> chain = BuildDispatchChain(newTarget, &window.GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(newTarget, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 
@@ -415,6 +415,28 @@ void Application::OnMouseMove(const MouseMoveEvent& event){
 void Application::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 	Window& window = *event.GetWindow();
+
+	// ★ Phase 42：Light Dismiss 点外关闭前置拦截
+	if (window.HasActiveOverlay()){
+		Widget* hit = window.HitTestWindow(event.GetMouseX(), event.GetMouseY());
+		auto* topOverlay = window.GetTopActiveOverlay();
+
+		if (topOverlay != nullptr && topOverlay->options.lightDismiss != LightDismissPolicy::None){
+			const bool isInside = (hit != nullptr && window.IsWithinSubtree(hit, topOverlay->widget));
+			const bool isExempt = (hit != nullptr && topOverlay->options.exemptWidget != nullptr &&
+			                       (hit == topOverlay->options.exemptWidget ||
+			                        window.IsWithinSubtree(hit, topOverlay->options.exemptWidget)));
+
+			if (!isInside && !isExempt){
+				const LightDismissPolicy policy = topOverlay->options.lightDismiss;
+				window.HideOverlay(nullptr); // 关闭顶层活动浮层
+
+				if (policy == LightDismissPolicy::Consume){
+					return; // 拦截消费，不向底层继续传递
+				}
+			}
+		}
+	}
 
 	Widget* target = FindTargetWidget(window, event.GetMouseX(), event.GetMouseY());
 
@@ -434,7 +456,7 @@ void Application::OnMouseButtonDown(const MouseButtonDownEvent& event){
 
 	// ★ Phase 35：捕获/焦点已在**派发之外**建立（不进入钉住区——它们只改 Window 状态，
 	//   不访问控件树）；下面才是控件回调区。
-	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 
@@ -475,7 +497,7 @@ void Application::OnMouseButtonUp(const MouseButtonUpEvent& event){
 	//   ★ 放在 DispatchWithChain **之后**（而非 bubble 循环之后、排水之前）：
 	//     排水析构发生在派发结束的同一时机，capture 指针若在排水期被读就是悬垂。
 	//     摘树路径已由 `Window::ForgetSubtree` 清空 capture——这里只处理「没摘树、单纯结束」的常态。
-	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 
@@ -502,7 +524,7 @@ void Application::OnMouseWheel(const MouseWheelEvent& event){
 	// ⚠️ **滚轮冒泡的边界**（条 135 同族）：子控件不 SetHandled 时事件继续
 	//   落到父控件滚内容 = **期望行为**；`BubbleAlongChain` 只让「已显式消费」的子控件
 	//   阻止冒泡，不改变默认的冒泡语义。
-	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 
@@ -528,7 +550,7 @@ void Application::OnCharInput(const CharInputEvent&event){
 	//   而是为了「回调里 RequestRemove()」同样安全：目标被钉住 ⇒ 摘树后延迟析构。
 	//   链 = target → 祖先（BubbleAlongChain 只取**第一个未移除**节点 = target 本身；
 	//   若 target 在本次派发的更早一步里已被移除，则向它的祖先降级派发——见下方 BubbleAlongChain 语义）。
-	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 
@@ -568,7 +590,7 @@ void Application::OnKeyDown(const KeyDownEvent& event) {
 
 	// 键盘是**单收件人**语义（不冒泡）：链只用于钉住存活与「同一 Application::OnKeyDown 在
 	// 回调内被重入派发」时的移除标记，HandleKeyDown 自身只摸窗口的焦点成员。
-	std::vector<Widget*> chain = BuildDispatchChain(keyboardTarget, &event.GetWindow()->GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(keyboardTarget, &event.GetWindow()->GetRootWidget(), &event.GetWindow()->GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 
@@ -597,7 +619,7 @@ void Application::OnKeyUp(const KeyUpEvent& event) {
 	}
 
 	// ★ Phase 35：与 CharInput 同款——单收件人 + 钉住（回调里可安全 RequestRemove）
-	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 
@@ -647,7 +669,7 @@ void Application::OnDropFiles(const DropFilesEvent& event){
 	}
 
 	// 3. Bubbling：沿**冻结链**逐级调用（与 OnMouseMove 同款——消费即停、已移除即跳过）
-	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget());
+	std::vector<Widget*> chain = BuildDispatchChain(target, &window.GetRootWidget(), &window.GetOverlayRoot());
 
 	DispatchWithChain(chain, [&]{
 

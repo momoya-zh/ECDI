@@ -16,17 +16,20 @@
 #include "ECDI/Window/WindowBackdrop.h"
 #include "ECDI/Window/WindowLayer.h"
 #include "ECDI/Window/WindowState.h"
+#include "ECDI/Window/OverlayTypes.h"
 
 #include <string>
 #include <memory>
 #include <chrono>
 #include <cstdint>   // Phase 32：衬底清屏色 AABBGGRR
+#include <optional>
 
 namespace ECDI{
 
 class PlatformWindow;   // 前置声明（unique_ptr 成员——平台抽象，7.1.1）
 class Application;
 class Widget;
+class Panel;            // ★ Phase 42：浮层三层 Layer 声明
 class KeyDownEvent;
 class Event;            // 前置声明（OnEvent 引用参数——7.1.2）
 
@@ -72,6 +75,23 @@ class Window : public PlatformWindowHost {
 
 		/// @brief 获取 RootWidget（Widget 树的根节点，代表窗口客户区）
 		Widget& GetRootWidget() noexcept;
+
+		/// @brief 获取浮层根容器（底阶原语，几何覆盖全客户区）
+		Widget& GetOverlayRoot() noexcept;
+
+		/// @brief 弹出浮层（移交所有权）
+		/// @param overlayWidget 待弹出的浮层 Widget（所有权移交 Window）
+		/// @param options 浮层配置选项
+		/// @return true = 成功弹出；false = 参数非法或状态冲突
+		bool ShowOverlay(std::unique_ptr<Widget> overlayWidget, const OverlayOptions& options = {});
+
+		/// @brief 关闭指定浮层（若传入 nullptr 则关闭当前活动顶层浮层）
+		/// @param overlayWidget 待关闭的浮层原始指针（nullptr = 关闭顶层）
+		/// @return true = 成功关闭；false = 浮层不存在或正在关闭
+		bool HideOverlay(Widget* overlayWidget = nullptr);
+
+		/// @brief 是否存在活动浮层（无参检查任意浮层，传参检查指定层）
+		bool HasActiveOverlay(std::optional<OverlayLayer> layer = std::nullopt) const noexcept;
 
 		/// @brief 所属 Application（★ Phase 35：`Widget::RequestRemove` 需要判断「是否在派发中」）
 		/// @details B2 引用成员（窗口必有主）⇒ 恒非空、无生命周期悬空问题。
@@ -419,6 +439,7 @@ class Window : public PlatformWindowHost {
 		// ⇒ 把 `m_rootWidget` 提前声明：回调里读到的是**已构造的 nullptr**（判空合法且为假 ⇒ 安全跳过）。
 		// ⚠️ 今后新增「构造期回调可能访问的成员」时，一律声明在此行之前。
 		std::unique_ptr<Widget> m_rootWidget;	///< Widget 树的根节点（拥有所有权；★ **必须先于 m_platformWindow 构造**——构造期 `WM_SIZE` 回调会读它）
+		std::unique_ptr<Widget> m_overlayRoot;	///< 浮层根节点（★ 必须早于 m_platformWindow 构造以防 WM_SIZE 崩溃 · Phase 42）
 
 		std::unique_ptr<PlatformWindow> m_platformWindow;	///< 平台窗口（组合，非拥有创建；7.1.1）
 
@@ -461,6 +482,36 @@ class Window : public PlatformWindowHost {
 
 		/// @brief 衬底实际态 → renderer（Phase 32 D32-H——PaintFrame 帧首调用；变化才下发）
 		void SyncBackdropSurface();
+
+		// ── Phase 42：浮层根与 Light Dismiss 内部成员 ──────────────────────
+		struct OverlayEntry {
+			Widget* widget = nullptr;                       ///< 浮层节点
+			OverlayOptions options;                         ///< 配置选项
+			Widget* ownerOverlay = nullptr;                 ///< 逻辑父浮层
+			Widget* previousFocus = nullptr;                ///< 打开前持焦控件
+		};
+
+		/// @brief 窗口级统一命中测试（同源服务于 FindTargetWidget / IsClientInteractiveAt / OnQueryCursor）
+		Widget* HitTestWindow(int x, int y) const noexcept;
+
+		/// @brief 检查节点是否属于某个子树
+		bool IsWithinSubtree(const Widget* node, const Widget* subtreeRoot) const noexcept;
+
+		/// @brief 重新计算跟随锚点的浮层位置（带同值守卫）
+		void UpdateOverlayPositions();
+
+		/// @brief 是否有可见的浮层子节点
+		bool HasVisibleOverlays() const noexcept;
+
+		/// @brief 获取最高非空层级中最后加入的顶层活动浮层
+		OverlayEntry* GetTopActiveOverlay() noexcept;
+
+		Panel* m_normalLayer = nullptr;    ///< 普通浮层容器（Panel 语义）
+		Panel* m_modalLayer = nullptr;     ///< 模态浮层容器（Panel 语义）
+		Panel* m_tooltipLayer = nullptr;   ///< Tooltip浮层容器（Panel 语义）
+		std::vector<OverlayEntry> m_overlayEntries; ///< 浮层记录项
+		std::vector<std::unique_ptr<Widget>> m_pendingDestroyOverlays; ///< 延迟销毁队列（防 UAF）
+		bool m_isClosingOverlay = false;   ///< 重入守卫标志
 
 };
 

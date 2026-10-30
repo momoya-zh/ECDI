@@ -140,6 +140,15 @@ protected:
 
 	void OnCharInput(const CharInputEvent& event) override;
 
+	/// @brief 通过坐标在 Widget 树中查找目标 Widget
+	/// @param window 目标窗口
+	/// @param x 客户区坐标 X
+	/// @param y 客户区坐标 Y
+	/// @return 目标 Widget 指针，未命中返回 nullptr
+	Widget* FindTargetWidget(Window& window,int x,int y)const noexcept;
+
+	Widget* FindFocusedWidget(Window&window) const noexcept;
+
 private:
 
 	// ── ★ Phase 35：事件派发语义（消费 + 存活保护 + 延迟移除）────────────
@@ -259,16 +268,8 @@ private:
 
 	/// @brief 收集「命中目标 → 根」的祖先链（含 target 自身；root 边界不含 Window 本身）
 	/// @return 顺序：target, parent, ..., root（target 为 nullptr 时返回空链）
-	static std::vector<Widget*> BuildDispatchChain(Widget* target, Widget* root);
+	static std::vector<Widget*> BuildDispatchChain(Widget* target, Widget* root, Widget* secondaryRoot = nullptr);
 
-	/// @brief 通过坐标在 Widget 树中查找目标 Widget
-	/// @param window 目标窗口
-	/// @param x 客户区坐标 X
-	/// @param y 客户区坐标 Y
-	/// @return 目标 Widget 指针，未命中返回 nullptr
-	Widget* FindTargetWidget(Window& window,int x,int y)const noexcept;
-
-	Widget* FindFocusedWidget(Window&window) const noexcept;
 
 	// 7.1.5：m_windowClass 已下沉——窗口系统资源归平台层 WindowClass::Instance()（Application 不再认识窗口类）
 

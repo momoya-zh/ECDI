@@ -53,6 +53,7 @@ int ECDI::Test::RunAllTests()
     RegisterEventConsumptionTests();    // Phase 35：事件消费 + 嵌套点击 + 派发期安全销毁
     RegisterPlatformQuickfixTests();    // ★ #72 平台面快修（GL 失败态验证 / 光标 / WM_MOUSELEAVE）
     RegisterLayoutInvalidationTests();  // ★ Phase 41（#79）：帧级布局失效结算（批 0 只注册量具 T41-10）
+    RegisterOverlayTests();             // ★ Phase 42（#81）：Window 级浮层根（批 0 负对照组 T42-1, T42-2）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

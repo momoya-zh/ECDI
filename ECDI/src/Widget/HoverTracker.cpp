@@ -31,8 +31,8 @@ void HoverTracker::Update(Widget* newTarget){
 
 bool HoverTracker::IsInTree(Widget* widget) const noexcept{
 
-	// 沿 Parent 链上溯，只有最终可达当前树根才视为属于当前树
-	if (widget == nullptr || m_treeRoot == nullptr){
+	// 沿 Parent 链上溯，只有最终可达当前树根或副树根才视为属于当前树
+	if (widget == nullptr || (m_treeRoot == nullptr && m_secondaryRoot == nullptr)){
 
 		return false;
 
@@ -42,9 +42,9 @@ bool HoverTracker::IsInTree(Widget* widget) const noexcept{
 
 	while (current != nullptr){
 
-		if (current == m_treeRoot){
+		if (current == m_treeRoot || (m_secondaryRoot != nullptr && current == m_secondaryRoot)){
 
-			return true;   // 到达树根 = 仍在树
+			return true;   // 到达树根或副树根 = 仍在树
 
 		}
 
