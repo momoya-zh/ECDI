@@ -631,8 +631,6 @@ private:
 ★ 三个 `using` 是**纯增量**（既有 T29-1..6 / T29-WRAP-1..3 / T28-3a/b / T36-7 / T31-2a..c 全部只用 `GetPreferredSize` 与 `Paint`，不受影响）。
 ★ 登记落 `RegisterWidgetTests()` 尾部（`:1699-1717` 一带），前缀沿既有 `TextWidget.Wrap*` 家族。
 
-
-
 ---
 
 ## §3 样本表（★ `tools/phase38_wrap_probe.py` 逐字输出，2026-10-29 复跑）
@@ -693,8 +691,7 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 
 | # | 文本（码点数） | 折行宽 | 新（v1.1）实算 | 旧（v1.0）实算 | 旧口径违反的判据 |
 |---|---|---|---|---|---|
-| **S8a** | `"一二三 四"` (5) | 24 | L0 `[0,3)` w24 **own4** · L1 `[4,1)` w8 own5 | L0 `own3` | `gap = 1` 而 `cps[3] = ' '`（非 `'
-'`）⇒ A3 第三态 |
+| **S8a** | `"一二三 四"` (5) | 24 | L0 `[0,3)` w24 **own4** · L1 `[4,1)` w8 own5 | L0 `own3` | `gap = 1` 而 `cps[3] = ' '`（非 `'\n'`）⇒ A3 第三态 |
 | **S8b** | `"一二三  四"` (6) | 24 | L0 `[0,3)` w24 **own5** · L1 `[5,1)` w8 own6 | L0 `own3` | `gap = 2` ⇒ 越出 `gap ∈ {0,1}` |
 | **S8c** | `"一二三 \n四"` (6) | 24 | L0 `[0,3)` w24 **own4** · L1 `[5,1)` w8 own6 | L0 `own3` | `gap = 2`（空格 + `\n` 两个无主码点） |
 | **S8d** | `"abc   "` (6) | 40 | **1 行** `[0,3)` w24 **own6** | 1 行 `own5` | **`ownedEnd(last) = 5 ≠ count = 6`** ⇒ 违反边界等式 ② |
@@ -727,9 +724,9 @@ wrapWidth=40 H=24 -> n=2 contentH=32 maxScroll=8  barVisible=True
 | **T38-11** | `TextBox.SoftWrapUndoRedoAndPinX` | TextBoxTests | 键入折行长文 → `Undo` → 行表 == 直接构造同文本的行表；折行期 `m_scrollOffsetX == 0.0f`。★★ **v1.1 强化切换相（A-17 的判别面）**：① 非折行态把光标推到长单行行尾 ⇒ 断言 `GetScrollOffsetX() > 0`（前置成立）；② `SetWordWrap(true)`（**不经任何光标移动 / 不经 `EnsureCaretVisible`**）⇒ 断言 `GetScrollOffsetX() == 0.0f`；③ 再 `Paint()` 一次 ⇒ 断言 `DrawTextCommand.pos.x == textX`（不是 `textX − 旧 offset`）。★ ② 在 v1.0 的两写点下**必红**（残留旧值），故本条同时是 D38-G 补全的负对照 · ★★ **v1.5 订正**：本相**必须真窗口**（`m_scrollOffsetX` 只在 `else if (Window*)` 支写入，无头恒 0），且 ② 的断言要跟一次**重建**（`SetWordWrap` 不调 `RecalculateLines`）⇒ 判据改成「② 重建后 offset == 0；③ 同一帧 `Paint` ⇒ `pos.x == Padding()`」，详见 §9 v1.5 ①② | ✅ 批 4 已实现（真窗口 2 条之一） |
 | **T38-12** | `TextBox.SoftWrapPreferredStable` | TextBoxTests | `GetPreferredSize().height == ceil(n × L_pref + 2p)` 且 `n == OnPaint` 发射的行数；`.width == GetWidth()` **恒等**；★ **连续两次 `AutoSize()` 宽不变**；★ 追加**窄带两档**（`W = 2p+14` 与 `W = 2p+1`）⇒ 两次 `AutoSize` 宽仍不变（D38-D 删宽度合取项的判别面） | §3.2 |
 | **T38-13** | `TextBox.SoftWrapOffPreferredBaseline` | TextBoxTests | 非折行态 preferred 逐位同（`wrap=false` / 含 `\n` / 单行）——常量表 | **批 0 采集** |
-| **T38-14** | `TextBox.SoftWrapKeyPerDimension` | TextBoxTests | **a–i 九子断言**，每维「只变这一维 ⇒ 行数或区间必变」：a `revision` / b `font.size` / c `font.family` / d `font.weight` / e `wrapWidth` / f `wrapRequested` 的 `SetWordWrap` 分量 / g `wrapRequested` 的 `SetSingleLine` 分量（★ 判别的是**维 8 的覆盖性**，该维已删、断言不删）/ h `echoMode`（★ S7 的 `RecordingTextMeasurer` 量具落在此：喂入串含 `E2 80 A2`、不含明文）/ i **组合三维**（★ **必须开 `Password`**——Normal 态 `BuildDisplayText` 直通 `:232-233`，组合标志不入显示串 ⇒ 恒真无判别力） · ★★ **v1.5 订正**：判据从「行数/区间必变」改成「**`FitText` 被再次调用**」——假测量器忽略字体 ⇒ b/c/d 三维视觉布局不变，只有「量了没有」能区分残表；f/g 两维走非折行支不调 `FitText` ⇒ 改断「表形变单行」；i-b（起点）**无法单独变更**，只断言「换起点那一轮必重建」，隔离性登记为余量，详见 §9 v1.5 ②③ | ✅ 批 4 已实现 | §3.1 S7 |
+| **T38-14** | `TextBox.SoftWrapKeyPerDimension` | TextBoxTests | **a–i 九子断言**，每维「只变这一维 ⇒ 行数或区间必变」：a `revision` / b `font.size` / c `font.family` / d `font.weight` / e `wrapWidth` / f `wrapRequested` 的 `SetWordWrap` 分量 / g `wrapRequested` 的 `SetSingleLine` 分量（★ 判别的是**维 8 的覆盖性**，该维已删、断言不删）/ h `echoMode`（★ S7 的 `RecordingTextMeasurer` 量具落在此：喂入串含 `E2 80 A2`、不含明文）/ i **组合三维**（★ **必须开 `Password`**——Normal 态 `BuildDisplayText` 直通 `:232-233`，组合标志不入显示串 ⇒ 恒真无判别力） · ★★ **v1.5 订正**：判据从「行数/区间必变」改成「**`FitText` 被再次调用**」——假测量器忽略字体 ⇒ b/c/d 三维视觉布局不变，只有「量了没有」能区分残表；f/g 两维走非折行支不调 `FitText` ⇒ 改断「表形变单行」；i-b（起点）**无法单独变更**，只断言「换起点那一轮必重建」，隔离性登记为余量，详见 §9 v1.5 ②③ · ✅ 批 4 已实现 | §3.1 S7 |
 | **T38-15** | `TextBox.SoftWrapKeyHitZeroMeasure` | TextBoxTests | `CountingFakeMeasurer`：① 键全同 ⇒ 第二次 `RecalculateLines()` 的 `fitCalls == 0 && measureCalls == 0`；② 重建一次时 **`行数 == fitCalls`**（线性判据，防超线性放大）——★ **v1.1 限定样本（A-16）**：**必须用无 `\n` 的单段串**（如 S6 `"abcdefgh"`@26 ⇒ 3 行 / 3 次）。含 `\n` 的串**必假红**：空段走 `TextWidget.cpp:257-259` 的 `continue`，**不调 `FitText`** ⇒ `"ab\n"` 是 2 行但 `fitCalls == 1`、`"a\n\nb"` 是 3 行但 `fitCalls == 2` | §2.9 + §3.1 S6 |
-| **T38-16** | `TextBox.SoftWrapRealWindowWhitelist` | TextBoxTests | **真窗口四件合一**：① 焦点态绘制（`:1430`）② 行内 x 精确定位（`:796` 的 `GetWindow() != nullptr` 守卫）③ 无头求 preferred 后 `AddChild` 挂窗 ⇒ **重排**（`hasMeasurer` 维）④ ★ `SetSingleLine(false)` 后**无需外部失效**即重排重绘（C38-9；无头 `Invalidate()` 是 no-op ⇒ 只能在此验） | `CaretProbe`（**现 `:1795` 起，含本批新增的「文本 + 尺寸」重载**）· ★ v1.5 订正：③ 的无测量器 `preferred` = **当前尺寸**（{40, 64}），不是单行内容高 16，详见 §9 v1.5 ⑥ | ✅ 批 4 已实现 |
+| **T38-16** | `TextBox.SoftWrapRealWindowWhitelist` | TextBoxTests | **真窗口四件合一**：① 焦点态绘制（`:1430`）② 行内 x 精确定位（`:796` 的 `GetWindow() != nullptr` 守卫）③ 无头求 preferred 后 `AddChild` 挂窗 ⇒ **重排**（`hasMeasurer` 维）④ ★ `SetSingleLine(false)` 后**无需外部失效**即重排重绘（C38-9；无头 `Invalidate()` 是 no-op ⇒ 只能在此验） | `CaretProbe`（**现 `:1795` 起，含本批新增的「文本 + 尺寸」重载**）· ★ v1.5 订正：③ 的无测量器 `preferred` = **当前尺寸**（{40, 64}），不是单行内容高 16，详见 §9 v1.5 ⑥ · ✅ 批 4 已实现 |
 | **T38-17** | `TextBox.SoftWrapClipIsInnerBoundary` | TextBoxTests | 折行态 `PushClipCommand.rect.width == GetWidth() − 2·padding`（**不是** `GetTextAreaWidth()`），且 S4 悬挂行 `DrawTextCommand` **完整落在 clip 内**（`pos.x + 行宽 ≤ clip.x + clip.width`）；条可见半段（`H=24`）断言 clip 宽不变 + 命令仍发射；**非折行半段**（`H=10` ⇒ 条可见）断言 clip 宽 = `GetTextAreaWidth()` = 24（与折行态的 38 形成对照）。★★ **v1.4 关键订正：clip 必须取 `clipWidths[1]`，不是 `back()`**——见下方 §9 v1.4 ① | §3.3 + v1.4 ① |
 | **T38-18** | `TextBox.SoftWrapSeparatorSpaceOwned` | TextBoxTests | ★★ **v1.1 新增（A-15 的判别面）**：S8 组在**行表**层的归属——① S8a `LineRange(0) == (0,4)` 且 `LineDrawRange(0) == (0,3)`（**分隔空格归前行、但不发射** = 两口径分离在软断点空格上的实证）；② S8b/S8c 逐行 `gap` 只有 0 / 1（后者仅在 `\n` 处）；③ S8d `LineRange(last).second == GetCodepointCount()`（尾部空格串不得丢）；④ **可达性**：`CaretIndexFromLineX(0, 24.0f)` 的返回值落在 `[0,4)`（含空格位 cp3；无头下 `:796` 守卫 ⇒ 只断「落在本行归属区间内」，行内精确定位归 T38-16②）；⑤ **负对照**：注释掉 §2.1 ⑨ 的回填 ⇒ ①③ **必红** | §3.4 |
 
