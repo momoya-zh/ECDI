@@ -284,14 +284,6 @@ void Application::OnWindowDestroyed(
 	}
 }
 
-void Application::OnWindowResized(
-	const WindowResizedEvent& event)
-{
-	event.GetWindow()
-		->GetRootWidget()
-		.Arrange();
-}
-
 void Application::OnWindowCloseRequested(
 	const WindowCloseRequestedEvent& event
 )

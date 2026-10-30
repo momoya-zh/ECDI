@@ -40,6 +40,12 @@ void TextWidget::SetText(const std::string& text){
 
 	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5）
 
+	// ★ Phase 41（D41-5）：**只走重绘通道**——文本不改变几何，故**不置布局脏**。
+	//   要让控件跟着文本变长，请显式 `AutoSize()`（它是尺寸的唯一动作入口）。
+	//   ★ 本行同时兑现审计「条 65」：`SetText` 曾只 bump revision 而不请求重绘
+	//   （非鼠标事件驱动的 UI 更新静默不刷新，与 M9 同族）。
+	Invalidate();
+
 }
 
 void TextWidget::SetText(std::string&& text){
@@ -47,6 +53,9 @@ void TextWidget::SetText(std::string&& text){
 	m_text = std::move(text);
 
 	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5）
+
+	// ★ Phase 41（D41-5）：同左值重载——只走重绘通道，不置布局脏（文本不改几何）。
+	Invalidate();
 
 }
 

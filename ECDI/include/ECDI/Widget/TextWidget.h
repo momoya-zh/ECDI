@@ -31,7 +31,10 @@ public:
 
 	explicit TextWidget(std::string&& text);
 
-	/// @brief 设置文本（9.7 修：升格 virtual——TextBox override 置行缓存失效；外部替换文本绕过编辑操作路径）
+	/// @brief 设置文本
+	/// @details ★ Phase 41：本方法内建 `MarkTextChanged()`（preferred 指纹失效 + `TextBox` 行表键维 1）
+	///          与 `Invalidate()`（重绘通道）；**仍不置布局脏**（文本不改几何，要撑开请显式 `AutoSize()`）。
+	///          `TextBox` 的 override 已删除——它的全部内容都是基类的子集。
 	virtual void SetText(const std::string& text);
 
 	virtual void SetText(std::string&& text);

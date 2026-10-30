@@ -90,18 +90,9 @@ public:
 	/// @brief TextBox 专属样式覆盖（文字颜色/字体经 TextWidget::SetStyle(TextStyleOverride)）
 	void SetStyle(TextBoxStyleOverride override);
 
-	/// @brief 设置宽高（9.5 R1 override：基类改几何后 EnsureCaretVisible + Invalidate——
-	/// 缩窗后光标越出可视区立即滚回；Layout 只 SetPosition 不碰尺寸，SetSize 是尺寸唯一入口）
+	/// @brief 设置宽高（9.5 R1 override：基类改几何后 EnsureCaretVisible——缩窗后光标越出可视区立即滚回；Layout 只 SetPosition 不碰尺寸，SetSize 是尺寸唯一入口）
+	/// @details ★ Phase 41：**`Invalidate` 归基类** `Widget::SetSize`（重绘 + 布局双通道）——本 override 只保留「光标可见 + 条摆位/同步」两件**复合**副作用，**不得**再自行 `Invalidate`（会逃过结算期抑制）
 	void SetSize(int w, int h) override;
-
-	// ── SetText override（9.7 修：外部替换文本绕过编辑操作路径，必须置行缓存失效）──
-	/// @details TextWidget::SetText 直接改 m_text——多行内容（\n）不失效 `m_lines` 会按旧缓存画成
-	/// 单行。override 只做缓存失效 + Invalidate，**不触发 RaiseTextChanged/callback**（D7 契约保持）。
-	/// ★ Phase 38：失效方式 = 清 `m_linesValid`（`MarkLinesDirty()`），与旧失效布尔位退役后的
-	/// 键守卫同源——行表只在**键未命中**时重建。
-	void SetText(const std::string& text) override;
-
-	void SetText(std::string&& text) override;
 
 	// ── 回调注册（7.5 新增：表单/数据绑定核心需求）──────────
 

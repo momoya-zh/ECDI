@@ -115,9 +115,6 @@ protected:
 	void OnWindowDestroyed(
 		const WindowDestroyedEvent& event) override;
 
-	void OnWindowResized(
-		const WindowResizedEvent& event) override;
-
 	void OnWindowCloseRequested(const WindowCloseRequestedEvent& event) override;
 
 	/// @brief 文件拖入派发（Phase 14 R11——HitTest → Dispatch → Bubbling，与鼠标同族）

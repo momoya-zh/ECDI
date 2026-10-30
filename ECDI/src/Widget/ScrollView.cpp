@@ -334,7 +334,19 @@ void ScrollView::SetSize(int w, int h){
 	ClampOffset();     // ②
 	SyncBars();        // ③
 
-	// 不 Invalidate：SetSize 由布局路径调用，重绘由调用方负责（既有契约）
+	// ★★ Phase 41 契约变更（旧契约「`SetSize` 不发重绘、刷新由调用方负责」已推翻——★ 原句**故意不复述**
+	//   靶词：它是本 Phase 的机检对象，拼进去等于让机检自己命中自己；原文全句见需求稿 §1.1.3）：
+	//   重绘失效由 `Widget::SetSize` 统一发出（值真变化才发，同值守卫在基类），本 override
+	//   只负责三段**复合**副作用——`ApplyLayout` / `ClampOffset` / `SyncBars` 改的是
+	//   **滚动条与内容节点**的几何/可见性，不是 `ScrollView` 自身的视口几何。
+	//   ⚠️ **旧注释当时为什么看起来是对的**：`SetSize` 确实由 `Layout` 逐帧调用；但
+	//   ① 「逐帧重绘」的代价在当前平台层**已经付过了**（无 `BeginPaint` ⇒ region 恒脏）；
+	//   ② 结算期（`Layout` 正在写几何）的豁免**不再由本类各自判断**，而由
+	//      `Widget::NotifyGeometryChanged` 在 `Arrange` 期间**统一拦下**（既不置脏也不 Invalidate）；
+	//   ⇒ 本类没有任何理由再单独拒发一次重绘请求。
+	//   ★ 如实记账：本函数内的 `SyncBars` → `ScrollBar::SetRange`（`ScrollBar.cpp:25-32`）仍带
+	//   **裸 Invalidate()**（不走统一出口）⇒ 结算期仍会发一次重绘请求，但它不碰 `m_layoutDirty`
+	//   ⇒ 不影响 Arrange 计数。
 
 }
 

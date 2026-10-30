@@ -155,6 +155,11 @@ void CollapsiblePanel::Toggle(){
 void CollapsiblePanel::SetSize(int w, int h){
 
 	if (!m_expanded){
+		// ★ Phase 41 雷区预警（**不修**——属 #80）：本分支把传入的 (w,h) 写进 m_expandedRect
+		//   作为「展开基准」，而此时呈现几何往往还是 0；`VerticalLayout.cpp:96` 的 fillCrossAxis
+		//   分支会调 `child->SetSize(cross, child->GetHeight())` ⇒ 收起态 GetHeight()==0
+		//   ⇒ **基准高被抹成 0 ⇒ 此后永远展不开**。当前无实例（examples 均在无 Layout 容器里），
+		//   修属 #80（动画驱动的连续几何）。
 		// 收起态语义（2026-08-30 v1.2，phase9.6-panel-container-semantics v1.1 硬契约）：
 		// SetSize 定义「展开基准」，实际呈现保持收缩——非动画轴保持给出值、动画轴呈现 0
 		// （Down/Up→宽=w 高=0；Left/Right→高=h 宽=0）。位置取当前 GetX()/GetY()，

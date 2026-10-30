@@ -95,9 +95,28 @@ void Widget::AddChild(std::unique_ptr<Widget> child){
 		return;
 	}
 
-	child->m_parent = this;
+	// ★★ Phase 41（D41-6）：**子树脏向新根合并**。
+	//   业务侧的真实建树路径是「先离线搭子树、再挂进窗口」——离线期 `AddChild`/`SetLayout`
+	//   把脏写在该子树的**临时根**上；根单标志只看真根 ⇒ 不合并就是**挂入后首帧不排**
+	//   （几何停在初始值）。★ 无法靠 `SetWindow` 兜底：它是 private、唯一调用点是
+	//   `Window` 构造第 113 行（对刚 new 出来的空 root），不是业务路径。
+	Widget* const raw = child.get();
+
+	const bool subtreeDirty = raw->m_layoutDirty;
+
+	raw->m_layoutDirty = false;   // 已由真根承载；临时根不再被查询（防「二次挂入」伪脏）
+
+	raw->m_parent = this;
 
 	m_children.emplace_back(std::move(child));
+
+	// ★★ 失效出口**无条件调用**，门控只作**实参**：
+	//   ① 子树脏：无条件合并（它代表一条**真实**失效，不需再过门控）；
+	//   ② 自身置脏：子集合的唯一读者是**我的** Layout。
+	//   ⚠️ 绝不可写成 `if (subtreeDirty || m_layout){ ... }` 把整句包起来——那会让「往**无 Layout**
+	//   的父节点加控件」连**重绘通道**都被跳过（新控件要等下一次偶然重绘才出现）。
+	//   ★ 这是**行为新增**：Phase 41 之前 AddChild 不发 Invalidate。
+	NotifyGeometryChanged(subtreeDirty || m_layout != nullptr);
 
 }
 
@@ -142,6 +161,13 @@ std::unique_ptr<Widget>Widget::RemoveChild(Widget* child){
 	std::unique_ptr<Widget> result=std::move(*it);
 
 	m_children.erase(it);
+
+	// ★ Phase 41：子集合变化 ⇒ 走失效出口（门控只说「**我的** Layout 会读子集合」，重绘无条件是发）。
+	//   ⚠️ 同样**不得**套 `if`——从**无 Layout** 的容器摘子也必须重绘。
+	//   ★ 插入点等价性：出口里的 `Invalidate()` 是从 **`this`** 上溯取 Window，与被摘节点的
+	//   `m_parent`（下文才清）无关 ⇒ 早一处/晚一处结果相同；放这里只是让「子集合刚变」
+	//   这个因果在代码里读得出来。此时 `result` 仍持有所有权、`this` 的父链完好。
+	NotifyGeometryChanged(m_layout != nullptr);
 
 	// ★★ 审计 #59 / H6：**清除父指针之前**注销该子树上的一切非拥有登记。
 	// 背景：框架有三处非拥有 Widget 指针（Window 的焦点/捕获 + HoverTracker 的 hover），
@@ -363,6 +389,12 @@ void Widget::SetLayout(std::unique_ptr<Layout> layout){
 
 	m_layout = std::move(layout);
 
+	// ★ Phase 41：换布局器 ⇒ **我的子树**必须重算（无条件置脏——连「移除布局」也置，
+	//   因为「此前由 Layout 摆出的几何是否仍然合法」无法在 O(1) 内判定）。
+	//   ⚠️ 若将来出现「在 Layout::Arrange 内部换布局器」的调用（当前不存在），该写入会被
+	//   结算期抑制吞掉 ⇒ 要等下一条失效才结算。
+	NotifyGeometryChanged(true);
+
 }
 
 Widget* Widget::GetChildAt(size_t index) noexcept{
@@ -413,14 +445,72 @@ void Widget::ArrangeInternal(){
 
 void Widget::Arrange(){
 
+	Widget* const root = GetRootNode();
+
+	// ★ D41-3 ⓑ：结算期抑制对**整棵树**生效（标志寄存在根）
+	++root->m_arrangeDepth;
+
 	ArrangeInternal();
+
+	--root->m_arrangeDepth;
+
+	// ★ D41-3.2：**根** Arrange 完成即清根脏；**子树** Arrange **不清**（兄弟分支可能仍脏）
+	//   ⇒ 这是「一次 WM_SIZE 只 Arrange 一次」的唯一成立条件：
+	//     `Window::OnResized` 先同步 Arrange（此处清脏）⇒ 随后 `PaintFrame` 看到干净 ⇒ 不再重排。
+	//   ⚠️ 第二个条件（**深度已归零**）是**防御性**：嵌套时 `root == this` 本来就为假，
+	//   写出来是让「结算完全退出后才消费脏」这条语义在代码里可见。
+	if (root == this && root->m_arrangeDepth == 0){
+
+		root->m_layoutDirty = false;
+
+	}
+
+}
+
+void Widget::SetPosition(int x, int y){
+
+	const float fx = static_cast<float>(x);
+	const float fy = static_cast<float>(y);
+
+	// ★ 同值守卫（R6 / D41-3 末段）：**正确性要求，不是优化**——
+	//   ① `Layout` 每帧对每个子调本方法（值多半相同）⇒ 无守卫会让「伪变化」把根**永久**置脏
+	//      （A41-6「空闲帧不重排」直接变红）；
+	//   ② 复合控件内部也常写同值（`CaptionBar::RelayoutChildren` 等）。
+	//   ★ Phase 41 前本方法是头内联的**纯赋值**（无守卫需求）——移出 inline 的理由见 `Widget.h`。
+	if (m_geometry.x == fx && m_geometry.y == fy){
+
+		return;
+
+	}
+
+	m_geometry.x = fx;
+	m_geometry.y = fy;
+
+	// 门控（D41-4）：位置的**唯一**读者是父的 Layout
+	NotifyGeometryChanged(ParentHasLayout());
 
 }
 
 void Widget::SetSize(int w, int h){
 
-	m_geometry.width = static_cast<float>(w);
-	m_geometry.height = static_cast<float>(h);
+	const float fw = static_cast<float>(w);
+	const float fh = static_cast<float>(h);
+
+	// ★ 同值守卫（R6 / D41-3 末段）：
+	//   ① `Layout` 每帧对每个 child 调 SetSize（值多半相同）；
+	//   ② 复合控件内部写同值几何（`TextBox::LayoutScrollBar:719`、`ScrollView::ApplyLayout:272-288`）
+	//      ——无守卫会无谓置脏 ⇒ 下一帧白跑一次全树 Arrange。
+	if (m_geometry.width == fw && m_geometry.height == fh){
+
+		return;
+
+	}
+
+	m_geometry.width = fw;
+	m_geometry.height = fh;
+
+	// 门控（D41-4）：尺寸有**两个**读者——我的 Layout（子要重排）、父的 Layout（我在父的槽位里）
+	NotifyGeometryChanged(m_layout != nullptr || ParentHasLayout());
 
 }
 
@@ -437,11 +527,13 @@ void Widget::SetVisible(bool v){
 
 	m_state.visible = v;
 
-	// ★ 请求重绘：可见性是**绘制门控**（`Widget.cpp:135`/`:281` 的 Paint 前置）⇒
-	//   状态变化必须让新状态上屏。此前的「裸赋值」与 `SetStyle`/`ApplyTheme`（内建 Invalidate）
+	// ★ 请求重绘：可见性是**绘制门控**（`Widget.cpp:489` 的 Paint 前置 / `:314` 的 HitTest 门控）
+	//   ⇒ 状态变化必须让新状态上屏。此前的「裸赋值」与 `SetStyle`/`ApplyTheme`（内建 Invalidate）
 	//   不同族 ⇒ 应用侧改可见性常静默不刷新（= 审计 M9 本体）。
+	// ★★ Phase 41：它同时是**布局输入**（`Layout` 对不可见子跳过槽位并停泊到 bbox 负区
+	//   ——C-VIS-2/4）⇒ 门控 = 父是否有 Layout。这是「SetVisible 之后兄弟不重排」的修复点。
 	// ⚠️ 无窗口（无头测试 / 构造期）时 `Invalidate()` 内部上溯取不到 Window ⇒ 自然 no-op。
-	Invalidate();
+	NotifyGeometryChanged(ParentHasLayout());
 
 }
 
@@ -457,7 +549,19 @@ void Widget::SetStretch(int stretch) noexcept{
 	// ★ **Debug 侧断言保留**：暴露"传了负值"这一调用方错误（框架自身不会传负值）。
 	FRAMEWORK_ASSERT(stretch >= 0);   // 负值无合理权重语义（详设 §2.1）
 
-	m_stretch = (stretch > 0) ? stretch : 0;
+	const int clamped = (stretch > 0) ? stretch : 0;
+
+	// ★ Phase 41：同值守卫（stretch 由父 Layout 读，逐帧写同值是常态）
+	if (m_stretch == clamped){
+
+		return;
+
+	}
+
+	m_stretch = clamped;
+
+	// 门控（D41-4）：stretch 的唯一读者是父的 Layout
+	NotifyGeometryChanged(ParentHasLayout());
 
 }
 
@@ -589,6 +693,78 @@ void Widget::Invalidate(){
 		window->Invalidate();
 
 	}
+
+}
+
+// ── ★ Phase 41：布局失效结算（两通道失效 + 帧首结算）──────────────
+
+Widget* Widget::GetRootNode() noexcept{
+
+	Widget* root = this;
+
+	while (root->m_parent){
+
+		root = root->m_parent;
+
+	}
+
+	return root;
+
+}
+
+void Widget::NotifyGeometryChanged(bool layoutInputChanged) noexcept{
+
+	Widget* const root = GetRootNode();
+
+	// ★★ 结算期抑制（D41-3 ⓑ）：`Layout::Arrange` 对子控件批量写几何，那些写入是**布局的输出**
+	//   而不是输入 ⇒ 不构成新的布局失效；且它们会在**同一帧**被画出来 ⇒ 也不需要重绘请求。
+	//   ⇒ 两条通道一起抑制（否则一次 Arrange 会发出 N 次 InvalidateRect，并把自己永久弄脏）。
+	//   ⚠️ 抑制范围 = 「经本出口的失效」，**不是**「结算期全库零 Invalidate」：
+	//     `ScrollBar::SetRange`（`ScrollBar.cpp:25-32`）仍带裸 Invalidate()，它不碰 m_layoutDirty
+	//     ⇒ 不影响 Arrange 计数（详设 §2 I41-6 已记账）。
+	if (root->m_arrangeDepth > 0){
+
+		return;
+
+	}
+
+	// ① 布局通道（D41-4 门控）：只有「某个 Layout 会读它」才置根脏
+	if (layoutInputChanged){
+
+		root->m_layoutDirty = true;
+
+	}
+
+	// ② 重绘通道：复用既有出口（无窗口 ⇒ 上溯取不到 Window ⇒ 自然 no-op，既有语义）
+	Invalidate();
+
+}
+
+void Widget::SettleLayoutIfDirty(){
+
+	// ★ 仅根有意义（`Window::PaintFrame` 以 `m_rootWidget` 调用；friend 授权）
+	if (!m_layoutDirty){
+
+		return;   // 空闲帧 O(1)——红线③
+
+	}
+
+	Arrange();    // 根调用 ⇒ 内部按 D41-3.2 清脏
+
+}
+
+bool Widget::NeedsLayout() const noexcept{
+
+	// 脏标志寄存在根 ⇒ 查询必须上溯（与 HasFocus 同型）
+	const Widget* root = this;
+
+	while (root->m_parent){
+
+		root = root->m_parent;
+
+	}
+
+	return root->m_layoutDirty;
 
 }
 

@@ -1,15 +1,13 @@
 #include "RunAllTests.h"
 #include "TestFramework.h"
+#include "WindowProbe.h"
 
 #include <Windows.h>
 #ifdef DrawText
 #undef DrawText   // 防御性 undef（规范 10）：本文件含 Windows.h——防 DrawTextW 宏污染 ECDI 头声明
 #endif
 
-#include "ECDI/Application/Application.h"
 #include "ECDI/Core/Color.h"
-#include "Render/RecordingBackend.h"          // 测试替身（库内内部头——同 RendererTests.cpp:11）
-#include "ECDI/Render/RenderServices.h"
 #include "ECDI/Widget/Button.h"
 #include "ECDI/Window/Window.h"
 
@@ -18,6 +16,7 @@
 #include <utility>
 
 using namespace ECDI;
+using namespace ECDI::Test;
 
 // ══════════════════════════════════════════════════════════════════════
 // ★ 审计 M9：`SetVisible` 不 `Invalidate`（与同族 setter 不一致）
@@ -44,83 +43,12 @@ using namespace ECDI;
 //   证明 `GetUpdateRect` **确实能观测到框架发出的 Invalidate**——否则若判据本身失效，
 //   四条用例会一起假绿（条 76：量具不校准则判据无效）。
 
-namespace {
-
-/// @brief 手动消息泵（WindowBackgroundTests 同款——处理至多 maxCount 条消息后返回）
-void PumpMessages(int maxCount) {
-
-	MSG msg{};
-
-	for (int i = 0; i < maxCount && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE); ++i) {
-
-		TranslateMessage(&msg);
-		DispatchMessageW(&msg);
-
-	}
-
-}
-
-/// @brief M9 装置：真 Application + 真 Window（注入 RecordingBackend 供正向对照观测）
-/// @details 关键实测事实（探针取证，如实记账）：
-///   ① `FindWindowW(nullptr, L"<title>")` 能按标题取到本窗口 HWND —— region 判据的前提；
-///   ② `WM_PAINT` 泛滥（无 BeginPaint/EndPaint）⇒ **帧计数不可用作判据**，改用 region 脏位。
-struct M9Probe {
-
-	Application app;
-
-	Window* window = nullptr;   ///< 非拥有（所有权归 Application）
-
-	HWND hwnd = nullptr;        ///< 平台窗口句柄（FindWindowW 取——region 判据的观测面）
-
-	explicit M9Probe(const char* title) {
-
-		auto recorderOwned = std::make_unique<RecordingBackend>();
-		RenderServices services{
-			std::move(recorderOwned),
-			std::make_unique<RecordingBackend>()   // 测量占位（本组不断言测量）
-		};
-
-		window = &app.Create(title, 400, 300, std::move(services));
-
-	}
-
-	~M9Probe() { if (window) window->Release(); }
-
-	/// @brief 显示并泵若干帧（让窗口进入稳态——region 由 Show 的第一帧弄脏）
-	void ShowAndSettle() {
-
-		window->Show();
-		PumpMessages(64);
-
-	}
-
-	/// @brief 清空 update region（测试侧家务——把「是否变脏」变成可区分二值）
-	/// @note 必须显示后调用（未显示的窗口 Region 操作无意义）
-	void ClearRegion() {
-
-		::ValidateRect(hwnd, nullptr);
-
-	}
-
-	/// @brief update region 是否变脏（非零 = 有绘制请求待处理）
-	/// @pre ClearRegion() 之后调用才有判别力
-	bool RegionDirty() const {
-
-		RECT rc{};
-		return ::GetUpdateRect(hwnd, &rc, FALSE) != 0;
-
-	}
-
-};
-
-}   // namespace
-
 // ── M9-①：可见性变化 ⇒ 请求重绘（★ 缺陷本体）──────────────────────────────
 //   修复前 `SetVisible` 只赋值 ⇒ region 保持干净 ⇒ 应用侧 `SetVisible(false)` 后
 //   控件不消失（直到别的失效顺带触发一次重绘）——这正是 M9 的用户可见后果。
 void TestM9SetVisibleRequestsRepaint() {
 
-	M9Probe probe("ECDI_M9_Hide");
+	WindowProbe probe("ECDI_M9_Hide");
 
 	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_M9_Hide");
 	EXPECT_TRUE(probe.hwnd != nullptr);          // 量具前提：拿得到 HWND
@@ -155,7 +83,7 @@ void TestM9SetVisibleRequestsRepaint() {
 //   ★ 同族先例：`TextWidget::SetWordWrap:102-105`（值比较 + 早退）。
 void TestM9SetVisibleSameValueNoRepaint() {
 
-	M9Probe probe("ECDI_M9_Same");
+	WindowProbe probe("ECDI_M9_Same");
 
 	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_M9_Same");
 	EXPECT_TRUE(probe.hwnd != nullptr);
@@ -184,15 +112,19 @@ void TestM9SetVisibleSameValueNoRepaint() {
 
 }
 
-// ── M9-③：★ 反向对照 —— 几何 setter `SetSize` **不**请求重绘（契约未扩大）───────
-//   ★ 这条钉住范围边界：M9 只补「可见性」这一条，**没有**顺手把 Invalidate
-//     推广到 `SetSize` / `SetPosition`（它们由 `Layout` 逐帧批量调用 ⇒ 加了会每帧重绘）。
-//   ⇒ 若将来有人「顺手统一」，本条会红 —— 那就是范围蔓延的信号。
-void TestM9SetSizeStillNoRepaint() {
+// ── M9-③ → ★ Phase 41：几何 setter **请求重绘**（契约变更后的正向守卫）────────────
+//   ★ 本条是原 `Widget.SetSizeStillNoRepaint` 的**翻转**（需求 D41-11 方案 A 的配套动作）。
+//     旧条自述「钉住范围边界……若将来有人『顺手统一』，本条会红 —— 那就是范围蔓延的信号」
+//     ⇒ Phase 41 **正是**要改变那个意图，翻转是**契约变更的配套**，不是掩盖回归。
+//   ★ 新旧判据的差别（为什么拆成两条）：
+//     · **重绘通道**：值真变化 ⇒ `Invalidate()`（旧契约说「不发」，新契约说「发」）；
+//     · **布局通道**：`Button` 与 `RootWidget` **都没有 `Layout`** ⇒ 门控（D41-4）拦下 ⇒ **不置脏**。
+//       这一条在两侧都是「不变」——它守的**不是**旧契约，而是**新门控的边界**。
+void TestPhase41SetSizeRequestsRepaint() {
 
-	M9Probe probe("ECDI_M9_Size");
+	WindowProbe probe("ECDI_P41_SetSize");
 
-	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_M9_Size");
+	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_P41_SetSize");
 	EXPECT_TRUE(probe.hwnd != nullptr);
 	if (probe.hwnd == nullptr) return;
 
@@ -202,13 +134,24 @@ void TestM9SetSizeStillNoRepaint() {
 	Button* button = owned.get();
 	probe.window->GetRootWidget().AddChild(std::move(owned));
 
+	// ★ 前置：结算跑过 ⇒ 根脏为假（否则下面「不置脏」的断言无判别力）
+	EXPECT_TRUE(!probe.window->GetRootWidget().NeedsLayout());
+
 	probe.ClearRegion();
 	button->SetSize(120, 40);
-	EXPECT_TRUE(!probe.RegionDirty());            // ★ 几何 setter 不请求重绘（既有契约保持）
+	EXPECT_TRUE(probe.RegionDirty());                              // ★ 重绘通道：必须请求重绘
+	EXPECT_TRUE(!probe.window->GetRootWidget().NeedsLayout());     // ★ 门控通道：无 Layout 读它 ⇒ 不置脏
 
 	probe.ClearRegion();
 	button->SetPosition(30, 30);
+	EXPECT_TRUE(probe.RegionDirty());
+	EXPECT_TRUE(!probe.window->GetRootWidget().NeedsLayout());
+
+	// ★ 同值守卫：值没变 ⇒ **两条通道都不动**（旧契约里这条不存在——它守的是新加的守卫）
+	probe.ClearRegion();
+	button->SetSize(120, 40);
 	EXPECT_TRUE(!probe.RegionDirty());
+	EXPECT_TRUE(!probe.window->GetRootWidget().NeedsLayout());
 
 }
 
@@ -218,7 +161,7 @@ void TestM9SetSizeStillNoRepaint() {
 //     「与同族 setter 不一致」中的那个同族 = `SetStyle`（内建 Invalidate）。
 void TestM9SetStyleDoesRepaint_GaugeCalibration() {
 
-	M9Probe probe("ECDI_M9_Gauge");
+	WindowProbe probe("ECDI_M9_Gauge");
 
 	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_M9_Gauge");
 	EXPECT_TRUE(probe.hwnd != nullptr);
@@ -254,7 +197,7 @@ void TestM9SetStyleDoesRepaint_GaugeCalibration() {
 //     若将来 `OnPaint` 开始消费 disabled 视觉，本条会红 ⇒ 那就是该加 Invalidate 的信号。
 void TestM9SetEnabledNoRepaintByDesign() {
 
-	M9Probe probe("ECDI_M9_Enabled");
+	WindowProbe probe("ECDI_M9_Enabled");
 
 	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_M9_Enabled");
 	EXPECT_TRUE(probe.hwnd != nullptr);
@@ -283,7 +226,8 @@ void ECDI::Test::RegisterVisibilityRepaintTests() {
 
 	GetTestRegistry().Add("Widget.SetVisibleRequestsRepaint",      &TestM9SetVisibleRequestsRepaint);
 	GetTestRegistry().Add("Widget.SetVisibleSameValueNoRepaint",   &TestM9SetVisibleSameValueNoRepaint);
-	GetTestRegistry().Add("Widget.SetSizeStillNoRepaint",          &TestM9SetSizeStillNoRepaint);
+	// ★ Phase 41（D41-11 方案 A）：旧名 `Widget.SetSizeStillNoRepaint` 已**翻转** ⇒ 新名如下。
+	GetTestRegistry().Add("Widget.SetSizeRequestsRepaint",         &TestPhase41SetSizeRequestsRepaint);
 	GetTestRegistry().Add("Widget.SetStyleRepaintsGauge",          &TestM9SetStyleDoesRepaint_GaugeCalibration);
 	GetTestRegistry().Add("Widget.SetEnabledNoRepaintByDesign",    &TestM9SetEnabledNoRepaintByDesign);
 

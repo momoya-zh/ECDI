@@ -68,6 +68,11 @@ public:
 	/// `w = max(0, max(x + child.GetWidth()))`，`h = max(0, max(y + child.GetHeight()))`。
 	/// **不是** `Σ(子控件尺寸)`（间隔会漏算：y=0/h=20 与 y=30/h=20 ⇒ 真实下界 50，Σ 只得 40）。
 	/// 副作用链见 `SetContentExtent`。
+	/// @note ★ Phase 41：几何**自动**（`SetSize`/`SetPosition` ⇒ 帧首结算）、**extent 手动**
+	///       （本方法）——两者不是同一件事：extent 是**内容语义**（我的内容有多大），几何是**结果**
+	///       （我在父容器里占多少）。`ListLayout`/`GridLayout` 会摆子，但**不会**替你累加 extent
+	///       ⇒ 增删子之后仍须显式更新，否则滚动范围失真（`ModelProbe` 的搜索过滤即此场景，
+	///       `ModelProbe.cpp:326-333`）。
 	void UpdateContentExtent();
 
 	/// @brief 显式设置内容范围（不走子控件推导——内容由外部管理的场景）

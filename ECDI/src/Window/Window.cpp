@@ -184,6 +184,11 @@ void Window::PaintFrame()
 
 	}
 
+	// ★★ Phase 41（R3）：**帧首布局结算**——有界（脏才排），空闲帧 O(1)。
+	//   位置必须在 `PaintContext` 构造与 `m_rootWidget->Paint()` **之前**：
+	//   本帧要画的几何 = 结算后的几何。
+	m_rootWidget->SettleLayoutIfDirty();
+
 	// 决策 10/13/33：完整编排，严格配对
 	m_commands.clear();                              // 决策 4：复用缓冲
 	// Phase 27：初始裁剪 = client 矩形（每帧经 GetClientSize 取——resize 天然跟随；
@@ -829,12 +834,19 @@ void Window::OnPaint(){
 
 void Window::OnResized(int width, int height){
 
-	// 窗口大小变化时，同步 RootWidget 尺寸 + 重排布局链 + 请求重绘（9.7 触发链）
+	// 窗口大小变化时，同步 RootWidget 尺寸 + 重排布局链（9.7 触发链）
 	if (m_rootWidget){
 
+		// ★ Phase 41：`SetSize` 现在自带「置布局脏 + Invalidate」两条通道 ⇒ 此处**不再**显式
+		//   `Invalidate()`（原第三行）。同值 resize 被基类守卫吃掉，不产生任何失效。
 		m_rootWidget->SetSize(width, height);
+
+		// ★ 同步重排（**保留**）：`Win32PlatformWindow.cpp:940-941` 承诺「resize 事件到达时
+		//   RootWidget 已是新尺寸、布局已更新」——消费者在事件回调里读到的是新几何。
+		//   本调用在根上 ⇒ 完成即清根脏 ⇒ 随后的 `PaintFrame` **不再重排**（一次 WM_SIZE 恰一次）。
+		//   ⚠️ 历史：此前 `Application::OnWindowResized` 还会再 Arrange 一次（同帧两次，幂等
+		//   所以无害）——Phase 41 已删，本行是**唯一**的 resize 布局驱动点。
 		m_rootWidget->Arrange();   // 9.7：渐进语义——有 Layout 的节点重排 / 无 Layout 的保持手摆
-		Invalidate();              // 9.7：重排后请求重绘（Window 层负责；Arrange 纯布局不 Invalidate）
 
 	}
 

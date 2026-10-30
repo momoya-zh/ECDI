@@ -52,6 +52,7 @@ int ECDI::Test::RunAllTests()
     RegisterRingProgressBarTests();     // Phase 33 批三：环形进度控件（T33-13..T33-18）
     RegisterEventConsumptionTests();    // Phase 35：事件消费 + 嵌套点击 + 派发期安全销毁
     RegisterPlatformQuickfixTests();    // ★ #72 平台面快修（GL 失败态验证 / 光标 / WM_MOUSELEAVE）
+    RegisterLayoutInvalidationTests();  // ★ Phase 41（#79）：帧级布局失效结算（批 0 只注册量具 T41-10）
 
     TestRunner runner;
     runner.Run(GetTestRegistry());

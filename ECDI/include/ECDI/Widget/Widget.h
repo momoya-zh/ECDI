@@ -39,6 +39,37 @@ class Layout;
 /// - Geometry：位置与尺寸（SetPosition / SetSize / GetX 等）
 /// - State：   可见性与启用状态（IsVisible / IsEnabled）
 /// - Event：   事件响应虚函数（OnMouseMove / OnKeyDown 等）
+///
+/// ## 布局 / 重绘失效（★ Phase 41 · #79——两条通道，判据不同，**不得并列描述**）
+///
+/// ▸ **重绘失效**：几何 / 可见性 / 样式 / 文本的**值真的变了**（同值守卫通过）⇒ `Invalidate()`。
+/// ▸ **布局失效**：值真的变了 **且** 某个 `Layout` 会读它 ⇒ 置**根**布局脏，**帧首结算**重排。
+///
+/// ▸ **谁读什么**（这张表就是「布局失效」的门控依据）：
+///   - 我的**尺寸** → 我的 `Layout`（我的子要重排）、父的 `Layout`（我在父的槽位里）
+///   - 我的**位置 / 可见性 / stretch** → **仅**父的 `Layout`
+///   - 我的**子集合** → **仅**我的 `Layout`
+///   ⇒ 没有任何 `Layout` 读的写入，只触发重绘、不触发重排
+///     （例：`TextBox` 的滚动条可见性——它的父 `TextBox` 没有 `Layout`）。
+///
+/// ▸ **谁结算**：`Window::PaintFrame` 帧首（`SettleLayoutIfDirty`）——**业务侧不再需要手写
+///   「SetText → AutoSize → Arrange → Invalidate」调用链**。`Arrange()` 仍公开，显式重排仍是
+///   权威入口（`ScrollView` 的内容区、动画收尾等场景照旧可用）。
+///
+/// ▸ **结算期抑制**：`Arrange` 期间 `Layout` 对子控件批量写几何——那些写入是**布局的输出**、
+///   不是布局的输入，且**同一帧**就会被画出来 ⇒ 期间**既不置布局脏、也不 `Invalidate()`**
+///   （否则一次 `Arrange` 会发出 N 次无意义的重绘请求，并把自己永久弄脏）。
+///   ⚠️ 抑制范围 = 「**经统一出口 `NotifyGeometryChanged` 的失效**」，不是「结算期全库零
+///   `Invalidate`」——`ScrollBar::SetRange`（`ScrollBar.cpp:25-32`）仍带裸 `Invalidate()`，
+///   它不碰 `m_layoutDirty` ⇒ 不影响结算计数。
+///
+/// ▸ ⚠️ **`SetText` 只走重绘通道**：文本不改变几何。要「文本变长、控件跟着变宽」请显式
+///   `AutoSize()`——它是尺寸的唯一动作入口。
+/// ▸ ⚠️ **`ScrollView::UpdateContentExtent` 仍是显式的**：extent 是**内容语义**（不是几何失效），
+///   框架不代挂钩（D6）。
+/// ▸ ⚠️ **`CollapsiblePanel` 在 #80 修好「展开基准 vs `fillCrossAxis`」冲突前，不得放入
+///   `fillCrossAxis = true` 的 Layout 容器**（收起态 `SetSize` 会把基准高抹成 0，
+///   `VerticalLayout.cpp:96` 的 `SetSize(cross, GetHeight())` 即触发路径——当前无实例）。
 class Widget{
 
 public:
@@ -116,11 +147,19 @@ public:
 	const Rect& GetGeometry() const noexcept { return m_geometry; }
 
 	/// @brief 设置相对于父 Widget 的位置
-	void SetPosition(int x, int y) { m_geometry.x = static_cast<float>(x); m_geometry.y = static_cast<float>(y); }
+	/// @details ★ Phase 41：**同值守卫 + 双通道失效**（实现由头内联**移入 `Widget.cpp`**——原为纯赋值）。
+	///          门控（D41-4）：位置的**唯一**读者是父的 `Layout` ⇒ 仅 `ParentHasLayout()` 才置布局脏；
+	///          重绘失效无条件（值真变化时）——几何变了必须上屏，不押在「平台层碰巧每帧重绘」上。
+	void SetPosition(int x, int y);
 
 	/// @brief 设置宽高
 	/// @details 虚函数（9.5 R1：TextBox override 挂 Resize 后 Caret 可见——Layout 只 SetPosition 不碰尺寸，
 	/// SetSize 是尺寸唯一入口）。签名不变、行为兼容；基类实现 = 直接写 m_geometry（移 Widget.cpp）
+	/// @details ★★ Phase 41：基类实现改为「**同值守卫 + 双通道失效**」——
+	///          ① 值真的变了才继续（否则零副作用：`Layout` 每帧对每个子调它，值多半相同）；
+	///          ② 重绘通道恒发 `Invalidate()`；③ 布局通道门控 = `m_layout != nullptr ||
+	///          ParentHasLayout()`（尺寸有两个读者：我的 Layout 摆子、父的 Layout 定我槽位）。
+	///          ⚠️ **override 不得重复 `Invalidate()`**——基类已发，重复会逃过结算期抑制。
 	virtual void SetSize(int w, int h);
 
 	// ── Stretch（9.7 自适应布局：剩余空间分配权重）────────
@@ -130,6 +169,7 @@ public:
 	/// @details ★ 审计 #63 / §7.3：负值在 Release 侧**钳为 0**（与 `Layout` 的
 	///          spacing/padding 钳 0 同型；选钳 0 而非拒绝，因为「0 = 不参与分配」
 	///          是有定义且正确的语义）。Debug 断言保留以暴露调用方错误。
+	/// @details ★ Phase 41：同值守卫 + 门控 = `ParentHasLayout()`（stretch 的唯一读者是父 Layout）。
 	void SetStretch(int stretch) noexcept;
 
 	/// @brief 剩余空间分配权重只读查询（默认 0——不参与分配，向后兼容锚点）
@@ -144,9 +184,17 @@ public:
 
 	/// @brief 按 GetPreferredSize() 调整自身尺寸（9.8 显式命令——后调用者赢，需求 R5 v1.5）
 	/// @return true = 实际调用了 SetSize；false = stretch 互斥 no-op 或尺寸未变化
-	/// @note §3.7 纯 geometry operation：内部只调 SetSize（虚分派——TextBox override 既有语义）；
-	///       不 Arrange、不 Invalidate、不挂钩 SetText——布局/重绘由调用方负责。
+	/// @note §3.7 纯 geometry operation：内部**只调 SetSize**（虚分派——TextBox override 既有语义）；
 	///       float → int 向零截断（v1 不引入 rounding policy）
+	/// @note ★★ **Phase 41 契约变更**（旧契约「由调用方自行排布与刷新」已推翻——★ 旧句**故意不复述**：
+	///       它是本 Phase 的机检靶词（要求全库零命中），原样拼进新注释会让判据自己命中自己；
+	///       原文全句见 `docs/dev/phase41-frame-layout-invalidation-pipeline-*-design.md` 的引文块）：
+	///       本方法**自身**仍不 Arrange、不 `Invalidate`——但 `SetSize` 现在是**失效源**
+	///       （重绘 + 布局双通道，见 `SetSize` 与类头「布局 / 重绘失效」）。
+	///       ⇒ 尺寸真变化后，**下一帧首**自动完成重排与重绘，调用方**无需**再补
+	///       `Arrange()` / `Invalidate()`；尺寸未变化时两条通道都不动（同值守卫）。
+	///       ★ 仍**不挂钩 `SetText`**：文本变长不会自动触发 AutoSize——那是**内容语义**，
+	///       不是几何失效（框架不替调用方决定「文本该不该撑开控件」）。
 	bool AutoSize();
 
 	// ── 内容偏移接缝（Phase 15 D1-A：视口偏移——内容坐标 → 视口坐标的变换）──
@@ -198,9 +246,17 @@ public:
 	///   ② **不扩大到 `SetEnabled`**：实测 `IsEnabled()` **无任何绘制消费者**——全库只 gate
 	///      命中（`Widget.cpp:142`）/ 焦点收集（`Window.cpp:43`）/ 键派发（`Window.cpp:677`）⇒
 	///      给它加 `Invalidate` 只是**语义为空的重绘请求**（如实记账：审计原文将两者并列）。
-	///   ③ **不扩大到 `SetSize` / `SetPosition` / `SetText`**——那些是**另一类契约**：
-	///      几何 setter 由 `Layout` 逐帧批量调用（加了会每帧重绘）；`SetText` 是**有意契约**
-	///      （`Widget.h` 明写「布局/重绘由调用方负责」）。M9 只管**可见性**这一条。
+	///   ③ ★★ **Phase 41 契约变更——本条旧豁免已撤销**：原豁免的依据是「几何 setter 由 `Layout`
+	///      逐帧批量调用（加了会每帧重绘）」。⇒ 该理由的**事实基础已不成立**：`Win32PlatformWindow`
+	///      的 `WM_PAINT` **不调 `BeginPaint`/`EndPaint`**（决策 39）⇒ update region **从不 validate**
+	///      ⇒ **每帧本来就在全量重绘**，`Invalidate` 的**边际**代价 ≈ 0。真正的代价项是
+	///      「每帧 O(N) 布局」，而它由「布局失效」的**门控 + 帧首结算**挡掉（见类头「布局 / 重绘失效」）。
+	///      ⇒ 现行为**两条通道、两套判据**：
+	///        · **重绘通道** = 值真的变了 ⇒ `Invalidate()`（本条即该通道的先例，M9 只先落了这一格）；
+	///        · **布局通道** = 值真的变了 **且** 某个 `Layout` 会读它 ⇒ 置根布局脏，帧首结算。
+	///      ⇒ 可见性**两条都走**：它既是绘制门控（`Widget.cpp:489` 的 Paint 前置 / `:314` 的
+	///      HitTest 门控），也是**布局输入**（`Layout` 对不可见子跳过槽位并停泊到 bbox 负区
+	///      ——C-VIS-2/4）。
 	///   ⚠️ **窗口外（无头）为 no-op**：`Widget::Invalidate()` 沿父链上溯取 Window，
 	///      取不到即什么都不做（测试/构造期路径零副作用）。
 	void SetVisible(bool v);
@@ -293,6 +349,13 @@ public:
 	/// @details 数据改变后调用（SetText / m_pressed / 未来 InsertCharacter 全走它）
 	void Invalidate();
 
+	/// @brief **整棵所属树**是否有待结算的布局失效（`Window::PaintFrame` 帧首会消费它）
+	/// @details ★ 语义是**整树**、不是「本节点」：脏标志寄存在**根**（D41-2 ⓐ），本方法沿父链
+	///          上溯到根再读——与 `HasFocus()`（`Widget.cpp` 内同款上溯）同型。
+	///          ⇒ 非根节点返回 `true` 意味着「**同树别的分支**（或本分支）有失效待结算」。
+	/// @note 主要消费者 = 测试与诊断；框架自身走私有的 `SettleLayoutIfDirty`。
+	[[nodiscard]] bool NeedsLayout() const noexcept;
+
 	/// @brief 当前 Widget 是否拥有键盘焦点（上溯到根查 Window 的焦点状态）
 	bool HasFocus() const noexcept;
 
@@ -326,6 +389,13 @@ public:
 
 	void SetLayout(std::unique_ptr<Layout> layout);
 
+	/// @brief 立即重排本子树（`m_layout->Arrange` 自上而下 + 递归子节点）
+	/// @details ★ Phase 41：**帧首结算**（`Window::PaintFrame` → `SettleLayoutIfDirty`）已接管
+	///          「几何变了要重排」——业务侧通常**不需要**再调本方法。
+	///          ⚠️ **清脏作用域**（D41-3.2）：在**根**上调用 ⇒ 完成即清根布局脏（`PaintFrame`
+	///          随后不再重排）；在**子树**上调用 ⇒ **不清**（兄弟分支可能仍脏）。
+	///          ⚠️ 调用期间对**整棵树**抑制「置脏 + 经出口的 `Invalidate`」（`Layout` 写几何是
+	///          布局的输出，不构成新的布局失效，且同帧即上屏）。
 	void Arrange();
 
 	void ArrangeInternal();
@@ -386,6 +456,30 @@ private:
 	/// 但两者应共享**同一份**判定表达式（`[0, width) × [0, height)`）——否则门控与命中语义会漂移。
 	[[nodiscard]] bool ContainsRect(int x, int y) const noexcept;
 
+	// ── 布局失效结算（★ Phase 41 · #79）─────────────────────────────────
+	//    存放形态 = **根单标志**（D41-2 ⓐ）：置位时沿父链上溯写根，消费只在根读，
+	//    与 `Invalidate()` 的「上溯取 Window」同构。⇒ **非根节点上的 `m_layoutDirty`
+	//    只在「离线子树挂入」那一次被读**（`AddChild` 合并），其余时刻无意义。
+
+	/// @brief 沿父链上溯到根（无父即自身）
+	[[nodiscard]] Widget* GetRootNode() noexcept;
+
+	/// @brief 父节点是否有 `Layout`（位置 / 可见性 / stretch 的唯一读者）——门控表达式的**单一来源**
+	/// @details 内联在头里而非移到 `.cpp`：它是零成本的三目（一次指针比较），被 4 个 setter 复用；
+	///          若移出会变成 4 次跨 TU 调用，而它没有任何副作用需要藏进实现文件。
+	[[nodiscard]] bool ParentHasLayout() const noexcept{
+		return m_parent != nullptr && m_parent->m_layout != nullptr;
+	}
+
+	/// @brief 几何类 setter 的**唯一**失效出口（三条语义见 `Widget.cpp` 实现处注释）
+	/// @param layoutInputChanged 本次写入是否是「某个 `Layout` 会读的输入」——门控由**调用方**
+	///        算好传入（出口不知道「这次改的是哪个字段」，故不能自己判）
+	/// @note ★ **无条件调用**，门控只作实参：重绘通道对几何类 setter 恒发，绝不因门控为假而跳过。
+	void NotifyGeometryChanged(bool layoutInputChanged) noexcept;
+
+	/// @brief 帧首布局结算（**仅根有意义**；由 `Window::PaintFrame` 经 `friend class Window` 调用）
+	void SettleLayoutIfDirty();
+
 	Widget* m_parent = nullptr;		///< 父节点指针（RootWidget 为 nullptr）
 
 	std::vector<std::unique_ptr<Widget>> m_children;	///< 子节点列表（有序，后添加的在上层）
@@ -399,6 +493,10 @@ private:
 	int m_stretch = 0;		///< 剩余空间分配权重（9.7；默认 0 = 不参与分配——向后兼容锚点）
 
 	std::unique_ptr<Layout> m_layout;
+
+	bool m_layoutDirty = false;	///< ★ Phase 41：根的待结算布局失效（D41-2 ⓐ；**非根只在挂入瞬间被读**）
+
+	int m_arrangeDepth = 0;	///< ★ Phase 41：结算期嵌套深度（D41-3 ⓑ 抑制；用计数而非 bool——同 `m_dispatchRefCount`）
 
 	Window* m_window = nullptr;		///< 所属 Window（非拥有；仅 RootWidget 由 Window 设置）
 

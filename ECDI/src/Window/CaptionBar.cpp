@@ -78,6 +78,8 @@ const std::string& CaptionBar::GetTitle() const noexcept{
 void CaptionBar::SetSize(int w, int h){
 
 	Widget::SetSize(w, h);	// 基类几何（Panel 未 override SetSize——直连 Widget）
+	// ★ Phase 41：本 override **不** `Invalidate()`——基类已发两条通道；`RelayoutChildren` 写的是
+	//   **无 Layout** 的子（`m_minButton` 等）⇒ 门控把它们拦在布局通道之外，只留重绘（恰是所需）。
 
 	RelayoutChildren();		// 复合控件同步子控件几何（CollapsiblePanel::SetSize 同款先例）
 

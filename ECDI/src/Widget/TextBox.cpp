@@ -117,30 +117,6 @@ void TextBox::SetStyle(TextBoxStyleOverride override){
 
 }
 
-// ── SetText override（9.7 修：外部替换文本绕过编辑操作路径——行缓存必须失效）──
-// D7 保持：不走 RaiseTextChanged/callback；只补编辑路径已有的两条副作用（行缓存失效 + Invalidate）。
-// 光标/选区不重置（程序性替换语义——只读 preview 场景主消费；索引越界由既有边界钳制兜底）。
-
-void TextBox::SetText(const std::string& text){
-
-	TextWidget::SetText(text);
-
-	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
-
-	Invalidate();
-
-}
-
-void TextBox::SetText(std::string&& text){
-
-	TextWidget::SetText(std::move(text));
-
-	MarkTextChanged();   // Phase 28 批二：preferred 指纹失效（C28-5——TextBox 编辑/组合/Undo 直接改 m_text，不经 SetText）
-
-	Invalidate();
-
-}
-
 // ── P1：echo 掩码 / 只读（显示层打点、数据层不变——GetText 永远真实值）──
 
 void TextBox::SetEchoMode(EchoMode mode){
@@ -261,12 +237,13 @@ std::string TextBox::BuildDisplayText() const{
 void TextBox::SetSize(int w, int h){
 
 	// 9.5 R1 §4.8：基类改几何 → 重新保证光标可见（缩窗后光标越出可视区立即滚回，垂直/水平同时受益）
-	Widget::SetSize(w, h);
+	Widget::SetSize(w, h);          // ★ Phase 41：基类已发「重绘 + 布局」两条通道
 	EnsureCaretVisible();
 	// scrollbar-placement-and-appearance △3：条摆位（视口空间，不受偏移）——★ v1.5 起四边**内缩**，见 LayoutScrollBar()
 	LayoutScrollBar();
 	SyncScrollBar();
-	Invalidate();
+	// ★ Phase 41（D41-F）：**删除原先这里的 Invalidate()**——基类已发，重复发会**逃过结算期抑制**
+	//   （`Arrange` 期间每个 TextBox 一次无意义 InvalidateRect，违反 I41-3）。
 
 }
 
