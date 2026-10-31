@@ -1587,6 +1587,17 @@ void GDIBackend::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 		BlendCoverageSolid(m_memoryDC, offX, offY, color, cov.data(), rasterW, rasterH, rasterW);
 	}
 
+	// ★ G1（2026-10-31）：a<1 分支已建临时光栅，但 CreateDIBSection 失败（rasterBitmap
+	//    为空）时 targetDC 仍是 m_memoryDC ⇒ 上面的合成分支不进入 ⇒ rasterDC 从未释放
+	//    （每帧泄漏一个 HDC）。照同函数内 pen 失败路径（`if (!pen)` 分支）同样清理。
+	//    仅当光栅已建却未成为绘制目标时进入；成为目标时合成分支已自行释放，不会重复删。
+	if (rasterDC != nullptr && targetDC != rasterDC)
+	{
+		if (rasterOld) SelectObject(rasterDC, rasterOld);
+		if (rasterBitmap) DeleteObject(rasterBitmap);
+		DeleteDC(rasterDC);
+	}
+
 	// ── Phase 32 批三（K③）：焦点框哨兵修补（点线边界——线像素 ≠ 清屏 ⇒ A=255，
 	// 空隙 = 清屏 ⇒ 透材质；框外/内部不动）────────────────────────────────
 	if (m_backdropActual != BackdropMode::None)

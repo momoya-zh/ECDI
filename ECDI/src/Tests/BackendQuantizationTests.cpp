@@ -258,19 +258,78 @@ void TestFocusRectFloatEndpointSemantics()
 
 void TestRectConsumersShareQuantizedEdges()
 {
-	// DrawRect / PushClip use the same pixel-space Rect-to-edge contract.
-	const float x = -1.5f, y = 2.25f, width = 4.0f, height = 3.5f;
-	const TestPixelBox box = MakePixelBox(x, y, width, height);
-	const int clipLeft = BackendContract::QuantizeEdge(x);
-	const int drawLeft = BackendContract::QuantizeEdge(x);
-	const int clipRight = BackendContract::QuantizeEdge(x + width);
-	const int drawRight = BackendContract::QuantizeEdge(x + width);
-	EXPECT_EQ(box.left, clipLeft);
-	EXPECT_EQ(box.left, drawLeft);
-	EXPECT_EQ(box.right, clipRight);
-	EXPECT_EQ(box.right, drawRight);
-	EXPECT_EQ(box.left + (box.right - box.left), box.right);
-	EXPECT_EQ(box.top + (box.bottom - box.top), box.bottom);
+	// P2-8 / E1（2026-10-31）：原实现是恒等式——clipLeft/drawLeft 都算 QuantizeEdge(x)，
+	// 断言 f(x)==f(x)，不可能失败；且分数边从未在真实后端做像素级验证。
+	// 改为**真实后端双路径像素探针**：
+	//   路径 A = DrawRect(rect) 直接填充；
+	//   路径 B = PushClip(rect) 后填满全屏（裁剪区即 rect 的量化像素框）。
+	// 两条路径的像素必须逐位相同，且都等于独立 oracle
+	//   [floor(x), floor(x+w)) × [floor(y), floor(y+h))（GDI 半开区间）。
+	// 若 DrawRect 与 PushClip 采用不同舍入（端点差 vs lround(width)），分数边处必然分歧。
+	QuantizationProbeWindow window;
+	if (!CreateQuantizationProbeWindow(window)) return;
+
+	// 分数 DIP：10.5 / 20.25 / 50.5 / 50.75 —— floor 与 lround 结果不同，
+	// 正是两条消费路径若采用不同量化会分歧的位置（整数 DIP 会掩盖分歧）。
+	const Rect rect{ 10.5f, 20.25f, 40.0f, 30.5f };
+	const Rect full{ 0.0f, 0.0f, 200.0f, 200.0f };
+	const Color color = Color::Red();
+	const float scale = 1.0f;
+
+	// 路径 A：DrawRect 直接填。
+	std::vector<COLORREF> drawPixels;
+	{
+		GDIBackend backend;
+		backend.Initialize(Win32RenderContext(window.hwnd));
+		Renderer renderer(backend);
+		CommandBuffer commands;
+		commands.emplace_back(DrawRectCommand{ rect, color });
+		InvalidateRect(window.hwnd, nullptr, FALSE);
+		renderer.BeginFrame(Color::Black());
+		renderer.Execute(commands, scale);
+		renderer.EndFrame();
+		drawPixels = CaptureQuantizationProbe(window.hwnd);
+	}
+
+	// 路径 B：PushClip(rect) 后填满全屏 —— 裁剪框必须与 DrawRect 的填充框一致。
+	std::vector<COLORREF> clipPixels;
+	{
+		GDIBackend backend;
+		backend.Initialize(Win32RenderContext(window.hwnd));
+		Renderer renderer(backend);
+		CommandBuffer commands;
+		commands.emplace_back(PushClipCommand{ rect });
+		commands.emplace_back(DrawRectCommand{ full, color });
+		commands.emplace_back(PopClipCommand{});
+		InvalidateRect(window.hwnd, nullptr, FALSE);
+		renderer.BeginFrame(Color::Black());
+		renderer.Execute(commands, scale);
+		renderer.EndFrame();
+		clipPixels = CaptureQuantizationProbe(window.hwnd);
+	}
+
+	EXPECT_EQ(drawPixels.size(), std::size_t{ 200 * 200 });
+	EXPECT_EQ(clipPixels.size(), std::size_t{ 200 * 200 });
+
+	const TestPixelBox box = MakePixelBox(rect.x, rect.y, rect.width, rect.height);
+	std::size_t differing = 0;
+	std::size_t oracleMismatch = 0;
+	std::size_t invalidPixels = 0;
+	for (int y = 0; y < 200; ++y)
+	{
+		for (int x = 0; x < 200; ++x)
+		{
+			const std::size_t i = static_cast<std::size_t>(y) * 200 + static_cast<std::size_t>(x);
+			if (drawPixels[i] == CLR_INVALID || clipPixels[i] == CLR_INVALID) ++invalidPixels;
+			if (drawPixels[i] != clipPixels[i]) ++differing;
+			const bool inside = (x >= box.left && x < box.right && y >= box.top && y < box.bottom);
+			const COLORREF want = inside ? RGB(255, 0, 0) : RGB(0, 0, 0);
+			if (drawPixels[i] != want) ++oracleMismatch;
+		}
+	}
+	EXPECT_EQ(invalidPixels, std::size_t{ 0 });
+	EXPECT_EQ(differing, std::size_t{ 0 });
+	EXPECT_EQ(oracleMismatch, std::size_t{ 0 });
 }
 
 void TestPixelBoxDimensionsAreDerivedFromEdges()
