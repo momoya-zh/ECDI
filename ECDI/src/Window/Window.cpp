@@ -770,6 +770,32 @@ void Window::ForgetSubtree(const Widget* subtreeRoot) noexcept{
 			&& IsWithinSubtree(entry.previousFocus, subtreeRoot)) {
 			entry.previousFocus = nullptr;
 		}
+		// ④d 逻辑父浮层（批 B）：父浮层被摘除销毁 ⇒ 子浮层失去依附，级联关闭。
+		//    置 stale 并置空 ownerOverlay 指针，避免后续解引用。
+		if (entry.ownerOverlay != nullptr
+			&& IsWithinSubtree(entry.ownerOverlay, subtreeRoot)) {
+			entry.stale = true;
+			entry.ownerOverlay = nullptr;
+			entry.options.ownerOverlay = nullptr;
+		}
+		// ④e 浮层节点自身（批 B）：应用侧越权直接 RemoveChild 摘树。
+		//    ★ 致命红线：此时 entry.widget 正在脱树栈内，绝对不能调 HideOverlay
+		//      （HideOverlay 内部调 RemoveChild 导致二次脱树/UAF）；
+		//    ★ 处置：置空 widget 裸指针消解悬垂，标记 stale，并级联将其子浮层标记为 stale。
+		//      后续由 UpdateOverlayPositions 识别 widget == nullptr 走跳过 RemoveChild 的纯条目清理。
+		if (entry.widget != nullptr
+			&& IsWithinSubtree(entry.widget, subtreeRoot)) {
+			Widget* deadWidget = entry.widget;
+			entry.widget = nullptr;
+			entry.stale = true;
+			for (auto& childEntry : m_overlayEntries) {
+				if (childEntry.ownerOverlay == deadWidget) {
+					childEntry.stale = true;
+					childEntry.ownerOverlay = nullptr;
+					childEntry.options.ownerOverlay = nullptr;
+				}
+			}
+		}
 	}
 
 }
@@ -1121,7 +1147,7 @@ bool Window::HideOverlay(Widget* overlayWidget){
 	// 1. 先收集所有以 target 为 owner 的子孙浮层（防迭代器失效与递归死循环）
 	std::vector<Widget*> childrenToClose;
 	for (const auto& e : m_overlayEntries) {
-		if (e.ownerOverlay == target) {
+		if (e.ownerOverlay == target && e.widget != nullptr && !e.stale) {
 			childrenToClose.push_back(e.widget);
 		}
 	}
@@ -1176,16 +1202,21 @@ bool Window::HideOverlay(Widget* overlayWidget){
 
 bool Window::HasActiveOverlay(std::optional<OverlayLayer> layer) const noexcept {
 	if (!layer.has_value()){
-		return !m_overlayEntries.empty();
+		for (const auto& entry : m_overlayEntries) {
+			if (!entry.stale && entry.widget != nullptr) return true;
+		}
+		return false;
 	}
 	for (const auto& entry : m_overlayEntries){
-		if (entry.options.layer == *layer) return true;
+		if (entry.options.layer == *layer && !entry.stale && entry.widget != nullptr) return true;
 	}
 	return false;
 }
 
 bool Window::HasVisibleOverlays() const noexcept {
-	if (!m_overlayEntries.empty()) return true;
+	for (const auto& entry : m_overlayEntries) {
+		if (!entry.stale && entry.widget != nullptr) return true;
+	}
 	if (m_overlayRoot != nullptr) {
 		if (m_overlayRoot->GetChildCount() > 3) return true;
 		if (m_normalLayer && m_normalLayer->GetChildCount() > 0) return true;
@@ -1202,7 +1233,7 @@ Window::OverlayEntry* Window::GetTopActiveOverlay() noexcept {
 	const OverlayLayer searchTiers[] = { OverlayLayer::Tooltip, OverlayLayer::Modal, OverlayLayer::Normal };
 	for (OverlayLayer tier : searchTiers) {
 		for (auto it = m_overlayEntries.rbegin(); it != m_overlayEntries.rend(); ++it) {
-			if (it->options.layer == tier) {
+			if (it->options.layer == tier && !it->stale && it->widget != nullptr) {
 				return &(*it);
 			}
 		}
@@ -1231,6 +1262,23 @@ void Window::UpdateOverlayPositions() {
 		//   必须放在 anchorWidget 空检查之前——stale 且 anchorWidget 已置空的条目
 		//   若被 continue 跳过，就永远关不掉了。
 		if (entry.stale) {
+			if (entry.widget == nullptr) {
+				// ★ B1（2026-10-31）：浮层节点自身已外部脱树（ForgetSubtree 中已置空 entry.widget），
+				//   跳过 targetLayer->RemoveChild 避免二次脱树与 UAF 读。
+				auto onClosed = std::move(entry.options.onClosed);
+				Widget* prevFocus = entry.previousFocus;
+				m_overlayEntries.erase(m_overlayEntries.begin() + i);
+				if (prevFocus != nullptr && IsWidgetInTree(prevFocus) && prevFocus->IsEnabled()) {
+					SetFocusedWidget(prevFocus);
+				} else if (m_focusedWidget != nullptr && !IsWidgetInTree(m_focusedWidget)) {
+					SetFocusedWidget(nullptr);
+				}
+				if (onClosed != nullptr) {
+					onClosed();
+				}
+				Invalidate();
+				break;
+			}
 			HideOverlay(entry.widget);
 			break;   // 复用既有 break 防失效迭代（HideOverlay 内部 erase）
 		}

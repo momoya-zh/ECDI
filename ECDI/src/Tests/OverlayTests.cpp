@@ -717,6 +717,86 @@ void TestOverlayDestroyedExemptWidget() {
 	EXPECT_FALSE(probe.window->HasActiveOverlay());
 }
 
+// ── T42-20：浮层节点自身被外部越权脱树析构时的纯条目安全注销（B1 / ④e）─────
+//    ★ 判据原理：外部绕过 HideOverlay 直接调 RemoveChild 摘树，此时 entry.widget 正在
+//      脱树调用栈中。ForgetSubtree 必须置空 entry.widget 并置 stale，
+//      后续 UpdateOverlayPositions 识别到 widget == nullptr 时走跳过 RemoveChild 的纯条目清理。
+//      若仍走旧路径调 HideOverlay，会对已脱树节点二次 RemoveChild 触发断言或 UAF。
+void TestOverlayDestroyedSelfDetachedGraceful() {
+	WindowProbe probe("ECDI_P42_SelfDetach");
+	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_P42_SelfDetach");
+	EXPECT_TRUE(probe.hwnd != nullptr);
+	if (probe.hwnd == nullptr) return;
+	probe.ShowAndSettle();
+
+	bool closed = false;
+	auto pop = std::make_unique<Button>("SelfPop");
+	Button* popRaw = pop.get();
+
+	OverlayOptions opt;
+	opt.onClosed = [&] { closed = true; };
+	probe.window->ShowOverlay(std::move(pop), opt);
+	EXPECT_TRUE(probe.window->HasActiveOverlay());
+
+	// 应用侧越权直接从所属分层容器脱树并立即析构（丢弃 unique_ptr）
+	Widget* parent = popRaw->GetParent();
+	EXPECT_TRUE(parent != nullptr);
+	if (parent != nullptr) {
+		parent->RemoveChild(popRaw);
+	}
+
+	// 此时 ForgetSubtree 已置空 widget 并置 stale，HasActiveOverlay 立即为 false
+	EXPECT_FALSE(probe.window->HasActiveOverlay());
+
+	// 帧首 UpdateOverlayPositions 消费 entry.stale（跳过 RemoveChild 纯清理），不崩并触发 onClosed
+	probe.PumpOneFrame();
+	EXPECT_TRUE(closed);
+	EXPECT_FALSE(probe.window->HasActiveOverlay());
+}
+
+// ── T42-21：逻辑父浮层脱树析构时子浮层级联关闭（B1 / ④d）────────────
+//    ★ 判据原理：嵌套浮层中，父浮层被外部强制摘除析构时，子浮层失去依附逻辑，
+//      ForgetSubtree 必须将子浮层置 stale 并置空 ownerOverlay，
+//      后续 UpdateOverlayPositions 自动级联关闭子浮层。
+void TestOverlayDestroyedOwnerOverlayCascadeClose() {
+	WindowProbe probe("ECDI_P42_OwnerDetach");
+	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_P42_OwnerDetach");
+	EXPECT_TRUE(probe.hwnd != nullptr);
+	if (probe.hwnd == nullptr) return;
+	probe.ShowAndSettle();
+
+	bool parentClosed = false;
+	bool childClosed = false;
+
+	auto parentPop = std::make_unique<Button>("ParentPop");
+	Button* parentRaw = parentPop.get();
+	OverlayOptions parentOpt;
+	parentOpt.onClosed = [&] { parentClosed = true; };
+	probe.window->ShowOverlay(std::move(parentPop), parentOpt);
+
+	auto childPop = std::make_unique<Button>("ChildPop");
+	Button* childRaw = childPop.get();
+	OverlayOptions childOpt;
+	childOpt.ownerOverlay = parentRaw;
+	childOpt.onClosed = [&] { childClosed = true; };
+	probe.window->ShowOverlay(std::move(childPop), childOpt);
+
+	EXPECT_TRUE(probe.window->HasActiveOverlay());
+
+	// 外部强制摘除并析构父浮层
+	Widget* parentLayer = parentRaw->GetParent();
+	EXPECT_TRUE(parentLayer != nullptr);
+	if (parentLayer != nullptr) {
+		parentLayer->RemoveChild(parentRaw);
+	}
+
+	// 帧首消费：父浮层纯清理 + 子浮层常规级联关闭
+	probe.PumpOneFrame();
+	EXPECT_TRUE(parentClosed);
+	EXPECT_TRUE(childClosed);
+	EXPECT_FALSE(probe.window->HasActiveOverlay());
+}
+
 } // namespace
 
 void ECDI::Test::RegisterOverlayTests() {
@@ -746,4 +826,6 @@ void ECDI::Test::RegisterOverlayTests() {
 	GetTestRegistry().Add("Overlay.DestroyedAnchorAutoClose", &TestOverlayDestroyedAnchorAutoClose);
 	GetTestRegistry().Add("Overlay.DestroyedPreviousFocusRestoreGraceful", &TestOverlayDestroyedPreviousFocusRestoreGraceful);
 	GetTestRegistry().Add("Overlay.DestroyedExemptWidget", &TestOverlayDestroyedExemptWidget);
+	GetTestRegistry().Add("Overlay.DestroyedSelfDetachedGraceful", &TestOverlayDestroyedSelfDetachedGraceful);
+	GetTestRegistry().Add("Overlay.DestroyedOwnerOverlayCascadeClose", &TestOverlayDestroyedOwnerOverlayCascadeClose);
 }
