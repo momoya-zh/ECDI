@@ -128,8 +128,25 @@ void Test26GLRendererInitFailureIsNoOp()
     EXPECT_EQ(renderer.AtlasMissCount(), static_cast<std::size_t>(0));   // 未初始化 ⇒ 零 miss
 }
 
+// D2：空/负尺寸矩形在 DrawRoundedRect 中安全处理（对齐 GDI，防 clamp lo > hi UB）
+void Test26GLRendererNegativeDimensionsAndDegenerate()
+{
+    const auto engine = std::make_shared<FontEngine>();
+    GLRenderer renderer(engine);
+    const Color white = Color::White();
+    renderer.BeginFrame(white);
+    // 负宽高与零宽高不崩、不触发 clamp 前置条件违反 UB
+    renderer.DrawRoundedRect(Rect{ 10.0f, 10.0f, -5.0f, 20.0f }, 3.0f, white);
+    renderer.DrawRoundedRect(Rect{ 10.0f, 10.0f, 20.0f, -5.0f }, 3.0f, white);
+    renderer.DrawRoundedRect(Rect{ 10.0f, 10.0f, 0.0f, 20.0f }, 3.0f, white);
+    renderer.DrawRoundedRect(Rect{ 10.0f, 10.0f, 20.0f, 0.0f }, 3.0f, white);
+    renderer.DrawRoundedRect(Rect{ 10.0f, 10.0f, -10.0f, -10.0f }, 3.0f, white);
+    renderer.EndFrame();
+}
+
 void ECDI::Test::RegisterGLBackendTests()
 {
     GetTestRegistry().Add("GLBackend.AtlasShelfAllocation", &Test26AtlasShelfAllocation);      // T26-7
     GetTestRegistry().Add("GLBackend.InitFailureIsNoOp",    &Test26GLRendererInitFailureIsNoOp); // T26-8
+    GetTestRegistry().Add("GLBackend.NegativeDimensions",   &Test26GLRendererNegativeDimensionsAndDegenerate);
 }

@@ -3,7 +3,7 @@
 > 状态：**v1.1 已吸收 DeepSeek 详细设计硬核审核**（2026-10-30）。上游 = 需求稿 **v1.1** · 初设 **v1.1**。
 > ★ **审核吸收（7 P0 + 8 P1 + 8 P2 全部清算重构，无一残留）**：
 > 1. **P0-1/2 尺寸缺失根治**：构造期与 `OnResized` 强制同步尺寸给 `m_overlayRoot` 及三层 Layer Panel，终结 0×0 视口剔除导致的不绘制；
-> 2. **P0-3 UAF 根治**：`RemoveChild` 返回的 `unique_ptr` 存入 `m_pendingDestroyOverlays` 延迟析构队列，杜绝栈内自杀；
+> 2. **P0-3 浮层自身生命周期安全（栈内析构防 UAF）**：`RemoveChild` 返回的 `unique_ptr` 存入 `m_pendingDestroyOverlays` 延迟析构队列，杜绝栈内自杀（★ 范围说明：已覆盖范围 = 浮层自身对象；指向外部控件的非拥有指针生命周期见 A1/A2 整改）；
 > 3. **P0-4 鼠标通道打通**：`Application::FindTargetWidget` 切换为调用 `window.HitTestWindow(x, y)`，消除浮层收不到事件与 T42-15 假通过；
 > 4. **P0-5/6 判据保真**：I42-4 改用「排查未传双根的非法调用」，I42-5 代码直接写 `m_overlayRoot = std::make_unique<Panel>();`；
 > 5. **P0-7 依赖倒置纠正**：分批测试严格按功能就绪度解耦（556 → 558 → 561 → 566 → 572）；
@@ -492,7 +492,7 @@ bool Window::HideOverlay(Widget* overlayWidget){
 	OverlayEntry entry = *it;
 	m_overlayEntries.erase(it);
 
-	// 2. 从对应的分层 Panel 中摘除，并移入延迟销毁队列（★ P0-3 彻底杜绝栈内立即析构 UAF）
+	// 2. 从对应的分层 Panel 中摘除，并移入延迟销毁队列（★ P0-3 浮层自身对象延迟析构，防栈内立即自杀 UAF；外部控件指针注销见 A1/A2）
 	Panel* targetLayer = nullptr;
 	switch (entry.options.layer) {
 		case OverlayLayer::Normal:  targetLayer = m_normalLayer; break;

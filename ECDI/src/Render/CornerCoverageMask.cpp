@@ -1,4 +1,5 @@
 ﻿#include "Render/CornerCoverageMask.h"
+#include "Render/BackendContract.h"
 
 #include "ECDI/Core/Logger.h"
 
@@ -11,7 +12,10 @@ CornerCoverageMask GenerateCornerMask(int radius, int samples) {
 	CornerCoverageMask mask;
 
 	// 参数校验：非法 → 空掩码（不抛异常、不产生半成品）
-	if (radius <= 0 || samples <= 0) {
+	// 参数校验：非法或像素超限 → 空掩码（不抛异常、不产生半成品）
+	// ★ 数值安全带（D1）：R² 分配上限对齐 BackendContract::kMaxArcPixels（2M 像素），防 bad_alloc 终止进程
+	if (radius <= 0 || samples <= 0
+		|| static_cast<long long>(radius) * radius > BackendContract::kMaxArcPixels) {
 
 		return mask;
 

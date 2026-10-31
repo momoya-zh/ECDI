@@ -727,6 +727,51 @@ void Window::ForgetSubtree(const Widget* subtreeRoot) noexcept{
 	// ③ hover 登记：委托 HoverTracker（契约 C 同款语义——不补发 Leave）
 	m_hoverTracker.ForgetSubtree(subtreeRoot);
 
+	// ④ 浮层条目（Phase 42 新增面）：非拥有指针注销。
+	//    ★ 只置标志、只置空，不 erase、不调 HideOverlay ——
+	//      本函数运行在 RemoveChild 调用栈内，此刻可能正处于 m_overlayEntries 的遍历中
+	//      （UpdateOverlayPositions:1182）；改容器大小或递归回 RemoveChild 都会打穿
+	//      既有防线（HideOverlay:1078 的「先收集再递归」+ :1189 的「erase 后立刻 break」）。
+	//
+	//    ★ 记账：Phase 42 引入的非拥有指针共 **5 类**，逐条对应关系如下
+	//      （① 焦点 / ② 捕获 / ③ hover 在上方，此处为 ④ 起）：
+	//        ④a exemptWidget   —— 本段处理（应用侧自有控件）
+	//        ④b anchorWidget   —— 本段处理（应用侧自有控件）
+	//        ④c previousFocus  —— 本段处理（应用侧自有控件）
+	//        ④d ownerOverlay   —— 批 B（指向浮层自身）
+	//        ④e entry.widget   —— 批 B（指向浮层自身）
+	//      ④a~④c 指向**应用侧自有控件**，应用侧随时销毁都是合法用法 ⇒ 必须在此注销；
+	//      否则各自的使用点即失效（④b 每帧取几何会 UAF 读、④a 每次点击做指针比较会误判，
+	//      详见各分支注释——两类的失效形态**不同**，不要合并成一句「都是 UAF」）。
+	for (auto& entry : m_overlayEntries) {
+		if (entry.options.anchorWidget != nullptr
+			&& IsWithinSubtree(entry.options.anchorWidget, subtreeRoot)) {
+			entry.stale = true;
+			entry.options.anchorWidget = nullptr;
+		}
+		// ④a 豁免控件（与 ④b 锚点同族：都指向**应用侧自有控件**，都是「浮层存在的理由」）
+		//    ★ 定性记账（勿照抄外部报告的措辞）：`IsWithinSubtree(node, subtreeRoot)` 只沿
+		//      **node** 上溯，`subtreeRoot` 仅参与指针比较、**不解引用** ⇒ 调用点
+		//      `IsWithinSubtree(hit, options.exemptWidget)`（Application::OnMouseButtonDown
+		//      的 light dismiss 判定）**不会**因 exemptWidget 悬垂而 UAF 读。
+		//      真实风险有两条：
+		//        ① 登记不完整 = 违反本函数的分工契约（悬垂一律由摘树时注销）；
+		//        ② 幽灵豁免——`hit == options.exemptWidget` 是裸指针比较，控件销毁后
+		//           同一地址被新控件复用时，点那个**无关**新控件会被误判为豁免 ⇒ 浮层关不掉。
+		//    ★ 处置取 stale（而非仅置空）：触发按钮已不存在，浮层再无 toggle 入口，
+		//      继续滞留即用户侧看到的「屏上留一套旧下拉」。与 ④b 同族同处置，
+		//      由 UpdateOverlayPositions 帧首统一关闭（不在此处调 HideOverlay——理由同段首）。
+		if (entry.options.exemptWidget != nullptr
+			&& IsWithinSubtree(entry.options.exemptWidget, subtreeRoot)) {
+			entry.stale = true;
+			entry.options.exemptWidget = nullptr;
+		}
+		if (entry.previousFocus != nullptr
+			&& IsWithinSubtree(entry.previousFocus, subtreeRoot)) {
+			entry.previousFocus = nullptr;
+		}
+	}
+
 }
 
 bool Window::IsWidgetInTree(const Widget* widget) const noexcept{
@@ -1181,6 +1226,15 @@ void Window::UpdateOverlayPositions() {
 
 	for (size_t i = 0; i < m_overlayEntries.size(); ++i) {
 		auto& entry = m_overlayEntries[i];
+
+		// ★ 失效条目：所引控件已销毁 ⇒ 关闭浮层。
+		//   必须放在 anchorWidget 空检查之前——stale 且 anchorWidget 已置空的条目
+		//   若被 continue 跳过，就永远关不掉了。
+		if (entry.stale) {
+			HideOverlay(entry.widget);
+			break;   // 复用既有 break 防失效迭代（HideOverlay 内部 erase）
+		}
+
 		if (entry.options.anchorWidget == nullptr) continue;
 
 		// 锚点脱树守卫：自动关闭

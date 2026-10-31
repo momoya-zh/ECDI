@@ -489,6 +489,7 @@ class Window : public PlatformWindowHost {
 			OverlayOptions options;                         ///< 配置选项
 			Widget* ownerOverlay = nullptr;                 ///< 逻辑父浮层
 			Widget* previousFocus = nullptr;                ///< 打开前持焦控件
+			bool stale = false;                             ///< ★ 所引控件已失效，待帧末更新时关闭
 		};
 
 		/// @brief 窗口级统一命中测试（同源服务于 FindTargetWidget / IsClientInteractiveAt / OnQueryCursor）

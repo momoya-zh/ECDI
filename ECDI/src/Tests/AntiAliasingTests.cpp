@@ -260,6 +260,10 @@ void TestMaskInvalidArgs()
     // 奇数 S 合法（仅「推荐 2 的幂」——非契约）
     EXPECT_FALSE(GenerateCornerMask(4, 7).Empty());
     EXPECT_EQ(GenerateCornerMask(4, 7).radius, 4);
+
+    // D1：巨大 radius 输入不抛异常，返回空掩码（R² > kMaxArcPixels）
+    EXPECT_TRUE(GenerateCornerMask(100000, 8).Empty());
+    EXPECT_TRUE(GenerateCornerMask(2000, 8).Empty());
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -629,6 +633,20 @@ void TestGDIShapeComposition()
     }
 }
 
+// D1：巨大 radius 降级到 legacy 保证出图且不崩
+void TestGDIRoundedRectHugeRadiusFallback()
+{
+    AAWindow w;
+    if (!CreateAAWindow(L"ECDITest_AA_HugeRadius", L"AA Huge Radius", w))
+    {
+        return;
+    }
+    // AA 开启下传入巨大 radius（R=50000 触发 CornerMaskCache 超限降级）
+    DrawOneFrame(w.hwnd, true, Rect{ 20.0f, 20.0f, 100.0f, 100.0f }, 50000.0f, Color::Red());
+    // 降级后仍然出图：中心像素 (70, 70) 必须为红色
+    EXPECT_TRUE(IsPureRed(ReadPixel(w.hwnd, 70, 70)));
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterAntiAliasingTests()
@@ -651,4 +669,5 @@ void ECDI::Test::RegisterAntiAliasingTests()
     GetTestRegistry().Add("AntiAliasing.GDIRadiusZeroBitwise",   &TestGDIRadiusZeroBitwise);
     GetTestRegistry().Add("AntiAliasing.GDIPremultipliedBlend",  &TestGDIPremultipliedBlend);
     GetTestRegistry().Add("AntiAliasing.GDIShapeComposition",    &TestGDIShapeComposition);
+    GetTestRegistry().Add("AntiAliasing.GDIHugeRadiusFallback",  &TestGDIRoundedRectHugeRadiusFallback);
 }

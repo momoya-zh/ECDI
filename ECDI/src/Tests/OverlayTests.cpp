@@ -607,6 +607,116 @@ void TestOverlayDetachedAnchorAutoClose() {
 	EXPECT_FALSE(probe.window->HasActiveOverlay());
 }
 
+// ── T42-17：锚点控件脱树即刻析构时浮层自动安全关闭（A1）───────
+// ★★ 判别力边界（P3-2 记账，勿高估本用例）：
+//    本用例与 T42-18 在**修复前**（ForgetSubtree 未注销、无 stale）的 Release 构建下
+//    同样是**绿**的——`Widget::RemoveChild` 在调完 ForgetSubtree 之后立刻
+//    `result->m_parent = nullptr`（Widget.cpp:190），旧路径的「锚点脱树守卫」
+//    `IsWidgetInTree(anchorWidget)` 上溯第一步就拿到 nullptr ⇒ 返回 false ⇒ 照样关浮层。
+//    观测结果与修复后完全一致 ⇒ 这两条**不是「无悬垂」判据**，只是「不崩 + 行为合理」判据。
+//    判别力只在 Debug：堆填充让 `GetParent()` 返回 0xDD… ⇒ 上溯解引用 ⇒ 崩。
+//    ⇒ 要验「无悬垂」需 ASAN，或应用侧场景负对照（RebuildUi 的 popup-rebuild 相）。
+//    真正**与堆行为无关**的判别用例是 T42-19：它判据单因（只设 exemptWidget、不设 anchor），
+//    旧代码下浮层压根不关 ⇒ 确定性变红（负对照实测 577 passed / 1 failed）。
+void TestOverlayDestroyedAnchorAutoClose() {
+	WindowProbe probe("ECDI_P42_AnchorDestroy");
+	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_P42_AnchorDestroy");
+	EXPECT_TRUE(probe.hwnd != nullptr);
+	if (probe.hwnd == nullptr) return;
+	probe.ShowAndSettle();
+
+	bool closed = false;
+	auto anchor = std::make_unique<Button>("Anchor");
+	Button* anchorRaw = anchor.get();
+	probe.window->GetRootWidget().AddChild(std::move(anchor));
+
+	auto pop = std::make_unique<Button>("Pop");
+	OverlayOptions opt;
+	opt.anchorWidget = anchorRaw;
+	opt.onClosed = [&]{ closed = true; };
+	probe.window->ShowOverlay(std::move(pop), opt);
+
+	EXPECT_TRUE(probe.window->HasActiveOverlay());
+
+	// 摘除并立即销毁锚点控件（不保留 unique_ptr，验证悬垂指针在 ForgetSubtree 中注销）
+	probe.window->GetRootWidget().RemoveChild(anchorRaw);
+
+	// 触发帧渲染管线，UpdateOverlayPositions 消费 entry.stale 标志，安全关闭浮层
+	probe.PumpOneFrame();
+	EXPECT_TRUE(closed);
+	EXPECT_FALSE(probe.window->HasActiveOverlay());
+}
+
+// ── T42-18：打开浮层前持焦控件已脱树析构时的回焦退化（A2）───────
+// ★ 判别力边界同 T42-17（见上）：修复前 `HideOverlay` 的
+//   `IsWidgetInTree(previousFocus)` 也因 `m_parent` 已清而返回 false ⇒ 走清焦点分支，
+//   观测一致 ⇒ Release 下恒绿。本用例守的是「不崩 + 回焦退化合理」。
+void TestOverlayDestroyedPreviousFocusRestoreGraceful() {
+	TestApp app;
+	auto& window = app.Create("FocusRestoreGraceful", 800, 600);
+
+	auto baseBtn = std::make_unique<Button>("Base");
+	Button* baseRaw = baseBtn.get();
+	window.GetRootWidget().AddChild(std::move(baseBtn));
+
+	window.SetFocusedWidget(baseRaw);
+	EXPECT_EQ(window.GetFocusedWidget(), baseRaw);
+
+	auto popBtn = std::make_unique<Button>("Pop");
+	Button* popRaw = popBtn.get();
+
+	OverlayOptions opt;
+	opt.layer = OverlayLayer::Modal;
+	window.ShowOverlay(std::move(popBtn), opt);
+	EXPECT_EQ(window.GetFocusedWidget(), popRaw);
+
+	// 销毁打开前持焦的外部控件（立即析构，非保留）
+	window.GetRootWidget().RemoveChild(baseRaw);
+
+	// 关闭浮层：previousFocus 已在 ForgetSubtree 置空，安全回退到 nullptr，无 UAF
+	window.HideOverlay(popRaw);
+	EXPECT_EQ(window.GetFocusedWidget(), nullptr);
+
+	window.Release();
+}
+
+// ── T42-19：豁免控件脱树即刻析构 ⇒ 浮层随锚点同族自动关闭（A1 第 5 类）──
+//    ★ 判据为什么能确定性变红：本用例**只设 exemptWidget、不设 anchorWidget**，
+//      于是 stale 的唯一来源就是 ④a 这条注销分支。未注销时浮层保持打开
+//      ⇒ `closed` 与 `HasActiveOverlay()` 两条断言同时红。
+//    ★ 不依赖 allocator 复用：曾经写过一个「摘树后立刻同尺寸重分配，靠悬垂地址被复用
+//      造幽灵豁免」的版本，负对照**实测不变红**——Debug CRT 默认延迟释放
+//      （_CRTDBG_DELAY_FREE_MEM_DF）不立即复用，且 `IsWithinSubtree(node, root)` 只沿
+//      node 上溯、root 仅参与指针比较 ⇒ 悬垂指针根本不被解引用。故那条路径既测不出
+//      UAF 也测不出幽灵豁免，已废弃。本类不是 UAF 读，是「登记不完整 + 浮层滞留」。
+void TestOverlayDestroyedExemptWidget() {
+	WindowProbe probe("ECDI_P42_ExemptDestroy");
+	probe.hwnd = ::FindWindowW(nullptr, L"ECDI_P42_ExemptDestroy");
+	EXPECT_TRUE(probe.hwnd != nullptr);
+	if (probe.hwnd == nullptr) return;
+	probe.ShowAndSettle();
+
+	bool closed = false;
+	auto entryBtn = std::make_unique<Button>("Entry");
+	Button* entryRaw = entryBtn.get();
+	probe.window->GetRootWidget().AddChild(std::move(entryBtn));
+
+	auto pop = std::make_unique<Button>("Pop");
+	OverlayOptions opt;
+	opt.exemptWidget = entryRaw;   // ★ 只设豁免，不设 anchorWidget（判据单因）
+	opt.onClosed = [&] { closed = true; };
+	probe.window->ShowOverlay(std::move(pop), opt);
+	EXPECT_TRUE(probe.window->HasActiveOverlay());
+
+	// 摘除并立即销毁豁免控件（丢弃 RemoveChild 返回值 ⇒ 即刻析构）
+	probe.window->GetRootWidget().RemoveChild(entryRaw);
+
+	// 帧首 UpdateOverlayPositions 消费 entry.stale ⇒ 关闭浮层
+	probe.PumpOneFrame();
+	EXPECT_TRUE(closed);
+	EXPECT_FALSE(probe.window->HasActiveOverlay());
+}
+
 } // namespace
 
 void ECDI::Test::RegisterOverlayTests() {
@@ -633,4 +743,7 @@ void ECDI::Test::RegisterOverlayTests() {
 	GetTestRegistry().Add("Overlay.FocusTrapAndRestore", &TestOverlayFocusTrapAndRestore);
 	GetTestRegistry().Add("Overlay.AnchorFollowAndFlip", &TestOverlayAnchorFollowAndFlip);
 	GetTestRegistry().Add("Overlay.DetachedAnchorAutoClose", &TestOverlayDetachedAnchorAutoClose);
+	GetTestRegistry().Add("Overlay.DestroyedAnchorAutoClose", &TestOverlayDestroyedAnchorAutoClose);
+	GetTestRegistry().Add("Overlay.DestroyedPreviousFocusRestoreGraceful", &TestOverlayDestroyedPreviousFocusRestoreGraceful);
+	GetTestRegistry().Add("Overlay.DestroyedExemptWidget", &TestOverlayDestroyedExemptWidget);
 }

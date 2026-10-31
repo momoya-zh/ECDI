@@ -1161,9 +1161,18 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 
 	const int R = static_cast<int>(effectiveRadius);   // ④ effective 整数半径 = 缓存键
 
+	// ★ 掩码只在「R > 0 且 AA 开启」时才取（批 A 回归修复，P3-1）：
+	//   ① `CornerMaskCache::Get` 的头文件前置条件是「**调用方保证 radius > 0**」——
+	//      先取后判 `R == 0` 属违反前置条件；
+	//   ② AA 关闭时本路径根本不用掩码，提前取会**开始生成并缓存**掩码
+	//      （改前完全不生成）⇒ 白耗一次 (R+1)² 覆盖度计算 + 污染缓存。
+	//   两件事都只需把取掩码挪到分流判断之后即可，不要用「Get 内部容忍 0」来打补丁。
+	const bool needMask = (R > 0 && m_antiAliasing);
+	const CornerCoverageMask* maskPtr = needMask ? &m_cornerMaskCache.Get(R) : nullptr;
+
 	// ── 路径选择（Phase 8.6 §5.2）──
-	// ① R == 0 或 AA 关闭 → legacy（与改造前逐位一致）
-	if (R == 0 || !m_antiAliasing)
+	// ① R == 0 或 AA 关闭 或 掩码为空（D1 安全降级：宁可无 AA，不可缺绘制）→ legacy
+	if (maskPtr == nullptr || maskPtr->Empty())
 	{
 		DrawRoundedRectLegacy(rect, cornerRadius, color);   // ⚠️ 传原始 cornerRadius（内部自行钳制）
 		// Phase 32 批三（K③）：legacy = GDI RoundRect 硬边 —— 哨兵修补（形状像素 ≠ 清屏
@@ -1180,12 +1189,13 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 		return;
 	}
 
+	const CornerCoverageMask& mask = *maskPtr;
+
 	// ── Phase 32 批三（K②）：衬底模式 = 覆盖率**预乘直写**（不跑 GDI、不需要 PatchSurface；
 	// a<1 的半透明填充在预乘表示下与材质天然正确合成）────────────────────────
 	if (m_backdropActual != BackdropMode::None)
 	{
-		const CornerCoverageMask& frostedMask = m_cornerMaskCache.Get(R);
-		WriteRoundedRectPremultiplied(rect, R, color, frostedMask);
+		WriteRoundedRectPremultiplied(rect, R, color, mask);
 		return;
 	}
 
@@ -1197,9 +1207,6 @@ void GDIBackend::DrawRoundedRect(const Rect& rect, float cornerRadius,
 		DrawRoundedRectLegacy(rect, cornerRadius, color);
 		return;
 	}
-
-	// ③ 取掩码（键 = effective 整数半径——掩码只依赖半径，与尺寸/位置/颜色正交）
-	const CornerCoverageMask& mask = m_cornerMaskCache.Get(R);
 
 	if (color.a >= 1.0f)
 	{

@@ -1,4 +1,5 @@
 ﻿#include "Render/LineCoverage.h"
+#include "Render/BackendContract.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,10 @@ float DistSqToSegment(float px, float py, float ax, float ay, float bx, float by
 
 bool IsAxisAlignedAfterRound(float x0, float y0, float x1, float y1) noexcept
 {
+    if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1))
+    {
+        return false;
+    }
     return std::lround(y0) == std::lround(y1) || std::lround(x0) == std::lround(x1);
 }
 
@@ -34,9 +39,11 @@ LineCoverageGrid GenerateLineCoverage(float x0, float y0, float x1, float y1,
 {
     LineCoverageGrid grid;   // 默认即空网格（Empty() == true）
 
-    if (samples <= 0)
+    // ① 数值安全带：非有限值或非正入参直接拒绝（先于一切算术，防 NaN/Inf 传播入 UB）
+    if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1)
+        || !std::isfinite(width) || samples <= 0)
     {
-        return grid;   // 契约 C3：同 GenerateCornerMask 的入参语义
+        return grid;
     }
     if (x0 == x1 && y0 == y1)
     {
@@ -48,18 +55,26 @@ LineCoverageGrid GenerateLineCoverage(float x0, float y0, float x1, float y1,
     const float hw = effW * 0.5f;
 
     // bbox（std::floor 而非 int 截断——负坐标正确）；两端各让出圆帽的鼓出量
-    const float minX = std::min(x0, x1) - hw;
-    const float maxX = std::max(x0, x1) + hw;
-    const float minY = std::min(y0, y1) - hw;
-    const float maxY = std::max(y0, y1) + hw;
-    const int bx0 = static_cast<int>(std::floor(minX));
-    const int by0 = static_cast<int>(std::floor(minY));
-    const int bw = static_cast<int>(std::floor(maxX)) - bx0 + 1;
-    const int bh = static_cast<int>(std::floor(maxY)) - by0 + 1;
-    if (bw <= 0 || bh <= 0)
+    // ★ 宽类型算：防极大有限值 floor / 乘积溢出 int（对齐 ArcCoverage 与 BackendContract::kMaxArcPixels）
+    const double minXd = std::min(static_cast<double>(x0), static_cast<double>(x1)) - static_cast<double>(hw);
+    const double maxXd = std::max(static_cast<double>(x0), static_cast<double>(x1)) + static_cast<double>(hw);
+    const double minYd = std::min(static_cast<double>(y0), static_cast<double>(y1)) - static_cast<double>(hw);
+    const double maxYd = std::max(static_cast<double>(y0), static_cast<double>(y1)) + static_cast<double>(hw);
+    const double bx0d = std::floor(minXd);
+    const double by0d = std::floor(minYd);
+    const double bx1d = std::floor(maxXd);
+    const double by1d = std::floor(maxYd);
+    const long long bwLL = static_cast<long long>(bx1d) - static_cast<long long>(bx0d) + 1;
+    const long long bhLL = static_cast<long long>(by1d) - static_cast<long long>(by0d) + 1;
+    if (bwLL <= 0 || bhLL <= 0 || bwLL * bhLL > BackendContract::kMaxArcPixels)
     {
         return grid;
     }
+
+    const int bx0 = static_cast<int>(bx0d);
+    const int by0 = static_cast<int>(by0d);
+    const int bw = static_cast<int>(bwLL);
+    const int bh = static_cast<int>(bhLL);
 
     // 预过滤（O3 定案）：像素中心到线段距离 > hw + √½ ⇒ 整个像素方格在带外
     // （三角不等式：方格内任意点距中心 ≤ √½，故 dist(q) ≥ dist(center) − √½ > hw）

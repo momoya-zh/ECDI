@@ -400,6 +400,12 @@ void GLRenderer::DrawRoundedRect(const Rect& rect, float cornerRadius, const Col
 		return;
 	}
 
+	// 契约层对齐 GDI 侧（GDIBackend.cpp:1147）：空/负矩形 no-op，防 maxRadius 负值违反 std::clamp 前置条件
+	if (rect.width <= 0.0f || rect.height <= 0.0f)
+	{
+		return;
+	}
+
 	// ★ 审计 M16：半径钳制改**整数口径**（与 GDI `GDIBackend.cpp:861-865` 逐字同式）——
 	//   ① 量化 `lround(cornerRadius)`；② 上界 `min(w,h) / 2`（**整数**除法）；
 	//   ③ clamp；④ effective 整数半径即角掩码键。

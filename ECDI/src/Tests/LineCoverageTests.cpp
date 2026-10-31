@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstddef>
 #include <vector>
+#include <limits>
 
 using namespace ECDI;
 
@@ -461,6 +462,34 @@ void TestPatchSurfaceRectangularRegression()
     }
 }
 
+// C1：数值安全带（NaN / Inf / 巨大坐标 / 非正线宽契约）
+void TestLineCoverageNumericalSafety()
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+
+    // ① NaN / Inf 输入不崩、不触发 UB、恒返回空网格
+    EXPECT_TRUE(GenerateLineCoverage(nan, 0.0f, 10.0f, 10.0f, 1.0f).Empty());
+    EXPECT_TRUE(GenerateLineCoverage(0.0f, nan, 10.0f, 10.0f, 1.0f).Empty());
+    EXPECT_TRUE(GenerateLineCoverage(0.0f, 0.0f, nan, 10.0f, 1.0f).Empty());
+    EXPECT_TRUE(GenerateLineCoverage(0.0f, 0.0f, 10.0f, nan, 1.0f).Empty());
+    EXPECT_TRUE(GenerateLineCoverage(0.0f, 0.0f, 10.0f, 10.0f, nan).Empty());
+    EXPECT_TRUE(GenerateLineCoverage(inf, 0.0f, 10.0f, 10.0f, 1.0f).Empty());
+    EXPECT_TRUE(GenerateLineCoverage(0.0f, 0.0f, 10.0f, 10.0f, inf).Empty());
+
+    // ② 谓词 IsAxisAlignedAfterRound 在 NaN 输入下返回 false（无 lround UB）
+    EXPECT_FALSE(IsAxisAlignedAfterRound(nan, 0.0f, 10.0f, 0.0f));
+    EXPECT_FALSE(IsAxisAlignedAfterRound(0.0f, nan, 0.0f, 10.0f));
+    EXPECT_FALSE(IsAxisAlignedAfterRound(inf, 0.0f, 10.0f, 0.0f));
+
+    // ③ 超大线宽安全拦截（防巨大分配与溢出）
+    EXPECT_TRUE(GenerateLineCoverage(0.0f, 0.0f, 10.0f, 10.0f, 1.0e9f).Empty());
+
+    // ④ 极大有限坐标安全拦截（不抛 bad_alloc/length_error，返回空网格）
+    EXPECT_TRUE(GenerateLineCoverage(-1.0e9f, -1.0e9f, 1.0e9f, 1.0e9f, 2.0f).Empty());
+    EXPECT_TRUE(GenerateLineCoverage(0.0f, 0.0f, 1.0e8f, 10.0f, 1.0f).Empty());
+}
+
 } // namespace
 
 namespace ECDI::Test {
@@ -481,6 +510,7 @@ void RegisterLineCoverageTests()
     // Phase 24 批三：端到端（T24-8b / T24-11——真实 backend + 真窗口读回）
     GetTestRegistry().Add("LineCoverage.SeamResidualEndToEnd",    &TestSeamResidualEndToEnd);
     GetTestRegistry().Add("LineCoverage.PatchSurfaceRectangular", &TestPatchSurfaceRectangularRegression);
+    GetTestRegistry().Add("LineCoverage.NumericalSafety",         &TestLineCoverageNumericalSafety);
 }
 
 } // namespace ECDI::Test
