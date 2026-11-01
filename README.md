@@ -19,7 +19,7 @@ ECDI is a **teaching-first** framework: it exists so that anyone can learn how a
 
 ## Why ECDI
 
-Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 210 design documents in Chinese).
+Most hobby GUI projects stop at "a window with buttons". ECDI is built the way a real framework is built: strict layering, platform abstraction, a self-hosted test suite, and a library-first build — with every design decision documented (`docs/`, 213 design documents in Chinese).
 
 ## How this was built
 
@@ -61,7 +61,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **Overlay & Popups**: window-level dual-tree topology with dedicated `m_overlayRoot` and three layered panels (Normal, Modal, Tooltip); escapes ancestor container clipping; Light Dismiss (outside-click auto-dismiss with pass-through / consume policies), ESC key handling, modal focus trap with previous-focus restoration, and Flip-then-Clamp anchor tracking with de-tree detection
 - **Window geometry & material**: runtime bounds (`SetBounds` / `GetBounds`, request semantics -- the read-back value is authoritative), minimum size, and a frosted backdrop (`SetWindowBackdrop`, Acrylic with a documented degraded fallback)
 - **Shell integration**: tray icon (application-level — lives on `PlatformApplication`, not on any `Window`, so closing/rebuilding every window leaves it intact) with a native popup menu, plus window-level file drop (`WM_DROPFILES` → UTF-8 path list; the `HDROP` is released before the event is emitted). Both stay behind platform seams — the public API exposes no Win32 types.
-- **Testing**: self-hosted test framework (580 cases as of 2026-10-31, zero dependencies) with a recording backend for paint assertions
+- **Testing**: self-hosted test framework (584 cases as of 2026-11-01, zero dependencies) with a recording backend for paint assertions
 
 ## Build
 
@@ -88,7 +88,7 @@ Targets:
 | Target | Type | Description |
 |---|---|---|
 | `ECDI` | static library | The framework (`include/ECDI/*.h` — 101 public headers; internal implementation lives in `src/`) |
-| `ecdi_tests` | executable | Self-hosted test suite — 580 cases (2026-10-31), zero dependencies |
+| `ecdi_tests` | executable | Self-hosted test suite — 584 cases (2026-11-01), zero dependencies |
 | `modelprobe` | executable | ModelProbe — a real tool built on ECDI (see below) |
 | `visualtest` | executable | Side-by-side visual check for image decoding (Phase 11) |
 | `ecdi_public_header_test` | test | Self-containment check: every public header compiled as an independent TU (opt-in via `--target`) |
@@ -149,7 +149,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ECDI/       framework sources (include/ = 101 public headers, src/ = implementation + tests)
 examples/   consumers: ModelProbe (real tool), MinimalApp (library-ization smoke test), VisualTest; DesktopNest (desktop organizer -- app-side M1: requirements v1.1 review passed, preliminary design v1.3 (all five open questions settled) and detailed design v1.3 filed 2026-10-09 -- three documents in place, three review rounds absorbed, ready for implementation)
 probe-go/   Go backend embedded into ModelProbe as an RC resource
-docs/       usage.md (API / usage guide, how to use the framework) + dev/ (210 design documents: requirements → preliminary → detailed, per phase)
+docs/       usage.md (API / usage guide, how to use the framework) + dev/ (213 design documents: requirements → preliminary → detailed, per phase)
 ```
 
 📚 **Design documents** (Chinese): [docs/dev/README.md](docs/dev/README.md) — full index of phase-by-phase design docs, development progress, and technical-debt ledger.

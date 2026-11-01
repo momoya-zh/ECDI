@@ -613,6 +613,119 @@ void TestScrollBarInsetAndViewport(){
 	EXPECT_EQ(sv.GetMaxOffsetY(), 400 - (100 - t - s));
 }
 
+// ── #84：滚动条双轴厚度（Phase 43）────────────────────────────
+// 缺陷：框架原用**一个**厚度代表两条（横条的 thickness 被整体丢弃，R84-A）；
+//       且视口高、`NeedsVerticalBar` 的扣除量误用竖条厚度（审计 M5 / R84-B）。
+// 红线：同厚路径必须逐位等价（`TestScrollBarInsetAndViewport` 一行不改即为守门人）。
+
+// ── T43-1 双轴厚度：异厚 12 / 4 三相 ─────────────────────────
+// 守护站点：P1 = S3 / S4 / S5 / S6 · P3 = S1 · P4 = S2
+// ★ 为什么需要 P3 / P4：`NeedsVerticalBar` 的 `return nV1 || (...)` 与
+//   `NeedsHorizontalBar` 的 `return nH1 || (...)` 都是**短路**求值 ⇒ 双轴溢出相里
+//   第二轮的厚度根本不参与判断，S1 / S2 改错也全绿。只有落在
+//   `contentH ∈ (h0 − BarFootprint(tv), h0 − BarFootprint(th)]` 或对偶区间的相能暴露。
+void TestScrollViewBarThicknessPerAxis(){
+	TestableScrollView sv;
+
+	// ★ 顺序固定：样式先于 SetSize（R84-C′：改厚度不触发重排，反序会假红）
+	sv.GetHorizontalScrollBar()->SetStyle(ScrollBarStyleOverride{ .thickness = 4 });
+	sv.SetSize(200, 100);
+
+	ScrollBar* vBar = sv.GetVerticalScrollBar();
+	ScrollBar* hBar = sv.GetHorizontalScrollBar();
+
+	EXPECT_EQ(vBar->GetThickness(), 12);
+	EXPECT_EQ(hBar->GetThickness(), 4);
+
+	// P1：双轴溢出 400 × 400
+	sv.SetContentExtent(400, 400);
+
+	EXPECT_EQ(vBar->GetWidth(), 12);
+	EXPECT_NEAR(vBar->GetAbsolutePosition().x, 186.0f, kEps);   // 200 − 12 − 2
+	EXPECT_EQ(hBar->GetHeight(), 4);
+	EXPECT_NEAR(hBar->GetAbsolutePosition().y, 94.0f, kEps);    // 100 − 4 − 2
+	EXPECT_EQ(sv.GetMaxOffsetX(), 214);                          // 400 − (200 − 12 − 2)
+	EXPECT_EQ(sv.GetMaxOffsetY(), 306);                          // 400 − (100 − 4 − 2)
+
+	// P3：只有横条（contentH = 90）——S1 的唯一守护相
+	sv.SetContentExtent(400, 90);
+
+	EXPECT_FALSE(vBar->IsVisible());
+	EXPECT_EQ(vBar->GetWidth(), 12);          // ★ 不可见 ≠ 尺寸 0（ApplyLayout 不判可见性）
+	EXPECT_EQ(hBar->GetHeight(), 4);
+	EXPECT_NEAR(hBar->GetAbsolutePosition().y, 94.0f, kEps);
+	EXPECT_EQ(sv.GetMaxOffsetX(), 200);       // 200 − 0（竖条不占位）
+	EXPECT_EQ(sv.GetMaxOffsetY(), 0);         // 90 < 94 ⇒ 钳 0
+
+	// P4：只有竖条（contentW = 190）——S2 的唯一守护相
+	sv.SetContentExtent(190, 400);
+
+	EXPECT_TRUE(hBar->IsVisible());
+	EXPECT_EQ(hBar->GetHeight(), 4);
+	EXPECT_EQ(sv.GetMaxOffsetX(), 4);         // 190 − (200 − 12 − 2)
+	EXPECT_EQ(sv.GetMaxOffsetY(), 306);       // 400 − (100 − 4 − 2)
+}
+
+// ── T43-2 反号 4 / 12（镜像）───────────────────────────────
+// 守护站点：S5 / S6 —— 与 T43-1 的 P1 互为镜像，防「只改一处刚好绿」
+void TestScrollViewBarThicknessAxisSwapped(){
+	TestableScrollView sv;
+
+	sv.GetVerticalScrollBar()->SetStyle(ScrollBarStyleOverride{ .thickness = 4 });
+	sv.SetSize(200, 100);
+	sv.SetContentExtent(400, 400);
+
+	ScrollBar* vBar = sv.GetVerticalScrollBar();
+	ScrollBar* hBar = sv.GetHorizontalScrollBar();
+
+	EXPECT_EQ(vBar->GetWidth(), 4);
+	EXPECT_NEAR(vBar->GetAbsolutePosition().x, 194.0f, kEps);   // 200 − 4 − 2
+	EXPECT_EQ(hBar->GetHeight(), 12);
+	EXPECT_NEAR(hBar->GetAbsolutePosition().y, 86.0f, kEps);    // 100 − 12 − 2
+	EXPECT_EQ(sv.GetMaxOffsetX(), 206);                          // 400 − (200 − 4 − 2)
+	EXPECT_EQ(sv.GetMaxOffsetY(), 314);                          // 400 − (100 − 12 − 2)
+}
+
+// ── T43-3 非默认同厚 8 / 8 ──────────────────────────────────
+// 判据目的：抓「助手写死 12 / 写死常量」——默认同厚下写死也绿，故必须非默认
+void TestScrollViewBarThicknessFromStyle(){
+	TestableScrollView sv;
+
+	sv.GetVerticalScrollBar()->SetStyle(ScrollBarStyleOverride{ .thickness = 8 });
+	sv.GetHorizontalScrollBar()->SetStyle(ScrollBarStyleOverride{ .thickness = 8 });
+	sv.SetSize(200, 100);
+	sv.SetContentExtent(400, 400);
+
+	ScrollBar* vBar = sv.GetVerticalScrollBar();
+	ScrollBar* hBar = sv.GetHorizontalScrollBar();
+
+	EXPECT_EQ(vBar->GetWidth(), 8);
+	EXPECT_NEAR(vBar->GetAbsolutePosition().x, 190.0f, kEps);   // 200 − 8 − 2
+	EXPECT_EQ(hBar->GetHeight(), 8);
+	EXPECT_NEAR(hBar->GetAbsolutePosition().y, 90.0f, kEps);    // 100 − 8 − 2
+	EXPECT_EQ(sv.GetMaxOffsetX(), 210);                          // 400 − (200 − 8 − 2)
+	EXPECT_EQ(sv.GetMaxOffsetY(), 310);                          // 400 − (100 − 8 − 2)
+}
+
+// ── T43-4 旧行为护栏（入库负对照）───────────────────────────
+// 判据目的：把「两轴共用同一个厚度」这一**旧行为**变成一条会红的断言——
+//          旧实现下 vBar 宽 == hBar 高（都取竖条厚度），本用例必红。
+//          ★ 与 T43-1 的 P1 断言不重复：P1 判「值对不对」，本条判「两轴是否被分开」。
+void TestScrollViewBarThicknessAxesAreIndependent(){
+	TestableScrollView sv;
+
+	sv.GetHorizontalScrollBar()->SetStyle(ScrollBarStyleOverride{ .thickness = 4 });
+	sv.SetSize(200, 100);
+	sv.SetContentExtent(400, 400);
+
+	const int vWidth  = sv.GetVerticalScrollBar()->GetWidth();
+	const int hHeight = sv.GetHorizontalScrollBar()->GetHeight();
+
+	EXPECT_EQ(vWidth, 12);
+	EXPECT_EQ(hHeight, 4);
+	EXPECT_TRUE(vWidth != hHeight);   // ★ 旧行为（单轴厚度）下两者恒相等 ⇒ 必红
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterScrollViewTests()
@@ -632,6 +745,10 @@ void ECDI::Test::RegisterScrollViewTests()
 	GetTestRegistry().Add("ScrollBar.DragInvertsOffset",                 &TestScrollBarDragInvertsOffset);
 	GetTestRegistry().Add("ScrollBar.ThemeAndOverride",                  &TestScrollBarThemeAndOverride);
 	GetTestRegistry().Add("ScrollBar.InsetAndViewport",                  &TestScrollBarInsetAndViewport);
+	GetTestRegistry().Add("ScrollView.BarThicknessPerAxis",              &TestScrollViewBarThicknessPerAxis);
+	GetTestRegistry().Add("ScrollView.BarThicknessAxisSwapped",          &TestScrollViewBarThicknessAxisSwapped);
+	GetTestRegistry().Add("ScrollView.BarThicknessFromStyle",            &TestScrollViewBarThicknessFromStyle);
+	GetTestRegistry().Add("ScrollView.BarThicknessAxesAreIndependent",   &TestScrollViewBarThicknessAxesAreIndependent);
 }
 
 }

@@ -190,10 +190,17 @@ ScrollBar* ScrollView::GetHorizontalScrollBar() noexcept{ return m_hBar; }
 
 // ── 内部：双轴 viewport（两轮判定——详设 §3.3）────────────────
 
-int ScrollView::BarThickness() const noexcept{
+int ScrollView::VerticalBarThickness() const noexcept{
 
 	// 厚度来自样式（主题可改）⇒ 单点可查（ScrollBar::GetThickness）
 	return (m_vBar != nullptr) ? m_vBar->GetThickness() : 0;
+
+}
+
+int ScrollView::HorizontalBarThickness() const noexcept{
+
+	// 同上——读的是**横条自己的**样式，不是竖条的（#84 S6 / 审计 M5）
+	return (m_hBar != nullptr) ? m_hBar->GetThickness() : 0;
 
 }
 
@@ -205,7 +212,8 @@ bool ScrollView::NeedsVerticalBar() const noexcept{
 
 	}
 
-	const int t  = BarThickness();
+	// ★ #84（S1）：扣除量必须取**横条**厚度——「是否需要竖条」取决于视口**高**，
+	//    而视口高被**横条**吃掉。此处曾误用竖条厚度（审计 M5 的第①②面）。
 	const int w0 = GetWidth();
 	const int h0 = GetHeight();
 
@@ -215,7 +223,7 @@ bool ScrollView::NeedsVerticalBar() const noexcept{
 
 	// 第二轮：按第一轮结论扣除后再判——**单调升级**
 	//（viewport 只会变小 ⇒ need 只会 false→true ⇒ 并集即不动点，最多 2 轮收敛）
-	const int tH = h0 - (nH1 ? BarFootprint(t) : 0);   // v1.6：条占「厚度 + 内缩」
+	const int tH = h0 - (nH1 ? BarFootprint(HorizontalBarThickness()) : 0);   // v1.6：条占「厚度 + 内缩」
 
 	return nV1 || (m_contentH > tH);
 
@@ -229,14 +237,15 @@ bool ScrollView::NeedsHorizontalBar() const noexcept{
 
 	}
 
-	const int t  = BarThickness();
+	// ★ #84（S2）：扣除量取**竖条**厚度——「是否需要横条」取决于视口**宽**，
+	//    而视口宽被**竖条**吃掉。本处原本就对，改成显式名字是为了让「轴」在调用点可读。
 	const int w0 = GetWidth();
 	const int h0 = GetHeight();
 
 	const bool nV1 = m_contentH > h0;
 	const bool nH1 = m_contentW > w0;
 
-	const int tW = w0 - (nV1 ? BarFootprint(t) : 0);   // v1.6：条占「厚度 + 内缩」
+	const int tW = w0 - (nV1 ? BarFootprint(VerticalBarThickness()) : 0);   // v1.6：条占「厚度 + 内缩」
 
 	return nH1 || (m_contentW > tW);
 
@@ -245,14 +254,15 @@ bool ScrollView::NeedsHorizontalBar() const noexcept{
 int ScrollView::ViewportWidth() const noexcept{
 
 	// ★ v1.6：条不再贴边 ⇒ 视口要让出**厚度 + 内缩**（只让厚度会让内容最后一列永远压在条底下）
-	return GetWidth() - (NeedsVerticalBar() ? BarFootprint(BarThickness()) : 0);
+	return GetWidth() - (NeedsVerticalBar() ? BarFootprint(VerticalBarThickness()) : 0);
 
 }
 
 int ScrollView::ViewportHeight() const noexcept{
 
 	// ★ v1.6：同上（内容最后一行）
-	return GetHeight() - (NeedsHorizontalBar() ? BarFootprint(BarThickness()) : 0);
+	// ★ #84（S4）：此处原来扣的是**竖条**厚度——横条厚度被整体忽略（R84-A 的视口面）
+	return GetHeight() - (NeedsHorizontalBar() ? BarFootprint(HorizontalBarThickness()) : 0);
 
 }
 
@@ -260,24 +270,29 @@ int ScrollView::ViewportHeight() const noexcept{
 
 void ScrollView::ApplyLayout(){
 
-	const int t = BarThickness();
+	// ★ #84：两条**各取自身厚度**（原实现共用一个 `t` ⇒ 横条的 thickness 被整体丢弃，R84-A）
+	//    ⚠️ 若将来让厚度**依赖视口**（如「条随容器变细」），本处的「常量化」前提失效，
+	//       两轮判定的收敛性须重新论证（详设 §3.3）。
+	const int tv = VerticalBarThickness();
+	const int th = HorizontalBarThickness();
 
 	// ① 条几何（**视口空间**——固定在视口，不受偏移）
 	//    ★ v1.6：四边**内缩** `kBarInset`（不贴边、不压外层容器的边框环与圆角）；
 	//    垂直条贴右、水平条贴底；交叉区仍不做缩角（记账 L2 不变——两条照旧在角落重叠）
+	//    ★ #84：此处**不判可见性**——不可见条仍被排满（可见性只影响绘制与 HitTest，见 C43-5）
 	const int s = kBarInset;
 
 	if (m_vBar != nullptr){
 
-		m_vBar->SetSize(t, (std::max)(0, GetHeight() - s * 2));   // 退化保护：过矮时钳 0
-		m_vBar->SetPosition(GetWidth() - t - s, s);
+		m_vBar->SetSize(tv, (std::max)(0, GetHeight() - s * 2));   // 退化保护：过矮时钳 0
+		m_vBar->SetPosition(GetWidth() - tv - s, s);
 
 	}
 
 	if (m_hBar != nullptr){
 
-		m_hBar->SetSize((std::max)(0, GetWidth() - s * 2), t);    // ★ v1.6：同垂直条，四边内缩
-		m_hBar->SetPosition(s, GetHeight() - t - s);
+		m_hBar->SetSize((std::max)(0, GetWidth() - s * 2), th);    // ★ v1.6：同垂直条，四边内缩
+		m_hBar->SetPosition(s, GetHeight() - th - s);
 
 	}
 

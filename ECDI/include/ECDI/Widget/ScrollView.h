@@ -170,8 +170,15 @@ private:
 	/// @brief 可用高（**扣除已显示的水平条**）
 	[[nodiscard]] int ViewportHeight() const noexcept;
 
-	/// @brief 条厚度（读样式——参与 viewport 计算）
-	[[nodiscard]] int BarThickness() const noexcept;
+	/// @brief 竖条厚度（读**竖条自己**的样式；对应条为空时 0）
+	/// @details 两轴厚度**各取各的**——不得用「一个厚度代表两条」（实现审计 M5 的原始缺陷形态）。
+	/// ⚠️ 改厚度（如 `GetHorizontalScrollBar()->SetStyle(...)`）**不会**触发本容器重排：
+	///    调用方须在改后调一次 `SetSize(GetWidth(), GetHeight())`（**同值也会重算**）；
+	///    `SetContentExtent` 在 extent 未变时提前返回（`.cpp:85-89`），**救不了**（#84 R84-C′ / 审计 M6）。
+	[[nodiscard]] int VerticalBarThickness() const noexcept;
+
+	/// @brief 横条厚度（同上，读**横条自己**的样式）
+	[[nodiscard]] int HorizontalBarThickness() const noexcept;
 
 	ScrollContent* m_content = nullptr;   ///< 内容坐标空间的根（非拥有——子节点）
 	ScrollBar* m_vBar = nullptr;          ///< 垂直条（非拥有——子节点；父先于子析构）
