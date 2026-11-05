@@ -45,6 +45,10 @@ struct QuickfixHost final : public PlatformWindowHost{
 	mutable int queryCount = 0;   ///< OnQueryCursor 调用次数（const 契约 ⇒ mutable）
 	int leaveCount = 0;           ///< OnMouseLeftWindow 调用次数
 
+	/// @brief 自述的光标形态（★ #87：默认 Arrow 保持 ② 的既有断言不变；
+	///        映射用例把它换成 `SizeWE` 等，验证「值 → 系统 IDC_*」这一段）
+	CursorShape queryResult = CursorShape::Arrow;
+
 	void OnPaint() override{}
 
 	void OnResized(int, int) override{}
@@ -67,7 +71,7 @@ struct QuickfixHost final : public PlatformWindowHost{
 
 		++queryCount;
 
-		return CursorShape::Arrow;
+		return queryResult;
 
 	}
 
@@ -240,6 +244,52 @@ void Test72SetCursorClientQueriesHost()
 	::SetCursor(::LoadCursorW(nullptr, IDC_ARROW));
 }
 
+// ── #87：光标形态值域补齐——每个新值都要映射到对应的系统 `IDC_*` ────────────────────
+// ★ **不能直测 `CursorHandleFor`**：它在 `Win32PlatformWindow.cpp` 的**匿名 namespace** 内，
+//   测试 TU 取不到。⇒ 走 ②-b 同一条真实链路：Host 自述形态 → `WM_SETCURSOR(HTCLIENT)`
+//   → 平台层映射 → `::SetCursor`，再用 `::GetCursor()` 读回实际装上的光标。
+// ★ 判别力：修复前这些值全部回落 `IDC_ARROW` ⇒ 用例必红（首轮就红，不是恒绿）。
+// ★ 每轮先归零成箭头：否则上一轮装上的光标会让下一轮**假绿**（进程级状态，②-b 同款卫生）。
+void Test87CursorShapeMapping()
+{
+	QuickfixHost host;
+
+	Win32PlatformWindow window(host, "ECDI_P87_Cursor", 200, 200);
+
+	const HWND hwnd = window.GetHwndForTests();
+
+	EXPECT_TRUE(hwnd != nullptr);
+
+	struct Case{ CursorShape shape; LPCWSTR idc; };
+
+	const Case cases[] = {
+		{ CursorShape::SizeWE,   IDC_SIZEWE },
+		{ CursorShape::SizeNS,   IDC_SIZENS },
+		{ CursorShape::SizeNWSE, IDC_SIZENWSE },
+		{ CursorShape::SizeNESW, IDC_SIZENESW },
+		{ CursorShape::SizeAll,  IDC_SIZEALL },
+		{ CursorShape::Hand,     IDC_HAND },
+		{ CursorShape::Cross,    IDC_CROSS },
+	};
+
+	for (const Case& c : cases){
+
+		host.queryResult = c.shape;
+
+		::SetCursor(::LoadCursorW(nullptr, IDC_ARROW));
+
+		SendMessageW(hwnd, WM_SETCURSOR, reinterpret_cast<WPARAM>(hwnd),
+
+			MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
+
+		EXPECT_TRUE(::GetCursor() == ::LoadCursorW(nullptr, c.idc));
+
+	}
+
+	// 测试卫生：::SetCursor 是进程级可见状态 → 恢复箭头
+	::SetCursor(::LoadCursorW(nullptr, IDC_ARROW));
+}
+
 // ── ③-a：WM_MOUSELEAVE → 宿主上报（平台层单元）──────────────────────────────────
 void Test72MouseLeaveNotifiesHost()
 {
@@ -313,6 +363,7 @@ void RegisterPlatformQuickfixTests()
 	GetTestRegistry().Add("Platform72.SetCursorClientQueriesHost",     &Test72SetCursorClientQueriesHost);              // ②-b
 	GetTestRegistry().Add("Platform72.MouseLeaveNotifiesHost",         &Test72MouseLeaveNotifiesHost);                  // ③-a
 	GetTestRegistry().Add("Platform72.WindowLeaveClearsHover",         &Test72WindowLeaveClearsHover);                  // ③-b
+	GetTestRegistry().Add("Platform87.CursorShapeMapping",             &Test87CursorShapeMapping);                      // #87
 }
 
 }   // namespace ECDI::Test

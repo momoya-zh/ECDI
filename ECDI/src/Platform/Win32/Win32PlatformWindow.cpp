@@ -49,6 +49,36 @@ HCURSOR CursorHandleFor(CursorShape shape) noexcept{
 
 		return ::LoadCursorW(nullptr, IDC_IBEAM);
 
+	// ── #87（2026-11-05）：尺寸/角部/手形族——每值一行，缺省仍回落 `IDC_ARROW` ─────
+	//    ★ 全部是系统预定义光标，`LoadCursorW(nullptr, IDC_*)` 由系统共享，无需缓存。
+	case CursorShape::SizeWE:
+
+		return ::LoadCursorW(nullptr, IDC_SIZEWE);
+
+	case CursorShape::SizeNS:
+
+		return ::LoadCursorW(nullptr, IDC_SIZENS);
+
+	case CursorShape::SizeNWSE:
+
+		return ::LoadCursorW(nullptr, IDC_SIZENWSE);
+
+	case CursorShape::SizeNESW:
+
+		return ::LoadCursorW(nullptr, IDC_SIZENESW);
+
+	case CursorShape::SizeAll:
+
+		return ::LoadCursorW(nullptr, IDC_SIZEALL);
+
+	case CursorShape::Hand:
+
+		return ::LoadCursorW(nullptr, IDC_HAND);
+
+	case CursorShape::Cross:
+
+		return ::LoadCursorW(nullptr, IDC_CROSS);
+
 	case CursorShape::Arrow:
 
 		break;
