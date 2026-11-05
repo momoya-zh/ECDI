@@ -273,7 +273,7 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		return std::nullopt;
 	}
 
-	// 字符输入：WM_CHAR/WM_SYSCHAR 的 wParam 是 UTF-16 码元流。
+	// 字符输入：WM_CHAR/WM_SYSCHAR/WM_IME_CHAR 的 wParam 都是 UTF-16 码元流。
 	// 共享代理对状态（本质都是 UTF-16 input unit stream，不维护两套状态）
 	case WM_CHAR:
 	case WM_SYSCHAR:{
@@ -286,6 +286,24 @@ std::optional<LRESULT> WindowMessageHandler::Handle(
 		}
 
 		return std::nullopt;
+	}
+
+	// ★ #86：IME「无组合直插」通道——IME 直接产出结果字符时发 WM_IME_CHAR。
+	// MSDN 明文：Unicode 窗口下它与 WM_CHAR **语义相同**；只有非 Unicode 窗口才有
+	// 「DBCS 双字节拆成两条 WM_CHAR」的额外转换。中文模式的全角标点（，。）正是这条。
+	// 修复前本库零处理 ⇒ 落到 DefWindowProc ⇒ 不插入 ⇒ 字符静默丢失。
+	// ⚠️ 这里**刻意返回 0（已消费）而非 nullopt**，与上面 WM_CHAR 分支不同：WM_CHAR 的
+	//   DefWindowProc 对本类窗口无副作用，而 WM_IME_CHAR 在非 Unicode 语义下会被**拆成
+	//   两条 WM_CHAR**（二次插入）⇒ 不依赖「我们是 Unicode 窗口」这一前提，直接挡在翻译器。
+	case WM_IME_CHAR:{
+		if (auto codepoint = ConsumeCodeUnit(static_cast<wchar_t>(wParam))){
+
+			CharInputEvent event(window, *codepoint);
+
+			m_host.OnEvent(event);
+		}
+
+		return 0;
 	}
 
 	// ⚠️ WM_IME_* 已移出（7.1.2 方案 B）：IME 属输入法子系统（TSF/IMM/候选窗），

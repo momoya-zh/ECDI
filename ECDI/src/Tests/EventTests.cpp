@@ -592,6 +592,49 @@ void TestDpiInvalidFallback()
     EXPECT_EQ(host.received[1].y, 13);
 }
 
+// ── ★ #86：`WM_IME_CHAR` = IME「无组合直插」通道 ──
+// MSDN 明文：Unicode 窗口下它与 `WM_CHAR` **语义相同**（只有非 Unicode 窗口才把 DBCS
+// 双字节拆成两条 `WM_CHAR`）。中文模式的全角标点（，。）走的正是这条消息。
+// 修复前本库零处理 ⇒ 落到 `DefWindowProc` ⇒ 不插入 ⇒ 字符静默丢失（T86-4）。
+void Test86TranslatorImeChar()
+{
+    FakeHost host;
+    WindowMessageHandler handler(host);
+
+    // ★ 纪律：每一步先断「条数」再断「内容」——事件缺失时只报失败、不越界
+    //   （否则负对照会在 `received[0]` 上 abort，红得不干净、掩盖真正的判据）。
+
+    // ① 全角逗号 U+FF0C：单码元 ⇒ 一条事件（修复前本库零处理 ⇒ 零事件 = 字符静默丢失）
+    handler.Handle(nullptr, nullptr, WM_IME_CHAR, 0xFF0C, 0);
+    const size_t n1 = host.received.size();
+    EXPECT_EQ(n1, 1);
+    if (n1 == 1){
+        EXPECT_EQ(host.received[0].type, EventType::CharInput);
+        EXPECT_EQ(host.received[0].codepoint, 0xFF0C);
+    }
+
+    // ② 全角句号 U+3002：同通道连续打入，各自独立成事件
+    handler.Handle(nullptr, nullptr, WM_IME_CHAR, 0x3002, 0);
+    const size_t n2 = host.received.size();
+    EXPECT_EQ(n2, 2);
+    if (n2 == 2)
+        EXPECT_EQ(host.received[1].codepoint, 0x3002);
+
+    // ③ 与 WM_CHAR **共用**同一套 UTF-16 码元状态：代理对跨消息类型也能组合
+    handler.Handle(nullptr, nullptr, WM_IME_CHAR, 0xD83D, 0);   // 高代理：暂存，不产出
+    EXPECT_EQ(host.received.size(), n2);                          // 不增长
+    handler.Handle(nullptr, nullptr, WM_CHAR, 0xDE00, 0);        // 低代理（换消息类型）
+    const size_t n3 = host.received.size();
+    EXPECT_EQ(n3, n2 + 1);
+    if (n3 == n2 + 1)
+        EXPECT_EQ(host.received[n2].codepoint, 0x1F600);
+
+    // ④ 与 WM_CHAR 分支的**刻意不对称**：本分支返回 0（已消费，不落 DefWindowProc）——
+    //    防非 Unicode 语义下「一条 WM_IME_CHAR → 两条 WM_CHAR」的二次插入。
+    EXPECT_TRUE(handler.Handle(nullptr, nullptr, WM_IME_CHAR, 0xFF0C, 0).has_value());
+    EXPECT_EQ(host.received.size(), n3 + 1);
+}
+
 } // anonymous namespace
 
 void ECDI::Test::RegisterEventTests()
@@ -615,6 +658,9 @@ void ECDI::Test::RegisterEventTests()
     GetTestRegistry().Add("Event.DpiResizeScaled",   &TestDpiResizeScaled);      // T20-9
     GetTestRegistry().Add("Event.DpiWheelUnaffected", &TestDpiWheelUnaffected);  // T20-10
     GetTestRegistry().Add("Event.DpiInvalidFallback", &TestDpiInvalidFallback);  // T20-11
+
+    // ★ #86：IME「无组合直插」（全角标点打不进——WM_IME_CHAR 零处理）
+    GetTestRegistry().Add("Event.TranslatorImeChar", &Test86TranslatorImeChar);  // T86-4
 }
 
 void ECDI::Test::RegisterTestFrameworkTests()

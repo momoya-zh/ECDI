@@ -1024,8 +1024,17 @@ void TextBox::UpdateComposition(const std::string& compositionText){
 void TextBox::CommitComposition(const std::string& resultText){
 	if (m_readOnly)
 		return;   // P1 只读门禁（只读框不参与 IME——组合已被 UpdateComposition 拒绝，此处防御）
-	if (!m_isComposing)
-		return;   // 无组合中 → no-op（fail-safe）
+	if (!m_isComposing){
+		// ★ #86：IME「无组合直插」——结果文本没有任何组合区间可以替换。
+		// 典型形态 = 中文模式下的全角标点（，。）与部分输入法的「直出」：不进组合、直接出结果。
+		// 修复前按 F8「无组合 ⇒ no-op」的 fail-safe 整体丢弃 ⇒ 字符静默消失（可用性阻断）。
+		// 判据收窄为「**无组合 ∧ 结果为空** ⇒ no-op」：空结果 + 无组合 = 确实没有内容（fail-safe 本意）；
+		// 有结果 + 无组合 = 一段正式输入 ⇒ 与字符输入同语义（进 Undo、RaiseTextChanged、光标跟随）。
+		if (resultText.empty())
+			return;
+		InsertText(resultText);
+		return;
+	}
 	// 组合区间 → resultText（正式文本）；清组合标记（C12：空串 = 合法空结果提交）
 	m_caret = ReplaceTextRange(
 		m_compositionStart, m_compositionStart + m_compositionLength, resultText);

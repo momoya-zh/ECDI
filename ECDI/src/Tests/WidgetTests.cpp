@@ -335,6 +335,43 @@ public:
 	Color Displayed() const noexcept { return m_displayedBackground; }   // protected 可访问
 };
 
+void TestButtonFastHoverLeaveCancelsAnimation()
+{
+	// 快速划过按钮：在动画第一帧未 Tick 前离开，旧动画必须被 Cancel，防止 hover 态残留
+	Application app;
+	RenderServices services = CreateDefaultRenderServices();
+	Window& window = app.Create("ECDI_FastHover_Test", 400, 300, std::move(services));
+
+	auto* btn = new TestableButton("Fast");
+	const Color normal = Color::FromRGBA8(47, 127, 217, 255);
+	const Color hover  = Color::FromRGBA8(79, 156, 247, 255);
+	btn->SetStyle(ButtonStyleOverride{
+		.background = normal,
+		.hoverBackground = hover,
+	});
+	window.GetRootWidget().AddChild(std::unique_ptr<Button>(btn));
+
+	EXPECT_EQ(btn->Displayed(), normal);
+
+	// 进入：已注册走向 hover 的动画，但尚未 Tick，当前仍是 normal
+	btn->OnMouseEnter();
+	EXPECT_EQ(btn->Displayed(), normal);
+
+	// 极快离开：此时 target 还原 normal，与当前 displayed 相等，必须 Cancel 旧动画
+	btn->OnMouseLeave();
+	EXPECT_EQ(btn->Displayed(), normal);
+
+	// 逐帧推进动画，验证旧动画已被取消，呈现值绝不会变成 hover
+	AnimationManager& anim = window.GetAnimationManager();
+	for (int frame = 0; frame < 10; ++frame)
+	{
+		anim.Tick(std::chrono::milliseconds(30));
+		EXPECT_EQ(btn->Displayed(), normal);
+	}
+
+	window.Release();
+}
+
 void TestButtonHover()
 {
 	// hover 目标色过渡（无窗口树 → 即时到位）
@@ -1876,6 +1913,7 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("Widget.WidgetTree", &TestWidgetTree);
     GetTestRegistry().Add("Widget.PanelSetStyle", &TestPanelSetStyle);
     GetTestRegistry().Add("Widget.PanelInputPassThrough", &TestPanelInputPassThrough);
+    GetTestRegistry().Add("Widget.ButtonFastHoverLeaveCancelsAnimation", &TestButtonFastHoverLeaveCancelsAnimation);
     GetTestRegistry().Add("Widget.ButtonHover", &TestButtonHover);                    // P1
     GetTestRegistry().Add("Widget.ButtonHoverPressedPriority", &TestButtonHoverPressedPriority);  // P1
     GetTestRegistry().Add("Widget.PanelShapeRounded", &TestPanelShapeRounded);        // P1

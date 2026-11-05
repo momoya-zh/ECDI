@@ -1,7 +1,7 @@
 ﻿
 # Phase 8.5.1 文本系统 2.0 详细设计（核心升级：IME 组合串内嵌 + 剪贴板 + Timer + SetFont）
 
-> 状态：v1.3（2026-08-24）｜已实现 + 验证通过（commit 8ab8300）
+> 状态：v1.4（2026-11-04）｜已实现 + 验证通过（commit 8ab8300）｜★ v1.4 = **F8 判据收窄**（#86「IME 无组合直插」——中文全角标点打不进），见 §14
 > 前序：Phase 8.5 职责确认 v1.1 / 初步设计 v1.2（评审 两轮评审通过）
 > 相关：phase8.5-text-system2.0-requirements.md（职责确认 v1.1）/ phase8.5-text-system2.0-preliminary-design.md（初步设计 v1.2）/ phase5.5-textbox-detailed-design.md（5.5）/ phase5.6-ime-detailed-design.md（5.6）
 > 拆分说明：8.5.2 → phase8.5.2-text-system2.0-detailed-design.md / 8.5.3 → phase8.5.3-text-system2.0-detailed-design.md
@@ -617,7 +617,7 @@ void TextWidget::SetFont(const Font& font){
 | F5 | Composition 空串不结束 | UpdateComposition("") → m_isComposing **仍 true**（C7：空串 ≠ Commit） | C7 契约 |
 | F6 | Composition 期间不触发 TextChanged | 注册回调，UpdateComposition 多次后回调未调用 | C8 契约（经 ReplaceTextRange，非 InsertText） |
 | F7 | CommitComposition 正式生效 | UpdateComposition("nihao") → CommitComposition("你好") → m_text 区间替换、m_isComposing=false、回调触发 | C7/C3 契约 |
-| F8 | Commit 无组合 no-op | 未组合时 CommitComposition → m_text 不变、无崩溃 | fail-safe |
+| F8 | Commit 无组合（★ v1.4 判据**收窄**） | 未组合 + **空结果** ⇒ `m_text` 不变、无崩溃（fail-safe 本意）；未组合 + **非空结果** ⇒ 按正式编辑插入（`InsertText`：进 Undo / `RaiseTextChanged` / 光标跟随）——即 IME「直出」的全角标点 | fail-safe + **IME 无组合直插**（#86） |
 | F9 | CancelComposition 擦除区间 | UpdateComposition("nihao") → CancelComposition() → m_text 恢复、m_isComposing=false | 预留接口 |
 | F10 | Ctrl+A 全选 | SelectAll → GetSelection() == {0, 末尾} | 键盘路径 |
 | F11 | CopySelectionToClipboard 无选区 no-op | 无选区调用 → m_text 不变、无崩溃 | 边界 |
@@ -692,6 +692,7 @@ void TextWidget::SetFont(const Font& font){
 
 ## 14. 修订记录
 
+- v1.4（2026-11-04）**F8 判据收窄 —— #86「IME 无组合直插」**（可用性阻断项：中文全角标点打不进）。① **现象**：中文模式下打「，。」不上屏；汉字正常（有组合）、ASCII 正常（走 `WM_CHAR`）；harness 侧实测确认归属 ECDI。② **三条叠加**（对码核实）：本库**零** `WM_IME_CHAR` 处理（`WindowMessageHandler.cpp` 只翻 `WM_CHAR`/`WM_SYSCHAR`）· `CommitComposition` 首行守卫按 F8 把无组合的结果**整体丢弃** · `m_imeResultPendingChars` 在每次非空 `GCS_RESULTSTR` 上**无条件武装**并按 `WM_CHAR` 递减 ⇒ 连兜底字符也被吞。③ **v1.4 定案**：F8 判据由「无组合 ⇒ no-op」**收窄**为「无组合 ∧ **空**结果 ⇒ no-op」；非空结果走 `InsertText`（**不是** `ReplaceTextRange`——直插是一次正式编辑，须进 Undo 与 `RaiseTextChanged`）。④ **配套（缺一不可）**：翻译器新增 `WM_IME_CHAR` → `CharInputEvent`（MSDN：*For a Unicode window, this message is the same as WM_CHAR*），且吞字拦截扩为 `WM_CHAR ∨ WM_IME_CHAR`——只加翻译器不扩拦截 = 把「丢字」换成「双写」。⑤ **判据**：T86-1..3（`TextBox.CompositionDirectInsert`）+ T86-4（`Event.TranslatorImeChar`）；负对照两臂实测（回退直插 ⇒ 1 红 3 断言；停用 `WM_IME_CHAR` ⇒ 1 红 5 断言），其余全绿。⑥ ★ **F8 的 fail-safe 语义未被取消**：它守的是「没有内容」（空结果），不是「没有组合」——后者是一段合法输入。
 - v1.3（2026-08-24）8.5.1 完结（commit 8ab8300）+ **8.5.2 定稿**（§9 v1.0：多行 RecalculateLines/LineRange、滚动 OnMouseWheel/EnsureCaretVisible、CaretIndexFromPosition（B9）、双击选词平台层 WM_LBUTTONDBLCLK 翻译 + WindowClass CS_DBLCLKS、多行绘制 + 组合串下划线补欠账、F16-F25）。
 - v1.2（2026-08-24）评审 第三轮评审整合（"设计可以冻结，进入实现"）：§4.1 ImmGetCompositionStringW 改 LONG 判负；**C12 Commit("") 合法/取消走 Cancel**；**§5.4 Timer 派发链修正**（Application::OnTimer → FindFocusedWidget，代码事实核实——同 OnCharInput 模式，非 Window::DispatchTimerEvent）；§5.6 OnTimer 加 HasFocus 防御（Focus 顺序已核实 Window.cpp:152）；TestCase 补 F14（中间替换）/F15（code point）；新增 §12 实施前检查点核实（评审 5 项全处理）。
 - v1.1（2026-08-24）外部评审整合（C7-C10）：IME **Update/Commit 分离**（GCS_COMPSTR/GCS_RESULTSTR + CommitComposition）；**ReplaceTextRange 抽取**（C8——UpdateComposition 不再调 InsertText，消除 TextChanged 副作用矛盾）；**C9 composition caret 明确**（8.5.1 固定组合末尾）；**C10 剪贴板失败释放 + ClipboardGuard RAII**；TestCase 重排 F3-F13（新增 Commit no-op/Cancel/空串不结束）；新增 §11 外部评审回应。

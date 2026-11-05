@@ -225,14 +225,16 @@ void Button::OnMouseLeave(){
 
 void Button::AnimateBackgroundTo(const Color& target){
 
-	// 目标即当前呈现——无过渡需求（同 token 空转无意义）
-	if (target == m_displayedBackground){
-
-		return;
-
-	}
-
 	Window* window = GetWindow();
+
+	// 目标即当前呈现——无过渡需求（同 token 空转无意义）；
+	// 但若此前已有动画在跑，必须取消该动画（防快速移出时旧动画尚未改变呈现值，继续向 hover 插值导致状态残留）
+	if (target == m_displayedBackground){
+		if (window != nullptr){
+			window->GetAnimationManager().Cancel(m_backgroundAnimToken);
+		}
+		return;
+	}
 
 	if (window == nullptr){
 

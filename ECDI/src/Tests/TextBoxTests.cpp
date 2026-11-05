@@ -1262,10 +1262,11 @@ void TestTextBoxTextSystem2()
         box.UpdateComposition("zz");   // 组合已结束——下次 Update 视为新组合开始
         EXPECT_EQ(box.GetText(), "abc你好zz");
     }
-    // F8: Commit 无组合 no-op（fail-safe）
+    // F8: Commit 无组合（★ #86 判据**收窄**：原「无组合 ⇒ 一律 no-op」把 IME 直插当异常丢弃）
+    //     收窄后 = 「无组合 ∧ **空**结果 ⇒ no-op」；非空结果按正式编辑插入（见 T86-1..3）
     {
         TestableTextBox box("abc");
-        box.CommitComposition("xyz");
+        box.CommitComposition("");         // 无组合 + 空结果 ⇒ 确实无内容 ⇒ no-op
         EXPECT_EQ(box.GetText(), "abc");   // 不变
         EXPECT_EQ(box.GetCaret(), 0);
     }
@@ -3504,6 +3505,47 @@ static void Test39Utf8ScanCountAgrees(){
 	}
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ★ #86：IME「无组合直插」（全角标点 / 输入法直出）—— F8 判据收窄后的三条
+// 背景：中文模式下打「，。」**不进组合**、IME 直接出结果 ⇒ 平台层上报
+//   `OnIMECompositionCommit("，")` 而 `m_isComposing == false`。修复前 F8 判据
+//   「无组合 ⇒ no-op」把它当异常整体丢弃 ⇒ 字符静默消失（harness 侧实测：标点打不进）。
+// 判据收窄为「**无组合 ∧ 结果为空** ⇒ no-op」：fail-safe 只防守「没有内容」，
+//   不防守「有内容但没组合」——后者是一段正式输入。
+// ════════════════════════════════════════════════════════════════════════════
+
+void Test86CompositionDirectInsert(){
+	// T86-1：无组合 + 非空结果 ⇒ 按正式编辑插入（内容 / 光标 / 选区三处观察点）
+	{
+		TestableTextBox box("ab");
+		box.MoveCaretToEnd();
+		box.CommitComposition("，");            // U+FF0C
+		EXPECT_EQ(box.GetText(), "ab，");
+		EXPECT_EQ(box.GetCaret(), static_cast<size_t>(3));
+		EXPECT_TRUE(!box.GetSelection().has_value());
+	}
+	// T86-2：无组合 + **空**结果 ⇒ 保持 no-op（fail-safe 本意不变——不得凭空插入 / 挪光标）
+	{
+		TestableTextBox box("abc");
+		box.MoveCaretToEnd();
+		box.CommitComposition("");
+		EXPECT_EQ(box.GetText(), "abc");
+		EXPECT_EQ(box.GetCaret(), static_cast<size_t>(3));
+	}
+	// T86-3：直插 = 正式编辑 ⇒ 进 Undo；且与组合路径互不污染（直插后组合照常工作）
+	{
+		TestableTextBox box("x");
+		box.MoveCaretToEnd();
+		box.CommitComposition("。");            // U+3002
+		EXPECT_EQ(box.GetText(), "x。");
+		box.Undo();
+		EXPECT_EQ(box.GetText(), "x");           // 一次直插 = 一个 Undo 单元
+		box.UpdateComposition("nihao");          // 直插结束后组合仍能正常开始
+		box.CommitComposition("你好");
+		EXPECT_EQ(box.GetText(), "x你好");       // 组合起点 = 直插后的光标（未被挪到 0）
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -3579,4 +3621,7 @@ void ECDI::Test::RegisterTextBoxTests()
     GetTestRegistry().Add("Text.Wrap.LineTableBitIdentical",     &Test40WrapLineTableDirtyBytes);         // T40-3
     GetTestRegistry().Add("Text.Caret.LineXBitIdentical",        &Test40CaretLineXBitIdentical);          // T40-4
     GetTestRegistry().Add("Text.Paint.WrapBytesBitIdentical",    &Test40PaintWrapBytesBitIdentical);      // T40-6
+
+    // ── ★ #86：IME「无组合直插」（全角标点打不进）──
+    GetTestRegistry().Add("TextBox.CompositionDirectInsert", &Test86CompositionDirectInsert);   // T86-1..3
 }

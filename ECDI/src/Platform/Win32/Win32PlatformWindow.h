@@ -282,8 +282,10 @@ private:
 	bool m_backdropApplied = false;	///< Show()/重应用后置位（「尚未应用 ≠ 应用失败」——D32-M）
 	bool m_backdropPolicyActive = false;	///< accent policy 当前是否在位（None 回退时决定是否发 state=0——SW1 实证可编程移除）
 
-	int m_imeResultPendingChars = 0;	///< 待吞掉的 IME 结果 WM_CHAR 数（8.5.1：GCS_RESULTSTR 已提交框架——
-	///< 系统随后仍发结果 WM_CHAR（DefWindowProc 通道），吞掉防双写；UTF-16 码元计数 = WM_CHAR 消息数）
+	int m_imeResultPendingChars = 0;	///< 待吞掉的 IME 结果字符数（8.5.1：GCS_RESULTSTR 已提交框架——
+	///< 系统随后仍发结果字符（DefWindowProc 通道），吞掉防双写；UTF-16 码元计数 =
+	///< 消息条数。★ #86：载体可能是 `WM_CHAR` **或** `WM_IME_CHAR`（Unicode 窗口下两者语义
+	///< 相同）⇒ 两类都在 `HandleMessage` 前置拦截里递减，缺一类即漏吞）
 
 	/// @brief 正在执行**我方主动**释放捕获（★ 审计 #60：抑制自触发上报）
 	/// @details `::ReleaseCapture` 同样会让系统投递 `WM_CAPTURECHANGED` ⇒ 若不设防，

@@ -958,7 +958,29 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 		// 不去重会以同一状态淹没消费者；连续两次 Maximize 只产生 1 个事件）
 		if (state != m_lastWindowState){
 
+			const WindowState previous = m_lastWindowState;
+
 			m_lastWindowState = state;
+
+			// ── #85：离开最小化 ⇒ 强制重算非客户区（DWM 延伸区几何被最小化态算坏）──────
+			// 现象：最小化 → 还原/最大化 之后，**整片客户区**被 DWM 当作「帧延伸区」做玻璃
+			//   合成 ⇒ 内容只按 ≈20% 透射率可见（浅色主题 = 整窗发白）；重画**无法**自愈
+			//   （GDI 改不了 DWM 侧的几何状态），只有重算非客户区才复位。
+			// 判据（2026-11-03 单变量实测，.scratch/states.txt · repair.txt · final.txt）：
+			//   · 投毒：最小化→最大化 后探针必白（white 95.0%）；还原→最大化 / 隐藏→显示 /
+			//     改尺寸→最大化 **均不白** ⇒ 触发器是「跨越最小化态」，与边距取值无关
+			//   · 仅重复 DwmExtendFrameIntoClientArea（同值、连设两次）**无效**（V3 仍白）
+			//   · **仅本调用即足够**（V1：边距为 0 时 FRAMECHANGED，之后再设 1px 即正常）
+			//   ⇒ 故 **不动** `{0,0,1,0}`：Phase 32 的材质与四边阴影一个都不碰（实测两值阴影
+			//     读数逐位相同，1px 本身对阴影零贡献，改它只会白白推翻 #58 的既有结论）。
+			// 顺序契约：先复位 DWM 几何、再派发事件——消费者收到事件时画面已可正常呈现。
+			// 门控：仅 Borderless 有延伸区（ApplyDwmEnhancements 只在该模式调用）。
+			if (previous == WindowState::minimized && m_chromeMode == ChromeMode::Borderless){
+
+				SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+					SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+			}
 
 			m_host.OnEvent(WindowStateChangedEvent(m_host.GetWindow(), state));
 
@@ -1157,9 +1179,13 @@ LRESULT Win32PlatformWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, L
 
 	}
 
-	// 8.5.1 双写修复：IME 结果 WM_CHAR 拦截（GCS_RESULTSTR 已提交框架——系统随后重复发送
-	// 结果字符 WM_CHAR，若放行会经 CharInputEvent → InsertCodepoint 二次插入，产生"你好你好"）
-	if (msg == WM_CHAR && m_imeResultPendingChars > 0){
+	// 8.5.1 双写修复：IME 结果字符拦截（GCS_RESULTSTR 已提交框架——系统随后重复发送
+	// 结果字符，若放行会经 CharInputEvent → InsertCodepoint 二次插入，产生"你好你好"）
+	// ★ #86：结果字符的到达消息类型随输入法 / 路径而变——Unicode 窗口下 WM_IME_CHAR 与
+	//   WM_CHAR 语义相同（MSDN「For a Unicode window, this message is the same as WM_CHAR」）
+	//   ⇒ 计数必须对两类**同时**生效：翻译器新增 WM_IME_CHAR 通路后，若这里只认 WM_CHAR，
+	//   走另一类的重复序列就逃过吞字 ⇒ 「丢字」被换成「双写」（更糟）。
+	if ((msg == WM_CHAR || msg == WM_IME_CHAR) && m_imeResultPendingChars > 0){
 
 		--m_imeResultPendingChars;
 
