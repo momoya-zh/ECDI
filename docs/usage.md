@@ -550,3 +550,15 @@ DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect / IsRectVisible
 | 各控件详设（契约级） | `dev/phase5.x-*` / `dev/phase9.x-*` / `dev/phase15-*` 等对应详设 |
 | 已知限制 / 排期 | `dev/README.md` 技术债务表 + `dev/roadmap-deferred.md` |
 | 可运行样例 | `examples/`（MinimalApp · ModelProbe · VisualTest · DesktopNest） |
+
+## 14. 再分发义务（FreeType / FTL）
+
+ECDI 静态链接 **FreeType 2.14.3**（GL 后端文本栈，vendored 于仓库 `third_party/freetype`，双许可取 **FTL**）。凡以**二进制**形态分发嵌入了 ECDI 的产物（exe / dll / 静态库 / 安装包），FTL §2 要求在**分发文档**中包含如下声明：
+
+> This product is based in part on the work of the FreeType Team (https://freetype.org).
+
+FreeType Team 首选致谢格式（FTL 引言，鼓励采用；`<year>` 取所用版本版权年）：
+
+> Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved.
+
+完整许可全文随 ECDI 源码仓库分发：`third_party/freetype/LICENSE.TXT`（入口）→ `docs/FTL.TXT` / `docs/GPLv2.TXT`；其正文引用的子许可（bdf/pcf X11 风格、gzip/zlib、autofit `ft-hb-*` Old MIT）已随 `src/` 保留。**源码**形态再分发只须将这三份文件原样随附。FTL §3：未经许可不得将 FreeType 名称用于商业、广告或推广背书。

@@ -201,4 +201,12 @@ docs/       usage.md (API / usage guide, how to use the framework) + dev/ (213 d
 
 ## License
 
-[MIT](LICENSE)
+ECDI itself is [MIT](LICENSE)-licensed (Copyright © 2026 momoya-zh).
+
+**Third-party**: FreeType 2.14.3 — vendored under `third_party/freetype`, statically linked into the GL backend's text stack — is dual-licensed under the FreeType License (**FTL**) or GPLv2; this project takes the **FTL**. Full license texts ship in-tree: `third_party/freetype/LICENSE.TXT` (entry point) pointing at `docs/FTL.TXT` / `docs/GPLv2.TXT`; the contrib licenses it references (bdf/pcf X11-style, gzip/zlib, autofit `ft-hb-*` Old MIT) ride along under `src/`. FTL §2 requires any binary distribution embedding FreeType to carry a disclaimer in the distribution documentation:
+
+> This product is based in part on the work of the FreeType Team (https://freetype.org).
+
+The FreeType Team's preferred credit form (FTL introduction, encouraged; `<year>` = the copyright year of the FreeType version in use):
+
+> Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved.
