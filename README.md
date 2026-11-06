@@ -210,3 +210,5 @@ ECDI itself is [MIT](LICENSE)-licensed (Copyright © 2026 momoya-zh).
 The FreeType Team's preferred credit form (FTL introduction, encouraged; `<year>` = the copyright year of the FreeType version in use):
 
 > Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved.
+
+`cmake --install` ships the notice with the prefix — `<prefix>/share/licenses/ECDI/NOTICE.md` plus ECDI's MIT `LICENSE` and FreeType's `LICENSE.TXT` / `FTL.TXT` / `GPLv2.TXT` under `share/licenses/ECDI/` — because the install prefix is a binary distribution in its own right (FreeType objects are merged into the `ECDI` static library). Delivery notes must pin the notice item and the delivered library's SHA256; see [docs/usage.md §14](docs/usage.md).

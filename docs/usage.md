@@ -561,4 +561,31 @@ FreeType Team 首选致谢格式（FTL 引言，鼓励采用；`<year>` 取所�
 
 > Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved.
 
-完整许可全文随 ECDI 源码仓库分发：`third_party/freetype/LICENSE.TXT`（入口）→ `docs/FTL.TXT` / `docs/GPLv2.TXT`；其正文引用的子许可（bdf/pcf X11 风格、gzip/zlib、autofit `ft-hb-*` Old MIT）已随 `src/` 保留。**源码**形态再分发只须将这三份文件原样随附。FTL §3：未经许可不得将 FreeType 名称用于商业、广告或推广背书。
+### 14.1 安装前缀自带许可（`cmake --install`）
+
+FreeType 的目标码已并入 `ECDI` 静态库（OBJECT 库合并）⇒ **install 前缀本身即二进制分发**，许可不能只留在源码仓。`install()` 落盘（`<prefix>` 下）：
+
+| 路径 | 内容 |
+|---|---|
+| `share/licenses/ECDI/LICENSE` | ECDI 本体 MIT 许可（MIT 亦要求声明随副本） |
+| `share/licenses/ECDI/NOTICE.md` | 再分发声明：based-in-part + 首选致谢 + 版本 + 许可指针 |
+| `share/licenses/ECDI/FreeType/LICENSE.TXT` | FreeType 许可入口（双许可说明 + 子许可指引） |
+| `share/licenses/ECDI/FreeType/FTL.TXT` | FTL 全文（本项目所依据的许可） |
+| `share/licenses/ECDI/FreeType/GPLv2.TXT` | GPLv2 全文（`LICENSE.TXT` 正文引用，缺则断链） |
+
+★ `GPLv2.TXT` 不是「顺手多带」：`LICENSE.TXT` 正文明确指向它，只带 `FTL.TXT` 会重演 Phase 26 vendor 时修过的「引用断链」缺口（详设 §11.3）。配置期对五份文件做存在性断言，缺一即 `FATAL_ERROR`。
+
+**源码**形态再分发只须把 `third_party/freetype/LICENSE.TXT` / `docs/FTL.TXT` / `docs/GPLv2.TXT` 原样随附；其正文引用的子许可（bdf/pcf X11 风格、gzip/zlib、autofit `ft-hb-*` Old MIT）已随 `src/` 保留。对 FreeType 原始文件的裁剪与「零本地改动」说明见 `third_party/freetype/README.ecdi.md`（FTL §2 第一项要求增删改在随附文档中说明）。FTL §3：未经许可不得将 FreeType 名称用于商业、广告或推广背书。
+
+### 14.2 交付单固定字段
+
+以二进制形态交付 ECDI（`ECDI.lib` / `libECDI.a` / 安装前缀）时，交付单必须包含：
+
+| 字段 | 说明 |
+|---|---|
+| **notice 项** | 声明本库内嵌 FreeType 2.14.3、取 FTL，并给出 `share/licenses/ECDI/NOTICE.md` 指针（缺此即不满足 FTL §2 二进制项） |
+| **库指纹** | 交付的 `.lib` / `.a` 的 **SHA256 + 字节数**（接收方按此复核；下游 `THIRD-PARTY-NOTICES` 的指纹表以实际链入的库为准） |
+| **版本** | ECDI 版本宏 + FreeType 版本（致谢年份随 FreeType 版本版权年走） |
+| **许可文件** | 确认 `share/licenses/ECDI/` 五份文件随前缀交付 |
+
+★ 交付单是**指纹**，不是复印件：notice 正文只写进 `NOTICE.md`（随前缀），交付单只固定「已含 notice + 这份库的 SHA256」，避免两处声明漂移。

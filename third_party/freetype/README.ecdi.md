@@ -83,10 +83,16 @@ FreeType 是**双许可**项目（`LICENSE.TXT` 原文）：使用方须**择一
 | 分发形态 | 须随附 |
 |---|---|
 | **源码**（本仓库） | ✅ `LICENSE.TXT` + `docs/FTL.TXT` + `docs/GPLv2.TXT`（**三份都在库内**） |
-| **二进制**（`ECDI.a` / 可执行 / 安装包） | ★ **须随附 FreeType 的版权声明与 FTL 全文** —— FreeType 的 obj 已并入 `ECDI.a`（OBJECT 库合并）⇒ 二进制分发即触发该义务 |
+| **二进制**（`ECDI.a` / 可执行 / 安装包） | ★ **须随附 FreeType 的版权声明与 FTL 全文** —— FreeType 的 obj 已并入 `ECDI.a`（OBJECT 库合并）⇒ 二进制分发即触发该义务（自 2026-11-06 起由 `install()` 自动落盘，见下） |
 
 ★ **判据**：许可文件是否齐全，**以 `LICENSE.TXT` 正文「引用到的文件」逐一核对** ——
 不能只看 `LICENSE.TXT` 在不在（它只是入口，正文指向 `docs/FTL.TXT` 与 `docs/GPLv2.TXT`）。
+
+★ **二进制载体（2026-11-06 起）**：`install()` 随前缀安装
+`share/licenses/ECDI/{LICENSE, NOTICE.md}` 与
+`share/licenses/ECDI/FreeType/{LICENSE.TXT, FTL.TXT, GPLv2.TXT}`（ECDI 的 MIT + FreeType 五件套）。
+**不是只装 `FTL.TXT`**：`LICENSE.TXT` 正文引用 `docs/GPLv2.TXT`，缺它即断链——与上面「判据」同一条纪律。
+交付单须固定 notice 项与库 SHA256（见 `docs/usage.md` §14.2）。
 
 ★ **其它许可**：`src/bdf/README`、`src/pcf/README`（X11 风格）· `src/gzip/zlib.h`（zlib）·
 `src/autofit/ft-hb-*`（Old MIT，来自 HarfBuzz）—— 均已随 `src/` 保留，且与 FTL / GPLv2 兼容。

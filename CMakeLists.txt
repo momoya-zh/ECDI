@@ -196,6 +196,7 @@ if(MINGW)
 endif()
 
 # ── R4：install/export（外部消费唯一正规入口）──
+include(GNUInstallDirs)   # share/licenses 按平台约定（Windows 下同样是 <prefix>/share）
 install(TARGETS ECDI EXPORT ECDITargets ARCHIVE DESTINATION lib)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ECDI/include/ECDI"
         DESTINATION include)                                  # 目录即 API 边界（新增 Public 头零维护）
@@ -206,6 +207,41 @@ install(EXPORT ECDITargets NAMESPACE ECDI:: DESTINATION lib/cmake/ECDI)
 install(FILES "${CMAKE_BINARY_DIR}/cmake/ECDIConfig.cmake"
               "${CMAKE_BINARY_DIR}/ECDIConfigVersion.cmake"
         DESTINATION lib/cmake/ECDI)
+
+# ★ 许可随安装前缀分发（合规）
+#   触发条件：FreeType 的目标码经 OBJECT 合并进了 ECDI 静态库（见上文 add_library）
+#   ⇒ `cmake --install` 出来的前缀**本身就是二进制分发**，声明不能只留在源码仓。
+#   FTL §2 二进制项要求分发文档含 based-in-part 声明；ECDI 的 MIT 也要求声明随副本。
+#   布局（与 docs/usage.md §14.1 一致）：
+#     share/licenses/ECDI/{LICENSE, NOTICE.md}
+#     share/licenses/ECDI/FreeType/{LICENSE.TXT, FTL.TXT, GPLv2.TXT}
+#   ★ 为什么不是只装 FTL.TXT：FreeType 的 LICENSE.TXT 正文引用 docs/FTL.TXT 与
+#     docs/GPLv2.TXT，缺任一份即引用断链——与 Phase 26 vendor 时修过的缺口同型
+#     （详设 §11.3「以正文引用逐一对账」）。
+set(ECDI_LICENSE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/LICENSE.TXT"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/docs/FTL.TXT"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/docs/GPLv2.TXT"
+)
+foreach(_license IN LISTS ECDI_LICENSE_FILES)
+    if(NOT EXISTS "${_license}")
+        message(FATAL_ERROR
+            "Missing license file required for binary distribution: ${_license}. "
+            "Binary redistribution of ECDI embeds FreeType (FTL) -- see docs/usage.md §14.")
+    endif()
+endforeach()
+
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/ECDI")
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/LICENSE.TXT"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/docs/FTL.TXT"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/freetype/docs/GPLv2.TXT"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/ECDI/FreeType")
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
