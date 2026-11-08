@@ -1,143 +1,162 @@
-﻿# Phase 45 · styled spans 表达力扩展（斜体 + 混字号，#89）· 初步设计稿
+# Phase 45 · styled spans 表达力扩展（斜体 + 混字号，#89）· 初步设计稿
 
-> 状态：**v1.0（2026-11-08）：初稿落盘待评审**。★ **条 74：状态由评审结论决定**。上游 = 需求稿 **v1.4**（`phase45-styled-spans-expressiveness-requirements.md`——评审二轮放行进初设；**闸门 1/3 已签**（§6.1 签字纪律）；O45-1..5 勘察读数已落盘（需求稿 §6.3 + `.workbuddy/spike/p45/`））。本稿职责 = 把闸门 2/4/5 从「勘察后裁」推进为**带读数的推荐裁决页**（§6，待用户签字），并钉死接口形状 / 行框口径 / 等价性结构。
-> ★ **源码行号**对 HEAD `008daff` 亲核（2026-11-08）——**产品码自 `008daff` 起未变**（其后五个提交全为文档批，`git log 008daff..HEAD --stat` 实证），需求稿 K45-1..14 行号快照全部有效。
-> ★ 基线：用例 **599** · 公共头 **102** · 设计文档 **217 → 218**（含本稿）。门禁纪律沿需求稿（`git add` → 列举式 `--select L04,L09,L11,L13` → 阳性对照）。
+> 状态：**v1.1（2026-11-08）：初设评审 v1.0 结论 = 不放行进详设（P0×3 / P1×5 / P2×6），全部逐条回码亲核后吸收（§8 v1.1）；闸门 2 = 可签 ⓑ（附条件已满足）、闸门 4 = 随本版可签、闸门 5 = 修后可签 ⓐ**。★ **条 74：状态由评审结论决定**。上游 = 需求稿 **v1.4**（评审二轮放行；闸门 1/3 已签；O45-1..5 勘察落盘）。★ 产品码自 `008daff` 零改动（`git diff 008daff..HEAD -- ECDI/` 为空）⇒ 需求稿 K45-1..14 行号快照有效。基线：用例 **599** · 公共头 **102** · 设计文档 **218**。
 
-**红线继承**（需求稿四条全文有效，本稿不重述）：零 span 逐位等价 · 测画同源 · 命令流与 DrawText 执行体零改动（豁免面 = 字体实例化 / face 选择层 + LOGFONT 位段）· 编辑器通路不动（L44-1）。
+**红线继承**（需求稿四条全文有效）：零 span 逐位等价 · 测画同源 · 命令流与 DrawText 执行体零改动（豁免面 = 字体实例化 / face 选择层 + LOGFONT 位段）· 编辑器通路不动（L44-1）。
 
 ---
 
-## §1 三个闸门的裁决材料（勘察读数驱动；推荐落字，签字页见 §6）
+## §1 三个闸门的裁决材料（v1.1 修订）
 
-### 1.1 闸门 2 · 斜体选面政策 → **推荐 ⓑ**（D45-7）
+### 1.1 闸门 2 · 斜体选面政策 → **ⓑ 可签**（D45-7；v1.1 修 P1-1 direct 相）
 
-勘察读数（需求稿 §6.3）：**CJK 族真斜体面 = 0**（512 face 全扫）；GDI 合成斜切实锤且**宽度增量 +0.00%**；真斜体面改 advance（±0.4~2.8%，等宽 Consolas = 0）。
+勘察读数：**512 face 全扫中 CJK 族 `fsSelection` bit0 全 0**（真斜体面仅在拉丁族）；GDI 合成斜切实锤且宽度增量 +0.00%；真斜体面改 advance（±0.4~2.8%）。ⓐ 拒（CJK 斜体全静默，与已签 ③-1 矛盾）；ⓒ 维持出局（红线 3）。**ⓑ = GDI 合成 + GL 真斜体面/无则回落常规（C36-4 同族扩容）**。
 
-- **ⓐ 限真斜体面 拒**：CJK 真斜体面为零 ⇒ 中文 markdown 斜体**全静默不斜**——REQ-20 判据③「斜体真渲染」对主消费者（中文转录）空转；闸门 3 已签 ③-1（引用块/列表块内嵌标题行，中文场景）⇒ ⓐ 与已签闸门自相矛盾。
-- **ⓑ GDI 合成 + GL 真斜体面/无则回落常规 —— 采纳推荐**：GDI 侧 = 平台原生行为（用户在系统应用里看到的斜体就是合成斜切），且**零宽度增量** ⇒ 测宽 / 折行 / 布局零影响；GL 侧 = 有真斜体面族用真面、无则**回落常规面（不合成）**——与 **C36-4（粗体：GDI 合成 / GL 不合成）完全同构的政策扩容**，已知分歧记录法现成（L45-1 扩容）。
-- **ⓒ GL 合成斜切 维持出局**：动字形栅格化 = 破红线 3（需求稿稿首）。
-- **两相裁决面**（评审 P1-4 要求）：非 direct（注册表候选）与 direct（文件直查，今日不排除斜体面）在 §2.4 同一回落语义下分别钉死；**回落语义统一 = FaceIdFor 内部回落常规 face（返回可用 id，绝不向 GL 返回 0）** ⇒ GL 执行体零改动（红线 3 的前提）。
+- **非 direct 相**：候选过滤「bit0 出局」→「请求 italic ⇒ 只收 bit0 面；池空 ⇒ 回落常规池（= italic=false 结果）」。
+- **direct 相（v1.1 按评审 P1-1 修订——v1.0 承诺了做不到的事）**：`Win32FontSource.cpp:308-315` 的直查探针只 push **单 face（索引 0）** ⇒ direct 族候选池恒 1 面，「按 bit0 优先」**结构上不可达**。处置 = **如实收窄**：direct 路径斜体请求**回落 face0**（Phase 36「直查豁免」语义保持，`Win32FontSource.cpp` 不入改动面）；登记入 L45-1（重启条件 = direct 文件消费者出现斜体需求，届时扩 numFaces 枚举）。**T45-2 的 direct 相删除**。
+- **回落语义统一收在 `FaceIdFor` 内部、绝不向 GL 返回 0** ⇒ GL 执行体零改动（`GLRenderer.cpp:240` 传参即走——红线 3）。
 
-### 1.2 闸门 4 · 行框口径 → **推荐 ⓐ 块级统一行框**（D45-8；含 C45-3 修订申明）
+### 1.2 闸门 4 · 行框口径 → **ⓐ 块级统一行框，随本版可签**（D45-8；C45-3 修订申明）
 
-**修订申明（相对需求稿 C45-3「逐行行高 = 该行 run 行高 max」）**：本稿推荐改为**块级统一**——全文行高 = `max(全部 run 行框)`（取「行框最大的那个 run 字体」的行框），所有行恒同高：
+全文行高 = `A′ 行框最大的 run 字体`之行框（**块级统一**，所有行恒同高）：
 
-- **P0-4 浮点守卫结构性成立**：恒 `lineHeight × 行数` 乘法原式，Σ 累加路径**不存在**——需求稿评审 P0-4 的 52.4% 逐位不等风险整体消除。
-- **`TextBox` 8.5.2 固定行高契约零改动**（P0-3 处置 = ⓐ 候选）：`GetLineHeight()`（`TextBox.cpp:586`，13 处文本命中）的**取值语义**从「基字体行框」改为「有效行框字体（spans 存在且含 size 覆盖时 = 全文 max 行框字体；否则 = 基字体）的行框」——**Y/lineH 算术、13 处消费点、8.5.2 注释（`:587`）全部原样**；ⓑ（逐行化 + 行顶 Y 表）与 ⓒ（混字号不进 TextBox）出局：ⓒ 直接掏空已签的 ③-1（引用块/列表块 = TextBox），ⓑ 的 13 站回归面与契约冲突不成比例（记 **L45-5**）。
-- **视觉代价（如实）**：块内一行大标题 ⇒ 其余行行距撑到同高。③-1 场景内标题行稀疏，可接受；若消费期对行距紧凑提出真实需求 ⇒ L45-5 重启。
-- **C45-2 兼容**：无 size 覆盖 ⇒ max = 基字体 ⇒ 行框逐位 = 今日。
-- FT 侧佐证（O45-3）：同族各 face hhea 一致 ⇒ max 行框的计算只随 **size/family/weight** 变（斜体零贡献）——行框字体的判定与斜体正交。
+- **P0-4 浮点守卫结构性成立**：totalHeight 恒 `lineHeight × 行数`（`TextWidget.cpp:584` 原式），Σ 路径不存在。
+- **TextBox 8.5.2 固定行高契约零改动**（P0-3 处置 = ⓐ）：`GetLineHeight()`（`TextBox.cpp:586-593`）**算术原样**（含 `:587` 注释与 13 处消费点），仅**取值来源**从「基字体」改为「有效行框字体」——机制见 §3.1（v1.0 的「在 BuildRunsForRange 产物上取 max」被评审 P0-3 证伪：行框在 `:423` 定死、runs 在 `:501` 逐行才产生，且 `TextBox.cpp:443` 喂 `BuildDisplayText()` + `TextWidget.cpp:497-498` 串身份护栏 ⇒ TextBox 路径 spans 恒不可达——v1.1 已改走成员助手通路）。
+- **★ 已知可见影响（闸门 4 签字项，v1.1 按评审 P1-4 显式列出）**：块内出现大字号 run ⇒ **全块**行框/选区 rect/**光标高**随 max 变大——`TextMeasurer.h:186-190` 契约明写「光标高 = 行框高」、`TextBox.cpp:813` 光标高直取 `GetLineHeight()`。这是只读显示面上的真实可见变化（非 L44-1 编辑通路）；**是否接受 = 闸门 4 签字内容**（拒绝则需改「光标高 = LineHeight(基字体)」放弃 I31 口径——同为口径变更，二选一，不沉默）。③-1 场景内标题行稀疏 ⇒ 行距撑高的视觉代价**由用户在签字时确认**（v1.0 替用户下结论，评审 P2-2 订正）。
+- ⓒ（混字号不进 TextBox）出局：掏空已签 ③-1；ⓑ（逐行 max）记 **L45-5**。
 
-### 1.3 闸门 5 · `TextMeasurer` 接口 → **推荐 ⓐ +1 纯虚 `Ascent`**（D45-9）
+### 1.3 闸门 5 · `TextMeasurer` 接口 → **ⓐ +1 纯虚 `Ascent`（DIP 契约），修后可签**（D45-9）
 
-- **ⓑ（GDI 内部表、接口 +0）出局机理**：per-run y 由**调用方**（`TextWidget` / `TextBox` 的发射站）计算 `run y = baseline − ascent(runFont)`，调用方唯一可达的测量缝 = 公共 `TextMeasurer`——没有公共 `Ascent`，基线对齐**无通路**（需求稿 K45-13 的缺口就是这条）。
-- **纯虚**（评审 P1-3）：默认体必错值且静默。**波及面如实列 = 11 子类**：产品 2（`FreeTypeTextMeasurer.h:18` / `GDITextMeasurer.h:27`）+ 门面 1（`RecordingBackend.h:21`）+ 测试假件 8（`WidgetTests.cpp:467/:714/:1915`、`TextMeasurerTests.cpp:208`、`TextBoxTests.cpp:40/:435/:559/:2170`）——假件给显式常数即可（断言不依赖其值）。
-- **★ GDI 口径订正（相对需求稿 v1.2「GDI 实现 = otmMacAscent」）**：GDI 绘制锚 = `TextOutW`（`GDIBackend.cpp:919` 口径注释），基线 = `y + tmAscent` ⇒ **`Ascent()` 的 GDI 实现必须返回 `tmAscent`**；`otmMac*` 是**行框**口径（`GDITextMeasurer.cpp:405-440` 实现头注释明写「otmMac* = hhea 缩放、不再用 tmHeight」）——行框与基线是两个口径，初设分开钉死，详设探针验证（T45-9）。
-- FT/GL 实现 = 转发既有 `FontEngine::Ascent`（`FontEngine.cpp:650-668`，`face->size->metrics.ascender/64`，与栅格化 D26-2 同 face 同 pixelSize 同源）。
+- **ⓑ 否证补全（v1.1 按评审 P1-2——v1.0 的「无通路」是循环论证）**：最强竞争方案 = `RunSlice` 已携带完整 `Font`（`TextWidget.h:128-134`），在唯一物化点（`TextWidget.cpp:374-381`）算 `baselineOffset = A′(box) − A′(run)` 挂进 `RunSlice` ⇒ 消费侧接口 +0。**否证点 = 该方案只搬运消费侧、不解决生产侧**：ascent 值仍必须从链上产生，widget 层唯一测量缝 = 公共 `TextMeasurer`（backend 内部态不可达）⇒ 任何 +0 变体都需要一个非公共的产生机制；且 `baselineOffset` 冻结 DIP 值于测量时 = A′ 的冗余拷贝。ⓐ 成立。
+- **★ 单位契约钉死（v1.1 按评审 P0-2——v1.0 两实现都返回裸物理像素，DPI ≠ 96 时公式两边单位不同）**：`Ascent(const Font&)` 返回 **DIP**，且返回的是**链内整数像素 ascent 的 DIP 折算**（A′，定义见 §3.2——这是 P0-1 整数化方案的承接面）：GDI 实现 = `tmAscent × 96 / dpi`（`tmAscent` 本身整数）；FT 实现 = `floor(face->size->metrics.ascender / 64) × 96 / dpi` **薄包装**（v1.0「直接转发 FontEngine::Ascent」作废——`:664` 原体无 96/dpi 换算，对比同文件 `:634` LineHeight 的换算先例）。T45-9 判据改为「同一 measurer 实例、同一 dpi 下 `Ascent(font) == tmAscent × 96/dpi`（±1e-3）」。
+- 波及面 = **11 子类**（产品 2 + RecordingBackend 门面 + 测试假件 8，行号清单见 v1.0 §1.3，评审 ✅1 复核无误）；★ **纯虚 = 源兼容破坏**（下游任何自定义子类编译不过）——记 §7 L45-6（评审 P1-5）。
 
 ---
 
 ## §2 接口设计（公共面）
 
-### 2.1 `Font.h` +italic（末尾追加）
+### 2.1 `Font.h` +italic（v1.1 按评审 P1-3 改 **bool**）
 
-`std::uint8_t italic = 0;`（0 = 常规 = 今日逐位；1 = 斜体请求）。C7560：声明序 = size → family → weight → **italic（末尾）**；聚合初始化面普查（O45-4）= 8 处全在测试 ⇒ 追加末尾安全。GDI 消费 = LOGFONT `lfItalic`（两站 K45-5）；GL 消费 = `FaceIdFor` 第三参。
+`bool italic = false;`（v1.0 的 `uint8_t` 作废：与全仓 `uint16_t weight` 口径不符、隐式窄化有严格告警风险、非 0/1 语义未定义；与「默认值 = 今日逐位」契约一致）。声明序 = size → family → weight → **italic（末尾）**；C7560 聚合初始化面 8 处全在测试（O45-4）⇒ 追加安全。GDI 消费 = LOGFONT `lfItalic`；GL 消费 = `FaceIdFor` 第三参 `bool`。
 
-### 2.2 `TextSpan.h`：`SpanStyle` +2 override + 契约注释解禁
+### 2.2 `TextSpan.h`：`SpanStyle` +2 override
 
-`std::optional<std::uint8_t> italic`、`std::optional<float> size`（DIP 绝对值，与 `Font.size` 同语义）；`:10` 的「严禁包含 size 或斜体」注释改为「size / italic 为 Phase 45 新增覆盖维度；nullopt = 继承」。物化点 = K45-8 单站（`TextWidget.cpp:374-381` `rFont` 组装 +2 分支）。
+`std::optional<bool> italic`、`std::optional<float> size`（DIP 绝对值）；`:10` 契约注释解禁。物化点 = `TextWidget.cpp:374-381` `rFont` 组装 +2 分支。
 
 ### 2.3 `TextMeasurer.h` +1 纯虚
 
-`virtual float Ascent(const Font& font) = 0;`——语义 = **该链绘制基线相对绘制原点的距离**（GDI = `tmAscent`；FT = `FontEngine::Ascent`）。GDI 侧实现沿 font 键缓存（沿 GDITextMeasurer 既有双键范式，键扩 italic 维）。
+`virtual float Ascent(const Font& font) = 0;`——返回 **A′（DIP，§3.2 定义）**；语义注释 =「该链整数像素基线偏移的 DIP 折算——与 LineHeight（行框口径，`otmMac*`）**分属两个口径**」。GDI 侧实现沿 font 键缓存（键扩 italic 维）。
 
-### 2.4 `FaceIdFor` 线程化（D45-10；P0-2 / P1-4 落地面）
+### 2.4 `FaceIdFor` 线程化（D45-10）
 
-- 签名：`FaceIdFor(const std::string& family, std::uint16_t weight, bool italic = false)`（默认值保兼容，`FontEngine.h:96` 先例）；**11 处调用 + 定义**（`FontEngine.cpp:286` 等 12 行）随 `Font` 传 `font.italic`。
-- **`familyCache` 键扩维**：`(family, weight)` → `(family, weight, italic)`（`FontEngine.cpp:114` / `:294-298`——P0-2：不扩则斜体首次调用后静默失效）。其余 6 键族 + 3 指纹站同批扩（K45-6/K45-7 清单 = O45-4 实测无漂移）。
-- **两相选面 + 统一内部回落**：非 direct = 候选过滤从「bit0 一律出局」改为「请求 italic ⇒ 只收 bit0 面；**池空 ⇒ 回落常规池**（= italic=false 结果）」；direct = 同文件 numFaces 扫描按 bit0 优先、无 bit0 用 face0。两相回落语义一致 ⇒ **GL 侧零特殊分支**（`GLRenderer.cpp:240` 传参即走，执行体不动——红线 3）。
+签名 `FaceIdFor(const std::string& family, std::uint16_t weight, bool italic = false)`；**`familyCache` 键扩维** `(family, weight, italic)`（P0-2）；12 行调用点随 `Font.italic` 传参。选面两相 + 回落 = §1.1。
 
 ---
 
-## §3 行框与基线状态机
+## §3 行框与基线状态机（v1.1 重写 §3.1 取数机制 + §3.2 像素空间整数化）
 
-### 3.1 行框统一（块级 max）
+### 3.1 行框字体的获取机制（v1.1 按评审 P0-3 重写——v1.0 的「产物上取 max」不可实现）
 
-- `TextWidget` 五站（K45-9：布局入口 `:423` / totalHeight `:430` / `:584` / 绘制 `:658/:718/:737` / preferred `:824/:829`）与 `TextBox` `GetLineHeight()`——**算术零改动**，仅「行框字体的取值」从基字体改为：`spans 空 或 无 size 覆盖 ⇒ 基字体（逐位今日）；否则 ⇒ max 行框字体`。max 的判定在 `BuildRunsForRange` 产物上取（run 字体集合已就绪，零新增测量——`LineHeight(maxFont)` 一次调用，走既有缓存）。
-- **P0-4 守卫结构性成立**：totalHeight 恒 `lineHeight × 行数`（`:584` 原式不动）。
-- `CalculateTextPosition`（`:632-637`）垂直居中随新行框值自动成立（算术不变）。
+**修法 = 成员助手（评审 P0-3 修法 (b) 的无签名变体）**：`TextWidget` 新增 protected
 
-### 3.2 per-run 基线发射（C45-8）
+```
+Font EffectiveLineBoxFont(TextMeasurer&) const;
+// spans 未激活（与 :497-498 串身份护栏同款判据）⇒ 返回 m_style.font.value（逐位今日）；
+// spans 激活 ⇒ 对「基字体 + 各 span 覆盖物化出的 run 字体集合」取 LineHeight 最大者
+//   （O(R) 次 LineHeight——零新增接口，测量走既有缓存，首次 miss O(R)；评审 P2-5 措辞订正）
+```
 
-- 行 baseline（每链内）= `lineTop + Ascent(行框字体)`；run `pos.y = baseline − Ascent(run.font)`——两链各自的 `Ascent` 与各自的绘制原点同口径（GDI：`TextOutW` 基线 = y + tmAscent；GL：基线 = `floor(pos.y) + floor(Ascent(font))`，`GLRenderer.cpp:254`）。
-- **同族 run 基线严格重合**（Ascent 同值 ⇒ y 差 = 0）；跨族 run 共享行基线 ⇒ **L44-9 的跨族 7px 顶边偏置被基线对齐取代并结账**（需求稿 D45-4）。
-- **跨链**：基线相对行顶的距离 = 各链既有 ascent 口径差——今日单字体路径已存在（整行一起偏），spans 不新增 ⇒ 验收口径 = **每链内基线重合为主断言**（T45-4），跨链沿 Phase 31 ≤1px 既有容差。
-- 发射站：wrap 逐 run（`:681`）/ 非 wrap 逐 run（`:729`）——命令字段零变化，仅 pos.y 逐 run（Phase 44 已逐 run 发射，x 累积同源；y 从「行统一值」变「逐 run 值」——同线零 size 差时 y 逐位 = 今日）。
+- `BuildTextLayout` **签名零改动**（它本就是成员函数，`:422` 的 `const Font& font = m_style.font.value` 改读 `EffectiveLineBoxFont(measurer)`——`:423` 行框、`:584` 乘法原式、`:430` 空文本相全部原样；两个调用点 `TextBox.cpp:443` / `TextWidget.cpp:609` 零改动）。
+- **TextBox 掩码态**：Password × spans 已被 Phase 44 划归 L44-1（`m_echoMode == Normal` 才进 spans 相）⇒ spans 激活时显示串 = 明文 ⇒ 助手在 TextBox 侧同样成立；`GetLineHeight()`（`:589-593`）把 `TextWidget::m_style.font.value` 换成 `EffectiveLineBoxFont(...)`——**算术与 13 处消费点零改动**。
+- 助手本身即评审 P0-3 要求的「取数机制显式化」：既非「产物上取」（不可达），也非改 `BuildTextLayout` 签名（成员函数无需）；`TextWidget.h:147` totalHeight 注释同步补「行框字体 = EffectiveLineBoxFont」。
+
+### 3.2 per-run 基线发射（v1.1 按评审 P0-1 重写——像素空间整数化，两层 floor/截断闭合）
+
+**A′ 定义**：`A′(font) = AscentIntPx(font) × 96 / dpi`（DIP）。其中 **AscentIntPx**（链内整数像素 ascent）：GDI = `tmAscent`（TEXTMETRIC，本就是整数设备像素）；GL/FT = `floor(face->size->metrics.ascender / 64)`（★ **`FontEngine::Ascent` 返回值语义修订为整数像素**——其唯一消费点 `GLRenderer.cpp:254` 的外层 `floor(...)` 变 no-op，**:254 一行不动**（红线 3）；连带 = GL 全行基线上移 <1px 子像素余量 + **T44-11 基线锚随 L44-9 结账重锚**（显式登记，§7））。
+
+**发射公式（全 DIP）**：`pos.y = lineTop + A′(boxFont) − A′(runFont)`；`baseline = pos.y + A′(runFont) = lineTop + A′(boxFont)`（DIP 恒等式——T45-4 判据形式不变，语义变为 A′）。
+
+**两链闭合证明（整数位移与量化可交换）**：`Renderer::ExecuteCommand` 只折 pos（`Renderer.cpp:69-71`，font 原样）⇒ 链上收到 `pos.y_px = scale·lineTop_px + (AscentIntPx(box) − AscentIntPx(run))`——第二项为**精确整数**（GDI `tmAscent` 整数；GL floor 后整数；|值| < 2^24 float 精确表示）⇒
+- GDI：`drawY = static_cast<LONG>(pos.y_px)`（`:922-923` 向零截断）⇒ `trunc(x + Δint) = trunc(x) + Δint` ⇒ `baseline_eff = trunc(scale·lineTop_px) + AscentIntPx(box)`——**与 run 无关，同行恒等**；
+- GL：`floor(pos.y_px) + floor(Ascent_px(run))`（`:254`，外层 floor 对整数 no-op）⇒ `floor(scale·lineTop_px) + AscentIntPx(box)`——**同行恒等**。
+
+⇒ 同线 run 基线落在**同一整数像素行**（评审同型建模 10 万组 0% 不等）；v1.0 的「33.4% 差 1px / 1.99px」由两层 floor 与非整数 A′ 的组合产生，本公式消解。跨链基线-行顶差 = 各链既有 ascent 口径差（今日单字体整行同偏，非新增）——验收 = **每链内重合为主断言**（T45-4），跨链沿既有容差。
 
 ### 3.3 等价性结构（C45-1 / C45-2 / P0-4）
 
-零 span ⇒ `rFont` 组装、行框取值、`FaceIdFor(false)`、LOGFONT 位段全现状 ⇒ 逐位；Phase 44 spans（italic/size 全空）⇒ max = 基字体 ⇒ 全链逐位（T45-5 golden 双相，批 0 在 HEAD 录制 = Phase 44 基线，O45-5 建议）；行框恒乘法 ⇒ P0-4 无 Σ 路径。
+零 span ⇒ `EffectiveLineBoxFont` 返回基字体、`rFont` 组装、`FaceIdFor(false)`、LOGFONT 位段全现状 ⇒ 逐位；Phase 44 spans ⇒ max = 基字体 ⇒ 全链逐位（T45-5 golden 双相）；行框恒乘法 ⇒ P0-4 无 Σ 路径。指纹：`m_prefFont`/`m_wrapFont` 逐字段比较加 `italic`（K45-7）；行表键 font 维 +italic（`:506-508`）；span revision 维已覆盖 span 侧。
 
 ---
 
-## §4 改动清单与规模预算
+## §4 改动清单与规模预算（v1.1 修订：+EffectiveLineBoxFont、TextBox 区间放宽、源兼容破坏入账）
 
 | 文件 | 改动 | 预估 |
 |---|---|---|
-| `Font.h` / `TextSpan.h` / `TextMeasurer.h` | +italic 字段 / +2 override / +Ascent 纯虚（§2） | +25 |
-| `FontEngine.h/.cpp` | FaceIdFor + 参 + 12 行线程化 + familyCache 键 + 两相回落 + ascent/lineHeight/measure 键扩维 | +60 |
-| `GDIBackend.cpp` / `GDITextMeasurer.cpp` | LOGFONT 位段 ×2 + HFONT/双键扩维 + **Ascent 实现（tmAscent + 缓存）** | +35 |
-| `GLRenderer.cpp` | `:240` 传参（执行体不动） | +1 |
-| `TextWidget.cpp` | rFont +2 分支 + 行框字体判定 + per-run y + 指纹 2 站扩维 | +90 |
-| `TextBox.cpp` | GetLineHeight 取值语义 + per-run y + 行表键 font 维 +italic | +50 |
-| `Tests/`（3 文件 11 子类） | 8 假件 +Ascent 显式值 + T45-1..9 | +380 |
+| `Font.h` / `TextSpan.h` / `TextMeasurer.h` | +bool italic / +2 override / +Ascent 纯虚（§2） | +25 |
+| `FontEngine.h/.cpp` | FaceIdFor 三参 + 12 行线程化 + familyCache 键 + 两相回落 + **Ascent 语义修订（整数像素）** + ascent/lineHeight/measure 键扩维 | +65 |
+| `GDIBackend.cpp` / `GDITextMeasurer.cpp` | LOGFONT 位段 ×2 + HFONT/双键扩维 + **Ascent 实现（tmAscent × 96/dpi + 缓存）** | +40 |
+| `GLRenderer.cpp` | `:240` 传参（执行体 `:254` 不动） | +1 |
+| `TextWidget.h/.cpp` | rFont +2 分支 + **EffectiveLineBoxFont 助手** + per-run y + 指纹 2 站扩维 + `:147` 注释 | +110 |
+| `TextBox.cpp` | GetLineHeight 取值来源 + per-run y + 行表键 +italic；★ **7 处 `GetLineHeight` 直取 + `lineH` 19 处下游（选区/光标/滚动/行号映射）复核**（评审 P1-5） | **+50 ~ +90** |
+| `Tests/`（3 文件 11 子类） | 8 假件 +Ascent 显式值（源兼容破坏的仓内面）+ T45-1..9 | +380 |
+| `Win32FontSource.cpp` | **不入改动面**（direct 相回落 face0，§1.1——评审 P1-1） | 0 |
 | `CMakeLists.txt` | **0** | 0 |
 
-**预算**：公共头 **102 → 102** · 公共 API **+1 方法（Ascent 纯虚，闸门 5）+3 字段** · 用例 **599 → 608**（T45-1..9；★ 需求稿 v1.2 P2-3 钉的 **607** 因闸门 5 推荐收 +1 相而**显式改锚 608**——此即该条预留的「初设显式改锚并回写续订义务」）· 设计文档 **217 → 218** · 批计划 = 批 1 公共契约与选面（T45-2/7/9）/ 批 2 TextWidget 行框与发射（T45-1/3/4/5/6）/ 批 3 TextBox 接入与两链验收（T45-8）+ 收口。
+**预算**：公共头 **102 → 102** · API **+1 方法（纯虚 = 源兼容破坏，L45-6）+3 字段** · 用例 **599 → 608**（T45-1..9；607 显式改锚兑现）· 批计划三批不变。
 
 ---
 
-## §5 测试规划修订（T45-1..9；★ = 相对需求稿的修订）
+## §5 测试规划（T45-1..9；★ = v1.1 修订）
 
 | # | 用例 | 判据 |
 |---|---|---|
-| T45-1 | 斜体 run 命令流 | 每 run 一条；命中 run `font.italic==1`；C45-2 相 |
-| T45-2 ★ | 斜体选面（**含回落**） | 有真斜体面族 `FaceIdFor(f,w,true)` ⇒ 斜体 face；**无斜体面族 ⇒ 返回常规 face（内部回落，非 0）**；`italic=false` 全表现状逐位 |
-| T45-3 ★ | 行框（**块级统一重写**） | 混字号 ⇒ totalHeight = `LineHeight(max 行框字体) × 行数` **恒乘法**（逐位 vs 手算）；无 size 覆盖 ⇒ 与 Phase 44 路径逐位（C45-2） |
-| T45-4 ★ | 基线共享（**观测面定型**） | 同线 run 满足「pos.y + Ascent(run.font) = 常数」（`Ascent` 公共后可无头观测）；GL 无头 `glReadPixels` 相（SwapBuffers 前） |
+| T45-1 | 斜体 run 命令流 | 每 run 一条；命中 run `font.italic==true`；C45-2 相 |
+| T45-2 ★ | 斜体选面（**direct 相删除**） | 有真斜体面族 `FaceIdFor(f,w,true)` ⇒ 斜体 face；无斜体面族 ⇒ **返回常规 face（内部回落，非 0）**；`italic=false` 全表现状逐位 |
+| T45-3 ★ | 行框（块级统一 + **max 归属判别相**） | 混字号 ⇒ totalHeight = `LineHeight(EffectiveLineBoxFont) × 行数` 恒乘法（逐位 vs 手算）；无 size 覆盖 ⇒ 与 Phase 44 逐位；★ **归属相：大字号 run 在第二行 ⇒ 首行行高同涨**（防「取首行字体」实现骗过） |
+| T45-4 ★ | 基线共享（**整数基线判据**） | 同线 run 满足 `pos.y + A′(run.font)` = 常数（DIP，公共 `Ascent` 无头观测）**且经 §3.2 证明落同一整数基线行**；GL 无头 `glReadPixels` 相 |
 | T45-5 | 等价护栏双相 | golden 快照（批 0 HEAD 录制 = Phase 44 基线）；两相逐位 |
 | T45-6 | 负对照①判别力 | 回退 italic 覆盖 ⇒ 恰 T45-1/2 断言红 |
 | T45-7 | 负对照②键完备投毒 | 投毒面含 **familyCache**；miss ⇒ 重算 |
-| T45-8 ★ | 两链一致（**分相**） | GDI 相：真面族基线重合 + 合成观感；GL 相：真面斜体 + 回落相；基线主断言 = **每链内重合**；跨链沿 ≤1px 既有容差 |
-| T45-9 ★ 新 | `Ascent` 接口相 | GDI `Ascent(font) == tmAscent`（同字体 TEXTMETRIC，无头）；FT 转发 == `FontEngine::Ascent`；假件显式值无害 |
+| T45-8 | 两链一致（分相） | GDI 相：真面族基线重合 + 合成观感；GL 相：真面斜体 + 回落相；主断言 = 每链内整数基线重合；跨链沿既有容差 |
+| T45-9 ★ | `Ascent` 接口相（**DIP 判据**） | 同一 measurer 实例、同一 dpi：GDI `Ascent(font) == tmAscent × 96/dpi`（**±1e-3**）；FT `Ascent(font) == floor(ascender/64) × 96/dpi`；假件显式值无害 |
 
 ---
 
-## §6 闸门 2/4/5 裁决页（待用户签字；签字纪律 = 日期 + 结论 + 圈选项）
+## §6 闸门 2/4/5 裁决页（v1.1 依评审建议改判）
 
-- [ ] **闸门 2 · 斜体选面政策**：推荐 **ⓑ**（GDI 合成 + GL 真面/回落常规 = C36-4 同族扩容；读数支撑 §1.1）。
-- [ ] **闸门 4 · 行框口径**：推荐 **ⓐ 块级统一行框**（C45-3 修订申明 §1.2；ⓒ 出局因掏空 ③-1；ⓑ 记 L45-5）。
-- [ ] **闸门 5 · `TextMeasurer::Ascent`**：推荐 **ⓐ 纯虚 +1**（§1.3；波及 11 子类如实列；GDI 口径 = tmAscent 订正）。
+- [ ] **闸门 2 · 斜体选面政策**：**ⓑ 可签**（评审原判可签；附条件 = P1-1 direct 相改对——v1.1 已改为 face0 回落声明并删 T45-2 direct 相）。
+- [ ] **闸门 4 · 行框口径**：**随本版可签**（评审原判「P0-3 未解不宜签」——v1.1 已给取数机制 §3.1；★ 签字内容含 **P1-4 光标高/行距可见影响确认**）。
+- [ ] **闸门 5 · `TextMeasurer::Ascent`**：**修后可签 ⓐ**（评审原判缓——v1.1 已补 ⓑ 竞争方案 RunSlice.baselineOffset 的正面否证（§1.3）+ 单位契约钉死 DIP（P0-2）+ T45-9 判据 ±1e-3）。
 
 ---
 
-## §7 记账更新
+## §7 记账更新（v1.1 修订）
 
 | # | 项 | 处置 |
 |---|---|---|
-| L45-1 | **GL 不合成斜切**（闸门 2 ⓑ 落地后的具体形态） | C36-4 同族已知分歧扩容；回落常规面语义 §2.4；T45-8 GL 相覆盖 |
-| **L45-5 新** | 逐行行高（ⓑ 被拒记账） | 重启条件 = 消费者对行距紧凑的真实需求；届时重盘点 13 处 `GetLineHeight` 消费 + 行顶 Y 表 |
-| L45-2/3/4 | 编辑器通路并 L44-1 / 背景底片 / harness 回写 | 维持需求稿口径 |
-
-**被拒项**：ⓐ 限真斜体面（闸门 2——CJK 全静默，与 ③-1 矛盾）· GL 合成（红线 3）· 行框逐行 max（闸门 4 ⓑ——回归面）· Ascent 默认体（P1-3）。
+| L45-1 | GL 不合成斜切（C36-4 同族扩容） | **v1.1 并入：direct 相斜体请求回落 face0**（单面池，`Win32FontSource.cpp:308-315`；重启条件 = direct 消费者出现斜体需求）；被拒项「GL 合成」与本条合并（评审 P2-6，不重复记） |
+| **L45-6 新** | **`TextMeasurer` 纯虚 = 源兼容破坏** | 下游自定义 `TextMeasurer` 子类须补 `Ascent` 实现才能编译；对内 11 子类随批落地；对外在 usage.md/交付说明标注（评审 P1-5） |
+| L45-5 | 逐行行高 | 维持（重启条件 = 行距紧凑真实需求） |
+| L44-9 结账连带 | **T44-11 基线锚重锚** | `FontEngine::Ascent` 语义修订（整数像素）改变 GL 基线子像素余量——T44-11 断言值随 L44-9 结账重锚（详设批内执行，显式登记） |
+| L45-2/3/4 | 维持需求稿口径 | — |
 
 ---
 
 ## §8 修订记录
 
-- **v1.0（2026-11-08）** 初稿：三闸门推荐裁决页（ⓑ / ⓐ 块级统一 / ⓐ 纯虚 Ascent——全部有勘察读数支撑）· C45-3 修订申明（块级统一行框取代逐行 max——P0-4 守卫结构性成立 + TextBox 8.5.2 契约零改动）· **GDI Ascent 口径订正 = tmAscent**（`TextOutW` 基线实证 `GDIBackend.cpp:919`；`otmMac*` 为行框口径两分）· FaceIdFor 线程化 + familyCache 扩维 + 两相统一内部回落（GL 执行体零改动前提）· 11 子类波及如实列 · T45-1..9 修订（T45-3 块级重写 / T45-8 分相 / T45-9 新）· 用例锚 **607 → 608 显式改锚**（闸门 5 收 +1 相，兑现需求稿 P2-3 预留）· 批计划三批。
+- **v1.1（2026-11-08）★ 初设评审吸收（结论 = 不放行进详设；P0×3 / P1×5 / P2×6 全部逐条回码亲核后处置）**：
+  ① **P0-1（基线公式两链不闭合）**：GL 双层 floor（`GLRenderer.cpp:254` + `Renderer.cpp:69-71` 只折 pos）+ GDI `static_cast<LONG>` 截断（`:922-923`）使 DIP 域逐 run 减法必然失配（评审建模 33.4%/1.99px）。**修法 = 像素空间整数化**：定义 `A′ = AscentIntPx × 96/dpi`（GDI = tmAscent 整数；GL = floor(ascender/64)），发射式 `pos.y = lineTop + A′(box) − A′(run)`——整数位移与截断/floor 可交换 ⇒ 同行恒同一整数基线（§3.2 闭合证明）。`FontEngine::Ascent` 语义修订（整数像素）+ T44-11 重锚登记。
+  ② **P0-2（Ascent 单位自相矛盾）**：`:664` 无 96/dpi 换算 vs `:634` LineHeight 有 ⇒ **Ascent 契约钉死 DIP**；GDI = `tmAscent × 96/dpi`、FT = 薄包装（v1.0 直接转发作废）；T45-9 改 ±1e-3 判据。
+  ③ **P0-3（行框字体不可达）**：`:423` 先于 `:501`、`TextBox.cpp:443` 喂 `BuildDisplayText()` + `:497-498` 身份护栏 ⇒ v1.0「产物上取 max」不可实现且 TextBox 恒空集。**修法 = protected 助手 `EffectiveLineBoxFont(TextMeasurer&)`**（成员函数无签名改动、两调用点零波及、掩码态由 Phase 44 已有的 echo 判据覆盖）——§3.1 重写；`:147` 注释同步。
+  ④ **P1-1（direct 相空转）**：`Win32FontSource.cpp:308-315` 单面池 ⇒ 「bit0 优先」不可达。处置 = **如实收窄为 face0 回落**（不入改动面），T45-2 删 direct 相，L45-1 并入登记。
+  ⑤ **P1-2（ⓑ 否证循环论证）**：补第三方案 `RunSlice.baselineOffset`（`TextWidget.h:128-134` 物化点挂载）的正面否证——只搬运消费侧、不解决生产侧（ascent 产生仍须公共缝）⇒ ⓐ 成立（§1.3）。
+  ⑥ **P1-3（uint8_t 口径）**：改 **`bool italic = false`**（Font.h / SpanStyle optional<bool> / FaceIdFor bool）。
+  ⑦ **P1-4（光标高可见回归）**：闸门 4 签字页显式列入「块内大字号 ⇒ 全块行框/选区/光标高随 max」（`TextMeasurer.h:186-190` 契约 + `TextBox.cpp:813`）；接受与否 = 签字内容，不沉默。
+  ⑧ **P1-5（预算与源兼容）**：TextBox 改 **+50 ~ +90**（含 lineH 下游复核注记）；API 行 + §7 新增 **L45-6 源兼容破坏**登记。
+  ⑨ **P2×6**：512 face 措辞订正（CJK 为子集表述）· 视觉代价改「用户签字时确认」· L44-9 结账引用 D45-4 条件（7px 非恒值）· T45-3 补 **max 归属判别相**（第二行大字号 ⇒ 首行同涨）· 「零新增测量」改「零新增接口，测量走既有缓存（首次 miss O(R)）」· L45-1 与被拒项合并。
+  ⑩ **闸门改判**：2 = 可签（附条件已满足）/ 4 = 随本版可签（含 P1-4 确认项）/ 5 = 修后可签 ⓐ——签字页 §6。
+  ⑪ **保留项（评审 ✅1-✅5 实证确认）**：11 子类行号清单 · GDI 两口径分离方向 · 块级统一消解 P0-3/P0-4 的结构 · 608 改锚 · `008daff` 零改动与基线 599/102/218。
 
 ---
 
-> 初设稿 v1.0（2026-11-08）：**初稿待评审；闸门 2/4/5 推荐已落字、待用户签字**——评审通过 + 三闸门签字后进详设（条 74）。
+> 初设稿 v1.1（2026-11-08）：**评审吸收毕；闸门 2 可签（附条件满足）、闸门 4/5 修后可签**——评审通过 + 三闸门签字后进详设（条 74）。
