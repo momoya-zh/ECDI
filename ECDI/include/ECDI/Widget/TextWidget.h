@@ -5,7 +5,10 @@
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Size.h"
 #include "ECDI/Theme/TextStyle.h"
+#include "ECDI/Widget/TextSpan.h"    // ★ Phase 44：段内内联样式契约（TextSpan / SpanStyle）
 #include "ECDI/Widget/Widget.h"
+
+#include <optional>                  // ★ Phase 44：RunSlice::color（P1-1 基色解耦）
 
 #include <cstdint>   // ★ Phase 40：码点→字节偏移表的半宽表项（std::uint32_t）
 #include <string>
@@ -38,6 +41,12 @@ public:
 	virtual void SetText(const std::string& text);
 
 	virtual void SetText(std::string&& text);
+
+	/// @brief 设置带有内联样式的富文本（Phase 44，闸门 1 原子入口 ⓐ）
+	/// @param text 文本明文字符串
+	/// @param spans 样式区间列表（内部执行排序、裁剪、去重叠与码点有界化）
+	void SetStyledText(const std::string& text, const std::vector<TextSpan>& spans);
+	void SetStyledText(std::string&& text, const std::vector<TextSpan>& spans);
 
 	const std::string& GetText() const noexcept;
 
@@ -115,14 +124,21 @@ protected:
 	///          ——第二个真实消费者 = `TextBox`（D38-A ⓐ：0 新增公共头 + protected 面 +3，
 	///          优于「抽内部头」（公共头必须见 `m_wrapLayout` 的类型 ⇒ 依赖方向倒置）与「重写」（禁则字面集必漂移））。
 	///          派生类只**读**输出；`GetTextLayout` / `IsWrapLayoutActive` / `BlockWidth` / 全部缓存字段仍 private。
+	/// @brief 单行内的样式渲染切片（Phase 44，P1-1 基色解耦模型）
+	struct RunSlice {
+		std::size_t          startCp; ///< 切片起始码点索引
+		std::size_t          cpCount; ///< 切片码点数
+		float                width;   ///< 切片测量宽度
+		Font                 font;    ///< 生效字体（族 + 字重）
+		std::optional<Color> color;   ///< 切片前景色（std::nullopt 表示继承基色，绘制期解析）
+	};
+
 	struct TextLine{
-		std::size_t startCp = 0;    ///< 行首码点索引（**绝对**——相对全串）
-		std::size_t cpCount = 0;    ///< 本行码点数（**已做尾部空白裁剪**——D29-Ⅰ ⑥；★ 口径不变 = 红线②）
-		float width = 0.0f;         ///< 本行宽（DIP——由扫描状态直接得到，**非** per-line MeasureText）
-		std::size_t ownedEnd = 0;   ///< ★ Phase 38 新增（**声明在末尾**——聚合初始化序不破既有三件，C7560）：
-		                            ///<   归属终点 = **下一行起点**（含软断点处被 ⑦ 终化跳过的分隔空格、不含硬断 `\n`）。
-		                            ///<   `TextWidget` 自身**不读**它（C38-5：`Label` 输出逐位不变）；
-		                            ///<   编辑器的可达性 / 选区 / 命中经 `TextBox::LineRange` 消费它。
+		std::size_t          startCp = 0;    ///< 行首码点索引（**绝对**——相对全串）
+		std::size_t          cpCount = 0;    ///< 本行码点数（**已做尾部空白裁剪**——D29-Ⅰ ⑥；★ 口径不变 = 红线②）
+		float                width = 0.0f;   ///< 本行宽（DIP——由扫描状态直接得到，**非** per-line MeasureText）
+		std::size_t          ownedEnd = 0;   ///< ★ Phase 38 新增
+		std::vector<RunSlice> runs{};         ///< ★ Phase 44：行内 run 序列（非 spans 态为空，默认初始化）
 	};
 
 	/// @brief 断行布局结果（★ D29-C 共享 TextLayout：`GetPreferredSize` 与 `DrawTextContent` 双消费端）
@@ -179,6 +195,23 @@ protected:
 	///                `OffsetAt` 的等价性证明（消费方给的是 `cps` 空间索引，可 > count）
 	[[nodiscard]] std::size_t ByteOffsetAt(std::size_t cpIndex) const;
 
+	/// @brief 判断当前 styled spans 是否处于激活状态（C44-8 串内容身份自检护栏）
+	[[nodiscard]] bool HasActiveSpans() const noexcept {
+		return !m_spans.empty() && m_styledTextIdentity == m_text;
+	}
+
+	/// @brief 将指定码点区间拆解为连续覆盖的 RunSlice 序列（基于局部表，绝不写基类成员，守护 D40-L-1）
+	std::vector<RunSlice> BuildRunsForRange(
+	    TextMeasurer& measurer, const std::string& textSource,
+	    const std::vector<std::uint32_t>& byteOffsets,
+	    std::size_t startCp, std::size_t endCp) const;
+
+	/// @brief 测量指定码点区间的样式总宽
+	float MeasureStyledRangeWidth(
+	    TextMeasurer& measurer, const std::string& textSource,
+	    const std::vector<std::uint32_t>& byteOffsets,
+	    std::size_t startCp, std::size_t endCp) const;
+
 	/// @brief 码点→字节偏移表：`m_cpByteOffsets[k]` = 第 k 个码点的首字节偏移
 	/// @details `size() == count + 1`（`count` 是 **`SequenceLength` 空间**的码点数，**不是** `cps.size()`）；
 	///          末项 = 最后一次步进后的字节位——★ **末段截断时可越过 `text.size()`**
@@ -227,6 +260,20 @@ private:   // ← ★ Phase 38：原 `:99` 的 private 区**从这一行起**（
 	mutable Font m_wrapFont{};               ///< 建立缓存时的字体（键维 2/3/4——size + family + weight；Phase 36 K8-④）
 	mutable int m_wrapDpi = 0;               ///< 建立缓存时的 DPI（键维 5）
 	mutable int m_wrapWidth = 0;             ///< 建立缓存时的 `GetWidth()`（键维 6——宽度驱动重排，T29-3）
+
+	// ── ★ Phase 44：段内内联样式状态与缓存 ──
+	std::vector<TextSpan> m_spans;                  ///< 当前样式区间集合（规范化：有序、无重叠、码点有界）
+	std::string           m_styledTextIdentity;     ///< 建立样式时的文本副本（C44-8：身份比对护栏）
+	std::size_t           m_styledTextRevision = 0; ///< 样式版本号（SetStyledText 递增）
+
+	// 非折行单行 runs 缓存（红线 2：保证 Paint 阶段 0 次额外测量，P1-2 补 DPI 维）
+	mutable std::vector<RunSlice> m_prefRuns;
+	mutable std::size_t           m_prefRunsRevision = 0;
+	mutable std::string           m_prefRunsIdentity;
+	mutable int                   m_prefRunsDpi = 0;
+
+	// preferred 高度指纹缓存的 span 版本维
+	mutable std::size_t           m_prefSpanRevision = 0;
 
 };
 

@@ -9,6 +9,9 @@
 #include "ECDI/Application/Application.h"
 #include "ECDI/Render/PaintContext.h"
 #include "Render/RecordingBackend.h"
+#include "Render/FontEngine.h"
+#include "Platform/Win32/Win32FontSource.h"
+#include <cmath>
 #include "Render/GDITextMeasurer.h"   // Phase 28 批二：真测量器（T28-3 计数包装）
 #include "Render/GDIBackend.h"
 #include "ECDI/Render/TextMeasurer.h"
@@ -1904,6 +1907,471 @@ void Test38WrapLayoutOutputUnchanged()
 	}
 }
 
+namespace {
+
+// ── ★ Phase 44 测试夹具与辅助定义 ──
+
+/// @brief 带判别力的假测量器（P0-2 & N1-2：行高有差别，防投毒；实现真实 6 参与 4 参 FitText）
+class StyledSpansFakeMeasurer : public TextMeasurer {
+public:
+	Size MeasureText(const Font& font, const std::string& text) override {
+		float charW = 8.0f;
+		if (font.weight >= 700) {
+			charW = 10.0f; // 粗体字符 10px
+		} else if (font.family == "Consolas") {
+			charW = 9.0f;  // mono 字符 9px
+		}
+		std::size_t count = 0;
+		for (std::size_t i = 0; i < text.size(); ++i) {
+			if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
+				++count;
+			}
+		}
+		return Size{ static_cast<float>(count) * charW, LineHeight(font) };
+	}
+
+	/// @brief 行高判别力：常规体 16px，粗体 24px（若施工期错误取用 run 的最大行高，即刻飘红）
+	float LineHeight(const Font& font) override {
+		if (font.weight >= 700) {
+			return 24.0f;
+		}
+		return 16.0f; // 基类/常规行高 16px
+	}
+
+	/// @brief 4 参真实重载
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth) override {
+		float charW = 8.0f;
+		if (font.weight >= 700) {
+			charW = 10.0f;
+		} else if (font.family == "Consolas") {
+			charW = 9.0f;
+		}
+		std::size_t totalCp = 0;
+		for (std::size_t i = 0; i < text.size(); ++i) {
+			if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) ++totalCp;
+		}
+		if (startCp >= totalCp || maxWidth <= 0.0f) {
+			return TextFit{ 0, 0.0f };
+		}
+		std::size_t fitted = 0;
+		float curW = 0.0f;
+		while (startCp + fitted < totalCp && curW + charW <= maxWidth) {
+			curW += charW;
+			++fitted;
+		}
+		return TextFit{ fitted, curW };
+	}
+
+	/// @brief 6 参真实同源重载（守护 D40-G/J 契约）
+	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp,
+	                float maxWidth, const std::vector<char32_t>& cps,
+	                const std::vector<std::uint32_t>& byteOffsets) override {
+		(void)cps;
+		(void)byteOffsets;
+		return FitText(font, text, startCp, maxWidth);
+	}
+};
+
+/// @brief 计数探针 Measurer（供 T44-4 / I44-6 判定二次重绘零测量）
+class CountingStyledMeasurer : public StyledSpansFakeMeasurer {
+public:
+	mutable std::size_t measureCalls = 0;
+
+	Size MeasureText(const Font& font, const std::string& text) override {
+		++measureCalls;
+		return StyledSpansFakeMeasurer::MeasureText(font, text);
+	}
+};
+
+/// @brief 可测 StyledLabel 夹具（N0-2：mutable 默认 Fake 消除 const 指针转换编译错误）
+class TestableStyledLabel : public Label {
+public:
+	using Label::Label;
+	using TextWidget::BuildTextLayout;
+	using TextWidget::TextLayout;
+	using TextWidget::TextLine;
+
+	void SetMeasurer(TextMeasurer* m) { m_customMeasurer = m; }
+
+protected:
+	TextMeasurer* ResolveMeasurer() const override {
+		return m_customMeasurer ? m_customMeasurer : &m_defaultFake;
+	}
+
+private:
+	TextMeasurer* m_customMeasurer = nullptr;
+	mutable StyledSpansFakeMeasurer m_defaultFake; // mutable 允许 const 方法返回 TextMeasurer*
+};
+
+// ── T44-1：段内三段混排测量与行高单源性（P0-2 & N1-2：行高有牙防投毒）──
+void Test44StyledSpansMeasurement() {
+	StyledSpansFakeMeasurer measurer;
+	TestableStyledLabel label;
+	label.SetMeasurer(&measurer);
+
+	// "Hello World Consolas"
+	// [0, 6) "Hello " = 常规体 (6 * 8 = 48px)
+	// [6, 12) "World " = 粗体 700 (6 * 10 = 60px)
+	// [12, 20) "Consolas" = mono "Consolas" (8 * 9 = 72px)
+	std::vector<TextSpan> spans = {
+		{ 6, 6, SpanStyle{ .weight = 700 } },
+		{ 12, 8, SpanStyle{ .family = "Consolas" } }
+	};
+	label.SetStyledText("Hello World Consolas", spans);
+
+	const Size pref = label.GetPreferredSize();
+	const float expectedW = 6 * 8.0f + 6 * 10.0f + 8 * 9.0f; // 180.0f
+	EXPECT_NEAR(pref.width, expectedW, kEpsilon);
+
+	// I44-7 行高单源断言：必须严格等于基控件字体行高（16.0f），绝不可受粗体 24.0f 污染
+	EXPECT_NEAR(pref.height, 16.0f, kEpsilon);
+	EXPECT_NEAR(pref.height, measurer.LineHeight(Font{}), kEpsilon);
+}
+
+// ── T44-2：折行单调性、逐行结构与 CJK 禁则同构（P0-7 物理数值严密对齐）──
+void Test44StyledSpansWrap() {
+	StyledSpansFakeMeasurer measurer;
+	TestableStyledLabel label;
+	label.SetMeasurer(&measurer);
+
+	// 文本 = "AA BBBB CC" (AA=16, 空格=8, BBBB=40, 空格=8, CC=16)
+	std::vector<TextSpan> spans = {
+		{ 3, 4, SpanStyle{ .weight = 700 } } // "BBBB" 为粗体
+	};
+	label.SetStyledText("AA BBBB CC", spans);
+
+	// 可用宽 limit = 50.0f（严密数值算例：首行放不下 BBBB，次行放得下 BBBB 但放不下 CC）
+	const auto layout = label.BuildTextLayout(measurer, "AA BBBB CC", 50.0f);
+
+	EXPECT_EQ(layout.lines.size(), static_cast<std::size_t>(3));
+	if (layout.lines.size() < 3) return;
+
+	// Line 0: "AA" (回退掉空格，width=16.0f, ownedEnd=3 含空格)
+	EXPECT_EQ(layout.lines[0].startCp, static_cast<std::size_t>(0));
+	EXPECT_EQ(layout.lines[0].cpCount, static_cast<std::size_t>(2));
+	EXPECT_NEAR(layout.lines[0].width, 16.0f, kEpsilon);
+	EXPECT_EQ(layout.lines[0].ownedEnd, static_cast<std::size_t>(3));
+	EXPECT_EQ(layout.lines[0].runs.size(), static_cast<std::size_t>(1));
+	if (!layout.lines[0].runs.empty()) {
+		EXPECT_EQ(layout.lines[0].runs[0].font.weight, static_cast<std::uint16_t>(400));
+	}
+
+	// Line 1: "BBBB" (粗体 40px，ownedEnd=8 含空格)
+	EXPECT_EQ(layout.lines[1].startCp, static_cast<std::size_t>(3));
+	EXPECT_EQ(layout.lines[1].cpCount, static_cast<std::size_t>(4));
+	EXPECT_NEAR(layout.lines[1].width, 40.0f, kEpsilon);
+	EXPECT_EQ(layout.lines[1].ownedEnd, static_cast<std::size_t>(8));
+	EXPECT_EQ(layout.lines[1].runs.size(), static_cast<std::size_t>(1));
+	if (!layout.lines[1].runs.empty()) {
+		EXPECT_EQ(layout.lines[1].runs[0].font.weight, static_cast<std::uint16_t>(700));
+	}
+
+	// Line 2: "CC" (width=16.0f, ownedEnd=10)
+	EXPECT_EQ(layout.lines[2].startCp, static_cast<std::size_t>(8));
+	EXPECT_EQ(layout.lines[2].cpCount, static_cast<std::size_t>(2));
+	EXPECT_NEAR(layout.lines[2].width, 16.0f, kEpsilon);
+
+	// CJK 标点行首禁则悬挂同构断言：文本 "一二。" 设置粗体后 limit=24px 时标点悬挂不单独起行
+	label.SetStyledText("一二。", { { 0, 2, SpanStyle{ .weight = 700 } } });
+	const auto cjkLayout = label.BuildTextLayout(measurer, "一二。", 24.0f);
+	EXPECT_EQ(cjkLayout.lines.size(), static_cast<std::size_t>(1));
+	if (!cjkLayout.lines.empty()) {
+		EXPECT_EQ(cjkLayout.lines[0].cpCount, static_cast<std::size_t>(3));
+	}
+}
+
+// ── T44-3：命令流逐 run 原样发射与累积贴合（P0 宏规范对齐）──
+void Test44StyledSpansCommandStream() {
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+
+	Label label;
+	label.SetPosition(10, 20);
+	label.SetSize(200, 50);
+	std::vector<TextSpan> spans = {
+		{ 3, 3, SpanStyle{ .weight = 700, .foreground = Color::Red() } }
+	};
+	label.SetStyledText("ABCDEF", spans);
+	label.Paint(ctx, 0, 0);
+
+	std::vector<DrawTextCommand> textCmds;
+	for (const auto& cmd : commands) {
+		if (std::holds_alternative<DrawTextCommand>(cmd)) {
+			textCmds.push_back(std::get<DrawTextCommand>(cmd));
+		}
+	}
+
+	EXPECT_EQ(textCmds.size(), static_cast<std::size_t>(2));
+	if (textCmds.size() < 2) return;
+
+	EXPECT_EQ(textCmds[0].text, "ABC");
+	EXPECT_EQ(textCmds[0].font.weight, static_cast<std::uint16_t>(400));
+	EXPECT_EQ(textCmds[1].text, "DEF");
+	EXPECT_EQ(textCmds[1].font.weight, static_cast<std::uint16_t>(700));
+	EXPECT_EQ(textCmds[1].color, Color::Red());
+
+	// 坐标贴合断言
+	EXPECT_NEAR(textCmds[1].pos.y, textCmds[0].pos.y, kEpsilon);
+	EXPECT_TRUE(textCmds[1].pos.x > textCmds[0].pos.x);
+}
+
+// ── T44-4：#85 三臂、计数探针与 "éab" 单 run 钳制（P0-4 闭合）──
+void Test44StyledSpansArmTransitions() {
+	CountingStyledMeasurer measurer;
+	TestableStyledLabel label;
+	label.SetMeasurer(&measurer);
+
+	std::vector<TextSpan> spans = { { 0, 3, SpanStyle{ .weight = 700 } } };
+	label.SetStyledText("ABCDEF", spans);
+
+	// 第一次绘制：触发测量并填充缓存
+	CommandBuffer cmd1;
+	PaintContext ctx1(cmd1, measurer);
+	label.Paint(ctx1, 0, 0);
+	const std::size_t initialMeasures = measurer.measureCalls;
+
+	// Arm B: 相同文本调用 SetText，样式保持激活，且二次重绘 0 次额外测量
+	label.SetText("ABCDEF");
+	CommandBuffer cmdB;
+	PaintContext ctxB(cmdB, measurer);
+	label.Paint(ctxB, 0, 0);
+	EXPECT_EQ(measurer.measureCalls, initialMeasures);
+
+	// Arm A: 不同文本调用 SetText，样式失活，回退为单命令纯文本
+	label.SetText("XYZUVW");
+	CommandBuffer cmdA;
+	PaintContext ctxA(cmdA, measurer);
+	label.Paint(ctxA, 0, 0);
+	int textCmdsA = 0;
+	for (const auto& c : cmdA) if (std::holds_alternative<DrawTextCommand>(c)) ++textCmdsA;
+	EXPECT_EQ(textCmdsA, 1);
+
+	// Arm C: 换回原文本，样式门控可逆重新激活
+	label.SetText("ABCDEF");
+	CommandBuffer cmdC;
+	PaintContext ctxC(cmdC, measurer);
+	label.Paint(ctxC, 0, 0);
+	int textCmdsC = 0;
+	for (const auto& c : cmdC) if (std::holds_alternative<DrawTextCommand>(c)) ++textCmdsC;
+	EXPECT_EQ(textCmdsC, 2);
+
+	// 显式清空：永久清除
+	label.SetStyledText("ABCDEF", {});
+	CommandBuffer cmdClear;
+	PaintContext ctxClear(cmdClear, measurer);
+	label.Paint(ctxClear, 0, 0);
+	int textCmdsClear = 0;
+	for (const auto& c : cmdClear) if (std::holds_alternative<DrawTextCommand>(c)) ++textCmdsClear;
+	EXPECT_EQ(textCmdsClear, 1);
+
+	// 同字节长异码点数钳制（"abcd" 4B/4cp -> "éab" 4B/3cp）
+	// span 请求 [0, 10) 必须钳制到 [0, 3) 码点空间，产出单一加粗 run
+	label.SetStyledText("éab", { { 0, 10, SpanStyle{ .weight = 700 } } });
+	CommandBuffer cmdEab;
+	PaintContext ctxEab(cmdEab, measurer);
+	label.Paint(ctxEab, 0, 0);
+	std::vector<DrawTextCommand> eabCmds;
+	for (const auto& c : cmdEab) {
+		if (const auto* tc = std::get_if<DrawTextCommand>(&c)) {
+			eabCmds.push_back(*tc);
+		}
+	}
+	EXPECT_EQ(eabCmds.size(), static_cast<std::size_t>(1));
+	if (!eabCmds.empty()) {
+		EXPECT_EQ(eabCmds[0].text, "éab");
+		EXPECT_EQ(eabCmds[0].font.weight, static_cast<std::uint16_t>(700));
+	}
+}
+
+// ── T44-5：脏边界、Emoji、Surrogate 与非法字节容错（P0 宏规范对齐）──
+void Test44StyledSpansDirtyBoundaries() {
+	TestableStyledLabel label;
+	// "A😀B" (A=1B, 😀=4B, B=1B)
+	std::vector<TextSpan> spans = {
+		{ 1, 1, SpanStyle{ .weight = 700 } }, // 刚好覆盖 emoji 单码点
+		{ 10, 5, SpanStyle{ .family = "Consolas" } } // 越界 span 自动被剔除
+	};
+	label.SetStyledText("A\xF0\x9F\x98\x80" "B", spans);
+
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+	label.Paint(ctx, 0, 0);
+
+	int drawCount = 0;
+	for (const auto& cmd : commands) {
+		if (std::holds_alternative<DrawTextCommand>(cmd)) {
+			++drawCount;
+		}
+	}
+	EXPECT_TRUE(drawCount >= 2);
+
+	// 非法 UTF-8 与 Surrogate 截断字节容错验证（绝不崩溃）
+	label.SetStyledText("Bad\xFF\xFE\xED\xA0\x80" "End", { { 0, 20, SpanStyle{ .weight = 700 } } });
+	CommandBuffer cmdBad;
+	PaintContext ctxBad(cmdBad, backend);
+	label.Paint(ctxBad, 0, 0); // 正常返回，无未捕获异常
+}
+
+// ── T44-6：零 spans 路径与既有纯文本逐字段位等价（C44-1 守护）──
+void Test44StyledSpansZeroSpansBaseline() {
+	RecordingBackend backend;
+
+	CommandBuffer baseCmds;
+	PaintContext baseCtx(baseCmds, backend);
+	Label baseLabel("Bit Identical Text");
+	baseLabel.SetPosition(10, 10);
+	baseLabel.SetSize(200, 40);
+	baseLabel.Paint(baseCtx, 0, 0);
+
+	CommandBuffer styledCmds;
+	PaintContext styledCtx(styledCmds, backend);
+	Label styledLabel;
+	styledLabel.SetPosition(10, 10);
+	styledLabel.SetSize(200, 40);
+	styledLabel.SetStyledText("Bit Identical Text", {}); // 空 spans
+	styledLabel.Paint(styledCtx, 0, 0);
+
+	EXPECT_EQ(styledCmds.size(), baseCmds.size());
+	if (styledCmds.size() != baseCmds.size()) return;
+
+	for (std::size_t i = 0; i < baseCmds.size(); ++i) {
+		EXPECT_EQ(styledCmds[i].index(), baseCmds[i].index());
+		if (const auto* bCmd = std::get_if<DrawTextCommand>(&baseCmds[i])) {
+			const auto* sCmd = std::get_if<DrawTextCommand>(&styledCmds[i]);
+			EXPECT_TRUE(sCmd != nullptr);
+			if (sCmd) {
+				EXPECT_NEAR(sCmd->pos.x, bCmd->pos.x, kEpsilon);
+				EXPECT_NEAR(sCmd->pos.y, bCmd->pos.y, kEpsilon);
+				EXPECT_EQ(sCmd->text, bCmd->text);
+				EXPECT_EQ(sCmd->color, bCmd->color);
+				EXPECT_NEAR(sCmd->font.size, bCmd->font.size, kEpsilon);
+				EXPECT_EQ(sCmd->font.family, bCmd->font.family);
+				EXPECT_EQ(sCmd->font.weight, bCmd->font.weight);
+			}
+		}
+	}
+}
+
+// ── T44-7：多段 gap 补洞结构切片验证（P0 宏规范对齐）──
+void Test44StyledSpansGapFill() {
+	StyledSpansFakeMeasurer measurer;
+	TestableStyledLabel label;
+	label.SetMeasurer(&measurer);
+
+	// "0123456789AB" 总长 12
+	// spans: [2, 4) 粗体, [7, 9) mono
+	// 期望 runs: [0, 2) 基色, [2, 4) 粗体, [4, 7) 基色, [7, 9) mono, [9, 12) 基色
+	std::vector<TextSpan> spans = {
+		{ 2, 2, SpanStyle{ .weight = 700 } },
+		{ 7, 2, SpanStyle{ .family = "Consolas" } }
+	};
+	label.SetStyledText("0123456789AB", spans);
+
+	const auto layout = label.BuildTextLayout(measurer, "0123456789AB", 500.0f);
+	EXPECT_EQ(layout.lines.size(), static_cast<std::size_t>(1));
+	if (layout.lines.empty()) return;
+
+	const auto& runs = layout.lines[0].runs;
+	EXPECT_EQ(runs.size(), static_cast<std::size_t>(5));
+	if (runs.size() < 5) return;
+
+	// Run 0: [0, 2)
+	EXPECT_EQ(runs[0].startCp, static_cast<std::size_t>(0));
+	EXPECT_EQ(runs[0].cpCount, static_cast<std::size_t>(2));
+	EXPECT_EQ(runs[0].font.weight, static_cast<std::uint16_t>(400));
+
+	// Run 1: [2, 4)
+	EXPECT_EQ(runs[1].startCp, static_cast<std::size_t>(2));
+	EXPECT_EQ(runs[1].cpCount, static_cast<std::size_t>(2));
+	EXPECT_EQ(runs[1].font.weight, static_cast<std::uint16_t>(700));
+
+	// Run 2: [4, 7)
+	EXPECT_EQ(runs[2].startCp, static_cast<std::size_t>(4));
+	EXPECT_EQ(runs[2].cpCount, static_cast<std::size_t>(3));
+
+	// Run 3: [7, 9)
+	EXPECT_EQ(runs[3].startCp, static_cast<std::size_t>(7));
+	EXPECT_EQ(runs[3].cpCount, static_cast<std::size_t>(2));
+	EXPECT_EQ(runs[3].font.family, "Consolas");
+
+	// Run 4: [9, 12)
+	EXPECT_EQ(runs[4].startCp, static_cast<std::size_t>(9));
+	EXPECT_EQ(runs[4].cpCount, static_cast<std::size_t>(3));
+}
+
+// ── T44-8：跨字体/字重命令发射属性分立（P0 宏规范对齐）──
+void Test44StyledSpansDifferentFonts() {
+	RecordingBackend backend;
+	CommandBuffer commands;
+	PaintContext ctx(commands, backend);
+
+	Label label;
+	label.SetStyledText("PlainBold", { { 5, 4, SpanStyle{ .weight = 700 } } });
+	label.Paint(ctx, 0, 0);
+
+	std::vector<DrawTextCommand> textCmds;
+	for (const auto& c : commands) {
+		if (const auto* tc = std::get_if<DrawTextCommand>(&c)) {
+			textCmds.push_back(*tc);
+		}
+	}
+
+	EXPECT_EQ(textCmds.size(), static_cast<std::size_t>(2));
+	if (textCmds.size() < 2) return;
+
+	EXPECT_NE(textCmds[0].font.weight, textCmds[1].font.weight);
+	EXPECT_EQ(textCmds[0].font.weight, static_cast<std::uint16_t>(400));
+	EXPECT_EQ(textCmds[1].font.weight, static_cast<std::uint16_t>(700));
+}
+
+// ── T44-9：字体度量健全性校验（从两链一致性载体撤出并更名，P1-1）──
+void Test44StyledSpansFontMetricsSanity() {
+	auto engine = std::make_unique<FontEngine>();
+	engine->SetDpi(96);
+	engine->SetFontSource(std::make_unique<Win32FontSource>());
+	const Font regFont{ 14.0f, "Segoe UI", 400 };
+	const Font boldFont{ 14.0f, "Segoe UI", 700 };
+
+	const float h1 = engine->LineHeight(regFont);
+	const float h2 = engine->LineHeight(boldFont);
+
+	EXPECT_TRUE(h1 > 0.0f);
+	EXPECT_TRUE(h2 > 0.0f);
+	if (h1 <= 0.0f || h2 <= 0.0f) return;
+
+	EXPECT_NEAR(h1, h2, kEpsilon);
+}
+
+// ── T44-11：基线数值探针（P0 宏规范对齐，Ascent 有牙守卫）──
+void Test44StyledSpansBaselineProbe() {
+	auto engine = std::make_unique<FontEngine>();
+	engine->SetDpi(96);
+	engine->SetFontSource(std::make_unique<Win32FontSource>());
+	const Font segoeReg{ 20.0f, "Segoe UI", 400 };
+	const Font segoeBold{ 20.0f, "Segoe UI", 700 };
+	const Font consolasReg{ 20.0f, "Consolas", 400 };
+
+	const float aReg = engine->Ascent(segoeReg);
+	const float aBold = engine->Ascent(segoeBold);
+	const float aMono = engine->Ascent(consolasReg);
+
+	// 守卫断言：Ascent 缺失时返回 0.0f，非真即判失败
+	EXPECT_TRUE(aReg > 0.0f);
+	EXPECT_TRUE(aBold > 0.0f);
+	EXPECT_TRUE(aMono > 0.0f);
+	if (aReg <= 0.0f || aBold <= 0.0f || aMono <= 0.0f) return;
+
+	// 同族断言：基线 0 偏差
+	EXPECT_NEAR(aReg, aBold, kEpsilon);
+
+	// 跨族反证：断言偏差存在并记录（~7px 偏置）
+	EXPECT_TRUE(std::abs(aReg - aMono) > 0.0f);
+}
+
+} // namespace
+
 void ECDI::Test::RegisterWidgetTests()
 {
     GetTestRegistry().Add("Widget.PanelPaint", &TestPanelPaint);
@@ -1963,4 +2431,16 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("Text.CpByteTable.RebuiltOnKeyChange",    &Test40TableRebuiltOnKeyChange);
     // ── ★ Phase 40 批 2：GDI 倍增窗口等价（T40-7）──
     GetTestRegistry().Add("Text.FitText.GdiWindowedEqualsLegacy",    &Test40GdiWindowedEqualsLegacy);
+
+    // ── ★ Phase 44：段内内联样式测试（T44-1..9, T44-11）──
+    GetTestRegistry().Add("TextWidget.StyledSpansMeasurement",       &Test44StyledSpansMeasurement);
+    GetTestRegistry().Add("TextWidget.StyledSpansWrap",              &Test44StyledSpansWrap);
+    GetTestRegistry().Add("TextWidget.StyledSpansCommandStream",      &Test44StyledSpansCommandStream);
+    GetTestRegistry().Add("TextWidget.StyledSpansArmTransitions",    &Test44StyledSpansArmTransitions);
+    GetTestRegistry().Add("TextWidget.StyledSpansDirtyBoundaries",   &Test44StyledSpansDirtyBoundaries);
+    GetTestRegistry().Add("TextWidget.StyledSpansZeroSpansBaseline", &Test44StyledSpansZeroSpansBaseline);
+    GetTestRegistry().Add("TextWidget.StyledSpansGapFill",           &Test44StyledSpansGapFill);
+    GetTestRegistry().Add("TextWidget.StyledSpansDifferentFonts",    &Test44StyledSpansDifferentFonts);
+    GetTestRegistry().Add("TextWidget.StyledSpansFontMetricsSanity", &Test44StyledSpansFontMetricsSanity);
+    GetTestRegistry().Add("TextWidget.StyledSpansBaselineProbe",     &Test44StyledSpansBaselineProbe);
 }

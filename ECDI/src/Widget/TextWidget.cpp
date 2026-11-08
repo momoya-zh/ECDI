@@ -249,6 +249,48 @@ std::size_t OffsetAt(const std::vector<std::uint32_t>& offsets, std::size_t k) n
 	return offsets[(std::min)(k, offsets.size() - 1)];
 }
 
+std::vector<TextSpan> ClampAndValidateSpans(const std::vector<TextSpan>& input, std::size_t textCpCount) {
+	std::vector<TextSpan> valid;
+	valid.reserve(input.size());
+
+	for (const auto& span : input) {
+		if (span.cpCount == 0 || span.startCp >= textCpCount) {
+			continue; // 过滤空区间与起始越界
+		}
+		TextSpan s = span;
+		if (s.startCp + s.cpCount > textCpCount) {
+			s.cpCount = textCpCount - s.startCp; // 钳制在合法码点上界内
+		}
+		valid.push_back(std::move(s));
+	}
+
+	// 采用 std::stable_sort 保持相同起点 span 的稳定顺序
+	std::stable_sort(valid.begin(), valid.end(), [](const TextSpan& a, const TextSpan& b) {
+		if (a.startCp != b.startCp) {
+			return a.startCp < b.startCp;
+		}
+		return a.cpCount < b.cpCount;
+	});
+
+	// 去重叠：后到区间向后裁剪或剔除（优先采纳在先区间）
+	std::vector<TextSpan> nonOverlapping;
+	std::size_t currentEnd = 0;
+	for (auto& s : valid) {
+		if (s.startCp < currentEnd) {
+			if (s.startCp + s.cpCount <= currentEnd) {
+				continue; // 完全被前一 span 吞没
+			}
+			const std::size_t diff = currentEnd - s.startCp;
+			s.startCp = currentEnd;
+			s.cpCount -= diff;
+		}
+		currentEnd = s.startCp + s.cpCount;
+		nonOverlapping.push_back(std::move(s));
+	}
+
+	return nonOverlapping;
+}
+
 }   // namespace
 
 // ── Phase 40：表设施（单写者 + 命中自检，D40-L）────────────────────────────
@@ -292,6 +334,84 @@ std::size_t TextWidget::ByteOffsetAt(std::size_t cpIndex) const{
 	return OffsetAt(m_cpByteOffsets, cpIndex);
 
 }
+
+std::vector<TextWidget::RunSlice> TextWidget::BuildRunsForRange(
+    TextMeasurer& measurer, const std::string& textSource,
+    const std::vector<std::uint32_t>& byteOffsets,
+    std::size_t startCp, std::size_t endCp) const {
+	std::vector<RunSlice> runs;
+	if (startCp >= endCp) {
+		return runs;
+	}
+
+	const Font& baseFont = m_style.font.value;
+
+	std::size_t cur = startCp;
+	for (const auto& span : m_spans) {
+		if (span.startCp >= endCp) {
+			break;
+		}
+		const std::size_t spanEnd = span.startCp + span.cpCount;
+		if (spanEnd <= cur) {
+			continue;
+		}
+
+		// 填充 span 之前的间隙（使用基控件字体，颜色置 nullopt）
+		if (span.startCp > cur) {
+			const std::size_t gapEnd = (std::min)(span.startCp, endCp);
+			const std::size_t b0 = OffsetAt(byteOffsets, cur);
+			const std::size_t b1 = OffsetAt(byteOffsets, gapEnd);
+			const float w = measurer.MeasureText(baseFont, textSource.substr(b0, b1 - b0)).width;
+			runs.push_back(RunSlice{ cur, gapEnd - cur, w, baseFont, std::nullopt });
+			cur = gapEnd;
+			if (cur >= endCp) {
+				break;
+			}
+		}
+
+		// 填充 span 覆盖部分
+		const std::size_t rStart = (std::max)(cur, span.startCp);
+		const std::size_t rEnd   = (std::min)(endCp, spanEnd);
+		if (rEnd > rStart) {
+			Font rFont = baseFont;
+			if (span.style.family.has_value()) {
+				rFont.family = *span.style.family;
+			}
+			if (span.style.weight.has_value()) {
+				rFont.weight = *span.style.weight;
+			}
+			const std::size_t b0 = OffsetAt(byteOffsets, rStart);
+			const std::size_t b1 = OffsetAt(byteOffsets, rEnd);
+			const float w = measurer.MeasureText(rFont, textSource.substr(b0, b1 - b0)).width;
+			runs.push_back(RunSlice{ rStart, rEnd - rStart, w, rFont, span.style.foreground });
+			cur = rEnd;
+		}
+	}
+
+	// 填充末尾间隙
+	if (cur < endCp) {
+		const std::size_t b0 = OffsetAt(byteOffsets, cur);
+		const std::size_t b1 = OffsetAt(byteOffsets, endCp);
+		const float w = measurer.MeasureText(baseFont, textSource.substr(b0, b1 - b0)).width;
+		runs.push_back(RunSlice{ cur, endCp - cur, w, baseFont, std::nullopt });
+	}
+
+	return runs;
+}
+
+float TextWidget::MeasureStyledRangeWidth(
+    TextMeasurer& measurer, const std::string& textSource,
+    const std::vector<std::uint32_t>& byteOffsets,
+    std::size_t startCp, std::size_t endCp) const {
+	const auto runs = BuildRunsForRange(measurer, textSource, byteOffsets, startCp, endCp);
+	float totalW = 0.0f;
+	for (const auto& r : runs) {
+		totalW += r.width;
+	}
+	return totalW;
+}
+
+
 
 // ── Phase 29 批二：断行状态机（D29-Ⅰ——流水线序固定）──────────────────────
 
@@ -374,51 +494,89 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer,
 			//   scan 下一行起点——**不得**混用（原稿 scan 双含义 = off-by-one 与跳空格错误根源）。
 			const std::size_t lineStart = scan;
 
-			// ① 硬边界：从 scan 起最多放多少码点（C29-1 契约——FitText 不懂空格/CJK/禁则）
-			// ★ Phase 40：**5 参**重载——`cps` / `byteOffsets` 复用上面的解码，量具无需再整串预备
-			const TextFit fit = measurer.FitText(font, text, scan, limit, cps, byteOffsets);
-			const std::size_t hardEnd = scan + fit.fitCp;   // 可能 == scan（一个码点都放不下）
+		// ★ P1-1 串身份护栏：防 TextBox 传入显示串/掩码串时错贴明文 spans
+		const bool hasSpans = HasActiveSpans() && (text == m_text);
+		if (hasSpans) {
+			// ── Phase 44（段内样式折行推进）：单调消费 run，复用 run.width（P1-4，复杂度 O(L·R)）──
+			const auto candidateRuns = BuildRunsForRange(measurer, text, byteOffsets, scan, segEnd);
 
-			// ② 整段放得下 ⇒ 一行收尾，本段结束
+			float accumW = 0.0f;
+			std::size_t hardEnd = scan;
+			for (const auto& run : candidateRuns) {
+				if (accumW + run.width <= limit) {
+					accumW += run.width;
+					hardEnd += run.cpCount;
+				} else {
+					const float remLimit = (std::max)(0.0f, limit - accumW);
+					// ★ 真实 6 参 FitText 调用，获取 rFit.fitCp 与 rFit.width
+					const TextFit rFit = measurer.FitText(run.font, text, hardEnd, remLimit, cps, byteOffsets);
+					hardEnd += rFit.fitCp;
+					accumW += rFit.width;
+					break;
+				}
+			}
+
+			if (hardEnd == scan && scan < segEnd) {
+				hardEnd = scan + 1; // 推进保证：至少前进一字
+			}
+
+			if (hardEnd >= segEnd) {
+				const auto lineRuns = BuildRunsForRange(measurer, text, byteOffsets, lineStart, segEnd);
+				float lineWidth = 0.0f;
+				for (const auto& r : lineRuns) lineWidth += r.width;
+				layout.lines.emplace_back(TextLine{ lineStart, segEnd - lineStart, lineWidth, segEnd, lineRuns });
+				break;
+			}
+
+			// 内联软断点回退与标点禁则四步链（P0-1 还原）
+			std::size_t b = FindLastSoftBreak(cps, lineStart, hardEnd);
+			if (b == lineStart) { b = lineStart + 1; }
+			while (b > lineStart && IsLineEndForbidden(cps[b - 1])) { --b; }
+			if (b == lineStart) { b = lineStart + 1; }
+			while (b < segEnd && IsLineStartForbidden(cps[b])) { ++b; }
+
+			// 尾部空白裁剪并生成最终有效 runs
+			std::size_t lineEnd = b;
+			while (lineEnd > lineStart && cps[lineEnd - 1] == U' ') { --lineEnd; }
+
+			const auto lineRuns = BuildRunsForRange(measurer, text, byteOffsets, lineStart, lineEnd);
+			float lineWidth = 0.0f;
+			for (const auto& r : lineRuns) {
+				lineWidth += r.width;
+			}
+
+			layout.lines.emplace_back(TextLine{ lineStart, lineEnd - lineStart, lineWidth, b, lineRuns });
+
+			std::size_t nextScan = b;
+			while (nextScan < segEnd && cps[nextScan] == U' ') { ++nextScan; }
+			if (nextScan <= scan) { nextScan = scan + 1; }
+			layout.lines.back().ownedEnd = nextScan;
+			scan = nextScan;
+		} else {
+			// ── 非 spans 路径：100% 逐字保留原代码（红线 1 绝对保证，emitLine 与 TextLine 初始化 0 扰动）──
+			const TextFit fit = measurer.FitText(font, text, scan, limit, cps, byteOffsets);
+			const std::size_t hardEnd = scan + fit.fitCp;
+
 			if (hardEnd >= segEnd){
 				emitLine(lineStart, segEnd, hardEnd, fit.width);
 				break;
 			}
 
-			// ③ 窗口内最后合法软断点；无 ⇒ 按字硬断（= hardEnd）
 			std::size_t b = FindLastSoftBreak(cps, lineStart, hardEnd);
-			// ★ 推进保证（「超长词按字硬断」）：一个码点都放不下 ⇒ 按字硬断**一字**。
-			//   否则 b == lineStart ⇒ emit 空行 + scan 不推进 ⇒ **死循环**（T29-5 断言锚）。
 			if (b == lineStart) { b = lineStart + 1; }
-
-			// ④ 行尾禁则：行尾不得是**开括号**（cps[b−1] ∈ 开括号集 ⇒ −−b；有界 b > lineStart——C29-3）
-			//    ※ 名字对着「行尾」看：禁的是**行尾出现开括号**（如「你好（」把（挪到下行）。
 			while (b > lineStart && IsLineEndForbidden(cps[b - 1])) { --b; }
-			// ④b 守卫：禁则不得把行退成**空行**（空行只允许来自显式 `\n`——D29-Ⅴ）
-			//    ⇒ 恢复按字硬断一字（罕见边界：首字符即开括号且只放得下一字）。
 			if (b == lineStart) { b = lineStart + 1; }
-
-			// ⑤ 行首禁则：**下行**行首不得是闭标点 ⇒ 悬挂进前行（cps[b] ∈ 闭标点集 ⇒ ++b；
-			//   ★ 上界取 **segEnd** 而非 hardEnd（详设 §10.2 E5 勘误：上限若取 hardEnd，
-			//   「把闭标点上提」被硬边界吃掉 ⇒ 规则形同虚设；超宽部分 = 悬挂链 advance，
-			//   即 D29-Ⅱ 的微超——结构性有界：链遇非禁则成员即停）
 			while (b < segEnd && IsLineStartForbidden(cps[b])) { ++b; }
 
 			emitLine(lineStart, b, hardEnd, fit.width);
 
-			// ⑥ ⑦ 终化：nextScan = lineEnd 后**跳过连续空格**（分隔空格不属于任何一行——需求 D1）
 			std::size_t nextScan = b;
 			while (nextScan < segEnd && cps[nextScan] == U' ') { ++nextScan; }
-			if (nextScan <= scan) { nextScan = scan + 1; }   // 防御：绝不零推进（Paint 死循环不可接受）
+			if (nextScan <= scan) { nextScan = scan + 1; }
 
-			// ★★ Phase 38（A-15）：归属终点 = **下一行起点** —— 把上面 ⑥⑦ 跳过的连续分隔空格一并收进本行。
-			//    根因：`FindLastSoftBreak` 对空格断点返回「空格后一位」、对 CJK 断点返回「字后一位」，
-			//    后者紧跟空格时该空格落进「不属于任何行」的空隙。缺这行则 `"一二三 四"@24` 的
-			//    gap==1 而 cps 是空格（A3 第三态）、`"abc   "` 的末行 ownedEnd < count。
-			//    ★ 只改新字段 ⇒ 切分（startCp/cpCount/width/totalHeight）逐位不变 = 红线② 结构性成立。
 			layout.lines.back().ownedEnd = nextScan;
-
 			scan = nextScan;
+		}
 		}
 	}
 
@@ -491,19 +649,15 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 	TextMeasurer& measurer = ctx.GetTextMeasurer();   // ★ 与 MeasureText/LineHeight **同一实例**（同源）
 
 	// ── Phase 29 批二：wrap 分支（C29-5：非 wrap 走下面 100% 原路径）──
+	const bool activeSpans = HasActiveSpans();
+	const Color& baseColor = m_style.foreground.value;
+
 	if (IsWrapLayoutActive())
 	{
 		const TextLayout& layout = GetTextLayout(measurer);
 		const float lineHeight = measurer.LineHeight(m_style.font.value);
-		const Color& color = m_style.foreground.value;
 
-		// ★ 区块定位：整块按 totalHeight 垂直居中（单行对齐语义的自然推广——
-		//   `CalculateTextPosition(x, y, 块宽, 块高)`，水平仍取控件的对齐策略）。
 		const Point block = CalculateTextPosition(x, y, BlockWidth(layout), layout.totalHeight);
-
-		// ★ Phase 40（M4）：必须**自己** Ensure——`GetTextLayout` 键命中时直接 return 缓存的
-		//   `m_wrapLayout`、根本不进 `BuildTextLayout`，不能指望上游替我们建表。
-		//   放在循环**之前**一次（命中 = 一次键比较、0 分配），不要每行一次。
 		EnsureCpByteOffsets(m_text);
 
 		std::size_t row = 0;
@@ -513,24 +667,72 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 			++row;
 			if (line.cpCount == 0)
 			{
-				continue;   // ★ 空行：占行高但**零 DrawText 命令**（D29-Ⅴ / C29-4）
+				continue;
 			}
-			// ★ UTF-8 切片**仅绘制时**（D29-C：布局零 substr；每行一次）
-			// ★ Phase 40：查表 O(1)（`ByteOffsetAt` 内含钳制——行表索引是 `cps` 空间）
-			const std::size_t b0 = ByteOffsetAt(line.startCp);
-			const std::size_t b1 = ByteOffsetAt(line.startCp + line.cpCount);
-			ctx.DrawText(Point{ block.x, lineY }, m_text.substr(b0, b1 - b0), color, m_style.font.value);
+			if (activeSpans && !line.runs.empty())
+			{
+				float runX = block.x;
+				for (const auto& run : line.runs)
+				{
+					if (run.cpCount == 0) continue;
+					const std::size_t b0 = ByteOffsetAt(run.startCp);
+					const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
+					const Color runColor = run.color.value_or(baseColor);
+					ctx.DrawText(Point{ runX, lineY }, m_text.substr(b0, b1 - b0), runColor, run.font);
+					runX += run.width;
+				}
+			}
+			else
+			{
+				const std::size_t b0 = ByteOffsetAt(line.startCp);
+				const std::size_t b1 = ByteOffsetAt(line.startCp + line.cpCount);
+				ctx.DrawText(Point{ block.x, lineY }, m_text.substr(b0, b1 - b0), baseColor, m_style.font.value);
+			}
 		}
 		return;
 	}
 
-	// D5：MeasureText 拿宽（水平对齐需要宽度）
-	// ★★ Phase 31（与行高口径同源）：**垂直居中改用 `LineHeight()`**
-	//   原为 `textSize.height`（= `MeasureText` 的高度）——Phase 31 把 `LineHeight` 改为
-	//   hhea 行框口径后，两者在 GDI 侧**不再同源**（实测 SimSun @14 差 2px、@32 差 5px）。
-	//   若继续用 `textSize.height`，同一控件在 `SetWordWrap` 开关切换时**垂直位置会跳变**
-	//   （wrap 路径用 `LineHeight`、非 wrap 用 `textSize.height`）。
-	//   ⇒ 统一为 `LineHeight()`：**行高是行高**（契约 C31-7「三概念分离」的落地）。
+	if (activeSpans)
+	{
+		int dpi = 0;
+		if (const Window* window = GetWindow())
+		{
+			dpi = static_cast<int>(std::lround(static_cast<double>(window->GetDpiScale()) * 96.0));
+		}
+
+		// 检查单行 runs 缓存（红线 2：二次重绘零测量）
+		if (m_prefRunsRevision != m_styledTextRevision || m_prefRunsIdentity != m_text || m_prefRunsDpi != dpi)
+		{
+			EnsureCpByteOffsets(m_text);
+			m_prefRuns = BuildRunsForRange(measurer, m_text, m_cpByteOffsets, 0, DecodeUtf8(m_text).size());
+			m_prefRunsRevision = m_styledTextRevision;
+			m_prefRunsIdentity = m_text;
+			m_prefRunsDpi = dpi;
+		}
+
+		float totalW = 0.0f;
+		for (const auto& r : m_prefRuns)
+		{
+			totalW += r.width;
+		}
+		const float lineHeight = measurer.LineHeight(m_style.font.value);
+		const Point startPos = CalculateTextPosition(x, y, totalW, lineHeight);
+
+		EnsureCpByteOffsets(m_text);
+		float curX = startPos.x;
+		for (const auto& run : m_prefRuns)
+		{
+			if (run.cpCount == 0) continue;
+			const std::size_t b0 = ByteOffsetAt(run.startCp);
+			const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
+			const Color runColor = run.color.value_or(baseColor);
+			ctx.DrawText(Point{ curX, startPos.y }, m_text.substr(b0, b1 - b0), runColor, run.font);
+			curX += run.width;
+		}
+		return;
+	}
+
+	// 零 spans 纯原路径
 	const Size textSize = ctx.MeasureText(m_style.font.value, m_text);
 	const float lineHeight = measurer.LineHeight(m_style.font.value);
 
@@ -569,13 +771,15 @@ Size TextWidget::GetPreferredSize() const{
 		dpi = static_cast<int>(std::lround(static_cast<double>(window->GetDpiScale()) * 96.0));
 	}
 
+	const bool activeSpans = HasActiveSpans();
 	if (m_prefValid && dpi != 0 && m_prefRevision == m_textRevision
 	    && m_prefDpi == dpi
 	    && m_prefFont.size == m_style.font.value.size
 	    && m_prefFont.family == m_style.font.value.family
-	    && m_prefFont.weight == m_style.font.value.weight)   // Phase 36 批三 K8-④
+	    && m_prefFont.weight == m_style.font.value.weight
+	    && (!activeSpans || m_prefSpanRevision == m_styledTextRevision))
 	{
-		return m_prefCache;   // 命中 ⇒ 零 measurer 调用、零键构造（C28-5）
+		return m_prefCache;
 	}
 
 	const Size measured = DoMeasureText(*measurer);
@@ -586,6 +790,10 @@ Size TextWidget::GetPreferredSize() const{
 		m_prefRevision = m_textRevision;
 		m_prefFont = m_style.font.value;
 		m_prefDpi = dpi;
+		if (activeSpans)
+		{
+			m_prefSpanRevision = m_styledTextRevision; // ★ N1-3 保存语句，防止有窗口时恒 miss
+		}
 		m_prefValid = true;
 	}
 	return measured;
@@ -603,11 +811,70 @@ TextMeasurer* TextWidget::ResolveMeasurer() const{
 
 Size TextWidget::DoMeasureText(TextMeasurer& measurer) const{
 
-	// Label/Button 0 inset（§3.2 冻结）：{文本测量宽, 行高}；空文本 MeasureText 返回 {0,0} → 宽 0 诚实
+	if (HasActiveSpans())
+	{
+		EnsureCpByteOffsets(m_text);
+		const auto runs = BuildRunsForRange(measurer, m_text, m_cpByteOffsets, 0, DecodeUtf8(m_text).size());
+		float totalW = 0.0f;
+		for (const auto& r : runs)
+		{
+			totalW += r.width;
+		}
+		// I44-7 行高单源性：行高必须且仅来自基控件字体
+		const float lineHeight = measurer.LineHeight(m_style.font.value);
+		return Size{ totalW, lineHeight };
+	}
+
 	const Size textSize = measurer.MeasureText(m_style.font.value, m_text);
 	const float lineHeight = measurer.LineHeight(m_style.font.value);
 	return Size{ textSize.width, lineHeight };
 
+}
+
+void TextWidget::SetStyledText(const std::string& text, const std::vector<TextSpan>& spans) {
+	if (m_text == text && m_spans == spans) {
+		return; // 无变更早退
+	}
+
+	// ── 严格遵循 Step 1-6 顺序（初设 P1-B 修正）──
+	// Step 1: 文本赋值
+	m_text = text;
+
+	// Step 2: 触发变更通知与 revision 递增（与 SetText 同序）
+	MarkTextChanged();
+
+	// Step 3: 单趟独立 DecodeUtf8 解码码点空间并钳制 spans（绝不复用依赖旧 revision 的表）
+	const std::size_t cpCount = DecodeUtf8(m_text).size();
+	m_spans = ClampAndValidateSpans(spans, cpCount);
+
+	// Step 4: 记录串身份副本与样式版本
+	m_styledTextIdentity = m_text;
+	++m_styledTextRevision;
+
+	// Step 5: 使单行 runs 缓存与 preferred 缓存失效
+	m_prefRunsRevision = 0;
+	m_prefRunsIdentity.clear();
+	m_prefRunsDpi = 0;
+	m_prefValid = false;
+	m_wrapValid = false;
+
+	// Step 6: 触发重排与重绘
+	Invalidate();
+}
+
+void TextWidget::SetStyledText(std::string&& text, const std::vector<TextSpan>& spans) {
+	m_text = std::move(text);
+	MarkTextChanged();
+	const std::size_t cpCount = DecodeUtf8(m_text).size();
+	m_spans = ClampAndValidateSpans(spans, cpCount);
+	m_styledTextIdentity = m_text;
+	++m_styledTextRevision;
+	m_prefRunsRevision = 0;
+	m_prefRunsIdentity.clear();
+	m_prefRunsDpi = 0;
+	m_prefValid = false;
+	m_wrapValid = false;
+	Invalidate();
 }
 
 }
