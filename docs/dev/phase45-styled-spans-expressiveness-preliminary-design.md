@@ -1,6 +1,6 @@
 # Phase 45 · styled spans 表达力扩展（斜体 + 混字号，#89）· 初步设计稿
 
-> 状态：**v1.1（2026-11-08）：初设评审 v1.0 结论 = 不放行进详设（P0×3 / P1×5 / P2×6），全部逐条回码亲核后吸收（§8 v1.1）；闸门 2 = 可签 ⓑ（附条件已满足）、闸门 4 = 随本版可签、闸门 5 = 修后可签 ⓐ**。★ **条 74：状态由评审结论决定**。上游 = 需求稿 **v1.4**（评审二轮放行；闸门 1/3 已签；O45-1..5 勘察落盘）。★ 产品码自 `008daff` 零改动（`git diff 008daff..HEAD -- ECDI/` 为空）⇒ 需求稿 K45-1..14 行号快照有效。基线：用例 **599** · 公共头 **102** · 设计文档 **218**。
+> 状态：**v1.2（2026-11-08）：初设评审 v1.0 吸收毕（P0×3 / P1×5 / P2×6）+ 评审补增 P1（P0-3 修法引入的激活判据不一致）已修（§3.1 / §8 v1.2）；闸门 2 = 可签 ⓑ、闸门 4 = 可签、闸门 5 = 可签 ⓐ**。★ **条 74：状态由评审结论决定**。上游 = 需求稿 **v1.4**（评审二轮放行；闸门 1/3 已签；O45-1..5 勘察落盘）。★ 产品码自 `008daff` 零改动（`git diff 008daff..HEAD -- ECDI/` 为空）⇒ 需求稿 K45-1..14 行号快照有效。基线：用例 **599** · 公共头 **102** · 设计文档 **218**。
 
 **红线继承**（需求稿四条全文有效）：零 span 逐位等价 · 测画同源 · 命令流与 DrawText 执行体零改动（豁免面 = 字体实例化 / face 选择层 + LOGFONT 位段）· 编辑器通路不动（L44-1）。
 
@@ -60,14 +60,20 @@
 **修法 = 成员助手（评审 P0-3 修法 (b) 的无签名变体）**：`TextWidget` 新增 protected
 
 ```
+// 判据单点化（v1.2 新增虚钩子——评审补增 P1）:
+protected:
+    virtual bool SpansActiveForLayout() const { return HasActiveSpans(); }  // 基类 = 逐位今日
+    // TextBox 覆写 = 绘制侧三站点同一表达式（TextBox.cpp:495 / :526 / :1536）:
+    //   return HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
+
 Font EffectiveLineBoxFont(TextMeasurer&) const;
-// spans 未激活（与 :497-498 串身份护栏同款判据）⇒ 返回 m_style.font.value（逐位今日）；
-// spans 激活 ⇒ 对「基字体 + 各 span 覆盖物化出的 run 字体集合」取 LineHeight 最大者
-//   （O(R) 次 LineHeight——零新增接口，测量走既有缓存，首次 miss O(R)；评审 P2-5 措辞订正）
+// SpansActiveForLayout() 为假 ⇒ 返回 m_style.font.value（逐位今日）；
+// 为真 ⇒ 对「基字体 + 各 span 覆盖物化出的 run 字体集合」取 LineHeight 最大者
+//   （O(R) 次 LineHeight——零新增接口，测量走既有缓存，首次 miss O(R)）
 ```
 
 - `BuildTextLayout` **签名零改动**（它本就是成员函数，`:422` 的 `const Font& font = m_style.font.value` 改读 `EffectiveLineBoxFont(measurer)`——`:423` 行框、`:584` 乘法原式、`:430` 空文本相全部原样；两个调用点 `TextBox.cpp:443` / `TextWidget.cpp:609` 零改动）。
-- **TextBox 掩码态**：Password × spans 已被 Phase 44 划归 L44-1（`m_echoMode == Normal` 才进 spans 相）⇒ spans 激活时显示串 = 明文 ⇒ 助手在 TextBox 侧同样成立；`GetLineHeight()`（`:589-593`）把 `TextWidget::m_style.font.value` 换成 `EffectiveLineBoxFont(...)`——**算术与 13 处消费点零改动**。
+- **TextBox 判据一致性（v1.2 按评审补增 P1 重写——v1.1 把激活判据说反了）**：绘制侧三站点（`TextBox.cpp:495` / `:526` / `:1536`）的激活判据 = `HasActiveSpans() && m_echoMode == Normal && !m_isComposing`，**比 `HasActiveSpans()`（`TextWidget.h:199-201`）多两道门**；v1.1 的助手只看后者 ⇒ 密码态/组合期设了 spans 时「布局判活（按 max span 字体抬行高）、绘制判死（掩码点全基字体）」＝ 行距被撑大而字形不变（一片空白）。修法 = **判据单点化**：`SpansActiveForLayout()` 虚钩子（基类 = `HasActiveSpans()`，对 TextWidget/Label 逐位等价 ⇒ C45-1/C45-2 不受扰；TextBox 覆写三条件版），`EffectiveLineBoxFont` 改读钩子 ⇒ **布局与绘制的激活判据恒同一份**；`GetLineHeight()`（`:589-593`）换读 `EffectiveLineBoxFont(...)`——算术与 13 处消费点零改动。★ 详设可选实施注记：三绘制站点可改调钩子（行为中性、单一真相源），批 2 定。
 - 助手本身即评审 P0-3 要求的「取数机制显式化」：既非「产物上取」（不可达），也非改 `BuildTextLayout` 签名（成员函数无需）；`TextWidget.h:147` totalHeight 注释同步补「行框字体 = EffectiveLineBoxFont」。
 
 ### 3.2 per-run 基线发射（v1.1 按评审 P0-1 重写——像素空间整数化，两层 floor/截断闭合）
@@ -96,7 +102,7 @@ Font EffectiveLineBoxFont(TextMeasurer&) const;
 | `FontEngine.h/.cpp` | FaceIdFor 三参 + 12 行线程化 + familyCache 键 + 两相回落 + **Ascent 语义修订（整数像素）** + ascent/lineHeight/measure 键扩维 | +65 |
 | `GDIBackend.cpp` / `GDITextMeasurer.cpp` | LOGFONT 位段 ×2 + HFONT/双键扩维 + **Ascent 实现（tmAscent × 96/dpi + 缓存）** | +40 |
 | `GLRenderer.cpp` | `:240` 传参（执行体 `:254` 不动） | +1 |
-| `TextWidget.h/.cpp` | rFont +2 分支 + **EffectiveLineBoxFont 助手** + per-run y + 指纹 2 站扩维 + `:147` 注释 | +110 |
+| `TextWidget.h/.cpp` | rFont +2 分支 + **EffectiveLineBoxFont 助手 + `SpansActiveForLayout()` 虚钩子（v1.2）** + per-run y + 指纹 2 站扩维 + `:147` 注释 | +115 |
 | `TextBox.cpp` | GetLineHeight 取值来源 + per-run y + 行表键 +italic；★ **7 处 `GetLineHeight` 直取 + `lineH` 19 处下游（选区/光标/滚动/行号映射）复核**（评审 P1-5） | **+50 ~ +90** |
 | `Tests/`（3 文件 11 子类） | 8 假件 +Ascent 显式值（源兼容破坏的仓内面）+ T45-1..9 | +380 |
 | `Win32FontSource.cpp` | **不入改动面**（direct 相回落 face0，§1.1——评审 P1-1） | 0 |
@@ -112,7 +118,7 @@ Font EffectiveLineBoxFont(TextMeasurer&) const;
 |---|---|---|
 | T45-1 | 斜体 run 命令流 | 每 run 一条；命中 run `font.italic==true`；C45-2 相 |
 | T45-2 ★ | 斜体选面（**direct 相删除**） | 有真斜体面族 `FaceIdFor(f,w,true)` ⇒ 斜体 face；无斜体面族 ⇒ **返回常规 face（内部回落，非 0）**；`italic=false` 全表现状逐位 |
-| T45-3 ★ | 行框（块级统一 + **max 归属判别相**） | 混字号 ⇒ totalHeight = `LineHeight(EffectiveLineBoxFont) × 行数` 恒乘法（逐位 vs 手算）；无 size 覆盖 ⇒ 与 Phase 44 逐位；★ **归属相：大字号 run 在第二行 ⇒ 首行行高同涨**（防「取首行字体」实现骗过） |
+| T45-3 ★ | 行框（块级统一 + **max 归属判别相 + 判据一致相**） | 混字号 ⇒ totalHeight = `LineHeight(EffectiveLineBoxFont) × 行数` 恒乘法（逐位 vs 手算）；无 size 覆盖 ⇒ 与 Phase 44 逐位；★ **归属相：大字号 run 在第二行 ⇒ 首行行高同涨**（防「取首行字体」实现骗过）；★ **判据一致相（v1.2）：TextBox 密码态 + spans ⇒ `GetLineHeight()` 仍 = 基字体行高**（钩子判死 ⇒ 无空白撑高；组合态由同一钩子单点化覆盖） |
 | T45-4 ★ | 基线共享（**整数基线判据**） | 同线 run 满足 `pos.y + A′(run.font)` = 常数（DIP，公共 `Ascent` 无头观测）**且经 §3.2 证明落同一整数基线行**；GL 无头 `glReadPixels` 相 |
 | T45-5 | 等价护栏双相 | golden 快照（批 0 HEAD 录制 = Phase 44 基线）；两相逐位 |
 | T45-6 | 负对照①判别力 | 回退 italic 覆盖 ⇒ 恰 T45-1/2 断言红 |
@@ -144,6 +150,7 @@ Font EffectiveLineBoxFont(TextMeasurer&) const;
 
 ## §8 修订记录
 
+- **v1.2（2026-11-08）★ 评审补增 P1 吸收（P0-3 修法引入的激活判据不一致——v1.1 §3.1 把判据说反了）**：① **缺陷**：`EffectiveLineBoxFont` 判据 = `HasActiveSpans()`（`TextWidget.h:199-201`，无 echo/composing 条件），而 TextBox 绘制侧三站点（`TextBox.cpp:495` / `:526` / `:1536`）= `HasActiveSpans() && m_echoMode == Normal && !m_isComposing` ⇒ 密码态/组合期设 spans 时「布局判活（按 max span 字体抬行高）、绘制判死（掩码点全基字体）」＝ 行距撑大 + 字形不变 = 一片空白。② **修法 = 判据单点化**：新增 protected 虚钩子 `SpansActiveForLayout()`（基类 = `HasActiveSpans()`，对 TextWidget/Label 逐位等价 ⇒ C45-1/C45-2 不受扰）；TextBox 覆写为三条件版（与绘制侧逐字同一表达式）⇒ 布局与绘制恒同一份判据；详设可选把三绘制站点改调钩子（行为中性、单一真相源，批 2 定）。③ **T45-3 补判据一致相**：密码态 + spans ⇒ `GetLineHeight()` 仍 = 基字体行高（组合态同钩子覆盖）。④ TextWidget 预算 +110 → +115（虚钩子）。
 - **v1.1（2026-11-08）★ 初设评审吸收（结论 = 不放行进详设；P0×3 / P1×5 / P2×6 全部逐条回码亲核后处置）**：
   ① **P0-1（基线公式两链不闭合）**：GL 双层 floor（`GLRenderer.cpp:254` + `Renderer.cpp:69-71` 只折 pos）+ GDI `static_cast<LONG>` 截断（`:922-923`）使 DIP 域逐 run 减法必然失配（评审建模 33.4%/1.99px）。**修法 = 像素空间整数化**：定义 `A′ = AscentIntPx × 96/dpi`（GDI = tmAscent 整数；GL = floor(ascender/64)），发射式 `pos.y = lineTop + A′(box) − A′(run)`——整数位移与截断/floor 可交换 ⇒ 同行恒同一整数基线（§3.2 闭合证明）。`FontEngine::Ascent` 语义修订（整数像素）+ T44-11 重锚登记。
   ② **P0-2（Ascent 单位自相矛盾）**：`:664` 无 96/dpi 换算 vs `:634` LineHeight 有 ⇒ **Ascent 契约钉死 DIP**；GDI = `tmAscent × 96/dpi`、FT = 薄包装（v1.0 直接转发作废）；T45-9 改 ±1e-3 判据。
@@ -159,4 +166,4 @@ Font EffectiveLineBoxFont(TextMeasurer&) const;
 
 ---
 
-> 初设稿 v1.1（2026-11-08）：**评审吸收毕；闸门 2 可签（附条件满足）、闸门 4/5 修后可签**——评审通过 + 三闸门签字后进详设（条 74）。
+> 初设稿 v1.2（2026-11-08）：**初设评审吸收毕（含补增 P1）；闸门 2/4/5 就绪待签**——评审通过 + 三闸门签字后进详设（条 74）。
