@@ -128,6 +128,10 @@ public:
     using TextBox::IsWrapActive;       ///< 折行生效（请求 ∧ 有测量器）
     using TextBox::WrapRequested;      ///< 折行请求（纯配置，noexcept）
     using TextBox::CaretIndexFromLineX;///< 行内 X → 全局码点（T38-18④ 的可达性判据）
+    using TextBox::SelectAll;                 // ★ Phase 44：暴露全选入口
+    using TextBox::CopySelectionToClipboard;  // ★ Phase 44：暴露剪贴板复制入口
+public:
+    static FakeTextMeasurer& GetFake() { return ms_fake; } // ★ 红线 2：测量绘制同源实例
 protected:
     TextMeasurer* ResolveMeasurer() const override{ return &ms_fake; }   // 9.8：preferred 测量接缝
 private:
@@ -3546,6 +3550,69 @@ void Test86CompositionDirectInsert(){
 	}
 }
 
+// ── T44-10：只读 TextBox 显示混排、选区高亮与明文复制 ──
+void Test44TextBoxReadOnlySupport() {
+	TestableTextBox box;
+	box.SetReadOnly(true);
+	box.SetSize(200, 100);
+
+	std::vector<TextSpan> spans = {
+		{ 0, 3, SpanStyle{ .weight = 700 } },
+		{ 3, 3, SpanStyle{ .family = "Consolas" } }
+	};
+	box.SetStyledText("AAABBBCCC", spans);
+
+	// 红线 2：测量与绘制严格复用同一 Measurer 实例
+	FakeTextMeasurer& fake = TestableTextBox::GetFake();
+
+	// ① 无选区基线绘制：统计背景与边框的 DrawRectCommand 基线数
+	CommandBuffer baseCmds;
+	PaintContext baseCtx(baseCmds, fake);
+	box.Paint(baseCtx, 0, 0);
+
+	int baseRectCount = 0;
+	for (const auto& cmd : baseCmds) {
+		if (std::holds_alternative<DrawRectCommand>(cmd)) ++baseRectCount;
+	}
+
+	// ② 触发全选与剪贴板复制通道
+	box.SelectAll();
+	box.CopySelectionToClipboard();
+
+	auto sel = box.GetSelection();
+	EXPECT_TRUE(sel.has_value());
+	if (sel.has_value()) {
+		EXPECT_EQ(sel->start, static_cast<std::size_t>(0));
+		EXPECT_EQ(sel->end, static_cast<std::size_t>(9));
+	}
+
+	// ③ 有选区状态绘制：断言多 run 发射与高亮矩形差分
+	CommandBuffer selCmds;
+	PaintContext selCtx(selCmds, fake);
+	box.Paint(selCtx, 0, 0);
+
+	int drawCount = 0;
+	int selRectCount = 0;
+	for (const auto& cmd : selCmds) {
+		if (std::holds_alternative<DrawTextCommand>(cmd)) {
+			++drawCount;
+		} else if (std::holds_alternative<DrawRectCommand>(cmd)) {
+			++selRectCount;
+		}
+	}
+	EXPECT_TRUE(drawCount >= 2);
+
+	// 差分断言（P1-2 充血化）：选区激活后发射的高亮矩形数严格比基线多 1 个
+	EXPECT_EQ(selRectCount, baseRectCount + 1);
+
+	// 断言明文获取不受样式影响且无控制字符污染
+	EXPECT_EQ(box.GetText(), "AAABBBCCC");
+	if (sel.has_value()) {
+		const std::string selectedText = box.GetText().substr(sel->start, sel->end - sel->start);
+		EXPECT_EQ(selectedText, "AAABBBCCC");
+	}
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -3624,4 +3691,7 @@ void ECDI::Test::RegisterTextBoxTests()
 
     // ── ★ #86：IME「无组合直插」（全角标点打不进）──
     GetTestRegistry().Add("TextBox.CompositionDirectInsert", &Test86CompositionDirectInsert);   // T86-1..3
+
+    // ── ★ Phase 44：只读 TextBox 混排支持（T44-10）──
+    GetTestRegistry().Add("TextBox.StyledReadOnlySupport", &Test44TextBoxReadOnlySupport);
 }

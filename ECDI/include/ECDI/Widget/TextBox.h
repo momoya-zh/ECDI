@@ -405,6 +405,7 @@ private:
 	bool        m_linesComposing = false;                          ///< 维 10-a 组合态
 	std::size_t m_linesCompStart = 0;                              ///< 维 10-b 组合起点
 	std::size_t m_linesCompLen = 0;                                ///< 维 10-c 组合长度
+	std::size_t m_linesSpanRevision = 0;                           ///< ★ Phase 44：TextBox 行表缓存的 span 版本维
 	float m_scrollOffsetY = 0.0f;          ///< 垂直滚动偏移（像素；clamp [0, GetMaxScrollOffset()]）
 	float m_scrollOffsetX = 0.0f;          ///< 水平滚动偏移（像素；跟手模式——光标边界推导，clamp ≥ 0，无上限）
 	                                       ///< ★ 折行期**恒 0**（D38-G：三个写点——`EnsureCaretVisible` 折行支钉 0 /
@@ -459,6 +460,7 @@ private:
 	/// 失焦用 DestroyTextInputCaret 不走本方法。
 	void SyncTextInputCaret();
 
+protected:
 	// ── 剪贴板（8.5.1；C1 契约——Ctrl 组合是 KeyDown 语义，剪贴板是 Platform capability 非 Event）──
 
 	/// @brief 复制选中区到剪贴板（无选区 = 空操作；Ctrl+C/X）
@@ -473,6 +475,8 @@ private:
 
 	/// @brief 全选（Ctrl+A；anchor=0, caret=末尾）
 	void SelectAll();
+
+private:
 
 	// ── Undo/Redo（8.5.3；方法 private——外部只经 Undo()/Redo() public 入口；测试经行为断言）──
 

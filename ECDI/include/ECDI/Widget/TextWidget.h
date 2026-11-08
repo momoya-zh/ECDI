@@ -200,6 +200,11 @@ protected:
 		return !m_spans.empty() && m_styledTextIdentity == m_text;
 	}
 
+	/// @brief 样式版本号（Phase 44，派生类 TextBox 行表缓存使用）
+	[[nodiscard]] std::size_t StyledTextRevision() const noexcept {
+		return m_styledTextRevision;
+	}
+
 	/// @brief 将指定码点区间拆解为连续覆盖的 RunSlice 序列（基于局部表，绝不写基类成员，守护 D40-L-1）
 	std::vector<RunSlice> BuildRunsForRange(
 	    TextMeasurer& measurer, const std::string& textSource,

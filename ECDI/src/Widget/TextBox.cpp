@@ -492,6 +492,7 @@ bool TextBox::LineKeyMatches(float wrapWidth, bool hasMeasurer) const{
 		dpi = static_cast<int>(std::lround(static_cast<double>(window->GetDpiScale()) * 96.0));
 
 	const Font& f = TextWidget::m_style.font.value;
+	const bool activeSpans = HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
 	return m_linesRevision      == TextRevision()          // 维 1（取代旧失效布尔位的职责）
 	    && m_linesDpi           == dpi                     // 维 5
 	    && m_linesWrapWidth     == wrapWidth               // 维 6
@@ -501,6 +502,7 @@ bool TextBox::LineKeyMatches(float wrapWidth, bool hasMeasurer) const{
 	    && m_linesComposing     == m_isComposing           // 维 10（三项：越序点见初设 C38-6）
 	    && m_linesCompStart     == m_compositionStart
 	    && m_linesCompLen       == m_compositionLength
+	    && (!activeSpans || m_linesSpanRevision == StyledTextRevision()) // 维 11（Phase 44：样式版本自检）
 	    && m_linesFont.size     == f.size                  // 维 2
 	    && m_linesFont.family   == f.family                // 维 3
 	    && m_linesFont.weight   == f.weight;               // 维 4（Phase 36 K8-④ 同族账：漏加过一次）
@@ -521,6 +523,11 @@ void TextBox::LineKeySave(float wrapWidth, bool hasMeasurer){
 	m_linesComposing     = m_isComposing;
 	m_linesCompStart     = m_compositionStart;
 	m_linesCompLen       = m_compositionLength;
+	const bool activeSpans = HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
+	if (activeSpans)
+	{
+		m_linesSpanRevision = StyledTextRevision();
+	}
 	m_linesFont          = TextWidget::m_style.font.value;
 }
 
@@ -1525,9 +1532,30 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 		}
 
 		// ② 行文本绘制（9.5 R1：删逐码点截断测量——单次完整 DrawText，超宽/滚动由 Clip + viewX 处理）
-		if (!lineText.empty()){
-			ctx.DrawText(Point{ viewX, lineY }, lineText,
-				TextWidget::m_style.foreground.value, TextWidget::m_style.font.value);
+		// ★ Phase 44：只读 TextBox 富文本混排分支（REQ-20 判据③ 守护）
+		const bool activeSpans = HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
+		if (activeSpans)
+		{
+			EnsureCpByteOffsets(textSource);
+			TextMeasurer& measurer = ctx.GetTextMeasurer();
+			const auto lineRuns = BuildRunsForRange(measurer, textSource, m_cpByteOffsets, startCp, drawEndCp);
+			float runX = viewX;
+			for (const auto& run : lineRuns)
+			{
+				if (run.cpCount == 0) continue;
+				const std::size_t b0 = ByteOffsetAt(run.startCp);
+				const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
+				const Color rColor = run.color.value_or(TextWidget::m_style.foreground.value);
+				ctx.DrawText(Point{ runX, lineY }, textSource.substr(b0, b1 - b0), rColor, run.font);
+				runX += run.width;
+			}
+		}
+		else
+		{
+			if (!lineText.empty()){
+				ctx.DrawText(Point{ viewX, lineY }, lineText,
+					TextWidget::m_style.foreground.value, TextWidget::m_style.font.value);
+			}
 		}
 
 		// ③ 组合串下划线（8.5.1 设计承诺 §4.4 补欠账——组合区间在本行时画底线）
