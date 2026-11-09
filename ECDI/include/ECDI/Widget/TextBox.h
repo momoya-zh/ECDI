@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Theme/TextBoxStyle.h"
 #include "ECDI/Widget/TextWidget.h"
@@ -206,6 +206,11 @@ protected:
 	///          3 字节）与组合区间保留原文；而 font / dpi / 折行宽**不影响字节** ⇒ 不进键。
 	///          ★ 基类只给 revision（`TextWidget::CurrentByteMapKey`），因为 Label / Button 无 echo/组合。
 	[[nodiscard]] ByteMapKey CurrentByteMapKey() const override;
+
+	/// @brief 布局/绘制 span 激活判据（Phase 45 J3：密码态与组合态不激活 span）
+	[[nodiscard]] bool SpansActiveForLayout() const override {
+		return HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
+	}
 
 	/// @brief TextBox 专属样式（protected——测试派生类可访问；不含 foreground——TextStyle 是文字唯一来源）
 	/// @details 注意：隐藏 TextWidget::m_style（TextStyle）——本类内访问文字样式需显式 `TextWidget::m_style`

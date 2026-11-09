@@ -9,15 +9,23 @@
 
 namespace ECDI {
 
-/// @brief 段内样式描述符（Phase 44，#88）
-/// @details 仅允许覆盖字体族、字重与前景色；严禁包含 size（闸门 3）或斜体（闸门 2 / L44-8）
+/// @brief 段内样式描述符（Phase 44，#88；Phase 45 扩展）
+/// @details 允许覆盖字体族、字重、斜体、字号与前景色。size 覆盖 = DIP 绝对值（与 Font.size 同语义，不跨换算）；
+///          无效值（非有限 / ≤ 0）视同 nullopt（D45-11）。
 struct SpanStyle {
 	std::optional<std::string>   family     = std::nullopt; ///< 字体族（std::nullopt 表示继承基样式）
 	std::optional<std::uint16_t> weight     = std::nullopt; ///< 字重（400=Regular, 700=Bold；std::nullopt 表示继承）
 	std::optional<Color>         foreground = std::nullopt; ///< 前景色（std::nullopt 表示继承控件当前前景色）
+	std::optional<bool>          italic     = std::nullopt; ///< 斜体（std::nullopt 表示继承）
+	std::optional<float>         size       = std::nullopt; ///< 字号（DIP 绝对值；std::nullopt 表示继承）
 
 	bool operator==(const SpanStyle&) const noexcept = default;
 };
+
+/// @brief 是否具有有效的 size 覆盖（D45-11 内部辅助）
+inline bool IsEffectiveSizeOverride(const SpanStyle& s) noexcept {
+	return s.size.has_value() && *s.size < 1.0e9f && *s.size > 0.0f;
+}
 
 /// @brief 样式区间契约（Phase 44，#88）
 /// @details 码点索引空间；区间半开 [startCp, startCp + cpCount)；空 spans 列表等价于普通纯文本

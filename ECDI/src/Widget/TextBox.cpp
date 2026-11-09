@@ -1,4 +1,4 @@
-﻿#include "ECDI/Widget/TextBox.h"
+#include "ECDI/Widget/TextBox.h"
 
 #include "ECDI/Core/ECDIAssert.h"
 #include "ECDI/Core/UTF8.h"
@@ -200,7 +200,7 @@ Size TextBox::MultilinePreferred() const{
 	const_cast<TextBox*>(this)->RecalculateLines();
 	const size_t lines = m_lines.size();
 
-	const float lineH = measurer->LineHeight(TextWidget::m_style.font.value);
+	const float lineH = measurer->LineHeight(EffectiveLineBoxFont(*measurer));
 	const float pad = m_style.padding.value;
 	const float contentH = static_cast<float>(lines) * lineH + pad * 2.0f;
 
@@ -492,7 +492,7 @@ bool TextBox::LineKeyMatches(float wrapWidth, bool hasMeasurer) const{
 		dpi = static_cast<int>(std::lround(static_cast<double>(window->GetDpiScale()) * 96.0));
 
 	const Font& f = TextWidget::m_style.font.value;
-	const bool activeSpans = HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
+	const bool activeSpans = SpansActiveForLayout();
 	return m_linesRevision      == TextRevision()          // 维 1（取代旧失效布尔位的职责）
 	    && m_linesDpi           == dpi                     // 维 5
 	    && m_linesWrapWidth     == wrapWidth               // 维 6
@@ -505,7 +505,8 @@ bool TextBox::LineKeyMatches(float wrapWidth, bool hasMeasurer) const{
 	    && (!activeSpans || m_linesSpanRevision == StyledTextRevision()) // 维 11（Phase 44：样式版本自检）
 	    && m_linesFont.size     == f.size                  // 维 2
 	    && m_linesFont.family   == f.family                // 维 3
-	    && m_linesFont.weight   == f.weight;               // 维 4（Phase 36 K8-④ 同族账：漏加过一次）
+	    && m_linesFont.weight   == f.weight                // 维 4（Phase 36 K8-④ 同族账：漏加过一次）
+	    && m_linesFont.italic   == f.italic;               // Phase 45 批一：斜体维
 }
 
 void TextBox::LineKeySave(float wrapWidth, bool hasMeasurer){
@@ -523,7 +524,7 @@ void TextBox::LineKeySave(float wrapWidth, bool hasMeasurer){
 	m_linesComposing     = m_isComposing;
 	m_linesCompStart     = m_compositionStart;
 	m_linesCompLen       = m_compositionLength;
-	const bool activeSpans = HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
+	const bool activeSpans = SpansActiveForLayout();
 	if (activeSpans)
 	{
 		m_linesSpanRevision = StyledTextRevision();
@@ -587,8 +588,10 @@ float TextBox::GetLineHeight() const{
 	// 全系统唯一行高来源（8.5.2 固定行高契约——不支持逐行字体，Y/lineH 成立）
 	// 空文本兜底：MeasureText("") 返回 {0,0}，LineHeight 提供精确行高
 	// const 方法内 GetWindow() 返回 const Window*——GetTextMeasurer 非 const，只读测量经 const_cast
-	if (Window* window = const_cast<Window*>(GetWindow()))
-		return window->GetTextMeasurer().LineHeight(TextWidget::m_style.font.value);
+	if (Window* window = const_cast<Window*>(GetWindow())) {
+		TextMeasurer& measurer = window->GetTextMeasurer();
+		return measurer.LineHeight(EffectiveLineBoxFont(measurer));
+	}
 	return 16.0f;   // 无窗口（测试环境）兜底固定行高
 }
 
@@ -1533,12 +1536,14 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 
 		// ② 行文本绘制（9.5 R1：删逐码点截断测量——单次完整 DrawText，超宽/滚动由 Clip + viewX 处理）
 		// ★ Phase 44：只读 TextBox 富文本混排分支（REQ-20 判据③ 守护）
-		const bool activeSpans = HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
+		const bool activeSpans = SpansActiveForLayout();
 		if (activeSpans)
 		{
 			EnsureCpByteOffsets(textSource);
 			TextMeasurer& measurer = ctx.GetTextMeasurer();
 			const auto lineRuns = BuildRunsForRange(measurer, textSource, m_cpByteOffsets, startCp, drawEndCp);
+			const bool lineBoxActive = LineBoxGuardActive();
+			const float boxA = lineBoxActive ? measurer.Ascent(EffectiveLineBoxFont(measurer)) : 0.0f;
 			float runX = viewX;
 			for (const auto& run : lineRuns)
 			{
@@ -1546,7 +1551,10 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 				const std::size_t b0 = ByteOffsetAt(run.startCp);
 				const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
 				const Color rColor = run.color.value_or(TextWidget::m_style.foreground.value);
-				ctx.DrawText(Point{ runX, lineY }, textSource.substr(b0, b1 - b0), rColor, run.font);
+				float runY = lineY;
+				if (lineBoxActive)
+					runY = lineY + boxA - measurer.Ascent(run.font);
+				ctx.DrawText(Point{ runX, runY }, textSource.substr(b0, b1 - b0), rColor, run.font);
 				runX += run.width;
 			}
 		}

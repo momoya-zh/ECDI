@@ -175,6 +175,76 @@ static void Test36FaceIdentityTierFiltering()
     EXPECT_EQ(engine->FaceIdFor("Consolas", 650), engine->FaceIdFor("Consolas", 700));
 }
 
+// ── T45-2：斜体选面（有真斜体面族分叉 / 无真斜体面族回落常规池且不重复告警 / italic=false 逐位不变）──
+static void Test45ItalicFaceSelection()
+{
+    auto engine = MakeRealEngine();
+
+    // 1. 有真斜体面族（Consolas / Segoe UI）：FaceIdFor(f, w, true) != FaceIdFor(f, w, false) 且 != 0
+    const FaceId consolasReg = engine->FaceIdFor("Consolas", 400, false);
+    const FaceId consolasIta = engine->FaceIdFor("Consolas", 400, true);
+    EXPECT_TRUE(consolasReg != 0);
+    EXPECT_TRUE(consolasIta != 0);
+    EXPECT_TRUE(consolasIta != consolasReg);
+
+    const FaceId segoeReg = engine->FaceIdFor("Segoe UI", 400, false);
+    const FaceId segoeIta = engine->FaceIdFor("Segoe UI", 400, true);
+    EXPECT_TRUE(segoeReg != 0);
+    EXPECT_TRUE(segoeIta != 0);
+    EXPECT_TRUE(segoeIta != segoeReg);
+
+    // 2. 无真斜体面族（SimSun）：italic=true 回落常规池，FaceId 相等且 != 0
+    const FaceId simsunReg = engine->FaceIdFor("SimSun", 400, false);
+    const FaceId simsunIta = engine->FaceIdFor("SimSun", 400, true);
+    EXPECT_TRUE(simsunReg != 0);
+    EXPECT_TRUE(simsunIta != 0);
+    EXPECT_EQ(simsunIta, simsunReg);
+
+    // 3. italic=false 缺省实参与双参旧调用逐位保持一致
+    EXPECT_EQ(engine->FaceIdFor("Consolas", 400), consolasReg);
+    EXPECT_EQ(engine->FaceIdFor("Segoe UI", 400), segoeReg);
+
+    // 4. 回落写缓存且不重复告警：再次请求命中缓存同 id
+    EXPECT_EQ(engine->FaceIdFor("SimSun", 400, true), simsunReg);
+}
+
+// ── T45-7：负对照② 键完备投毒（familyCache / measureCache / lineHeightCache / ascentCache）──
+static void Test45KeyCompletenessPoisoning()
+{
+    auto engine = MakeRealEngine();
+
+    // ① familyCache 完备性：同一族、同字重下，改变 italic 位不会被旧缓存覆盖
+    const FaceId fReg = engine->FaceIdFor("Segoe UI", 400, false);
+    const FaceId fIta = engine->FaceIdFor("Segoe UI", 400, true);
+    EXPECT_TRUE(fReg != fIta);
+
+    // ② measureCache 完备性：Font.italic 改变产生新 key，未命中缓存
+    const Font regular{ 20.0f, "Segoe UI", 400, false };
+    const Font italic { 20.0f, "Segoe UI", 400, true };
+    const std::string text = "ECDI Italic Poison Test";
+
+    const std::size_t baseMiss = engine->MeasureTextCacheMissCount();
+    engine->MeasureText(regular, text);
+    EXPECT_EQ(engine->MeasureTextCacheMissCount(), baseMiss + 1);
+
+    engine->MeasureText(regular, text);
+    EXPECT_EQ(engine->MeasureTextCacheMissCount(), baseMiss + 1); // 命中缓存
+
+    engine->MeasureText(italic, text);
+    EXPECT_EQ(engine->MeasureTextCacheMissCount(), baseMiss + 2); // italic=true 必须 miss 并重算
+
+    // ③ Ascent 与 LineHeight 分离投毒断言
+    const float aReg = engine->Ascent(regular);
+    const float aIta = engine->Ascent(italic);
+    EXPECT_TRUE(aReg > 0.0f);
+    EXPECT_TRUE(aIta > 0.0f);
+
+    const float lhReg = engine->LineHeight(regular);
+    const float lhIta = engine->LineHeight(italic);
+    EXPECT_TRUE(lhReg > 0.0f);
+    EXPECT_TRUE(lhIta > 0.0f);
+}
+
 void ECDI::Test::RegisterFontWeightTests()
 {
     GetTestRegistry().Add("FontWeight.SimSunSyntheticBoldWidthBand", &Test36SimSunSyntheticBoldWidthBand);     // T36-2
@@ -184,4 +254,8 @@ void ECDI::Test::RegisterFontWeightTests()
     GetTestRegistry().Add("FontWeight.UnresolvedFallsBackAndCaches", &Test36UnresolvedFallsBackAndCaches);     // T36-5
     GetTestRegistry().Add("FontWeight.MeasureCacheKeyIncludesWeight", &Test36MeasureCacheKeyIncludesWeight);   // T36-6
     GetTestRegistry().Add("FontWeight.FaceIdentityTierFiltering", &Test36FaceIdentityTierFiltering);           // T36-8
+
+    // ── Phase 45 批一：斜体选面与键完备性 ──
+    GetTestRegistry().Add("FontWeight.ItalicFaceSelection", &Test45ItalicFaceSelection);                       // T45-2
+    GetTestRegistry().Add("FontWeight.KeyCompletenessPoisoning", &Test45KeyCompletenessPoisoning);             // T45-7
 }

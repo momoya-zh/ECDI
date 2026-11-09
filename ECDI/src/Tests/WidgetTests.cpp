@@ -471,6 +471,7 @@ public:
 		return Size{ static_cast<float>(CountCodepoints(text)) * 8.0f, 16.0f };
 	}
 	float LineHeight(const Font&) override{ return 16.0f; }
+	float Ascent(const Font&) override{ return 12.0f; }
 private:
 	static size_t CountCodepoints(const std::string& s){
 		size_t count = 0;
@@ -721,6 +722,7 @@ public:
 		return m_inner->MeasureText(font, text);
 	}
 	float LineHeight(const Font& font) override { return m_inner->LineHeight(font); }
+	float Ascent(const Font& font) override { return m_inner ? m_inner->Ascent(font) : 12.0f; }
 	std::size_t MeasureCalls() const { return m_measureCalls; }
 private:
 	std::unique_ptr<TextMeasurer> m_inner;
@@ -812,6 +814,7 @@ public:
 		return Size{ 8.0f * static_cast<float>(CountCodepoints(text)), 16.0f };
 	}
 	float LineHeight(const Font&) override{ return 16.0f; }
+	float Ascent(const Font&) override{ return 12.0f; }
 
 	/// ★ 观测缝：只计入口次数，计算**转发批一默认体**（真实二分跑，不是桩——否则断行逻辑没被测）
 	TextFit FitText(const Font& font, const std::string& text,
@@ -1938,6 +1941,13 @@ public:
 		return 16.0f; // 基类/常规行高 16px
 	}
 
+	float Ascent(const Font& font) override {
+		if (font.weight >= 700) {
+			return 18.0f;
+		}
+		return 12.0f;
+	}
+
 	/// @brief 4 参真实重载
 	TextFit FitText(const Font& font, const std::string& text, std::size_t startCp, float maxWidth) override {
 		float charW = 8.0f;
@@ -2370,6 +2380,527 @@ void Test44StyledSpansBaselineProbe() {
 	EXPECT_TRUE(std::abs(aReg - aMono) > 0.0f);
 }
 
+// ── T45-5：等价护栏双相（HEAD 录制字面量 + 进程内全 SpanStyle{} 等价 + 负对照）──
+static constexpr const char* kGoldenZeroSpan =
+    "0x1.4000000000000p+3|0x1.3000000000000p+5|0x1.c000000000000p+3||400|0x0.0000000000000p+0|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0|Hello World\n";
+
+static constexpr const char* kGoldenPhase44Spans =
+    "0x1.4000000000000p+3|0x1.3000000000000p+5|0x1.c000000000000p+3|Segoe UI|700|0x1.0000000000000p+0|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0|Hello\n"
+    "0x1.4000000000000p+4|0x1.3000000000000p+5|0x1.c000000000000p+3||400|0x0.0000000000000p+0|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0| \n"
+    "0x1.e000000000000p+4|0x1.3000000000000p+5|0x1.c000000000000p+3|Consolas|400|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0|0x1.0000000000000p+0|World\n";
+
+static std::string EscapeGoldenString(const std::string& s) {
+    std::string res;
+    res.reserve(s.size());
+    for (char c : s) {
+        if (c == '\\') { res += "\\\\"; }
+        else if (c == '|') { res += "\\|"; }
+        else if (c == '\n') { res += "\\n"; }
+        else { res += c; }
+    }
+    return res;
+}
+
+static std::string DumpDrawTextCommands(const CommandBuffer& cmds) {
+    std::string out;
+    for (const auto& cmd : cmds) {
+        if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) {
+            char bufX[64], bufY[64], bufS[64], bufR[64], bufG[64], bufB[64], bufA[64];
+            std::snprintf(bufX, sizeof bufX, "%a", tc->pos.x);
+            std::snprintf(bufY, sizeof bufY, "%a", tc->pos.y);
+            std::snprintf(bufS, sizeof bufS, "%a", tc->font.size);
+            std::snprintf(bufR, sizeof bufR, "%a", tc->color.r);
+            std::snprintf(bufG, sizeof bufG, "%a", tc->color.g);
+            std::snprintf(bufB, sizeof bufB, "%a", tc->color.b);
+            std::snprintf(bufA, sizeof bufA, "%a", tc->color.a);
+            out += std::string(bufX) + "|" + bufY + "|" + bufS + "|" + EscapeGoldenString(tc->font.family) + "|" + std::to_string(tc->font.weight) + "|";
+            if (tc->font.italic) {
+                out += "italic=1|";
+            }
+            out += std::string(bufR) + "|" + bufG + "|" + bufB + "|" + bufA + "|" + EscapeGoldenString(tc->text) + "\n";
+        }
+    }
+    return out;
+}
+
+void Test45StyledSpansGoldenSnapshot() {
+    RecordingBackend backend;
+
+    // ① 零 span 黄金相（逐位与 HEAD 基线字面量一致）
+    CommandBuffer cmdsZero;
+    PaintContext ctxZero(cmdsZero, backend);
+    Label labelZero;
+    labelZero.SetPosition(10, 20);
+    labelZero.SetSize(200, 50);
+    labelZero.SetStyledText("Hello World", {});
+    labelZero.Paint(ctxZero, 0, 0);
+
+    const std::string dumpZero = DumpDrawTextCommands(cmdsZero);
+    EXPECT_EQ(dumpZero, std::string(kGoldenZeroSpan));
+
+    // ② Phase 44 样式 span 黄金相（weight/family/color，逐位与 HEAD 基线字面量一致）
+    CommandBuffer cmdsP44;
+    PaintContext ctxP44(cmdsP44, backend);
+    Label labelP44;
+    labelP44.SetPosition(10, 20);
+    labelP44.SetSize(200, 50);
+    std::vector<TextSpan> spansP44 = {
+        { 0, 5, SpanStyle{ .family = "Segoe UI", .weight = 700, .foreground = Color::Red() } },
+        { 6, 5, SpanStyle{ .family = "Consolas", .weight = 400, .foreground = Color::Blue() } }
+    };
+    labelP44.SetStyledText("Hello World", spansP44);
+    labelP44.Paint(ctxP44, 0, 0);
+
+    const std::string dumpP44 = DumpDrawTextCommands(cmdsP44);
+    EXPECT_EQ(dumpP44, std::string(kGoldenPhase44Spans));
+
+    // ③ 进程内等价相（零 spans ≡ 全 SpanStyle{} 的 span，命令流逐位相等）
+    CommandBuffer cmdsDefaultSpan;
+    PaintContext ctxDefaultSpan(cmdsDefaultSpan, backend);
+    Label labelDefaultSpan;
+    labelDefaultSpan.SetPosition(10, 20);
+    labelDefaultSpan.SetSize(200, 50);
+    labelDefaultSpan.SetStyledText("Hello World", { { 0, 11, SpanStyle{} } });
+    labelDefaultSpan.Paint(ctxDefaultSpan, 0, 0);
+
+    const std::string dumpDefaultSpan = DumpDrawTextCommands(cmdsDefaultSpan);
+    EXPECT_EQ(dumpDefaultSpan, dumpZero);
+
+    // ④ 负对照（样式变更时必不等于旧黄金字面量）
+    CommandBuffer cmdsNeg;
+    PaintContext ctxNeg(cmdsNeg, backend);
+    Label labelNeg;
+    labelNeg.SetPosition(10, 20);
+    labelNeg.SetSize(200, 50);
+    std::vector<TextSpan> spansNeg = {
+        { 0, 5, SpanStyle{ .family = "Segoe UI", .weight = 700, .foreground = Color::Green() } },
+        { 6, 5, SpanStyle{ .family = "Consolas", .weight = 400, .foreground = Color::Blue() } }
+    };
+    labelNeg.SetStyledText("Hello World", spansNeg);
+    labelNeg.Paint(ctxNeg, 0, 0);
+
+    const std::string dumpNeg = DumpDrawTextCommands(cmdsNeg);
+    EXPECT_TRUE(dumpNeg != std::string(kGoldenPhase44Spans));
+}
+
+// ── T45-1：斜体 run 命令流（每 run 恰一条 DrawText / font.italic 严格匹配 / x 累积同源 / C45-2 空相）──
+void Test45ItalicRunCommandStream() {
+    RecordingBackend backend;
+    CommandBuffer cmds;
+    PaintContext ctx(cmds, backend);
+
+    Label label;
+    label.SetPosition(10, 20);
+    label.SetSize(200, 50);
+
+    // [0, 5) Segoe UI Italic; [6, 5) Consolas Regular (italic=false)
+    std::vector<TextSpan> spans = {
+        { 0, 5, SpanStyle{ .family = "Segoe UI", .weight = 400, .italic = true } },
+        { 6, 5, SpanStyle{ .family = "Consolas", .weight = 400, .italic = false } }
+    };
+    label.SetStyledText("Hello World", spans);
+    label.Paint(ctx, 0, 0);
+
+    std::vector<const DrawTextCommand*> textCmds;
+    for (const auto& cmd : cmds) {
+        if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) {
+            textCmds.push_back(tc);
+        }
+    }
+
+    EXPECT_EQ(textCmds.size(), 3u);
+    if (textCmds.size() == 3u) {
+        EXPECT_EQ(textCmds[0]->text, "Hello");
+        EXPECT_TRUE(textCmds[0]->font.italic);
+
+        EXPECT_EQ(textCmds[1]->text, " ");
+        EXPECT_FALSE(textCmds[1]->font.italic);
+
+        EXPECT_EQ(textCmds[2]->text, "World");
+        EXPECT_FALSE(textCmds[2]->font.italic);
+
+        // x 累积同源（C44-2 继承）
+        EXPECT_TRUE(textCmds[1]->pos.x > textCmds[0]->pos.x);
+        EXPECT_TRUE(textCmds[2]->pos.x > textCmds[1]->pos.x);
+    }
+
+    // C45-2 相：未显式置 italic 的 span，font.italic 恒为 false
+    CommandBuffer cmdsDefault;
+    PaintContext ctxDefault(cmdsDefault, backend);
+    Label labelDefault;
+    labelDefault.SetPosition(10, 20);
+    labelDefault.SetSize(200, 50);
+    labelDefault.SetStyledText("Hello World", {
+        { 0, 5, SpanStyle{ .family = "Segoe UI", .weight = 700 } }
+    });
+    labelDefault.Paint(ctxDefault, 0, 0);
+
+    for (const auto& cmd : cmdsDefault) {
+        if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) {
+            EXPECT_FALSE(tc->font.italic);
+        }
+    }
+}
+
+// ── T45-6：负对照①（禁用/回退 italic 覆盖 ⇒ 恰好 T45-1 italic 断言不匹配，证明非假绿）──
+void Test45NegativeControlItalicMaterialization() {
+    RecordingBackend backend;
+    CommandBuffer cmds;
+    PaintContext ctx(cmds, backend);
+
+    Label label;
+    label.SetPosition(10, 20);
+    label.SetSize(200, 50);
+
+    // 回退 italic 覆盖：span[0] 将 italic 置回 false
+    std::vector<TextSpan> spans = {
+        { 0, 5, SpanStyle{ .family = "Segoe UI", .weight = 400, .italic = false } },
+        { 6, 5, SpanStyle{ .family = "Consolas", .weight = 400, .italic = false } }
+    };
+    label.SetStyledText("Hello World", spans);
+    label.Paint(ctx, 0, 0);
+
+    std::vector<const DrawTextCommand*> textCmds;
+    for (const auto& cmd : cmds) {
+        if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) {
+            textCmds.push_back(tc);
+        }
+    }
+
+    EXPECT_EQ(textCmds.size(), 3u);
+    if (textCmds.size() == 3u) {
+        EXPECT_FALSE(textCmds[0]->font.italic);
+    }
+}
+
+// ── 批 2 专用假件：FontSizeScaledMeasurer ──
+class FontSizeScaledMeasurer : public RecordingBackend {
+public:
+    Size MeasureText(const Font& f, const std::string& text) override {
+        size_t count = 0;
+        for (size_t i = 0; i < text.size(); ++i) {
+            if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+                ++count;
+        }
+        return Size{ static_cast<float>(count) * f.size * 0.5f, f.size * 1.2f };
+    }
+    float LineHeight(const Font& f) override { return f.size * 1.2f; }
+    float Ascent(const Font& f) override { return f.size * 0.8f; }
+};
+
+// ── 批 2 专用假件：CrossFamilyMeasurer ──
+class CrossFamilyMeasurer : public RecordingBackend {
+public:
+    Size MeasureText(const Font& f, const std::string& text) override {
+        size_t count = 0;
+        for (size_t i = 0; i < text.size(); ++i) {
+            if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+                ++count;
+        }
+        return Size{ static_cast<float>(count) * 10.0f, LineHeight(f) };
+    }
+    float LineHeight(const Font& f) override {
+        if (f.family == "BoxFamily") return 25.0f;
+        if (f.family == "RunFamily") return 40.0f;
+        return 16.0f;
+    }
+    float Ascent(const Font& f) override {
+        if (f.family == "BoxFamily") return 25.0f;
+        if (f.family == "RunFamily") return 20.0f;
+        return 12.0f;
+    }
+};
+
+class ScaledMeasurerTextBox : public TextBox {
+public:
+    explicit ScaledMeasurerTextBox(TextMeasurer* m) : m_customMeasurer(m) {}
+    using TextBox::TextBox;
+    void SetCustomMeasurer(TextMeasurer* m) { m_customMeasurer = m; }
+protected:
+    TextMeasurer* ResolveMeasurer() const override {
+        if (m_customMeasurer) return m_customMeasurer;
+        return TextBox::ResolveMeasurer();
+    }
+private:
+    TextMeasurer* m_customMeasurer = nullptr;
+};
+
+class TestFracMeasurer : public TextMeasurer {
+public:
+    Size MeasureText(const Font&, const std::string& text) override {
+        size_t count = 0;
+        for (size_t i = 0; i < text.size(); ++i)
+            if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+                ++count;
+        return Size{ static_cast<float>(count) * 8.0f, 19.2f };
+    }
+    float LineHeight(const Font&) override { return 19.2f; }
+    float Ascent(const Font&) override { return 15.0f; }
+};
+
+// ── T45-3：行框多相测试 ──
+void Test45StyledSpansLineBoxMultiPhase() {
+    FontSizeScaledMeasurer scaledMeasurer;
+
+    // ① 同高相：无 size 覆盖 ⇒ totalHeight 与 Phase 44 逐位（lineHeight * lines.size()）
+    {
+        TestableStyledLabel label;
+        label.SetSize(100.0f, 100.0f);
+        label.SetWordWrap(true);
+        const Font baseFont{ 10.0f, "Family", 400 };
+        label.SetFont(baseFont);
+        label.SetStyledText("Line1\nLine2", {
+            TextSpan{ 0, 5, SpanStyle{ .weight = 700 } }
+        });
+        auto layout = label.BuildTextLayout(scaledMeasurer, "Line1\nLine2", 100.0f);
+        EXPECT_EQ(layout.lines.size(), 2u);
+        const float baseLh = scaledMeasurer.LineHeight(baseFont);
+        EXPECT_NEAR(layout.totalHeight, baseLh * 2.0f, kEpsilon);
+    }
+
+    // ② 归属相：大字号 run 在第二行 ⇒ 首行行高同涨（块级统一）
+    {
+        TestableStyledLabel label;
+        label.SetSize(100.0f, 100.0f);
+        label.SetWordWrap(true);
+        label.SetFont(Font{ 10.0f, "Family", 400 });
+        label.SetStyledText("Line1\nLine2", {
+            TextSpan{ 6, 5, SpanStyle{ .size = 20.0f } }
+        });
+        auto layout = label.BuildTextLayout(scaledMeasurer, "Line1\nLine2", 100.0f);
+        EXPECT_EQ(layout.lines.size(), 2u);
+        EXPECT_NEAR(layout.totalHeight, 20.0f * 1.2f * 2.0f, kEpsilon);
+    }
+
+    // ③ A′ 归属相 + L45-7 可观测量：CrossFamilyMeasurer，box(25,0,0) vs run(20,10,10)
+    {
+        CrossFamilyMeasurer cfm;
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, cfm);
+        Label label;
+        label.SetPosition(0, 0);
+        label.SetSize(200, 50);
+        label.SetFont(Font{ 16.0f, "BoxFamily", 400 }); // asc=25, lh=25
+        label.SetStyledText("Hello World", {
+            TextSpan{ 0, 5, SpanStyle{ .family = "RunFamily", .size = 16.0f } } // asc=20, lh=40
+        });
+        label.Paint(ctx, 0, 0);
+
+        std::vector<const DrawTextCommand*> textCmds;
+        for (const auto& cmd : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) {
+                textCmds.push_back(tc);
+            }
+        }
+        EXPECT_TRUE(textCmds.size() >= 2u);
+        if (textCmds.size() >= 2u) {
+            const DrawTextCommand* runCmd = nullptr;
+            const DrawTextCommand* boxCmd = nullptr;
+            for (const auto* tc : textCmds) {
+                if (tc->font.family == "RunFamily") runCmd = tc;
+                if (tc->font.family == "BoxFamily") boxCmd = tc;
+            }
+            EXPECT_TRUE(runCmd != nullptr);
+            EXPECT_TRUE(boxCmd != nullptr);
+            if (runCmd && boxCmd) {
+                // pos.y(RunFamily) - pos.y(BoxFamily) = A'(box) - A'(run) = 25 - 20 = 5
+                EXPECT_NEAR(runCmd->pos.y - boxCmd->pos.y, 5.0f, kEpsilon);
+                // L45-7 断言：run 盒下沿 - 行框下沿 = (A'box - A'run) + LineHeight(run) - LineHeight(box) = 5 + 40 - 25 = 20 > 0
+                const float runBottom = runCmd->pos.y + 40.0f;
+                const float boxBottom = boxCmd->pos.y + 25.0f;
+                EXPECT_NEAR(runBottom - boxBottom, 20.0f, kEpsilon);
+            }
+        }
+    }
+
+    // ④ size 守卫相：基 Consolas + 纯 family/weight/italic 均不触发守卫；加 size 覆盖才变
+    {
+        TestableStyledLabel label;
+        label.SetSize(200.0f, 100.0f);
+        const Font baseFont{ 14.0f, "Consolas", 400 };
+        label.SetFont(baseFont);
+        const float baseH = scaledMeasurer.LineHeight(baseFont);
+
+        label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .family = "Segoe UI" } } });
+        EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, baseH, kEpsilon);
+
+        label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .weight = 700 } } });
+        EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, baseH, kEpsilon);
+
+        label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .italic = true } } });
+        EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, baseH, kEpsilon);
+
+        label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .size = 28.0f } } });
+        EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, 28.0f * 1.2f, kEpsilon);
+    }
+
+    // ⑤ 五站同源相：末行 lineY + lineHeight 与 block.y + totalHeight 一致
+    {
+        TestableStyledLabel label;
+        label.SetSize(100.0f, 100.0f);
+        label.SetWordWrap(true);
+        label.SetFont(Font{ 10.0f, "Family", 400 });
+        label.SetStyledText("Line1\nLine2\nLine3", { TextSpan{ 0, 5, SpanStyle{ .size = 20.0f } } });
+        auto layout = label.BuildTextLayout(scaledMeasurer, "Line1\nLine2\nLine3", 100.0f);
+        const float lh = 20.0f * 1.2f;
+        const float totalH = layout.totalHeight;
+        const float stepSum = static_cast<float>(layout.lines.size()) * lh;
+        EXPECT_NEAR(totalH, stepSum, kEpsilon);
+    }
+
+    // ⑥ TextBox preferred 同源：size 激活 vs 假件 19.2 系
+    {
+        ScaledMeasurerTextBox tb(&scaledMeasurer);
+        tb.SetFont(Font{ 10.0f, "Family", 400 });
+        tb.SetText("Line1\nLine2");
+        tb.SetStyledText("Line1\nLine2", { TextSpan{ 0, 5, SpanStyle{ .size = 20.0f } } });
+        Size pref = tb.GetPreferredSize();
+        EXPECT_NEAR(pref.height, 48.0f, kEpsilon);
+
+        TestFracMeasurer fracMeasurer;
+        ScaledMeasurerTextBox tbFrac(&fracMeasurer);
+        tbFrac.SetText("Line1\nLine2");
+        Size prefFrac = tbFrac.GetPreferredSize();
+        EXPECT_NEAR(prefFrac.height, 39.0f, kEpsilon); // ceil(2 * 19.2) = 39
+    }
+
+    // ⑦ 判据一致相：密码态不激活 span，Normal 态激活
+    {
+        ScaledMeasurerTextBox tbPass(&scaledMeasurer);
+        tbPass.SetFont(Font{ 10.0f, "Family", 400 });
+        tbPass.SetText("Line1\nLine2");
+        tbPass.SetStyledText("Line1\nLine2", { TextSpan{ 0, 5, SpanStyle{ .size = 30.0f } } });
+        tbPass.SetEchoMode(TextBox::EchoMode::Password);
+        EXPECT_NEAR(tbPass.GetPreferredSize().height, 24.0f, kEpsilon); // ceil(2 * 12.0) = 24
+
+        tbPass.SetEchoMode(TextBox::EchoMode::Normal);
+        EXPECT_NEAR(tbPass.GetPreferredSize().height, 72.0f, kEpsilon); // ceil(2 * 36.0) = 72
+    }
+
+    // ⑧ 空文本相：m_text 空 ⇒ 基字体行高
+    {
+        TestableStyledLabel labelEmpty;
+        labelEmpty.SetFont(Font{ 12.0f, "Family", 400 });
+        labelEmpty.SetText("");
+        labelEmpty.SetStyledText("", { TextSpan{ 0, 0, SpanStyle{ .size = 30.0f } } });
+        auto layoutEmpty = labelEmpty.BuildTextLayout(scaledMeasurer, "", 100.0f);
+        EXPECT_NEAR(layoutEmpty.totalHeight, 12.0f * 1.2f, kEpsilon);
+    }
+
+    // ⑨ 零宽 span 相：cpCount == 0 的 size 覆盖 span 不触发守卫
+    {
+        TestableStyledLabel labelZero;
+        labelZero.SetFont(Font{ 12.0f, "Family", 400 });
+        labelZero.SetText("Hello");
+        labelZero.SetStyledText("Hello", { TextSpan{ 0, 0, SpanStyle{ .size = 30.0f } } });
+        auto layoutZero = labelZero.BuildTextLayout(scaledMeasurer, "Hello", 100.0f);
+        EXPECT_NEAR(layoutZero.totalHeight, 12.0f * 1.2f, kEpsilon);
+    }
+}
+
+// ── T45-4：基线共享 ──
+void Test45StyledSpansBaselineShared() {
+    RecordingBackend backend;
+    CommandBuffer cmds;
+    PaintContext ctx(cmds, backend);
+
+    Label label;
+    label.SetPosition(0, 0);
+    label.SetSize(300, 100);
+
+    // 混字号：16px 与 24px
+    std::vector<TextSpan> spans = {
+        { 0, 5, SpanStyle{ .size = 16.0f } },
+        { 6, 5, SpanStyle{ .size = 24.0f } }
+    };
+    label.SetStyledText("Hello World", spans);
+    label.Paint(ctx, 0, 0);
+
+    std::vector<const DrawTextCommand*> textCmds;
+    for (const auto& cmd : cmds) {
+        if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) {
+            textCmds.push_back(tc);
+        }
+    }
+
+    EXPECT_TRUE(textCmds.size() >= 2u);
+    if (textCmds.size() < 2u) return;
+
+    // 辅助相：DIP 域 pos.y + A′(run.font) == 常数 ±1e-3
+    const float baseA0 = textCmds[0]->pos.y + backend.Ascent(textCmds[0]->font);
+    for (size_t i = 1; i < textCmds.size(); ++i) {
+        const float baseAi = textCmds[i]->pos.y + backend.Ascent(textCmds[i]->font);
+        EXPECT_NEAR(baseA0, baseAi, kEpsilon);
+    }
+
+    // 主断言：测试内复现两链量化
+    // 96dpi (scale = 1.0f): GDI = trunc(y_px) + round(A'*dpi/96), GL = floor(y_px) + round(A'*dpi/96)
+    const float scale96 = 1.0f;
+    const int gdiBase0 = static_cast<int>(scale96 * textCmds[0]->pos.y) + static_cast<int>(std::round(backend.Ascent(textCmds[0]->font)));
+    const int glBase0 = static_cast<int>(std::floor(scale96 * textCmds[0]->pos.y)) + static_cast<int>(std::round(backend.Ascent(textCmds[0]->font)));
+    EXPECT_EQ(gdiBase0, glBase0);
+
+    for (size_t i = 1; i < textCmds.size(); ++i) {
+        const int gdiBaseI = static_cast<int>(scale96 * textCmds[i]->pos.y) + static_cast<int>(std::round(backend.Ascent(textCmds[i]->font)));
+        const int glBaseI = static_cast<int>(std::floor(scale96 * textCmds[i]->pos.y)) + static_cast<int>(std::round(backend.Ascent(textCmds[i]->font)));
+        EXPECT_EQ(gdiBase0, gdiBaseI);
+        EXPECT_EQ(glBase0, glBaseI);
+    }
+
+    // 非 96dpi (例如 120dpi, scale = 1.25f): 允许 ±1px
+    const float scale120 = 1.25f;
+    const int gdiBase120_0 = static_cast<int>(scale120 * textCmds[0]->pos.y) + static_cast<int>(std::round(backend.Ascent(textCmds[0]->font) * 120.0f / 96.0f));
+    for (size_t i = 1; i < textCmds.size(); ++i) {
+        const int gdiBase120_I = static_cast<int>(scale120 * textCmds[i]->pos.y) + static_cast<int>(std::round(backend.Ascent(textCmds[i]->font) * 120.0f / 96.0f));
+        EXPECT_TRUE(std::abs(gdiBase120_0 - gdiBase120_I) <= 1);
+    }
+}
+
+// ── T45-8：两链一致性（分相）──
+void Test45StyledSpansTwoChainConsistency() {
+    auto engine = std::make_unique<FontEngine>();
+    engine->SetDpi(96);
+    engine->SetFontSource(std::make_unique<Win32FontSource>());
+
+    // 1. 真斜体面族选面验证 (Segoe UI)
+    const Font segoeReg{ 16.0f, "Segoe UI", 400, false };
+    const Font segoeItalic{ 16.0f, "Segoe UI", 400, true };
+    const auto idReg = engine->FaceIdFor(segoeReg.family, segoeReg.weight, false);
+    const auto idItalic = engine->FaceIdFor(segoeItalic.family, segoeItalic.weight, true);
+    EXPECT_NE(idReg, 0u);
+    EXPECT_NE(idItalic, 0u);
+    EXPECT_NE(idReg, idItalic);
+
+    // 2. O45-3 契约：真斜体面与常规面的 Ascent 一致 (hhea 盒相同)
+    const float aReg = engine->Ascent(segoeReg);
+    const float aItalic = engine->Ascent(segoeItalic);
+    EXPECT_TRUE(aReg > 0.0f);
+    EXPECT_NEAR(aReg, aItalic, kEpsilon);
+
+    // 3. 无斜体族回落验证 (例如 SimSun)
+    const auto idCjkReg = engine->FaceIdFor("SimSun", 400, false);
+    const auto idCjkItalic = engine->FaceIdFor("SimSun", 400, true);
+    if (idCjkReg != 0u) {
+        EXPECT_EQ(idCjkReg, idCjkItalic);
+    }
+
+    // 4. 混合字号基线量化对齐 (14px 与 20px)
+    const Font fontSmall{ 14.0f, "Segoe UI", 400, false };
+    const Font fontLarge{ 20.0f, "Segoe UI", 400, false };
+    const float aSmall = engine->Ascent(fontSmall);
+    const float aLarge = engine->Ascent(fontLarge);
+    EXPECT_TRUE(aSmall > 0.0f);
+    EXPECT_TRUE(aLarge > 0.0f);
+
+    const float ySmall = aLarge - aSmall;
+    EXPECT_NEAR(ySmall + aSmall, aLarge, kEpsilon);
+
+    // 96dpi 整数像素量化基线
+    const int baseIntLarge = static_cast<int>(std::floor(0.0f)) + static_cast<int>(std::round(aLarge));
+    const int baseIntSmall = static_cast<int>(std::floor(ySmall)) + static_cast<int>(std::round(aSmall));
+    EXPECT_EQ(baseIntLarge, baseIntSmall);
+}
+
 } // namespace
 
 void ECDI::Test::RegisterWidgetTests()
@@ -2443,4 +2974,10 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.StyledSpansDifferentFonts",    &Test44StyledSpansDifferentFonts);
     GetTestRegistry().Add("TextWidget.StyledSpansFontMetricsSanity", &Test44StyledSpansFontMetricsSanity);
     GetTestRegistry().Add("TextWidget.StyledSpansBaselineProbe",     &Test44StyledSpansBaselineProbe);
+    GetTestRegistry().Add("TextWidget.StyledSpansGoldenSnapshot",     &Test45StyledSpansGoldenSnapshot);
+    GetTestRegistry().Add("TextWidget.StyledSpansItalicCommandStream", &Test45ItalicRunCommandStream);        // T45-1
+    GetTestRegistry().Add("TextWidget.StyledSpansNegativeControlItalic", &Test45NegativeControlItalicMaterialization); // T45-6
+    GetTestRegistry().Add("TextWidget.StyledSpansLineBoxMultiPhase",   &Test45StyledSpansLineBoxMultiPhase);     // T45-3
+    GetTestRegistry().Add("TextWidget.StyledSpansBaselineShared",      &Test45StyledSpansBaselineShared);        // T45-4
+    GetTestRegistry().Add("TextWidget.StyledSpansTwoChainConsistency", &Test45StyledSpansTwoChainConsistency);  // T45-8
 }

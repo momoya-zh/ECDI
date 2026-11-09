@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ECDI/Core/Color.h"
 #include "ECDI/Core/Font.h"
@@ -204,6 +204,19 @@ protected:
 	[[nodiscard]] std::size_t StyledTextRevision() const noexcept {
 		return m_styledTextRevision;
 	}
+
+	/// @brief 布局/绘制 span 激活判据的单一真相源（Phase 45 J1–J3）。基类 ≡ HasActiveSpans()。
+	[[nodiscard]] virtual bool SpansActiveForLayout() const { return HasActiveSpans(); }
+
+	/// @brief 是否存在生效的 size 覆盖（且处于激活状态）的守卫判断（Phase 45）
+	[[nodiscard]] bool LineBoxGuardActive() const;
+
+	/// @brief 行框字体（A′ 最大者；仅 size 覆盖触发，否则 = 基字体）。不是 ResolveRunFont 的产物，
+	///        而是同一 run 字体集合上的兄弟概念（不同选取规则）。
+	[[nodiscard]] Font EffectiveLineBoxFont(TextMeasurer& measurer) const;
+
+	/// @brief span → 字形字体（唯一组装点；RunSlice.font 与行框集合共用；Phase 45）
+	[[nodiscard]] static Font ResolveRunFont(const Font& base, const SpanStyle& s);
 
 	/// @brief 将指定码点区间拆解为连续覆盖的 RunSlice 序列（基于局部表，绝不写基类成员，守护 D40-L-1）
 	std::vector<RunSlice> BuildRunsForRange(

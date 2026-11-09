@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "ECDI/Core/Size.h"
 #include "ECDI/Core/Font.h"
@@ -205,6 +205,11 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		/// @note 回退（三处统一为 `font.size`）：缺 face / 字体无 `hhea` 表 /
 		///       `unitsPerEm == 0` / 查询失败 / 计算出的行框非正。
 		virtual float LineHeight(const Font& font) = 0;
+
+		/// @brief 该字体的链内整数像素基线偏移之 DIP 折算（A′，Phase 45）
+		/// @details 与 LineHeight（行框口径，otmMac* / hhea 盒）分属两个口径。
+		///          DIP 单位：A′ = AscentIntPx × 96 / dpi（同一 measurer 实例、同一 dpi）。
+		virtual float Ascent(const Font& font) = 0;
 	};
 
 }

@@ -40,10 +40,12 @@ public:
 	                const std::vector<std::uint32_t>& byteOffsets) override;
 
 	float LineHeight(const Font& font) override;
+	float Ascent(const Font& font) override;
 
 private:
 	/// ★ 与 `GLRenderer` **共享**（外部评审 §9/§10：保持 `shared_ptr`——不引入更复杂的所有权）
 	std::shared_ptr<FontEngine> m_engine;
+	int m_dpi = 96;
 };
 
 }

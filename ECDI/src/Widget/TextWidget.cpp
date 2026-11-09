@@ -1,4 +1,4 @@
-﻿#include "ECDI/Widget/TextWidget.h"
+#include "ECDI/Widget/TextWidget.h"
 
 #include "ECDI/Core/ECDIAssert.h"   // ★ Phase 40：表设施的 FRAMEWORK_ASSERT（截断 / 串身份自检）
 #include "ECDI/Core/Size.h"
@@ -335,6 +335,52 @@ std::size_t TextWidget::ByteOffsetAt(std::size_t cpIndex) const{
 
 }
 
+Font TextWidget::ResolveRunFont(const Font& base, const SpanStyle& s) {
+	Font f = base;
+	if (s.family.has_value()) f.family = *s.family;
+	if (s.weight.has_value()) f.weight = *s.weight;
+	if (s.italic.has_value()) f.italic = *s.italic;
+	if (IsEffectiveSizeOverride(s)) f.size = *s.size;
+	return f;
+}
+
+bool TextWidget::LineBoxGuardActive() const {
+	if (!SpansActiveForLayout()) return false;
+	for (const auto& sp : m_spans) {
+		if (sp.cpCount != 0 && IsEffectiveSizeOverride(sp.style)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+Font TextWidget::EffectiveLineBoxFont(TextMeasurer& m) const {
+	const Font& base = m_style.font.value;
+	if (!LineBoxGuardActive()) return base;
+	constexpr float kEps = 1e-3f;
+	Font  best   = base;
+	float bestA  = m.Ascent(base);
+	float bestLH = m.LineHeight(base);
+	for (const auto& sp : m_spans) {
+		if (sp.cpCount == 0) continue;
+		const Font f = ResolveRunFont(base, sp.style);
+		const float a = m.Ascent(f);
+		if (a > bestA + kEps) {
+			best = f;
+			bestA = a;
+			bestLH = m.LineHeight(f);
+		} else if (std::fabs(a - bestA) <= kEps) {
+			const float lh = m.LineHeight(f);
+			if (lh > bestLH) {
+				best = f;
+				bestA = a;
+				bestLH = lh;
+			}
+		}
+	}
+	return best;
+}
+
 std::vector<TextWidget::RunSlice> TextWidget::BuildRunsForRange(
     TextMeasurer& measurer, const std::string& textSource,
     const std::vector<std::uint32_t>& byteOffsets,
@@ -373,13 +419,7 @@ std::vector<TextWidget::RunSlice> TextWidget::BuildRunsForRange(
 		const std::size_t rStart = (std::max)(cur, span.startCp);
 		const std::size_t rEnd   = (std::min)(endCp, spanEnd);
 		if (rEnd > rStart) {
-			Font rFont = baseFont;
-			if (span.style.family.has_value()) {
-				rFont.family = *span.style.family;
-			}
-			if (span.style.weight.has_value()) {
-				rFont.weight = *span.style.weight;
-			}
+			const Font rFont = ResolveRunFont(baseFont, span.style);
 			const std::size_t b0 = OffsetAt(byteOffsets, rStart);
 			const std::size_t b1 = OffsetAt(byteOffsets, rEnd);
 			const float w = measurer.MeasureText(rFont, textSource.substr(b0, b1 - b0)).width;
@@ -420,7 +460,8 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer,
 
 	TextLayout layout;
 	const Font& font = m_style.font.value;
-	const float lineHeight = measurer.LineHeight(font);
+	const Font lineBoxFont = EffectiveLineBoxFont(measurer);
+	const float lineHeight = measurer.LineHeight(lineBoxFont);
 
 	// ★ 空文本 ⇒ 1 个空行（而非 0 行）：「零行」会让 preferred 高度归零、控件整块消失；
 	//   D29-Ⅴ 的空行语义在空串上的自然延伸（T29-5 空串断言锚）。
@@ -495,7 +536,7 @@ TextWidget::TextLayout TextWidget::BuildTextLayout(TextMeasurer& measurer,
 			const std::size_t lineStart = scan;
 
 		// ★ P1-1 串身份护栏：防 TextBox 传入显示串/掩码串时错贴明文 spans
-		const bool hasSpans = HasActiveSpans() && (text == m_text);
+		const bool hasSpans = SpansActiveForLayout() && (text == m_text);
 		if (hasSpans) {
 			// ── Phase 44（段内样式折行推进）：单调消费 run，复用 run.width（P1-4，复杂度 O(L·R)）──
 			const auto candidateRuns = BuildRunsForRange(measurer, text, byteOffsets, scan, segEnd);
@@ -601,7 +642,8 @@ const TextWidget::TextLayout& TextWidget::GetTextLayout(TextMeasurer& measurer) 
 	    && m_wrapWidth == width
 	    && m_wrapFont.size == m_style.font.value.size
 	    && m_wrapFont.family == m_style.font.value.family
-	    && m_wrapFont.weight == m_style.font.value.weight)   // Phase 36 批三 K8-④：漏加 = 换字重不重排
+	    && m_wrapFont.weight == m_style.font.value.weight   // Phase 36 批三 K8-④：漏加 = 换字重不重排
+	    && m_wrapFont.italic == m_style.font.value.italic)   // Phase 45 批一：加 italic
 	{
 		return m_wrapLayout;   // ★ 命中 ⇒ 零 FitText / 零 MeasureText 调用（T29-3 / T29-WRAP-3 锚）
 	}
@@ -649,13 +691,14 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 	TextMeasurer& measurer = ctx.GetTextMeasurer();   // ★ 与 MeasureText/LineHeight **同一实例**（同源）
 
 	// ── Phase 29 批二：wrap 分支（C29-5：非 wrap 走下面 100% 原路径）──
-	const bool activeSpans = HasActiveSpans();
+	const bool activeSpans = SpansActiveForLayout();
 	const Color& baseColor = m_style.foreground.value;
 
 	if (IsWrapLayoutActive())
 	{
 		const TextLayout& layout = GetTextLayout(measurer);
-		const float lineHeight = measurer.LineHeight(m_style.font.value);
+		const Font lineBoxFont = EffectiveLineBoxFont(measurer);
+		const float lineHeight = measurer.LineHeight(lineBoxFont);
 
 		const Point block = CalculateTextPosition(x, y, BlockWidth(layout), layout.totalHeight);
 		EnsureCpByteOffsets(m_text);
@@ -671,6 +714,8 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 			}
 			if (activeSpans && !line.runs.empty())
 			{
+				const bool lineBoxActive = LineBoxGuardActive();
+				const float boxA = lineBoxActive ? measurer.Ascent(lineBoxFont) : 0.0f;
 				float runX = block.x;
 				for (const auto& run : line.runs)
 				{
@@ -678,7 +723,10 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 					const std::size_t b0 = ByteOffsetAt(run.startCp);
 					const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
 					const Color runColor = run.color.value_or(baseColor);
-					ctx.DrawText(Point{ runX, lineY }, m_text.substr(b0, b1 - b0), runColor, run.font);
+					float runY = lineY;
+					if (lineBoxActive)
+						runY = lineY + boxA - measurer.Ascent(run.font);
+					ctx.DrawText(Point{ runX, runY }, m_text.substr(b0, b1 - b0), runColor, run.font);
 					runX += run.width;
 				}
 			}
@@ -715,10 +763,13 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 		{
 			totalW += r.width;
 		}
-		const float lineHeight = measurer.LineHeight(m_style.font.value);
+		const Font lineBoxFont = EffectiveLineBoxFont(measurer);
+		const float lineHeight = measurer.LineHeight(lineBoxFont);
 		const Point startPos = CalculateTextPosition(x, y, totalW, lineHeight);
 
 		EnsureCpByteOffsets(m_text);
+		const bool lineBoxActive = LineBoxGuardActive();
+		const float boxA = lineBoxActive ? measurer.Ascent(lineBoxFont) : 0.0f;
 		float curX = startPos.x;
 		for (const auto& run : m_prefRuns)
 		{
@@ -726,7 +777,10 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 			const std::size_t b0 = ByteOffsetAt(run.startCp);
 			const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
 			const Color runColor = run.color.value_or(baseColor);
-			ctx.DrawText(Point{ curX, startPos.y }, m_text.substr(b0, b1 - b0), runColor, run.font);
+			float curY = startPos.y;
+			if (lineBoxActive)
+				curY = startPos.y + boxA - measurer.Ascent(run.font);
+			ctx.DrawText(Point{ curX, curY }, m_text.substr(b0, b1 - b0), runColor, run.font);
 			curX += run.width;
 		}
 		return;
@@ -734,7 +788,7 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 
 	// 零 spans 纯原路径
 	const Size textSize = ctx.MeasureText(m_style.font.value, m_text);
-	const float lineHeight = measurer.LineHeight(m_style.font.value);
+	const float lineHeight = measurer.LineHeight(EffectiveLineBoxFont(measurer));
 
 	ctx.DrawText(
 		CalculateTextPosition(x, y, textSize.width, lineHeight),
@@ -771,12 +825,13 @@ Size TextWidget::GetPreferredSize() const{
 		dpi = static_cast<int>(std::lround(static_cast<double>(window->GetDpiScale()) * 96.0));
 	}
 
-	const bool activeSpans = HasActiveSpans();
+	const bool activeSpans = SpansActiveForLayout();
 	if (m_prefValid && dpi != 0 && m_prefRevision == m_textRevision
 	    && m_prefDpi == dpi
 	    && m_prefFont.size == m_style.font.value.size
 	    && m_prefFont.family == m_style.font.value.family
 	    && m_prefFont.weight == m_style.font.value.weight
+	    && m_prefFont.italic == m_style.font.value.italic   // Phase 45 批一：加 italic
 	    && (!activeSpans || m_prefSpanRevision == m_styledTextRevision))
 	{
 		return m_prefCache;
@@ -811,7 +866,7 @@ TextMeasurer* TextWidget::ResolveMeasurer() const{
 
 Size TextWidget::DoMeasureText(TextMeasurer& measurer) const{
 
-	if (HasActiveSpans())
+	if (SpansActiveForLayout())
 	{
 		EnsureCpByteOffsets(m_text);
 		const auto runs = BuildRunsForRange(measurer, m_text, m_cpByteOffsets, 0, DecodeUtf8(m_text).size());
@@ -820,13 +875,14 @@ Size TextWidget::DoMeasureText(TextMeasurer& measurer) const{
 		{
 			totalW += r.width;
 		}
-		// I44-7 行高单源性：行高必须且仅来自基控件字体
-		const float lineHeight = measurer.LineHeight(m_style.font.value);
+		// I44-7（Phase 45 取代）：行高恒来自同一个助手 EffectiveLineBoxFont（单源性保留，源由基字体改为有效行框字体）；
+		// 原意「不得由整段 MeasureText 高度反推」仍满足。
+		const float lineHeight = measurer.LineHeight(EffectiveLineBoxFont(measurer));
 		return Size{ totalW, lineHeight };
 	}
 
 	const Size textSize = measurer.MeasureText(m_style.font.value, m_text);
-	const float lineHeight = measurer.LineHeight(m_style.font.value);
+	const float lineHeight = measurer.LineHeight(EffectiveLineBoxFont(measurer));
 	return Size{ textSize.width, lineHeight };
 
 }

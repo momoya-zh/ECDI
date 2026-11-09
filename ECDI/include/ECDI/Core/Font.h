@@ -21,6 +21,10 @@ struct Font
 								///< 语义（Phase 36 C36-2）＝**族内最近字面、平手取轻，不跨族**——GDI 由字体映射器实现（探针验证样本），GL 按 face 的 `OS/2.usWeightClass` 档位归并。
 								///< 族名内嵌样式（`"Consolas Bold"`）优先于本字段（C36-3）；消费边界 clamp（>1000 归一，C36-1）。
 								///< 族内无对应字面时 **GDI 合成加粗、GL 不合成**（face 相同、墨不同 = 已知分歧，C36-4）。★ 声明序：必须位于 `family` 之后（C7560）。
+	bool italic = false;			///< 斜体（默认 false = 既有行为逐位不变）。
+								///< 语义（Phase 45，闸门 2 ⓑ）：GDI = LOGFONT `lfItalic`（无真斜体面的族由 GDI **合成斜切**，
+								///< 宽度增量 0.00%）；GL = 选 `OS/2.fsSelection` bit0 的真斜体面，**族内无真斜体面 ⇒ 回落常规面**
+								///< （GL 不合成，C36-4 同族已知分歧；CJK 族真斜体面为零，O45-1）。★ 声明序：必须位于 `weight` 之后。
 };
 
 }

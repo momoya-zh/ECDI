@@ -1,4 +1,5 @@
-﻿#include "Render/FreeTypeTextMeasurer.h"
+﻿#include <cmath>
+#include "Render/FreeTypeTextMeasurer.h"
 
 #include "ECDI/Core/UTF8.h"   // ★ Phase 29 △4：无 engine 兜底路径的码点数上界换算
 #include "Platform/Win32/Win32RenderContext.h"   // ★ 取 HWND（同 GDIBackend / GDITextMeasurer 先例）
@@ -25,6 +26,7 @@ void FreeTypeTextMeasurer::Initialize(const PlatformRenderContext& context)
 		dpi = 96;   // fail-safe（无窗口 / 失败——与 DpiConversion 一致）
 	}
 
+	m_dpi = dpi;
 	if (m_engine)
 	{
 		m_engine->SetDpi(dpi);
@@ -73,6 +75,16 @@ TextFit FreeTypeTextMeasurer::FitText(const Font& font, const std::string& text,
 float FreeTypeTextMeasurer::LineHeight(const Font& font)
 {
 	return m_engine ? m_engine->LineHeight(font) : font.size;
+}
+
+float FreeTypeTextMeasurer::Ascent(const Font& font)
+{
+	if (!m_engine)
+	{
+		return font.size;
+	}
+	const int effectiveDpi = (m_dpi > 0) ? m_dpi : 96;
+	return std::floor(m_engine->Ascent(font)) * 96.0f / static_cast<float>(effectiveDpi);
 }
 
 }

@@ -1,4 +1,4 @@
-#include "Render/GDITextMeasurer.h"
+﻿#include "Render/GDITextMeasurer.h"
 
 #include "ECDI/Core/Logger.h"
 #include "ECDI/Core/String.h"
@@ -49,7 +49,7 @@ HFONT GDITextMeasurer::GetOrCreateFont(const Font& font, int dpi)
 	// D1：缓存键 = weight + size + family + **dpi**（键隔离——与 GDIBackend 同理；Phase 36 +weight）
 	const int effectiveDpi = (dpi > 0) ? dpi : 96;
 
-	const auto key = std::make_tuple(font.weight, font.size, font.family, effectiveDpi);
+	const auto key = std::make_tuple(font.weight, font.size, font.family, font.italic, effectiveDpi);
 	auto it = m_fontCache.find(key);
 	if (it != m_fontCache.end())
 	{
@@ -62,6 +62,7 @@ HFONT GDITextMeasurer::GetOrCreateFont(const Font& font, int dpi)
 	lf.lfHeight = -static_cast<LONG>(std::lround(font.size * effectiveDpi / 96.0));
 	lf.lfCharSet = DEFAULT_CHARSET;                             // 关键：中文/Unicode 正常
 	lf.lfWeight = static_cast<WORD>(ClampWeight(font.weight));   // Phase 36 C36-1：消费边界 clamp（默认 400 = FW_NORMAL 逐位）
+	lf.lfItalic = font.italic ? TRUE : FALSE;                   // Phase 45 批一：LOGFONT 位段
 
 	if (!font.family.empty())
 	{
@@ -95,7 +96,7 @@ Size GDITextMeasurer::MeasureText(const Font& font, const std::string& text)
 
 	// ★ Phase 26（△9b）：查测量结果缓存（★ 在 GetDC **之前**）。
 	//   键 = (weight, text, size, family, **dpi**)——★ 含 DPI（跨屏自动失效）；Phase 36 +weight。
-	const auto cacheKey = std::make_tuple(font.weight, text, font.size, font.family, dpi);
+	const auto cacheKey = std::make_tuple(font.weight, text, font.size, font.family, font.italic, dpi);
 	const auto cacheIt = m_measureCache.find(cacheKey);
 	if (cacheIt != m_measureCache.end())
 	{
@@ -487,4 +488,42 @@ float GDITextMeasurer::LineHeight(const Font& font)
 	return height;
 }
 
+float GDITextMeasurer::Ascent(const Font& font)
+{
+	int dpi = GetDpiForWindow(m_hwnd);
+	if (dpi <= 0)
+	{
+		dpi = 96;
+	}
+
+	const auto key = std::make_tuple(font.weight, font.size, font.family, font.italic, dpi);
+	auto it = m_ascentCache.find(key);
+	if (it != m_ascentCache.end())
+	{
+		return it->second;
+	}
+
+	float result = 0.0f;
+	HFONT hfont = GetOrCreateFont(font, dpi);
+	if (hfont)
+	{
+		HDC measureDC = GetDC(nullptr);
+		if (measureDC)
+		{
+			HGDIOBJ oldFont = SelectObject(measureDC, hfont);
+			TEXTMETRICW tm{};
+			if (GetTextMetricsW(measureDC, &tm))
+			{
+				result = static_cast<float>(tm.tmAscent) * 96.0f / static_cast<float>(dpi);
+			}
+			SelectObject(measureDC, oldFont);
+			ReleaseDC(nullptr, measureDC);
+		}
+	}
+
+	m_ascentCache.emplace(key, result);
+	return result;
 }
+
+}
+

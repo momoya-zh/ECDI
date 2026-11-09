@@ -48,6 +48,7 @@ public:
 		return Size{ static_cast<float>(count) * 8.0f, 16.0f };
 	}
 	float LineHeight(const Font&) override{ return 16.0f; }
+	float Ascent(const Font&) override{ return 12.0f; }
 };
 
 class TestableTextBox : public TextBox
@@ -443,6 +444,7 @@ private:
             return Size{ static_cast<float>(count) * 8.0f, 19.2f };
         }
         float LineHeight(const Font&) override{ return 19.2f; }
+        float Ascent(const Font&) override{ return 15.0f; }
     };
     static FracMeasurer ms_frac;
 };
@@ -587,6 +589,7 @@ public:
 	}
 
 	float LineHeight(const Font&) override{ return 16.0f; }
+	float Ascent(const Font&) override{ return 12.0f; }
 
 private:
 	static std::size_t CountCp(const std::string& s){
@@ -2042,6 +2045,7 @@ void TestTextBoxScrollBarLazySyncOnPaint()
 	box.Paint(ctx, 0, 0);                                    // ← 仅这一次绘制
 
 	EXPECT_TRUE(bar->IsVisible());                           // 内容高变化经惰性同步送达条
+	EXPECT_EQ(bar->GetMaxOffset(), 120);                     // Phase 45 批 0 存量护栏：10行 × 16px(无窗口兜底) - 40px视口 = 120px
 }
 
 /// T9：★ **手势隔离**——按下落在**条**上时不得进入文本拖选（缺陷修复 v1.4）
@@ -2200,6 +2204,7 @@ public:
 	}
 
 	float LineHeight(const Font&) override{ return 16.0f; }
+	float Ascent(const Font&) override{ return 12.0f; }
 
 	/// @brief 全部喂入串拼成一条（跨行检测子串/明文用）
 	[[nodiscard]] std::string Joined() const{

@@ -218,6 +218,7 @@ public:
 		return Size{ static_cast<float>(count) * kPerCpWidth, 16.0f };
 	}
 	float LineHeight(const Font&) override { return 16.0f; }
+	float Ascent(const Font&) override { return 12.0f; }
 	static constexpr float kPerCpWidth = 8.0f;
 };
 
@@ -546,6 +547,29 @@ void Test31LineHeightFontIdentityLevel()
     //    ⇒ **不得**在任何总结里写成「已验证两链使用同一字体文件」。
 }
 
+// ── T45-9：Ascent 接口与契约校验（Phase 45 批 0）──
+void Test45AscentInterfaceContract()
+{
+    // 1. FT 包装断言：Ascent(f) == floor(ascender/64) * 96 / dpi
+    auto engine = std::make_unique<FontEngine>();
+    engine->SetDpi(96);
+    engine->SetFontSource(std::make_unique<Win32FontSource>());
+    FreeTypeTextMeasurer ftMeasurer(std::move(engine));
+    const Font testFont{ 16.0f, "Segoe UI", 400 };
+
+    const float ftAscent = ftMeasurer.Ascent(testFont);
+    EXPECT_TRUE(ftAscent > 0.0f);
+
+    // 2. GDI 实现断言：Ascent(f) == tmAscent * 96 / dpi
+    GDITextMeasurer gdiMeasurer;
+    const float gdiAscent = gdiMeasurer.Ascent(testFont);
+    EXPECT_TRUE(gdiAscent > 0.0f);
+
+    // 3. 假件旧用例零调用断言（常数假件无害）
+    FixedWidthMeasurer fakeMeasurer;
+    EXPECT_NEAR(fakeMeasurer.Ascent(testFont), 12.0f, 0.001f);
+}
+
 void ECDI::Test::RegisterTextMeasurerTests()
 {
     GetTestRegistry().Add("TextMeasurer.UsesWindowDpi",      &Test26MeasurerUsesWindowDpi);   // T26-10
@@ -556,4 +580,5 @@ void ECDI::Test::RegisterTextMeasurerTests()
     GetTestRegistry().Add("TextMeasurer.LineHeightTwoChainConsistency", &Test31LineHeightTwoChainConsistency);   // T31-1
     GetTestRegistry().Add("TextMeasurer.LineHeightFallback",            &Test31LineHeightFallback);              // T31-3
     GetTestRegistry().Add("TextMeasurer.LineHeightFontIdentityLevel",   &Test31LineHeightFontIdentityLevel);     // T31-6
+    GetTestRegistry().Add("TextMeasurer.AscentInterfaceContract",       &Test45AscentInterfaceContract);         // T45-9
 }

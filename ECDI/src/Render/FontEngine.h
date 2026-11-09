@@ -93,7 +93,7 @@ public:
 	/// @param weight 0–1000（C36-1）；**默认 400 = 既有行为**（单参调用点零改动编译；
 	///        ★ 有 `Font` 在手的内部调用点必须显式传 `font.weight`）
 	/// @return 有效 `FaceId`；**无可用 face ⇒ 0**（0 恒为无效——id 从 1 起分配）
-	FaceId FaceIdFor(const std::string& family, std::uint16_t weight = 400);
+	FaceId FaceIdFor(const std::string& family, std::uint16_t weight = 400, bool italic = false);
 
 	/// @brief codepoint → glyph index（★ 修正：调用方经此取，**不直调 `FT_Get_Char_Index`**）
 	/// @details 内部 = `FT_Get_Char_Index` ⇒ ★ **`FT_*` 仍只出现在本类 `.cpp`**（契约 C-4）。

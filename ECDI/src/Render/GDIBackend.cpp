@@ -1625,7 +1625,7 @@ HFONT GDIBackend::GetOrCreateFont(const Font& font)
 	const int effectiveDpi = (dpi > 0) ? dpi : 96;
 
 	// D1：缓存键 = weight + size + family + **dpi**（键隔离——见头文件成员注释；Phase 36 +weight）
-	const auto key = std::make_tuple(font.weight, font.size, font.family, effectiveDpi);
+	const auto key = std::make_tuple(font.weight, font.size, font.family, font.italic, effectiveDpi);
 	auto it = m_fontCache.find(key);
 	if (it != m_fontCache.end())
 	{
@@ -1638,6 +1638,7 @@ HFONT GDIBackend::GetOrCreateFont(const Font& font)
 	lf.lfHeight = -static_cast<LONG>(std::lround(font.size * effectiveDpi / 96.0));
 	lf.lfCharSet = DEFAULT_CHARSET;                             // 关键：中文/Unicode 正常
 	lf.lfWeight = static_cast<WORD>(ClampWeight(font.weight));   // Phase 36 C36-1：消费边界 clamp（默认 400 = FW_NORMAL 逐位）
+	lf.lfItalic = font.italic ? TRUE : FALSE;                   // Phase 45 批一：LOGFONT 位段
 
 	if (!font.family.empty())
 	{

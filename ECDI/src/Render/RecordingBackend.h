@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #ifdef DrawText
 #undef DrawText   // 防御性 undef（2026-08-16）：本头声明 DrawText override——自包含防护
@@ -137,6 +137,7 @@ namespace ECDI {
 		}
 
 		float LineHeight(const Font&) override { return 14.0f; }
+		float Ascent(const Font&) override { return 11.0f; }
 
 	private:
 
