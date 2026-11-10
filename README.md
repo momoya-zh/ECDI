@@ -118,10 +118,21 @@ Visual Studio and CLion both open the CMake project directly — there is no han
 ## Minimal usage
 
 ```cpp
+#include <Windows.h>   // wWinMain entry (WINAPI / HINSTANCE / PWSTR)
+
+// Windows.h macro guard — the DrawText macro would otherwise rewrite
+// PaintContext::DrawText out of the library's exported symbol (same three
+// lines as examples/MinimalApp/main.cpp; harmless when the macro is absent)
+#ifdef DrawText
+#undef DrawText
+#endif
+
 #include <ECDI/Application/Application.h>
 #include <ECDI/Window/Window.h>
 #include <ECDI/Widget/Panel.h>
 #include <ECDI/Layout/VerticalLayout.h>
+
+#include <memory>
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {

@@ -19,14 +19,17 @@
 ## 1. 五分钟上手：一个窗口 + 一个按钮
 
 ```cpp
+#include <Windows.h>       // wWinMain 入口（WINAPI / HINSTANCE / PWSTR）
+
+// Win32 宏防护：DrawText 宏会把 PaintContext::DrawText 改写掉 —— 必须放在 ECDI 头之前
+#ifdef DrawText
+#undef DrawText
+#endif
+
 #include <ECDI/Application/Application.h>
 #include <ECDI/Widget/Button.h>
 #include <ECDI/Widget/Panel.h>
 #include <ECDI/Layout/VerticalLayout.h>
-
-#ifdef DrawText            // Win32 宏会撞上 PaintContext::DrawText
-#undef DrawText            // 任何 .cpp 同时包 Windows.h 与 ECDI 头时都要这句
-#endif
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
     using namespace ECDI;
@@ -626,7 +629,7 @@ DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect / IsRectVisible
 | 5 | `CollapsiblePanel` 动画中外部 `SetPosition/SetSize` | 不支持场景（v0.1 已知限制） |
 | 6 | `ScrollView` 的条显隐自动（溢出驱动） | 想固定显隐用外层 Panel 包 + 自行控制 |
 | 7 | `AddChild` 三条前置条件 | 空指针/多父/成环在 Release 也有防护，但成环的症状是 Arrange/Paint/HitTest 栈溢出 |
-| 8 | Win32 宏 `DrawText` 与 `PaintContext::DrawText` 同名 | 同时包 `Windows.h` 与 ECDI 头时 `#ifdef DrawText / #undef DrawText`（框架内部已防御性处理，用户侧照写无害） |
+| 8 | Win32 宏 `DrawText` 与 `PaintContext::DrawText` 同名 | 声明 `DrawText` 的两个公共头（`Render/PaintContext.h` / `Render/RenderingBackend.h`）**各自**带防御性 `#ifdef / #undef` ⇒ 只要经过它们就自动免疫；但自己先 `#include <Windows.h>` 时**仍建议照写一遍**（§1 示例即如此）——多一行，兜住将来任何漏护栏的头 |
 | 9 | `WindowLayer::Bottom` 不承诺「绝对最底」；`Win+D` 时与普通窗口一起隐藏 | 桌面层需求用 `Desktop` |
 | 10 | DPI | 框架声明 Per-Monitor-V2；`Font::size` 是 DIP；`SetBounds/GetBounds` 用屏幕 DIP |
 | 11 | 输入层半抽象、多窗口焦点语义、光标色未主题化 | 均在 `dev/README.md` 技术债务表与 `dev/roadmap-deferred.md`（v1.0 API 审查项） |

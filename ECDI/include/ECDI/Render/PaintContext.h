@@ -1,5 +1,15 @@
 ﻿#pragma once
 
+#ifdef DrawText
+#undef DrawText   // 防御性 undef（2026-11-11）：本头声明 PaintContext::DrawText（绘制门面）——
+// 与 RenderingBackend.h 同款，位置也一致（#pragma once 之后、includes 之前）。
+// ★ 必须有这一处：本头不 include RenderingBackend.h ⇒ 那处的防护到不了这里。只包
+// PaintContext.h（写自绘控件的典型姿势）时，先 include Windows.h 的 TU 里 DrawText 宏会把
+// 本方法改写成 DrawTextA/DrawTextW —— 单 TU 内改写一致所以能编过，但库导出的是
+// PaintContext::DrawText ⇒ 链接期 undefined reference（静默、难查）。
+// #ifdef 包裹 = 宏未定义则无副作用，已定义则自动免疫。
+#endif
+
 #include "ECDI/Core/Rect.h"
 #include "ECDI/Core/Point.h"
 #include "ECDI/Core/Color.h"
