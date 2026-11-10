@@ -8,7 +8,8 @@
 
 **声明与约定**
 
-- 所有 API 结论均以 `include/ECDI/**` 的公共头为准（98 个）；文中标注 `ECDI/include/...` 的是可直接核对的源头。
+- 所有 API 结论均以 `include/ECDI/**` 的公共头为准（**102 个**，`find ECDI/include -name '*.h' | wc -l` 可复核）；文中标注 `ECDI/include/...` 的是可直接核对的源头。
+- 源码引用一律锚在**符号**（`class Widget`、`Button::OnMouseButtonDown`）而不是行号——行号会随阶段演进漂走，符号不会。
 - 示例默认 **GDI 后端**（`CreateDefaultRenderServices()` 的默认值，Windows 开箱即用）。
 - 框架只支持 **Windows**（Win32 + GDI / WGL）；Win32 头需自备（示例见下方「宏冲突防护」）。
 - 已知限制与「v1.0 API 审查项」集中在 [§11 已知限制与坑](#11-已知限制与坑)，不要向使用者承诺已解决。
@@ -61,7 +62,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
 
 ## 2. 应用与窗口生命周期
 
-### 2.1 Application（ECDI/include/ECDI/Application/Application.h:43-180）
+### 2.1 Application（`ECDI/include/ECDI/Application/Application.h` · `class Application`）
 
 | API | 语义 |
 |---|---|
@@ -75,7 +76,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
 
 `Application` 继承 `EventRouter`，可 override 应用级 `OnXxx`（见 §9）。
 
-### 2.2 Window（ECDI/include/ECDI/Window/Window.h:46-436）
+### 2.2 Window（`ECDI/include/ECDI/Window/Window.h` · `class Window`）
 
 **生命周期铁律**：`Window` 由 `Application` 持有，调用方不得 `delete`；`Release()` 幂等销毁 HWND；
 `Hide()` 只隐藏不销毁；`RequestClose()` 同步派发 `WindowCloseRequested`（可被 override 拦截，
@@ -98,8 +99,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
 `Minimize/Maximize/Restore/GetWindowState` ·
 `SetBackgroundColor(const Color&)`（运行期可用，忽略 alpha，默认白）· `SetFocusedWidget/GetFocusedWidget` ·
 `Invalidate()` · `GetTextMeasurer()` · `GetPlatformWindow()` · `GetDpiScale()` ·
-`SetFileDropEnabled(bool)`（开启 `WM_DROPFILES` → `OnDropFiles`）· `SetCaptureWidget/GetCaptureWidget`
+`SetFileDropEnabled(bool)`（开启 `WM_DROPFILES` → `OnDropFiles`，§9.5）· `SetCaptureWidget/GetCaptureWidget`
 （拖拽期鼠标捕获；配合 `Application::PostToUi` 时可跨线程投递回调）· `HandleKeyDown` / `UpdateHoverState`。
+
+**浮层族**（Phase 42，用法见 §7.4）：`GetOverlayRoot()`（底阶原语）· `ShowOverlay(std::unique_ptr<Widget>, const OverlayOptions& = {})` ·
+`HideOverlay(Widget* = nullptr)`（无参 = 关顶层）· `HasActiveOverlay(std::optional<OverlayLayer> = std::nullopt)`。
 
 ---
 
@@ -120,7 +124,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
 | `ScrollBar` | `Widget/ScrollBar.h` | 轨道 + 滑块（一般经 `ScrollView` 派生） | 独立滚动控制 |
 | `CaptionBar` | `Window/CaptionBar.h` | 自绘标题栏（`Borderless` 窗口用） | 无边框应用 |
 
-### 3.2 Widget 基类（ECDI/include/ECDI/Widget/Widget.h:39-350）
+### 3.2 Widget 基类（`ECDI/include/ECDI/Widget/Widget.h` · `class Widget`）
 
 所有控件的公共合约。**三个继承约定**：
 
@@ -147,6 +151,7 @@ protected:
 | 坐标 | `GetAbsolutePosition()` | 父链累加（含沿途内容偏移）= **视觉位置**；鼠标事件的 `GetMouseX/Y` 是**客户区绝对坐标**，控件内一律先减它（`ScrollBar`/`TextBox` 都这么干） |
 | 裁剪 | `virtual bool ClipsChildren()`（默认 false） | true = 命中点必须落在本容器矩形内，否则不递归子树；**这是命中门控不是几何裁剪**。`ScrollView` override 为 true |
 | 绘制 | `Invalidate()` / `Paint(PaintContext&, offsetX, offsetY)` | 无窗口（无头测试）时 `Invalidate()` 是 no-op |
+| 布局失效 | `NeedsLayout()`（`[[nodiscard]]`，Phase 41） | 语义是**整棵所属树**、不是本节点（脏标志寄在根，沿父链上溯）⇒ 非根节点返回 `true` 意味着「同树别的分支有欠账」。用于测试与诊断；框架自身走帧首 `SettleLayoutIfDirty`（§4.4） |
 
 **坐标不变量（全框架级，写自定义控件必读）**：`OnPaint` 收到的 `x,y` 是绝对位置；`HitTest` 传的是父链累加后的绝对坐标；自定义控件要**用局部坐标做命中、用绝对坐标转发绘制**。
 
@@ -186,15 +191,16 @@ Widget 树（SetLayout / AddChild / RemoveChild）
 
 ### 4.4 `Arrange` 什么时候发生
 
-| 时机 | 触发者 |
-|---|---|
-| 建树完毕、`Show()` 之前 | **你手动调 `root.Arrange()`**（示例的固定动作） |
-| 窗口尺寸变化 | `OnResized` 链自动 `Arrange`（Phase 9.7 触发链；所以运行期缩窗不用手动排） |
-| `SetLayout` / 第一次 `SetSize` | 容器自身 |
-| `SetStretch` 改变 | 下一次 `Arrange` 生效（`SetStretch` 自己不重排） |
+Phase 41 起，布局失效是**帧级结算**：改动只把**根**置脏，真正的重排发生在**帧首**（脏才排，排一次）。
 
-**实践建议**：把「建树 → 设布局 → `Arrange()` → `Show()`」写成固定五步；运行期增删子控件后调一次
-`parent.Arrange()`（`AddChild/RemoveChild` 不自动重排父容器）。
+| 时机 | 谁做 |
+|---|---|
+| 建树完毕、`Show()` 之前 | **你手动调 `root.Arrange()`**（推荐——让首帧就有正确几何） |
+| `SetSize` / `SetLayout` / `SetStretch` / `AddChild` / `RemoveChild` | 被改动的控件置根脏（`NotifyGeometryChanged`，门控 = 「值**真变** ∧ 某 Layout 会读它」） |
+| 窗口尺寸变化 | 根几何脏 → 帧首结算（Phase 41 删除 `Application::OnWindowResized` 的同帧重复 `Arrange`） |
+| 帧首 | `Window::PaintFrame` → `SettleLayoutIfDirty()`（根与浮层根各一次） |
+
+**实践建议**：建树期照旧写成「建树 → 设布局 → `Arrange()` → `Show()`」；**运行期不必再手动排**——改尺寸、增删子控件、改 `SetStretch` 都会在下一帧自动结算。要「立刻」而不是「下一帧」，仍可显式调 `parent.Arrange()`；查有没有欠账用 `NeedsLayout()`（§3.2）。
 
 ### 4.5 一个更真实的例子（左右分栏 + 底部固定）
 
@@ -321,6 +327,7 @@ tb->SetText("初始值");                   // 只失效缓存 + Invalidate；�
 - **`InsertCodepoint/InsertText/DeleteBackward/...` 编辑操作目前是 public（5.5.1 阶段为可测试，v1.0 API 审查定稿）**——不要在新代码里把它们当稳定 API 依赖。
 - IME 组合期不触发 `OnTextChanged`、不产生快照；`CommitComposition("")` 是合法提交。
 - 垂直滚动条**自动显隐**（多行且内容溢出 + 主题驱动）；`GetVerticalScrollBar()` 是只读观察入口。
+- **富文本**：只读 `TextBox` 可显示段内样式（`SetStyledText`，§6.6）；**可编辑 `TextBox` × spans 本期不支持**（Phase 44 红线 4，记账 `L44-1`）——编辑类场景先按纯文本用。
 
 ### 6.5 进度条家族
 
@@ -336,6 +343,35 @@ ring->SetProgress(0.75f);      // NaN ⇒ 拒绝（值不变、不启动动画�
 
 - 两个控件都是**状态分离**：`m_progress` 目标逻辑 / `m_displayProgress` 呈现视觉（动画驱动）；`SetProgress` 只改目标并启动过渡，`OnPaint` 只读呈现值；`GetProgress()` 返回**目标值**。
 - 无动画宿主（无头测试）时 `ResolveAnimationManager()==nullptr` ⇒ 瞬时到位。
+
+### 6.6 富文本（段内内联样式，Phase 44 / 45）
+
+```cpp
+#include <ECDI/Widget/TextSpan.h>
+
+auto label = std::make_unique<Label>();
+label->SetStyledText("粗体 常规 mono", {
+    { 0, 2, SpanStyle{ .weight = 700 } },                        // [0,2) 码点 → 粗体
+    { 6, 4, SpanStyle{ .family = "Consolas" } },                 // [6,10) → monospace
+    { 3, 2, SpanStyle{ .foreground = Color::FromRGBA8(200, 0, 0),
+                       .italic = true, .size = 16.0f } },        // 颜色 + 斜体 + 字号
+});
+```
+
+| 概念 | 契约 |
+|---|---|
+| 索引空间 | **码点**（UTF-8 解码后的字符位，**不是字节**）；区间半开 `[startCp, startCp + cpCount)` |
+| `SpanStyle` 可覆盖字段 | `family` · `weight`（400 = Regular / 700 = Bold）· `foreground` · `italic`（Phase 45）· `size`（DIP 绝对值，Phase 45）；`std::nullopt` = **继承**控件基样式（`TextStyle`） |
+| 生效控件 | `TextWidget` 家族——`Label` / `Button`，以及**只读** `TextBox`（§6.4） |
+| 失效值 | `size` 非有限或 `≤ 0` ⇒ 视同 `nullopt`（不覆盖），不会画出异常字号 |
+| 规范化 | 起点越界 ⇒ 丢弃；尾部越界 ⇒ 钳到串末；空区间 ⇒ 丢弃；按起点 `stable_sort`；重叠 ⇒ **先到者赢**（后到被裁剪或整段剔除） |
+| 空 spans | 等价纯文本，**逐位等价**——不设 / 传 `{}` 时命令流、测量、折行与今日完全一致（C44-1） |
+
+三条容易踩的：
+
+- **`SetText` 会让 spans 失活**（串身份自检 C44-8）：`SetText` 改串后旧 spans 不再生效；要带样式就重新 `SetStyledText`，别指望它自动跟着走。
+- **行高由基控件字体决定**（C44-3）；Phase 45 起混字号按「该行最大字号」建行框，所以同一行内不同字号会与该行最高 run 对齐。
+- **跨族混排有已知降级**：同一串里 `family` 不同时，两链统一按单元格顶边对齐，存在至多约 7px 的 run 内基线偏置（`L44-9`）；**斜体**在 GDI 走合成斜切、GL 选真斜体面（族内无真斜体面 ⇒ GL 回落常规面，不合成——`C36-4` 同族已知分歧）。要求严格基线一致时避免跨族；斜体优先挑有真斜体面的族。
 
 ---
 
@@ -386,6 +422,46 @@ bar->SetTitle("新标题");
 - 宽度自适应：`SetSize` override 内部重排子控件 ⇒ 父容器 `fillCrossAxis` 布局下窗口 resize 零接线。
 - `SetResizeInset` 控裁边热区；交互控件 `ConsumesMouseInput()==true` 是拖拽不误触的前提。
 
+### 7.4 浮层（overlay，Phase 42）
+
+窗口有**两个根**：`GetRootWidget()`（内容树）+ `GetOverlayRoot()`（浮层根，几何覆盖全客户区）。浮层因此**不受内容树裁剪影响**——这是「在下拉列表里点开二级菜单不被父容器切掉」的结构性保证。
+
+```cpp
+auto popup = std::make_unique<Panel>();     // 浮层 = 任意 Widget
+popup->SetSize(180, 120);                   // ★ 尺寸必须你自己给（框架不替你量）
+popup->SetPosition(40, 40);                 // 无锚点时才用得上（见下）
+popup->SetLayout(std::make_unique<VerticalLayout>(4, true));
+
+window.ShowOverlay(std::move(popup), {
+    .layer        = OverlayLayer::Normal,               // Normal / Modal / Tooltip
+    .lightDismiss = LightDismissPolicy::PassThrough,    // 点外关闭策略
+    .closeOnEsc   = true,                               // ESC 关顶层
+    .exemptWidget = triggerButton,                      // 点它不算「点外」
+    .anchorWidget = triggerButton,                      // 可选：跟随锚点自动定位
+    .placement    = AnchorPlacement::Below,             // Below / Above / Left / Right
+    .ownerOverlay = nullptr,                            // 逻辑父浮层（级联关闭）
+    .onClosed     = [] { /* 已脱树 */ },
+});
+
+window.HideOverlay();                                     // 无参 = 关当前顶层
+bool open = window.HasActiveOverlay(OverlayLayer::Modal); // 无参 = 任意层
+
+// 底阶原语：只把控件挂到浮层根，**不带** light dismiss / ESC / 焦点转移
+window.GetOverlayRoot().AddChild(std::move(someWidget));
+```
+
+| 层 | 顺序 | 行为 |
+|---|---|---|
+| `Tooltip` | 最高 | 纯视觉，**不参与命中**（点击穿透到底下） |
+| `Modal` | 中 | 存在时 Tab 焦点被**陷阱**在模态子树内循环；关闭后焦点安全恢复到打开前的控件 |
+| `Normal` | 低 | 下拉列表 / 气泡 / 右键菜单 |
+
+- **点外关闭三策略**：`PassThrough`（默认：关闭浮层 + 这次点击**继续**下派给底层控件）/ `Consume`（关闭 + 吞掉这次点击）/ `None`（强模态，不自动关）。
+- **`exemptWidget` 必填于弹出型控件**：把触发按钮填进去，否则「点按钮关掉、再点又开」会抖成两次。
+- **锚点跟随会改写位置**：给了 `anchorWidget` 就由框架按 `placement` 算坐标并做**翻转 + 夹取**（贴边时自动翻到另一侧、超出客户区则夹回），你设的 `SetPosition` 不再生效。
+- **关闭是延迟析构**：`HideOverlay` 先脱树 → `onClosed()` → 帧末才真正析构（防回调栈内 UAF）⇒ 回调里别再用那个指针判断存活。
+- 返回值 `false` = 参数非法（空指针 / 层冲突）或正在关闭；不要重试，先查状态。
+
 ---
 
 ## 8. 主题与样式（Theme 系统）
@@ -424,7 +500,14 @@ Win32 消息 → PlatformWindow 翻译 → Event → EventRouter::OnEvent
 - 键盘走**焦点链**（`CanFocus` 控件）+ `Application` 路由；鼠标走 `HitTest` 目标 → 父链冒泡。
 - hover 有专门的事实链：目标切换 `A → B` 严格 `A.OnMouseLeave()` → `B.OnMouseEnter()`；
   控件脱树导致的失效**不派发** `OnMouseLeave`（`HoverTracker` 契约 C/D）。
-- 鼠标事件带 `wParam` 维度（按下键位 + 修饰键，Phase 19）；`TimerEvent` 供 `OnTimer` 用。
+- 鼠标事件带**按键与修饰键维度**（Phase 19）；`TimerEvent` 供 `OnTimer` 用。
+
+| 查询（鼠标事件通用） | 语义 |
+|---|---|
+| `GetMouseX()` / `GetMouseY()` | **窗口客户区绝对坐标**（不是控件局部坐标） |
+| `GetButton()`（Down/Up 事件） | 触发本次事件的按键：`MouseButton::Left` / `Right` / `Middle` |
+| `IsButtonDown(MouseButton)` | 事件发生时**该键是否处于按下态**（含本次）——多键组合、拖拽判定用它 |
+| `HasModifier(KeyModifier)` | `Shift` / `Ctrl` / `Alt`（可位或组合） |
 - 应用级事件（托盘）`GetWindow()` 恒 `nullptr`；`TrayEvent::GetX/Y` 是**屏幕坐标**（菜单定位直接可用）。
 
 **事件消费（Phase 35）**——回调里 `event.SetHandled()` 即**停止向祖先冒泡**。冒泡循环每节点判两个条件：该节点已被移除（跳过）、事件已消费（停）。
@@ -473,6 +556,30 @@ Image img = ECDI::Decode::DecodeFile(u8"assets/logo.png");   // 或 DecodeMemory
 ### 9.4 自绘控件（ PaintContext 门面 ）
 
 见 §10；注意 `DrawArc(center, radius, startAngleDeg, sweepAngleDeg, width, color)`：**0° = 3 点钟，正角 = 顺时针**，`|sweep|>360` 在执行端钳制；方法自身不做角度归一化。
+
+### 9.5 文件拖放（Window 级，Phase 14）
+
+```cpp
+window.SetFileDropEnabled(true);        // ★ 运行期调用；Show() 之前调记 Warning 并忽略
+
+class DropZone : public Panel {
+protected:
+    void OnDropFiles(const DropFilesEvent& e) override {
+        for (const auto& path : e.GetPaths()) {   // UTF-8 绝对路径列表
+            if (path.empty()) continue;
+            LoadDocument(path);
+        }
+        e.SetHandled();                            // 需要时阻止继续冒泡（可选）
+        Invalidate();
+    }
+};
+```
+
+- **派发路径与鼠标同族**：平台 → `Application` → `HitTest(e.GetX(), e.GetY())` 找目标 → `OnDropFiles` → 父链冒泡。
+- 落点 `GetX/Y()` 是**客户区绝对坐标**，控件内做局部判定要自己减偏移（同鼠标事件）。
+- 平台层已完成 `DragFinish`：事件携带的是**纯数据**（`std::vector<std::string>`），不含系统句柄。
+- `GetPaths()` **可能为空**（无有效文件）——消费方必须忽略，而不是当错误。
+- 应用级也能接：`Application::OnDropFiles`（`GetWindow()` **恒非空**——与托盘事件的语义不同）。
 
 ---
 
@@ -525,6 +632,9 @@ DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect / IsRectVisible
 | 11 | 输入层半抽象、多窗口焦点语义、光标色未主题化 | 均在 `dev/README.md` 技术债务表与 `dev/roadmap-deferred.md`（v1.0 API 审查项） |
 | 12 | `Button` 的 Down/Up 都会被自动消费（Phase 35） | **嵌套可点击控件时父行收不到点中子按钮的那次点击**——把父级动作放进子按钮回调（见 §9.1「事件消费」） |
 | 13 | `RemoveChild` 立即交回所有权（很可能马上析构） | 事件回调里删控件只用 `RequestRemove()`；延迟边界 = **整次派发结束**，不是单次回调 |
+| 14 | 富文本只覆盖**显示**通路：可编辑 `TextBox` × spans 不支持（Phase 44 红线 4，记账 `L44-1`） | 编辑类场景按纯文本用，或自绘；只读预览可用 `SetStyledText`（§6.6） |
+| 15 | 跨族混排（同串不同 `family`）有至多约 7px 的 run 基线偏置；GL 族内无真斜体面时回落常规面 | 要求严格基线一致就别跨族；斜体挑有真斜体面的族（GDI 会合成斜切，两链因此可能不一致） |
+| 16 | 浮层 Widget 的尺寸与位置要自己给；`GetOverlayRoot().AddChild` 只是挂上去，**不带**点外关闭 / ESC / 焦点转移 | 要交互闭环一律走 `ShowOverlay`（§7.4） |
 
 ---
 
@@ -550,6 +660,10 @@ DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect / IsRectVisible
 | 各控件详设（契约级） | `dev/phase5.x-*` / `dev/phase9.x-*` / `dev/phase15-*` 等对应详设 |
 | 已知限制 / 排期 | `dev/README.md` 技术债务表 + `dev/roadmap-deferred.md` |
 | 可运行样例 | `examples/`（MinimalApp · ModelProbe · VisualTest · DesktopNest） |
+| 富文本（styled spans）契约 | `dev/phase44-styled-spans-detailed-design.md` · `dev/phase45-styled-spans-expressiveness-detailed-design.md` |
+| 浮层与点外关闭 | `dev/phase42-window-overlay-root-detailed-design.md` |
+| 帧级布局失效结算 | `dev/phase41-frame-layout-invalidation-pipeline-detailed-design.md` |
+| 文件拖放 / 托盘 | `dev/phase14-tray-and-drop-detailed-design.md` |
 
 ## 14. 再分发义务（FreeType / FTL）
 

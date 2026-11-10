@@ -38,6 +38,12 @@ Checks
        '## Status', and the 'current scale anchor' callout in docs/dev/README.md.
        Per-phase numbers elsewhere are documented time-point values (rule 22)
        and are deliberately NOT flagged.
+  L14  the Chinese mirror (README.zh-CN.md) carries the same three anchors as
+       the English README -- same carrier rule as L13 (above '## 进度'), same
+       ground truth.  A translation that keeps prose in sync but lets the
+       numbers drift is the one drift a reader cannot detect by skimming, so
+       it is a defect, not a style nit.  Its existence is also what makes the
+       mirror maintainable: the pair cannot rot silently.
 
 Guarantee: this script never writes to, renames or deletes any scanned file.
 The only write it can perform is the optional UTF-8 report (--out) or the JSON
@@ -434,6 +440,17 @@ def metric_zones(rel, lines):
                 cut = i
                 break
         return list(range(cut))
+    if rel == "README.zh-CN.md":
+        # L14: the mirror obeys the same carrier rule, cut at the translated
+        # heading.  Kept as a separate branch (not a second README pattern) so
+        # a renamed heading fails loudly -- empty zones -- instead of silently
+        # scanning the whole file.
+        cut = len(lines)
+        for i, line in enumerate(lines):
+            if line.startswith("## \u8fdb\u5ea6"):
+                cut = i
+                break
+        return list(range(cut))
     if rel == "docs/dev/README.md":
         zones = []
         for i, line in enumerate(lines):
@@ -451,6 +468,7 @@ def check_metrics(report, rel, lines, opts):
     zones = metric_zones(rel, lines)
     if not zones:
         return
+    level = "L14" if rel == "README.zh-CN.md" else "L13"
     for i in zones:
         line = lines[i]
         numbers = set(int(n) for n in re.findall(r"\d{2,4}", line))
@@ -462,7 +480,7 @@ def check_metrics(report, rel, lines, opts):
             expected = opts.metrics.get(name)
             if expected is None or expected in numbers:
                 continue
-            report.add(DEFECT, "L13", rel, i + 1,
+            report.add(DEFECT, level, rel, i + 1,
                        "metric '%s' anchor disagrees with measured value %d "
                        "(numbers on this line: %s)"
                        % (name, expected,
