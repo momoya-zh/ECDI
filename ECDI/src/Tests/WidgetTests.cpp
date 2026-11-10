@@ -2381,13 +2381,16 @@ void Test44StyledSpansBaselineProbe() {
 }
 
 // ── T45-5：等价护栏双相（HEAD 录制字面量 + 进程内全 SpanStyle{} 等价 + 负对照）──
+// ★ 2026-11-11：float 字段改为 `HexFloat()` 归一后的最简形式（原为 MSVC `%a` 的满位写法）。
+//   数值与录制时**逐位相同**，只是去掉了无信息的尾随零 —— 归一化把两个字面量机械对上：
+//   `0x1.4000000000000p+3` → `0x1.4p+3`，故这不是重新锚定，而是同一事实的等价改写。
 static constexpr const char* kGoldenZeroSpan =
-    "0x1.4000000000000p+3|0x1.3000000000000p+5|0x1.c000000000000p+3||400|0x0.0000000000000p+0|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0|Hello World\n";
+    "0x1.4p+3|0x1.3p+5|0x1.cp+3||400|0x0p+0|0x0p+0|0x0p+0|0x1p+0|Hello World\n";
 
 static constexpr const char* kGoldenPhase44Spans =
-    "0x1.4000000000000p+3|0x1.3000000000000p+5|0x1.c000000000000p+3|Segoe UI|700|0x1.0000000000000p+0|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0|Hello\n"
-    "0x1.4000000000000p+4|0x1.3000000000000p+5|0x1.c000000000000p+3||400|0x0.0000000000000p+0|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0| \n"
-    "0x1.e000000000000p+4|0x1.3000000000000p+5|0x1.c000000000000p+3|Consolas|400|0x0.0000000000000p+0|0x0.0000000000000p+0|0x1.0000000000000p+0|0x1.0000000000000p+0|World\n";
+    "0x1.4p+3|0x1.3p+5|0x1.cp+3|Segoe UI|700|0x1p+0|0x0p+0|0x0p+0|0x1p+0|Hello\n"
+    "0x1.4p+4|0x1.3p+5|0x1.cp+3||400|0x0p+0|0x0p+0|0x0p+0|0x1p+0| \n"
+    "0x1.ep+4|0x1.3p+5|0x1.cp+3|Consolas|400|0x0p+0|0x0p+0|0x1p+0|0x1p+0|World\n";
 
 static std::string EscapeGoldenString(const std::string& s) {
     std::string res;
@@ -2401,23 +2404,37 @@ static std::string EscapeGoldenString(const std::string& s) {
     return res;
 }
 
+// ── 跨 CRT 的 `%a` 归一（2026-11-11）────────────────────────────────
+// MSVC 的 `%a` 把尾数补满 13 位十六进制（`0x1.4000000000000p+3`），mingw-w64 打最简形式
+// （`0x1.4p+3`）——同一个 float 两种字面量，逐字节比较必然全字段不等（MinGW 单链红）。
+// 去尾随零是**无损**归一：13 hex = 52 bit = double 尾数全宽，两者都精确；
+// 归一后四条链产出同一字符串，golden 不再绑定某一套 CRT 的 printf 实现。
+static std::string HexFloat(float value) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%a", static_cast<double>(value));
+    std::string s(buf);
+    const std::size_t dot = s.find('.');
+    const std::size_t p = s.find('p');
+    // ★ 只剥**小数点之后**的尾随零：无小数点（`0x1p+0` / `0x0p+0`）原样返回，
+    //   否则会把 `0x0p+0` 削成 `0xp+0`（整数部分那个 0 是有效数字）。
+    if (dot != std::string::npos && p != std::string::npos && dot < p) {
+        std::size_t end = p;
+        while (end > dot + 1 && s[end - 1] == '0') { --end; }
+        if (end == dot + 1) { --end; }   // 尾数全零 ⇒ 连小数点一起去掉（`0x0.000…` → `0x0`）
+        s.erase(end, p - end);
+    }
+    return s;
+}
+
 static std::string DumpDrawTextCommands(const CommandBuffer& cmds) {
     std::string out;
     for (const auto& cmd : cmds) {
         if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) {
-            char bufX[64], bufY[64], bufS[64], bufR[64], bufG[64], bufB[64], bufA[64];
-            std::snprintf(bufX, sizeof bufX, "%a", tc->pos.x);
-            std::snprintf(bufY, sizeof bufY, "%a", tc->pos.y);
-            std::snprintf(bufS, sizeof bufS, "%a", tc->font.size);
-            std::snprintf(bufR, sizeof bufR, "%a", tc->color.r);
-            std::snprintf(bufG, sizeof bufG, "%a", tc->color.g);
-            std::snprintf(bufB, sizeof bufB, "%a", tc->color.b);
-            std::snprintf(bufA, sizeof bufA, "%a", tc->color.a);
-            out += std::string(bufX) + "|" + bufY + "|" + bufS + "|" + EscapeGoldenString(tc->font.family) + "|" + std::to_string(tc->font.weight) + "|";
+            out += HexFloat(tc->pos.x) + "|" + HexFloat(tc->pos.y) + "|" + HexFloat(tc->font.size) + "|" + EscapeGoldenString(tc->font.family) + "|" + std::to_string(tc->font.weight) + "|";
             if (tc->font.italic) {
                 out += "italic=1|";
             }
-            out += std::string(bufR) + "|" + bufG + "|" + bufB + "|" + bufA + "|" + EscapeGoldenString(tc->text) + "\n";
+            out += HexFloat(tc->color.r) + "|" + HexFloat(tc->color.g) + "|" + HexFloat(tc->color.b) + "|" + HexFloat(tc->color.a) + "|" + EscapeGoldenString(tc->text) + "\n";
         }
     }
     return out;
