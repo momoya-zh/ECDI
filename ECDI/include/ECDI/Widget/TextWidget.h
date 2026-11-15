@@ -208,12 +208,19 @@ protected:
 	/// @brief 布局/绘制 span 激活判据的单一真相源（Phase 45 J1–J3）。基类 ≡ HasActiveSpans()。
 	[[nodiscard]] virtual bool SpansActiveForLayout() const { return HasActiveSpans(); }
 
-	/// @brief 是否存在生效的 size 覆盖（且处于激活状态）的守卫判断（Phase 45）
+	/// @brief 行框/基线守卫判据——是否存在**改变解析后 `Font`**（`family`/`weight`/`italic`/`size`
+	///        任一维）且非空的 span（#91 / REQ-23 扩维；纯 `foreground` 覆盖仍返回 false）。
+	/// @details 判据 = `ResolveRunFont(base, style)` 与 `base` 四字段比较 ⇒ 与绘制侧逐 run
+	///          是否真的要换字体严格同源；非空但解析结果等同基字体（如重复声明同 family）不触发。
 	[[nodiscard]] bool LineBoxGuardActive() const;
 
-	/// @brief 行框字体（A′ 最大者；仅 size 覆盖触发，否则 = 基字体）。不是 ResolveRunFont 的产物，
+	/// @brief 行框字体（A′ 最大者；仅改变解析字体之 span 触发，否则 = 基字体）。不是 ResolveRunFont 的产物，
 	///        而是同一 run 字体集合上的兄弟概念（不同选取规则）。
 	[[nodiscard]] Font EffectiveLineBoxFont(TextMeasurer& measurer) const;
+
+	/// @brief 行底部下伸溢出保护余量（#92 / REQ-24：max(0, boxA + maxRunDescent - lineHeight)）
+	/// @details 仅扩大外包首选高、视觉居中参考总高与滚动上限；行距 LineHeight 步进保持不变。
+	[[nodiscard]] float EffectiveBottomOverhang(TextMeasurer& measurer) const;
 
 	/// @brief span → 字形字体（唯一组装点；RunSlice.font 与行框集合共用；Phase 45）
 	[[nodiscard]] static Font ResolveRunFont(const Font& base, const SpanStyle& s);

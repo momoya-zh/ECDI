@@ -61,6 +61,7 @@ public:
 
 	float LineHeight(const Font& font) override;
 	float Ascent(const Font& font) override;
+	float Descent(const Font& font) override;
 
 	/// @brief 测量缓存未命中计数（★ **观测缝**——命中与否的**返回值相同**，无法凭返回值区分）
 	/// @details ★ 内部件的公开方法，**非公共 API**；服务 T26-12 断言 + 基准指标。
@@ -82,6 +83,7 @@ public:
 	///          ★ **生产路径恒为真实 API**（成员初值即 `&::GetOutlineTextMetricsW`）。
 	void SetOutlineTextMetricsForTests(OutlineTextMetricsFn fn){
 		m_outlineTextMetrics = (fn != nullptr) ? fn : &::GetOutlineTextMetricsW;
+		m_lineHeightCache.clear();   // ★ 切换测试注入函数时清缓存，保证 T31-3 确定性
 	}
 
 	/// @brief 当前 OTM 查询实现（观测用——便于断言「已恢复真实 API」）
@@ -99,12 +101,21 @@ private:
 
 	HWND m_hwnd = nullptr;   ///< ★ Phase 26：窗口句柄（`Initialize` 注入——测量基准 DPI 的来源）
 
+	struct TmMetrics {
+		float ascent = 0.0f;
+		float descent = 0.0f;
+	};
+
+	/// @brief 合并查询并缓存 GetTextMetricsW 的 tmAscent / tmDescent（DIP 口径，零重复 GDI 调用）
+	TmMetrics QueryTextMetrics(const Font& font);
+
 	/// ★ Phase 26（△9b）：**测量结果缓存**——消掉「每帧 × 每行」的
 	/// `GetDC` + `SelectObject` + `GetTextExtentPoint32W`（性能方向②）。
 	/// 键 = (weight, text, size, family, **dpi**)——★ 含 DPI（跨屏自动失效），与 `m_fontCache` 同口径；Phase 36 +weight；Phase 45 +italic。
 	/// ★ `font.size`（float）在生成 key 前**不得额外 rounding**（同一 `Font` 重复测量须逐位命中）。
 	std::map<std::tuple<std::uint16_t, std::string, float, std::string, bool, int>, Size> m_measureCache;
-	std::map<std::tuple<std::uint16_t, float, std::string, bool, int>, float> m_ascentCache;
+	std::map<std::tuple<std::uint16_t, float, std::string, bool, int>, TmMetrics> m_tmMetricsCache;
+	std::map<std::tuple<std::uint16_t, float, std::string, bool, int>, float> m_lineHeightCache;
 
 	/// ★ 上限 ⇒ 达上限 `clear()`（O(1)，防无界增长——TextBox 反复编辑会不断产生新 `text` 键）。
 	/// ★ 淘汰策略（LRU）不做——记为详设开放项 O9。

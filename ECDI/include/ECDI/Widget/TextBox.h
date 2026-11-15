@@ -366,6 +366,9 @@ private:
 	/// 8.5.2 固定行高——不支持逐行字体，Y/lineH 成立）
 	float GetLineHeight() const;
 
+	/// @brief 底部下伸溢出保护余量（#92 / REQ-24；无窗口返回 0 守护无头测试契约）
+	float GetBottomOverhang() const;
+
 	/// @brief 文本实际绘制起点相对 TextBox client origin 的 X 坐标（单一来源——
 	/// OnPaint textX / CaretIndexFromPosition innerX = localX - textX 同源防漂移）
 	float GetTextLeftInset() const;

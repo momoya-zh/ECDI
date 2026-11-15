@@ -210,6 +210,15 @@ class PlatformRenderContext;   // 前置声明（Initialize 参数 const&——�
 		/// @details 与 LineHeight（行框口径，otmMac* / hhea 盒）分属两个口径。
 		///          DIP 单位：A′ = AscentIntPx × 96 / dpi（同一 measurer 实例、同一 dpi）。
 		virtual float Ascent(const Font& font) = 0;
+
+		/// @brief 字体基线以下像素/DIP 下伸深度（#92 / REQ-24 底部溢出防护）
+		/// @details 默认假设盒高闭合，即 (std::max)(0.0f, LineHeight(font) - Ascent(font))；
+		///          GDI 链覆盖返回 tmDescent × 96 / dpi，使 Noto Sans SC 等 tmHeight > hhea LineHeight
+		///          字体的下伸溢出可被 AutoSize / PushClip / 居中对齐精确计入（行距 LineHeight 本身不变）。
+		virtual float Descent(const Font& font)
+		{
+			return (std::max)(0.0f, LineHeight(font) - Ascent(font));
+		}
 	};
 
 }

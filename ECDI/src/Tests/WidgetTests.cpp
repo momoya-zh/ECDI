@@ -11,6 +11,7 @@
 #include "Render/RecordingBackend.h"
 #include "Render/FontEngine.h"
 #include "Platform/Win32/Win32FontSource.h"
+#include <algorithm>
 #include <cmath>
 #include "Render/GDITextMeasurer.h"   // Phase 28 批二：真测量器（T28-3 计数包装）
 #include "Render/GDIBackend.h"
@@ -2000,6 +2001,8 @@ public:
 	using TextWidget::BuildTextLayout;
 	using TextWidget::TextLayout;
 	using TextWidget::TextLine;
+	using TextWidget::LineBoxGuardActive;
+	using TextWidget::EffectiveBottomOverhang;
 
 	void SetMeasurer(TextMeasurer* m) { m_customMeasurer = m; }
 
@@ -2033,9 +2036,28 @@ void Test44StyledSpansMeasurement() {
 	const float expectedW = 6 * 8.0f + 6 * 10.0f + 8 * 9.0f; // 180.0f
 	EXPECT_NEAR(pref.width, expectedW, kEpsilon);
 
-	// I44-7 行高单源断言：必须严格等于基控件字体行高（16.0f），绝不可受粗体 24.0f 污染
-	EXPECT_NEAR(pref.height, 16.0f, kEpsilon);
-	EXPECT_NEAR(pref.height, measurer.LineHeight(Font{}), kEpsilon);
+	// ★★ #91（REQ-23）**契约破坏登记**：Phase 44 不变量 **I44-7 自本批作废**。
+	//    旧口径「行高恒等于基字体行高、绝不受 span 污染」→ 新口径
+	//    「行高 = max(LineHeight over 全部非空 run)」（`EffectiveLineBoxFont` 取 max Ascent、
+	//    平手取 max LineHeight）。所以断言从硬编码 16.0f 改为**按 max 口径复算**。
+	//    ⚠ 本假件的 24.0f 是**故意毒饵**（原注释：「若施工期错误取用 run 的最大行高，即刻飘红」），
+	//      **不是真实行为**：96 DPI 实测（`.workbuddy/spike/p91/probe.cpp`）Noto Sans SC /
+	//      Microsoft YaHei / Consolas / SimSun / Segoe UI 五族，weight 400↔700 与 italic 开闭
+	//      的 `otmMac*` LineHeight **逐位不变**，只随 family 变；真实污染幅度上限 1px
+	//      （YaHei@16 粗体 `tmDescent 4→5`）。⇒ 本条只验证「机制按 max 口径运转」，
+	//      **不得**被读作「粗体会把行高抬高 50%」。
+	const float hBase = measurer.LineHeight(Font{});
+	const float hBold = measurer.LineHeight(Font{ 16.0f, "", 700 });
+	const float hMono = measurer.LineHeight(Font{ 16.0f, "Consolas", 400 });
+	const float expectedH = (std::max)({ hBase, hBold, hMono });
+	EXPECT_NEAR(pref.height, expectedH, kEpsilon);
+
+	TestableStyledLabel colorOnlyLabel;
+	colorOnlyLabel.SetMeasurer(&measurer);
+	colorOnlyLabel.SetStyledText("Hello World", {
+		TextSpan{ 0, 5, SpanStyle{ .foreground = Color::Red() } }
+	});
+	EXPECT_NEAR(colorOnlyLabel.GetPreferredSize().height, measurer.LineHeight(Font{}), kEpsilon);
 }
 
 // ── T44-2：折行单调性、逐行结构与 CJK 禁则同构（P0-7 物理数值严密对齐）──
@@ -2730,7 +2752,8 @@ void Test45StyledSpansLineBoxMultiPhase() {
         }
     }
 
-    // ④ size 守卫相：基 Consolas + 纯 family/weight/italic 均不触发守卫；加 size 覆盖才变
+    // ④ 守卫与同尺不改行高相：FontSizeScaledMeasurer 下 family/weight/italic 不改变行高；
+    //    纯 foreground 不触发守卫，family/weight/italic 变化才触发守卫（REQ-23）
     {
         TestableStyledLabel label;
         label.SetSize(200.0f, 100.0f);
@@ -2738,16 +2761,23 @@ void Test45StyledSpansLineBoxMultiPhase() {
         label.SetFont(baseFont);
         const float baseH = scaledMeasurer.LineHeight(baseFont);
 
+        label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .foreground = Color::Red() } } });
+        EXPECT_FALSE(label.LineBoxGuardActive());
+
         label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .family = "Segoe UI" } } });
+        EXPECT_TRUE(label.LineBoxGuardActive());
         EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, baseH, kEpsilon);
 
         label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .weight = 700 } } });
+        EXPECT_TRUE(label.LineBoxGuardActive());
         EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, baseH, kEpsilon);
 
         label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .italic = true } } });
+        EXPECT_TRUE(label.LineBoxGuardActive());
         EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, baseH, kEpsilon);
 
         label.SetStyledText("Hello World", { TextSpan{ 0, 5, SpanStyle{ .size = 28.0f } } });
+        EXPECT_TRUE(label.LineBoxGuardActive());
         EXPECT_NEAR(label.BuildTextLayout(scaledMeasurer, "Hello World", 200.0f).totalHeight, 28.0f * 1.2f, kEpsilon);
     }
 
@@ -2920,6 +2950,302 @@ void Test45StyledSpansTwoChainConsistency() {
 
 } // namespace
 
+// ── #91/#92/#93：跨族基线与守卫、下伸 overhang、AutoSize ceil 防截断 ──────
+
+class OverhangMeasurer : public RecordingBackend {
+public:
+    Size MeasureText(const Font& f, const std::string& text) override {
+        size_t count = 0;
+        for (size_t i = 0; i < text.size(); ++i) {
+            if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+                ++count;
+        }
+        return Size{ static_cast<float>(count) * 8.0f, LineHeight(f) };
+    }
+    float LineHeight(const Font& f) override {
+        if (f.family == "NotoOverhang") return 20.0f;
+        if (f.family == "SmallZero") return 18.0f;
+        return 18.0f;
+    }
+    float Ascent(const Font& f) override {
+        if (f.family == "NotoOverhang") return 15.0f;
+        if (f.family == "SmallZero") return 14.0f;
+        return 14.0f;
+    }
+    float Descent(const Font& f) override {
+        if (f.family == "NotoOverhang") return 9.0f; // 15 + 9 - 20 = 4.0f overhang
+        if (f.family == "SmallZero") return 4.0f;    // 14 + 4 - 18 = 0.0f overhang
+        return 4.0f;
+    }
+};
+
+class PrecisionMeasurer : public RecordingBackend {
+public:
+    float fixedWidth = 0.0f;
+    float fixedHeight = 0.0f;
+    Size MeasureText(const Font&, const std::string&) override {
+        return Size{ fixedWidth, fixedHeight };
+    }
+    float LineHeight(const Font&) override { return fixedHeight; }
+    float Ascent(const Font&) override { return fixedHeight * 0.75f; }
+    float Descent(const Font&) override { return fixedHeight * 0.25f; }
+};
+
+class TestableMeasurerButton : public Button {
+public:
+    using Button::Button;
+    void SetMeasurer(TextMeasurer* m) { m_customMeasurer = m; }
+protected:
+    TextMeasurer* ResolveMeasurer() const override {
+        return m_customMeasurer ? m_customMeasurer : Button::ResolveMeasurer();
+    }
+private:
+    TextMeasurer* m_customMeasurer = nullptr;
+};
+
+// ── T1（#91 / REQ-23）：同 size 跨族/字重/斜体基线共享 & 负对照 guard ──
+void Test91MixedFamilyBaselineAndGuard() {
+    CrossFamilyMeasurer crossMeasurer;
+
+    // ① 负对照：纯 foreground 覆盖 + 同字体属性冗余覆盖均不触发 LineBoxGuardActive()
+    {
+        TestableStyledLabel label;
+        label.SetFont(Font{ 15.0f, "Consolas", 400, false });
+        label.SetStyledText("code only", {
+            TextSpan{ 0, 4, SpanStyle{ .foreground = Color::Red() } }
+        });
+        EXPECT_FALSE(label.LineBoxGuardActive());
+
+        label.SetStyledText("code same", {
+            TextSpan{ 0, 4, SpanStyle{ .family = "Consolas", .weight = 400, .italic = false } }
+        });
+        EXPECT_FALSE(label.LineBoxGuardActive());
+    }
+
+    // ② 单行无 wrap：Base = Consolas (LH=16, A=12) + Span = RunFamily (LH=40, A=20)，无 .size
+    {
+        TestableStyledLabel label;
+        label.SetMeasurer(&crossMeasurer);
+        label.SetPosition(0, 0);
+        label.SetFont(Font{ 15.0f, "Consolas", 400 });
+        label.SetStyledText("code run", {
+            TextSpan{ 5, 3, SpanStyle{ .family = "RunFamily" } }
+        });
+        EXPECT_TRUE(label.LineBoxGuardActive());
+        EXPECT_TRUE(label.AutoSize());
+        EXPECT_EQ(label.GetHeight(), 40);
+
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, crossMeasurer);
+        label.Paint(ctx, 0, 0);
+
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& c : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&c)) texts.push_back(tc);
+        }
+        EXPECT_EQ(texts.size(), 2u);
+        if (texts.size() == 2u) {
+            const float b0 = texts[0]->pos.y + crossMeasurer.Ascent(texts[0]->font);
+            const float b1 = texts[1]->pos.y + crossMeasurer.Ascent(texts[1]->font);
+            EXPECT_NEAR(b0, b1, kEpsilon);
+            EXPECT_NEAR(texts[0]->pos.y, 8.0f, kEpsilon); // lineY(0) + boxA(20) - ascent(12)
+            EXPECT_NEAR(texts[1]->pos.y, 0.0f, kEpsilon); // lineY(0) + boxA(20) - ascent(20)
+        }
+    }
+
+    // ③ 多行 wrap（挂窗使 IsWrapLayoutActive 生效）：RunFamily Span 触发行框放大，双行共基线且 line step = 40
+    {
+        Application app;
+        RenderServices services{
+            std::make_unique<GDIBackend>(),
+            std::make_unique<CrossFamilyMeasurer>()
+        };
+        Window& window = app.Create("ECDI_T91_WrapLabel", 240, 160, std::move(services));
+
+        auto owned = std::make_unique<Label>();
+        Label* label = owned.get();
+        window.GetRootWidget().AddChild(std::move(owned));
+        label->SetPosition(0, 0);
+        label->SetWordWrap(true);
+        label->SetSize(120, 100);
+        label->SetFont(Font{ 15.0f, "Consolas", 400 });
+        label->SetStyledText("ab cd\nef gh", {
+            TextSpan{ 3, 2, SpanStyle{ .family = "RunFamily" } },
+            TextSpan{ 9, 2, SpanStyle{ .family = "RunFamily" } }
+        });
+
+        EXPECT_NEAR(label->GetPreferredSize().height, 80.0f, kEpsilon);
+
+        CommandBuffer cmds;
+        auto& m = window.GetTextMeasurer();
+        PaintContext ctx(cmds, m);
+        label->Paint(ctx, 0, 0);
+
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& c : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&c)) texts.push_back(tc);
+        }
+        EXPECT_EQ(texts.size(), 4u);
+        if (texts.size() == 4u) {
+            const float line0Base = texts[0]->pos.y + m.Ascent(texts[0]->font);
+            const float line0RunBase = texts[1]->pos.y + m.Ascent(texts[1]->font);
+            const float line1Base = texts[2]->pos.y + m.Ascent(texts[2]->font);
+            const float line1RunBase = texts[3]->pos.y + m.Ascent(texts[3]->font);
+            EXPECT_NEAR(line0Base, line0RunBase, kEpsilon);
+            EXPECT_NEAR(line1Base, line1RunBase, kEpsilon);
+            EXPECT_NEAR(line1Base - line0Base, 40.0f, kEpsilon);
+        }
+        window.Release();
+    }
+}
+
+// ── T3 + T4a（#92 / REQ-24）：BottomOverhang 居中对齐、Wrap 步进与零 overhang 负对照 ──
+void Test92TextWidgetOverhangCenteringAndWrap() {
+    OverhangMeasurer overhangMeasurer;
+
+    // ① AutoSize Label（single-line）：preferred 含 overhang(+4)，居中 pos.y == 0
+    {
+        TestableStyledLabel label;
+        label.SetMeasurer(&overhangMeasurer);
+        label.SetFont(Font{ 15.0f, "NotoOverhang", 400 });
+        label.SetText("gjqpy");
+        EXPECT_NEAR(label.EffectiveBottomOverhang(overhangMeasurer), 4.0f, kEpsilon);
+        EXPECT_NEAR(label.GetPreferredSize().height, 24.0f, kEpsilon);
+        EXPECT_TRUE(label.AutoSize());
+        EXPECT_EQ(label.GetHeight(), 24);
+
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, overhangMeasurer);
+        label.Paint(ctx, 0, 0);
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& c : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&c)) texts.push_back(tc);
+        }
+        EXPECT_EQ(texts.size(), 1u);
+        if (texts.size() == 1u) {
+            EXPECT_NEAR(texts[0]->pos.y, 0.0f, kEpsilon);
+        }
+    }
+
+    // ② Button 固定高 H=40 居中：offsetY = (40 - (20 + 4)) / 2 = 8.0f（旧行为 10.0f）
+    {
+        TestableMeasurerButton btn("gjqpy");
+        btn.SetMeasurer(&overhangMeasurer);
+        btn.SetFont(Font{ 15.0f, "NotoOverhang", 400 });
+        btn.SetSize(120, 40);
+
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, overhangMeasurer);
+        btn.Paint(ctx, 0, 0);
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& c : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&c)) texts.push_back(tc);
+        }
+        EXPECT_EQ(texts.size(), 1u);
+        if (texts.size() == 1u) {
+            EXPECT_NEAR(texts[0]->pos.y, 8.0f, kEpsilon);
+        }
+    }
+
+    // ③ Wrap 多行（挂窗使 IsWrapLayoutActive 生效）：preferred = lines * lineHeight + overhang (44)，但行距步进仍 = lineHeight (20)
+    {
+        Application app;
+        RenderServices services{
+            std::make_unique<GDIBackend>(),
+            std::make_unique<OverhangMeasurer>()
+        };
+        Window& window = app.Create("ECDI_T92_WrapOverhang", 240, 160, std::move(services));
+
+        auto owned = std::make_unique<Label>();
+        Label* label = owned.get();
+        window.GetRootWidget().AddChild(std::move(owned));
+        label->SetWordWrap(true);
+        label->SetFont(Font{ 15.0f, "NotoOverhang", 400 });
+        label->SetText("Line1\nLine2");
+        label->SetSize(200, 100);
+        EXPECT_NEAR(label->GetPreferredSize().height, 44.0f, kEpsilon);
+        EXPECT_TRUE(label->AutoSize());
+        EXPECT_EQ(label->GetHeight(), 44);
+
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, window.GetTextMeasurer());
+        label->Paint(ctx, 0, 0);
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& c : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&c)) texts.push_back(tc);
+        }
+        EXPECT_EQ(texts.size(), 2u);
+        if (texts.size() == 2u) {
+            EXPECT_NEAR(texts[0]->pos.y, 0.0f, kEpsilon);
+            EXPECT_NEAR(texts[1]->pos.y - texts[0]->pos.y, 20.0f, kEpsilon);
+        }
+        window.Release();
+    }
+
+    // ④ 混排 max overhang：Base(SmallZero, overhang=0) + Span(NotoOverhang, overhang=4)
+    {
+        TestableStyledLabel label;
+        label.SetMeasurer(&overhangMeasurer);
+        label.SetFont(Font{ 15.0f, "SmallZero", 400 });
+        label.SetStyledText("code gjqpy", {
+            TextSpan{ 5, 5, SpanStyle{ .family = "NotoOverhang" } }
+        });
+        EXPECT_NEAR(label.EffectiveBottomOverhang(overhangMeasurer), 4.0f, kEpsilon);
+        EXPECT_NEAR(label.GetPreferredSize().height, 24.0f, kEpsilon);
+    }
+
+    // ⑤ 负对照（zero-overhang 字体）：SmallZero（Ascent+Descent == LineHeight == 18）逐位不变
+    {
+        TestableStyledLabel label;
+        label.SetMeasurer(&overhangMeasurer);
+        label.SetFont(Font{ 15.0f, "SmallZero", 400 });
+        label.SetText("gjqpy");
+        EXPECT_NEAR(label.EffectiveBottomOverhang(overhangMeasurer), 0.0f, kEpsilon);
+        EXPECT_NEAR(label.GetPreferredSize().height, 18.0f, kEpsilon);
+
+        TestableMeasurerButton btn("gjqpy");
+        btn.SetMeasurer(&overhangMeasurer);
+        btn.SetFont(Font{ 15.0f, "SmallZero", 400 });
+        btn.SetSize(120, 40);
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, overhangMeasurer);
+        btn.Paint(ctx, 0, 0);
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& c : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&c)) texts.push_back(tc);
+        }
+        EXPECT_EQ(texts.size(), 1u);
+        if (texts.size() == 1u) {
+            EXPECT_NEAR(texts[0]->pos.y, 11.0f, kEpsilon); // (40 - 18) / 2
+        }
+    }
+}
+
+// ── T5（#93 / REQ-22）：Widget::AutoSize ceil 进位与浮点边界防御 ──
+void Test93WidgetAutoSizeCeilPrecision() {
+    auto runCase = [](float w, float h, int expectedW, int expectedH) {
+        PrecisionMeasurer precision;
+        precision.fixedWidth = w;
+        precision.fixedHeight = h;
+        TestableStyledLabel label;
+        label.SetMeasurer(&precision);
+        label.SetText("x");
+        label.SetSize(200, 200);
+        EXPECT_TRUE(label.AutoSize());
+        EXPECT_EQ(label.GetWidth(), expectedW);
+        EXPECT_EQ(label.GetHeight(), expectedH);
+    };
+
+    // 20.8 / 61.2 -> 21 / 62（旧 lround 会把 61.2 截成 61）
+    runCase(20.8f, 61.2f, 21, 62);
+    // 浮点微扰 18.00001f -> 不因 1e-5f 进位成 19
+    runCase(18.0f, 18.0f + 1e-5f, 18, 18);
+    // 超出阈值 18.01f -> 正确进位成 19
+    runCase(18.01f, 18.01f, 19, 19);
+    // 非正钳位 0
+    runCase(0.0f, -0.5f, 0, 0);
+}
+
 void ECDI::Test::RegisterWidgetTests()
 {
     GetTestRegistry().Add("Widget.PanelPaint", &TestPanelPaint);
@@ -2997,4 +3323,7 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.StyledSpansLineBoxMultiPhase",   &Test45StyledSpansLineBoxMultiPhase);     // T45-3
     GetTestRegistry().Add("TextWidget.StyledSpansBaselineShared",      &Test45StyledSpansBaselineShared);        // T45-4
     GetTestRegistry().Add("TextWidget.StyledSpansTwoChainConsistency", &Test45StyledSpansTwoChainConsistency);  // T45-8
+    GetTestRegistry().Add("TextWidget.MixedFamilyBaselineAndGuard",    &Test91MixedFamilyBaselineAndGuard);      // #91 (T1)
+    GetTestRegistry().Add("TextWidget.OverhangCenteringAndWrap",       &Test92TextWidgetOverhangCenteringAndWrap); // #92 (T3/T4a)
+    GetTestRegistry().Add("Widget.AutoSizeCeilPrecision",              &Test93WidgetAutoSizeCeilPrecision);      // #93 (T5)
 }

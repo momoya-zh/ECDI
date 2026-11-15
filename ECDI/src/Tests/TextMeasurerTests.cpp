@@ -19,7 +19,13 @@
 #include <cstddef>
 #include <memory>   // ★ Phase 31 批二：make_shared<FontEngine>
 #include <string>
+#include <cwchar>
 #include <vector>   // ★ Phase 31 批二：OTM 缓冲
+
+#include "ECDI/Render/PaintContext.h"
+#include "ECDI/Render/Renderer.h"
+#include "ECDI/Widget/Label.h"
+#include "Render/GDIBackend.h"
 
 using namespace ECDI;
 
@@ -568,6 +574,261 @@ void Test45AscentInterfaceContract()
     // 3. 假件旧用例零调用断言（常数假件无害）
     FixedWidthMeasurer fakeMeasurer;
     EXPECT_NEAR(fakeMeasurer.Ascent(testFont), 12.0f, 0.001f);
+    EXPECT_NEAR(fakeMeasurer.Descent(testFont), 4.0f, 0.001f); // default LineHeight(16) - Ascent(12)
+}
+
+namespace {
+
+class GdiPixelLabel final : public Label {
+public:
+    using Label::Label;
+    void SetMeasurer(TextMeasurer* m) { m_measurer = m; }
+protected:
+    TextMeasurer* ResolveMeasurer() const override { return m_measurer; }
+private:
+    TextMeasurer* m_measurer = nullptr;
+};
+
+bool IsFontInstalledOnSystem(const wchar_t* faceName) {
+    LOGFONTW lf{};
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfHeight = -15;
+    std::copy_n(faceName, std::wcslen(faceName) + 1, lf.lfFaceName);
+    HFONT hf = CreateFontIndirectW(&lf);
+    if (!hf) return false;
+    HDC dc = GetDC(nullptr);
+    HGDIOBJ old = SelectObject(dc, hf);
+    wchar_t resolved[LF_FACESIZE]{};
+    GetTextFaceW(dc, LF_FACESIZE, resolved);
+    SelectObject(dc, old);
+    ReleaseDC(nullptr, dc);
+    DeleteObject(hf);
+    return std::wcscmp(resolved, faceName) == 0;
+}
+
+} // namespace
+
+// ── T6（#92 / REQ-24）：GDITextMeasurer::Descent 与缓存/测试注入缝契约 ──
+void Test92GdiTextMeasurerDescentAndCache()
+{
+    MeasurerWindow w;
+    if (!CreateMeasurerWindow(L"ECDI_T92_DescentCache", w)) return;
+
+    GDITextMeasurer gdi;
+    gdi.Initialize(Win32RenderContext(w.hwnd));
+
+    // ① 基准字体：Consolas / Microsoft YaHei / SimSun 均返回正 Descent，且重复查询稳定（命中缓存）
+    for (const char* family : { "Consolas", "Microsoft YaHei", "SimSun" }) {
+        const Font f{ 15.0f, family, 400 };
+        const float lh1 = gdi.LineHeight(f);
+        const float asc1 = gdi.Ascent(f);
+        const float desc1 = gdi.Descent(f);
+        EXPECT_TRUE(lh1 > 0.0f);
+        EXPECT_TRUE(asc1 > 0.0f);
+        EXPECT_TRUE(desc1 > 0.0f);
+
+        EXPECT_NEAR(gdi.LineHeight(f), lh1, kEps);
+        EXPECT_NEAR(gdi.Ascent(f), asc1, kEps);
+        EXPECT_NEAR(gdi.Descent(f), desc1, kEps);
+    }
+
+    // ② Negative control：Consolas @ 15 与 Microsoft YaHei @ 15 无显著 bottom overhang
+    {
+        const Font consolas{ 15.0f, "Consolas", 400 };
+        const float overhangConsolas = (std::max)(0.0f, gdi.Ascent(consolas) + gdi.Descent(consolas) - gdi.LineHeight(consolas));
+        EXPECT_TRUE(overhangConsolas <= kEps);
+
+        const Font yahei{ 15.0f, "Microsoft YaHei", 400 };
+        const float overhangYahei = (std::max)(0.0f, gdi.Ascent(yahei) + gdi.Descent(yahei) - gdi.LineHeight(yahei));
+        EXPECT_TRUE(overhangYahei <= kEps);
+    }
+
+    // ③ 注入缝清空/绕过 LineHeight 缓存：先预热缓存再注入失败回调，须立即回退 font.size
+    {
+        const Font f{ 14.0f, "SimSun", 400 };
+        const float normalLh = gdi.LineHeight(f);
+        EXPECT_TRUE(normalLh > f.size);
+        gdi.SetOutlineTextMetricsForTests([](HDC, UINT, LPOUTLINETEXTMETRICW) -> UINT { return 0; });
+        EXPECT_NEAR(gdi.LineHeight(f), f.size, kEps);
+        gdi.SetOutlineTextMetricsForTests(nullptr);
+        EXPECT_NEAR(gdi.LineHeight(f), normalLh, kEps);
+    }
+}
+
+// ── T2（#91/#92）：真实 GDITextMeasurer + GDIBackend 栅格像素验证与负对照 ──
+void Test92GdiEndToEndOverhangInkRasterization()
+{
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"ECDI_T92_GdiRaster";
+    if (!RegisterClassW(&wc)) {
+        EXPECT_EQ(GetLastError(), ERROR_CLASS_ALREADY_EXISTS);
+    }
+    const int screenW = GetSystemMetrics(SM_CXSCREEN);
+    MeasurerWindow w;
+    w.hwnd = CreateWindowExW(0, L"ECDI_T92_GdiRaster", L"ECDI_T92_GdiRaster", WS_POPUP,
+                             screenW - 260, 10, 240, 80, nullptr, nullptr, wc.hInstance, nullptr);
+    EXPECT_TRUE(w.hwnd != nullptr);
+    if (!w.hwnd) return;
+    ShowWindow(w.hwnd, SW_SHOWNOACTIVATE);
+
+    const float dpiScale = static_cast<float>(GetDpiForWindow(w.hwnd)) / 96.0f;
+    GDITextMeasurer gdi;
+    gdi.Initialize(Win32RenderContext(w.hwnd));
+    GDIBackend backend;
+    backend.Initialize(Win32RenderContext(w.hwnd));
+    Renderer renderer(backend);
+
+    auto renderAndFindInkY = [&](Label& label, int originX, int originY, int& outMinY, int& outMaxY) {
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, gdi);
+        ctx.PushClip(Rect{
+            static_cast<float>(originX), static_cast<float>(originY),
+            static_cast<float>(label.GetWidth()), static_cast<float>(label.GetHeight())
+        });
+        label.Paint(ctx, 0.0f, 0.0f);
+        ctx.PopClip();
+
+        InvalidateRect(w.hwnd, nullptr, FALSE);
+        renderer.BeginFrame(Color::White());
+        renderer.Execute(cmds, dpiScale);
+        renderer.EndFrame();
+
+        outMinY = 9999;
+        outMaxY = -1;
+        HDC dc = GetDC(w.hwnd);
+        const int scanW = static_cast<int>(std::ceil(label.GetWidth() * dpiScale)) + 4;
+        const int scanH = (std::min)(80, static_cast<int>(std::ceil((originY + label.GetHeight()) * dpiScale)) + 8);
+        const int startPxX = static_cast<int>(std::floor(originX * dpiScale));
+        const int startPxY = static_cast<int>(std::floor(originY * dpiScale));
+        for (int y = startPxY; y < scanH; ++y) {
+            for (int x = startPxX; x < startPxX + scanW && x < 240; ++x) {
+                const COLORREF c = GetPixel(dc, x, y);
+                if (c != CLR_INVALID && (GetRValue(c) < 245 || GetGValue(c) < 245 || GetBValue(c) < 245)) {
+                    outMinY = (std::min)(outMinY, y - startPxY);
+                    outMaxY = (std::max)(outMaxY, y - startPxY);
+                }
+            }
+        }
+        ReleaseDC(w.hwnd, dc);
+    };
+
+    // ① 负对照：Consolas @ 15（zero overhang，AutoSize 高 == ceil(LineHeight)）与 Microsoft YaHei @ 15
+    for (const char* fam : { "Consolas", "Microsoft YaHei" }) {
+        GdiPixelLabel label;
+        label.SetMeasurer(&gdi);
+        label.SetPosition(10, 4);
+        label.SetTextColor(Color::Black());
+        label.SetFont(Font{ 15.0f, fam, 400 });
+        label.SetText("gjqpy");
+        EXPECT_TRUE(label.AutoSize());
+
+        const float lh = gdi.LineHeight(Font{ 15.0f, fam, 400 });
+        EXPECT_EQ(label.GetHeight(), static_cast<int>(std::ceil((std::max)(0.0f, lh - 1e-4f))));
+
+        int minY = 9999, maxY = -1;
+        renderAndFindInkY(label, 10, 4, minY, maxY);
+        EXPECT_TRUE(maxY >= 0);
+        const int pxBoxH = static_cast<int>(std::ceil(label.GetHeight() * dpiScale));
+        EXPECT_TRUE(maxY < pxBoxH);
+    }
+
+    // ② 真字形下伸保护验证（Noto Sans SC @ 15 若已安装于当前系统）
+    if (IsFontInstalledOnSystem(L"Noto Sans SC")) {
+        const Font noto{ 15.0f, "Noto Sans SC", 400 };
+        const float lh = gdi.LineHeight(noto);
+        const float overhang = (std::max)(0.0f, gdi.Ascent(noto) + gdi.Descent(noto) - lh);
+        EXPECT_TRUE(overhang > 0.5f);
+
+        GdiPixelLabel label;
+        label.SetMeasurer(&gdi);
+        label.SetPosition(10, 4);
+        label.SetTextColor(Color::Black());
+        label.SetFont(noto);
+        label.SetText("gjqpy");
+        EXPECT_TRUE(label.AutoSize());
+        EXPECT_EQ(label.GetHeight(), static_cast<int>(std::ceil((std::max)(0.0f, lh + overhang - 1e-4f))));
+        EXPECT_TRUE(label.GetHeight() > static_cast<int>(std::ceil(lh - 1e-4f)));
+
+        int minY = 9999, maxY = -1;
+        renderAndFindInkY(label, 10, 4, minY, maxY);
+        EXPECT_TRUE(maxY >= static_cast<int>(std::floor(lh * dpiScale)));
+        const int pxBoxH = static_cast<int>(std::ceil(label.GetHeight() * dpiScale));
+        EXPECT_TRUE(maxY < pxBoxH);
+
+        // ③ 混排："code gjqpy"（Consolas @ 15 + Span Noto Sans SC @ 15）共享基线 + AutoSize 包住下伸
+        GdiPixelLabel mixed;
+        mixed.SetMeasurer(&gdi);
+        mixed.SetPosition(10, 4);
+        mixed.SetTextColor(Color::Black());
+        mixed.SetFont(Font{ 15.0f, "Consolas", 400 });
+        mixed.SetStyledText("code gjqpy", {
+            TextSpan{ 5, 5, SpanStyle{ .family = "Noto Sans SC" } }
+        });
+        EXPECT_TRUE(mixed.AutoSize());
+
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, gdi);
+        mixed.Paint(ctx, 0.0f, 0.0f);
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& cmd : cmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) texts.push_back(tc);
+        }
+        EXPECT_EQ(texts.size(), 2u);
+        if (texts.size() == 2u) {
+            const float b0 = texts[0]->pos.y + gdi.Ascent(texts[0]->font);
+            const float b1 = texts[1]->pos.y + gdi.Ascent(texts[1]->font);
+            EXPECT_NEAR(b0, b1, kEps);
+        }
+
+        int mixMinY = 9999, mixMaxY = -1;
+        renderAndFindInkY(mixed, 10, 4, mixMinY, mixMaxY);
+        EXPECT_TRUE(mixMaxY >= static_cast<int>(std::floor(lh * dpiScale)));
+        const int mixPxBoxH = static_cast<int>(std::ceil(mixed.GetHeight() * dpiScale));
+        EXPECT_TRUE(mixMaxY < mixPxBoxH);
+
+        // ④ ★ harness 现场方向（③ 是**反向**）：基 Noto Sans SC @ 15 + 行内 code span Consolas @ 15。
+        //    ③ 的基是 Consolas（Ascent 14）、内联是 Noto（Ascent 17）——内联字体**更高**；
+        //    ④ 的基是 Noto（Ascent 17）、内联是 Consolas（Ascent 14）——内联字体**更矮**，正是
+        //    REQ-23 的原始 REPRO（正文中文 + 行内 code 上浮 3px）。两向判别力独立，都要覆盖。
+        GdiPixelLabel codeInline;
+        codeInline.SetMeasurer(&gdi);
+        codeInline.SetPosition(10, 4);
+        codeInline.SetTextColor(Color::Black());
+        codeInline.SetFont(Font{ 15.0f, "Noto Sans SC", 400 });
+        codeInline.SetStyledText("code gjqpy", {
+            TextSpan{ 5, 5, SpanStyle{ .family = "Consolas" } }
+        });
+        EXPECT_TRUE(codeInline.AutoSize());
+        EXPECT_EQ(codeInline.GetHeight(),
+                  static_cast<int>(std::ceil((std::max)(0.0f, lh + overhang - 1e-4f))));
+
+        CommandBuffer codeCmds;
+        PaintContext codeCtx(codeCmds, gdi);
+        codeInline.Paint(codeCtx, 0.0f, 0.0f);
+        std::vector<const DrawTextCommand*> codeTexts;
+        for (const auto& cmd : codeCmds) {
+            if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) codeTexts.push_back(tc);
+        }
+        EXPECT_EQ(codeTexts.size(), 2u);
+        if (codeTexts.size() == 2u) {
+            const float cb0 = codeTexts[0]->pos.y + gdi.Ascent(codeTexts[0]->font);
+            const float cb1 = codeTexts[1]->pos.y + gdi.Ascent(codeTexts[1]->font);
+            EXPECT_NEAR(cb0, cb1, kEps);
+            // ★ 判别力核心：Ascent 更小的 code run 必须被**下移**到共享基线（pos.y 变大），
+            //   而非维持 runY = lineY（那正是未修时的上浮 3px）
+            EXPECT_TRUE(codeTexts[1]->pos.y > codeTexts[0]->pos.y);
+            EXPECT_NEAR(codeTexts[1]->pos.y - codeTexts[0]->pos.y,
+                        gdi.Ascent(noto) - gdi.Ascent(Font{ 15.0f, "Consolas", 400 }), kEps);
+        }
+
+        int codeMinY = 9999, codeMaxY = -1;
+        renderAndFindInkY(codeInline, 10, 4, codeMinY, codeMaxY);
+        EXPECT_TRUE(codeMaxY >= static_cast<int>(std::floor(lh * dpiScale)));
+        const int codePxBoxH = static_cast<int>(std::ceil(codeInline.GetHeight() * dpiScale));
+        EXPECT_TRUE(codeMaxY < codePxBoxH);
+    }
 }
 
 void ECDI::Test::RegisterTextMeasurerTests()
@@ -581,4 +842,6 @@ void ECDI::Test::RegisterTextMeasurerTests()
     GetTestRegistry().Add("TextMeasurer.LineHeightFallback",            &Test31LineHeightFallback);              // T31-3
     GetTestRegistry().Add("TextMeasurer.LineHeightFontIdentityLevel",   &Test31LineHeightFontIdentityLevel);     // T31-6
     GetTestRegistry().Add("TextMeasurer.AscentInterfaceContract",       &Test45AscentInterfaceContract);         // T45-9
+    GetTestRegistry().Add("TextMeasurer.GdiDescentAndCacheContract",    &Test92GdiTextMeasurerDescentAndCache);  // #92 (T6)
+    GetTestRegistry().Add("TextMeasurer.GdiOverhangInkRasterization",   &Test92GdiEndToEndOverhangInkRasterization); // #91/#92 (T2)
 }

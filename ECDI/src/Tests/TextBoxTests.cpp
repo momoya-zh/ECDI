@@ -3618,6 +3618,165 @@ void Test44TextBoxReadOnlySupport() {
 	}
 }
 
+// ── #91/#92：TextBox 跨族基线、BottomOverhang 居中与滚动上限 ────────
+
+class BoxOverhangMeasurer final : public TextMeasurer {
+public:
+	Size MeasureText(const Font& f, const std::string& text) override {
+		size_t count = 0;
+		for (size_t i = 0; i < text.size(); ++i)
+			if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+				++count;
+		return Size{ static_cast<float>(count) * 8.0f, LineHeight(f) };
+	}
+	float LineHeight(const Font& f) override {
+		if (f.family == "OverhangNoto") return 20.0f;
+		if (f.family == "TallSerif")    return 30.0f;
+		if (f.family == "ZeroFont")     return 18.0f;
+		return 16.0f;
+	}
+	float Ascent(const Font& f) override {
+		if (f.family == "OverhangNoto") return 15.0f;
+		if (f.family == "TallSerif")    return 24.0f;
+		if (f.family == "ZeroFont")     return 14.0f;
+		return 12.0f;
+	}
+	float Descent(const Font& f) override {
+		if (f.family == "OverhangNoto") return 9.0f;  // 15 + 9 - 20 = 4.0f overhang
+		if (f.family == "TallSerif")    return 6.0f;  // 24 + 6 - 30 = 0.0f
+		if (f.family == "ZeroFont")     return 4.0f;  // 14 + 4 - 18 = 0.0f
+		return 4.0f;
+	}
+};
+
+class OverhangInspectableTextBox : public TextBox {
+public:
+	using TextBox::TextBox;
+	using TextBox::GetTextTopInset;
+	using TextBox::OnMouseWheel;
+};
+
+void Test91TextBoxMixedFamilyBaseline() {
+	Application app;
+	RenderServices services{
+		std::make_unique<GDIBackend>(),
+		std::make_unique<BoxOverhangMeasurer>()
+	};
+	Window& window = app.Create("ECDI_T91_TextBoxMixed", 240, 120, std::move(services));
+
+	auto owned = std::make_unique<OverhangInspectableTextBox>();
+	OverhangInspectableTextBox* box = owned.get();
+	window.GetRootWidget().AddChild(std::move(owned));
+	box->SetReadOnly(true);
+	box->SetSize(200, 80);
+	box->SetStyle(TextBoxStyleOverride{ .padding = 0.0f, .verticalAlign = VerticalAlignment::Top });
+	box->SetFont(Font{ 15.0f, "Consolas", 400 });
+	box->SetStyledText("code Tall\nnext line", {
+		TextSpan{ 5, 4, SpanStyle{ .family = "TallSerif" } } // 纯 family 覆盖，无 .size
+	});
+
+	EXPECT_NEAR(box->GetPreferredSize().height, 60.0f, kEps); // 2 * TallSerif(30)
+
+	CommandBuffer cmds;
+	PaintContext ctx(cmds, window.GetTextMeasurer());
+	box->Paint(ctx, 0, 0);
+
+	std::vector<const DrawTextCommand*> texts;
+	for (const auto& cmd : cmds) {
+		if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) texts.push_back(tc);
+	}
+	EXPECT_EQ(texts.size(), 3u); // "code ", "Tall", "next line"
+	if (texts.size() == 3u) {
+		auto& m = window.GetTextMeasurer();
+		const float b0 = texts[0]->pos.y + m.Ascent(texts[0]->font);
+		const float b1 = texts[1]->pos.y + m.Ascent(texts[1]->font);
+		const float b2 = texts[2]->pos.y + m.Ascent(texts[2]->font);
+		EXPECT_NEAR(b0, b1, kEps);
+		EXPECT_NEAR(texts[0]->pos.y, 12.0f, kEps); // boxA(24) - ascent(12)
+		EXPECT_NEAR(texts[1]->pos.y, 0.0f, kEps);  // boxA(24) - ascent(24)
+		EXPECT_NEAR(b2 - b0, 30.0f, kEps);         // line step == TallSerif lineHeight(30)
+	}
+
+	window.Release();
+}
+
+void Test92TextBoxOverhangInsetScrollAndPreferred() {
+	Application app;
+	RenderServices services{
+		std::make_unique<GDIBackend>(),
+		std::make_unique<BoxOverhangMeasurer>()
+	};
+	Window& window = app.Create("ECDI_T92_TextBoxOverhang", 240, 160, std::move(services));
+
+	auto owned = std::make_unique<OverhangInspectableTextBox>();
+	OverhangInspectableTextBox* box = owned.get();
+	window.GetRootWidget().AddChild(std::move(owned));
+
+	// ① 单行 Center vs Top：OverhangNoto (LH=20, overhang=4), H=40, padding=0
+	box->SetSingleLine(true);
+	box->SetSize(160, 40);
+	box->SetFont(Font{ 15.0f, "OverhangNoto", 400 });
+	box->SetText("gjqpy");
+	box->SetStyle(TextBoxStyleOverride{ .padding = 0.0f, .verticalAlign = VerticalAlignment::Top });
+	EXPECT_NEAR(box->GetTextTopInset(), 0.0f, kEps);
+
+	box->SetStyle(TextBoxStyleOverride{ .padding = 0.0f, .verticalAlign = VerticalAlignment::Center });
+	// Center inset = (40 - (20 + 4)) / 2 = 8.0f（未加 overhang 前为 10.0f）
+	EXPECT_NEAR(box->GetTextTopInset(), 8.0f, kEps);
+	{
+		CommandBuffer cmds;
+		PaintContext ctx(cmds, window.GetTextMeasurer());
+		box->Paint(ctx, 0, 0);
+		std::vector<const DrawTextCommand*> texts;
+		for (const auto& cmd : cmds) {
+			if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) texts.push_back(tc);
+		}
+		EXPECT_EQ(texts.size(), 1u);
+		if (texts.size() == 1u) {
+			EXPECT_NEAR(texts[0]->pos.y, 8.0f, kEps);
+		}
+	}
+
+	// ② 多行 MultilinePreferred 与 MaxScrollOffset（经 OnMouseWheel + Paint 观测）均计入 1x overhang
+	box->SetSingleLine(false);
+	box->SetStyle(TextBoxStyleOverride{ .padding = 4.0f, .verticalAlign = VerticalAlignment::Top });
+	box->SetText("Line1\nLine2"); // 2 * 20 + 4(overhang) + 8(2*padding) = 52
+	EXPECT_NEAR(box->GetPreferredSize().height, 52.0f, kEps);
+
+	box->SetSize(160, 50); // viewportH = 50 - 8 = 42; totalContent = 40 + 4 = 44 => maxScroll = 2
+	box->OnMouseWheel(MouseWheelEvent(nullptr, 0, 0, -1200));
+	{
+		CommandBuffer cmds;
+		PaintContext ctx(cmds, window.GetTextMeasurer());
+		box->Paint(ctx, 0, 0);
+		std::vector<const DrawTextCommand*> texts;
+		for (const auto& cmd : cmds) {
+			if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) texts.push_back(tc);
+		}
+		EXPECT_EQ(texts.size(), 2u);
+		if (texts.size() == 2u) {
+			EXPECT_NEAR(texts[0]->pos.y, 2.0f, kEps); // padding(4) - maxScroll(2)
+		}
+	}
+
+	// ③ 混排 Base(ZeroFont) + Span(OverhangNoto) => overhang == 4.0f 生效
+	box->SetReadOnly(true);
+	box->SetFont(Font{ 15.0f, "ZeroFont", 400 });
+	box->SetSingleLine(true);
+	box->SetSize(160, 40);
+	box->SetStyle(TextBoxStyleOverride{ .padding = 0.0f, .verticalAlign = VerticalAlignment::Center });
+	box->SetStyledText("code gjqpy", {
+		TextSpan{ 5, 5, SpanStyle{ .family = "OverhangNoto" } }
+	});
+	EXPECT_NEAR(box->GetTextTopInset(), 8.0f, kEps); // (40 - (20 + 4)) / 2
+
+	// ④ 负对照：纯 ZeroFont 无 overhang，Center inset 逐位不变
+	box->SetStyledText("clean text", {});
+	EXPECT_NEAR(box->GetTextTopInset(), 11.0f, kEps); // (40 - 18) / 2
+
+	window.Release();
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -3699,4 +3858,8 @@ void ECDI::Test::RegisterTextBoxTests()
 
     // ── ★ Phase 44：只读 TextBox 混排支持（T44-10）──
     GetTestRegistry().Add("TextBox.StyledReadOnlySupport", &Test44TextBoxReadOnlySupport);
+
+    // ── ★ #91/#92：跨族基线共享与下伸 overhang（T1-tb / T4b）──
+    GetTestRegistry().Add("TextBox.MixedFamilyBaseline", &Test91TextBoxMixedFamilyBaseline);
+    GetTestRegistry().Add("TextBox.OverhangInsetScrollAndPreferred", &Test92TextBoxOverhangInsetScrollAndPreferred);
 }

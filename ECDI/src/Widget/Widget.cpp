@@ -15,6 +15,7 @@
 #include "ECDI/Window/Window.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace ECDI{
@@ -577,8 +578,14 @@ bool Widget::AutoSize(){
 		return false;                       // §3.5 条 1：stretch 互斥——调用时判断（SetStretch(0) 后重新生效）
 
 	const Size preferred = GetPreferredSize();
-	const int w = static_cast<int>(preferred.width);   // float → int 向零截断（详设 v1.1——v1 无 rounding policy）
-	const int h = static_cast<int>(preferred.height);
+	// ★ #93 / REQ-22：向上进位避免 125%/150% DPI 与小数行高被向零截断 1px 自裁（1e-4 容忍浮点累积噪声）
+	constexpr float kCeilEps = 1e-4f;
+	const int w = (preferred.width > 0.0f)
+		? static_cast<int>(std::ceil((std::max)(0.0f, preferred.width - kCeilEps)))
+		: 0;
+	const int h = (preferred.height > 0.0f)
+		? static_cast<int>(std::ceil((std::max)(0.0f, preferred.height - kCeilEps)))
+		: 0;
 
 	if (w == GetWidth() && h == GetHeight())
 		return false;                       // 同尺寸 no-op

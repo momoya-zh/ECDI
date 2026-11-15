@@ -201,8 +201,9 @@ Size TextBox::MultilinePreferred() const{
 	const size_t lines = m_lines.size();
 
 	const float lineH = measurer->LineHeight(EffectiveLineBoxFont(*measurer));
+	const float overhang = EffectiveBottomOverhang(*measurer);
 	const float pad = m_style.padding.value;
-	const float contentH = static_cast<float>(lines) * lineH + pad * 2.0f;
+	const float contentH = static_cast<float>(lines) * lineH + overhang + pad * 2.0f;
 
 	// ★ `ceil`（见声明处注释：取整是本函数的责任，不是 AutoSize 的）
 	//   ★ 宽仍取**当前宽**：本函数不制造宽度约束（与 wrap 分支同一条纪律）。
@@ -595,6 +596,13 @@ float TextBox::GetLineHeight() const{
 	return 16.0f;   // 无窗口（测试环境）兜底固定行高
 }
 
+float TextBox::GetBottomOverhang() const{
+	if (Window* window = const_cast<Window*>(GetWindow())) {
+		return EffectiveBottomOverhang(window->GetTextMeasurer());
+	}
+	return 0.0f;
+}
+
 float TextBox::GetTextLeftInset() const{
 	// 文本实际绘制起点 X（单一来源——OnPaint textX / CaretIndexFromPosition innerX 同源防漂移）
 	// 9.6 收尾方案 B：padding = 样式内边距（常驻布局属性，默认 0）——**不再随焦点变化**
@@ -613,8 +621,8 @@ float TextBox::GetTextTopInset() const{
 	const_cast<TextBox*>(this)->RecalculateLines();   // 键守卫在体内：命中 ⇒ 零测量返回
 
 	const float lineH = GetLineHeight();
-	// 内容高的唯一真相源 = 行缓存 × 行高（与 GetMaxScrollOffset 同源）
-	const float contentH = static_cast<float>(m_lines.size()) * lineH;
+	// 内容高的唯一真相源 = 行缓存 × 行高 + 下伸溢出余量（与 GetMaxScrollOffset 同源）
+	const float contentH = static_cast<float>(m_lines.size()) * lineH + GetBottomOverhang();
 	// ★ max(0, ·)：内容超屏（含 A < 0 的负文本区）⇒ 偏移归零 ⇒ 与改前逐位同（C37-1 不变量 2）
 	const float offset = (std::max)(0.0f, (GetTextAreaHeight() - contentH) / 2.0f);
 	return m_style.padding.value + offset;
@@ -627,8 +635,8 @@ float TextBox::GetTextAreaHeight() const{
 }
 
 float TextBox::GetMaxScrollOffset() const{
-	// 内容总高 = 行数 × 固定行高（含最后一行完整行高——最后一行可恰好滚到可视区底部）
-	const float contentHeight = static_cast<float>(m_lines.size()) * GetLineHeight();
+	// 内容总高 = 行数 × 固定行高 + 末行下伸溢出余量（含最后一行完整字形下伸部）
+	const float contentHeight = static_cast<float>(m_lines.size()) * GetLineHeight() + GetBottomOverhang();
 	const float viewportHeight = GetTextAreaHeight();
 	return (std::max)(0.0f, contentHeight - viewportHeight);
 }

@@ -344,10 +344,22 @@ Font TextWidget::ResolveRunFont(const Font& base, const SpanStyle& s) {
 	return f;
 }
 
+namespace {
+
+bool FontsEqual(const Font& a, const Font& b) {
+	return a.size == b.size
+		&& a.family == b.family
+		&& a.weight == b.weight
+		&& a.italic == b.italic;
+}
+
+} // namespace
+
 bool TextWidget::LineBoxGuardActive() const {
 	if (!SpansActiveForLayout()) return false;
+	const Font& base = m_style.font.value;
 	for (const auto& sp : m_spans) {
-		if (sp.cpCount != 0 && IsEffectiveSizeOverride(sp.style)) {
+		if (sp.cpCount != 0 && !FontsEqual(ResolveRunFont(base, sp.style), base)) {
 			return true;
 		}
 	}
@@ -379,6 +391,24 @@ Font TextWidget::EffectiveLineBoxFont(TextMeasurer& m) const {
 		}
 	}
 	return best;
+}
+
+float TextWidget::EffectiveBottomOverhang(TextMeasurer& m) const {
+	const Font& base = m_style.font.value;
+	if (!LineBoxGuardActive()) {
+		const float boxH = m.LineHeight(base);
+		const float inkH = m.Ascent(base) + m.Descent(base);
+		return (std::max)(0.0f, inkH - boxH);
+	}
+	const Font boxFont = EffectiveLineBoxFont(m);
+	const float boxA = m.Ascent(boxFont);
+	const float boxH = m.LineHeight(boxFont);
+	float maxDesc = m.Descent(base);
+	for (const auto& sp : m_spans) {
+		if (sp.cpCount == 0) continue;
+		maxDesc = (std::max)(maxDesc, m.Descent(ResolveRunFont(base, sp.style)));
+	}
+	return (std::max)(0.0f, boxA + maxDesc - boxH);
 }
 
 std::vector<TextWidget::RunSlice> TextWidget::BuildRunsForRange(
@@ -699,8 +729,9 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 		const TextLayout& layout = GetTextLayout(measurer);
 		const Font lineBoxFont = EffectiveLineBoxFont(measurer);
 		const float lineHeight = measurer.LineHeight(lineBoxFont);
+		const float overhang = EffectiveBottomOverhang(measurer);
 
-		const Point block = CalculateTextPosition(x, y, BlockWidth(layout), layout.totalHeight);
+		const Point block = CalculateTextPosition(x, y, BlockWidth(layout), layout.totalHeight + overhang);
 		EnsureCpByteOffsets(m_text);
 
 		std::size_t row = 0;
@@ -765,7 +796,8 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 		}
 		const Font lineBoxFont = EffectiveLineBoxFont(measurer);
 		const float lineHeight = measurer.LineHeight(lineBoxFont);
-		const Point startPos = CalculateTextPosition(x, y, totalW, lineHeight);
+		const float overhang = EffectiveBottomOverhang(measurer);
+		const Point startPos = CalculateTextPosition(x, y, totalW, lineHeight + overhang);
 
 		EnsureCpByteOffsets(m_text);
 		const bool lineBoxActive = LineBoxGuardActive();
@@ -789,9 +821,10 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 	// 零 spans 纯原路径
 	const Size textSize = ctx.MeasureText(m_style.font.value, m_text);
 	const float lineHeight = measurer.LineHeight(EffectiveLineBoxFont(measurer));
+	const float overhang = EffectiveBottomOverhang(measurer);
 
 	ctx.DrawText(
-		CalculateTextPosition(x, y, textSize.width, lineHeight),
+		CalculateTextPosition(x, y, textSize.width, lineHeight + overhang),
 		m_text, m_style.foreground.value, m_style.font.value
 	);
 
@@ -813,7 +846,8 @@ Size TextWidget::GetPreferredSize() const{
 	if (IsWrapLayoutActive())
 	{
 		const TextLayout& layout = GetTextLayout(*measurer);
-		return Size{ static_cast<float>(GetWidth()), layout.totalHeight };
+		const float overhang = EffectiveBottomOverhang(*measurer);
+		return Size{ static_cast<float>(GetWidth()), layout.totalHeight + overhang };
 	}
 
 	// ★ Phase 28 批二（D28-B/C28-5）：指纹短路——(revision, font, dpi) 任一变化 ⇒ miss。
@@ -878,12 +912,14 @@ Size TextWidget::DoMeasureText(TextMeasurer& measurer) const{
 		// I44-7（Phase 45 取代）：行高恒来自同一个助手 EffectiveLineBoxFont（单源性保留，源由基字体改为有效行框字体）；
 		// 原意「不得由整段 MeasureText 高度反推」仍满足。
 		const float lineHeight = measurer.LineHeight(EffectiveLineBoxFont(measurer));
-		return Size{ totalW, lineHeight };
+		const float overhang = EffectiveBottomOverhang(measurer);
+		return Size{ totalW, lineHeight + overhang };
 	}
 
 	const Size textSize = measurer.MeasureText(m_style.font.value, m_text);
 	const float lineHeight = measurer.LineHeight(EffectiveLineBoxFont(measurer));
-	return Size{ textSize.width, lineHeight };
+	const float overhang = EffectiveBottomOverhang(measurer);
+	return Size{ textSize.width, lineHeight + overhang };
 
 }
 

@@ -409,19 +409,29 @@ float GDITextMeasurer::LineHeight(const Font& font)
 	//   经 `GetOutlineTextMetricsW` 的 `otmMac*` 取（= hhea 缩放值——12/12 字体误差 0.00 px）
 	//   ★ **不再用 `tmHeight`**：那是字体映射器的产物（初设 §2.2 证其不可由 FT 复现——
 	//     差值有正有负、随字号放大到 +9 px，且无单一候选式可普遍复现）
+	int dpi = GetDpiForWindow(m_hwnd);
+	if (dpi <= 0)
+	{
+		dpi = 96;   // fail-safe
+	}
+
+	const bool canUseCache = (m_outlineTextMetrics == &::GetOutlineTextMetricsW);
+	const auto key = std::make_tuple(font.weight, font.size, font.family, font.italic, dpi);
+	if (canUseCache)
+	{
+		const auto it = m_lineHeightCache.find(key);
+		if (it != m_lineHeightCache.end())
+		{
+			return it->second;
+		}
+	}
+
 	float height = font.size;   // 兜底：字号（**已是 DIP**——与返回值单位一致；契约 C31-3）
 
 	HDC measureDC = GetDC(nullptr);
 	if (!measureDC)
 	{
 		return height;
-	}
-
-	// ★ Phase 26（△9a）：与 MeasureText 同一基准——**窗口 DPI**（D-8 闭合）
-	int dpi = GetDpiForWindow(m_hwnd);
-	if (dpi <= 0)
-	{
-		dpi = 96;   // fail-safe
 	}
 
 	HFONT hfont = GetOrCreateFont(font, dpi);
@@ -485,10 +495,18 @@ float GDITextMeasurer::LineHeight(const Font& font)
 	}
 
 	ReleaseDC(nullptr, measureDC);
+	if (canUseCache)
+	{
+		if (m_lineHeightCache.size() >= kMaxMeasureCache)
+		{
+			m_lineHeightCache.clear();
+		}
+		m_lineHeightCache.emplace(key, height);
+	}
 	return height;
 }
 
-float GDITextMeasurer::Ascent(const Font& font)
+GDITextMeasurer::TmMetrics GDITextMeasurer::QueryTextMetrics(const Font& font)
 {
 	int dpi = GetDpiForWindow(m_hwnd);
 	if (dpi <= 0)
@@ -497,13 +515,13 @@ float GDITextMeasurer::Ascent(const Font& font)
 	}
 
 	const auto key = std::make_tuple(font.weight, font.size, font.family, font.italic, dpi);
-	auto it = m_ascentCache.find(key);
-	if (it != m_ascentCache.end())
+	auto it = m_tmMetricsCache.find(key);
+	if (it != m_tmMetricsCache.end())
 	{
 		return it->second;
 	}
 
-	float result = 0.0f;
+	TmMetrics result{};
 	HFONT hfont = GetOrCreateFont(font, dpi);
 	if (hfont)
 	{
@@ -514,15 +532,31 @@ float GDITextMeasurer::Ascent(const Font& font)
 			TEXTMETRICW tm{};
 			if (GetTextMetricsW(measureDC, &tm))
 			{
-				result = static_cast<float>(tm.tmAscent) * 96.0f / static_cast<float>(dpi);
+				const float pxToDip = 96.0f / static_cast<float>(dpi);
+				result.ascent = static_cast<float>(tm.tmAscent) * pxToDip;
+				result.descent = static_cast<float>(tm.tmDescent) * pxToDip;
 			}
 			SelectObject(measureDC, oldFont);
 			ReleaseDC(nullptr, measureDC);
 		}
 	}
 
-	m_ascentCache.emplace(key, result);
+	if (m_tmMetricsCache.size() >= kMaxMeasureCache)
+	{
+		m_tmMetricsCache.clear();
+	}
+	m_tmMetricsCache.emplace(key, result);
 	return result;
+}
+
+float GDITextMeasurer::Ascent(const Font& font)
+{
+	return QueryTextMetrics(font).ascent;
+}
+
+float GDITextMeasurer::Descent(const Font& font)
+{
+	return QueryTextMetrics(font).descent;
 }
 
 }
