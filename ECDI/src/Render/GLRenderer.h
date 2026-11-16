@@ -16,6 +16,8 @@
 #include "Render/GLGlyphAtlas.h"
 #include "Render/LineCoverage.h"
 
+#include <compare>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -82,18 +84,55 @@ public:
 
 	/// @brief 图集 miss 次数（★ 观测缝 —— 详设 §1.5 基准指标之一）
 	std::size_t AtlasMissCount() const noexcept { return m_atlas ? m_atlas->MissCount() : 0; }
+	std::size_t AtlasPageCount() const noexcept { return m_atlas ? m_atlas->PageCount() : 0; }
+	std::size_t AtlasEvictionCount() const noexcept { return m_atlas ? m_atlas->EvictionCount() : 0; }
+	std::size_t AtlasInFrameResetCount() const noexcept { return m_atlas ? m_atlas->InFrameResetCount() : 0; }
+
+	std::size_t ImageCacheHitCount() const noexcept { return m_imageCacheHits; }
+	std::size_t ImageCacheMissCount() const noexcept { return m_imageCacheMisses; }
+	std::size_t ImageCacheEvictionCount() const noexcept { return m_imageCacheEvictions; }
+	std::size_t ImageCacheEntryCount() const noexcept { return m_imageCache.size(); }
+	std::size_t ImageCacheBytes() const noexcept { return m_imageCacheBytes; }
+
+	void SetAtlasMaxPagesForTests(std::size_t maxPages);
+	void SetImageCacheLimitsForTests(std::size_t maxEntries, std::size_t maxBytes);
+
+	/// @brief 抓回当前帧缓冲 RGBA 像素（top-down，仅限 m_ready && m_inFrame 时在 EndFrame 前调用；会改变 GL_READ_BUFFER 与 GL_PACK_ALIGNMENT）
+	bool CaptureBackbufferRGBA(int& outW, int& outH, std::vector<std::uint8_t>& outRgba) const;
+
+	static constexpr std::size_t kDefaultMaxImageCacheEntries = 128;
+	static constexpr std::size_t kDefaultMaxImageCacheBytes = 32u * 1024u * 1024u;
+	static constexpr std::size_t kDefaultMaxSingleCachedImageBytes = 2u * 1024u * 1024u;
 
 private:
+	struct ImageCacheKey{
+		int width = 0;
+		int height = 0;
+		std::uint64_t hashLo = 0;
+		std::uint64_t hashHi = 0;
+		auto operator<=>(const ImageCacheKey&) const = default;
+	};
+	struct CachedImageEntry{
+		GLuint texture = 0;
+		std::size_t byteSize = 0;
+		std::uint64_t lastUsedTick = 0;
+	};
+
+	void BindTexture(unsigned int tex);
+	void ClearImageCache();
+	void EvictImageCacheFor(std::size_t incomingBytes);
+
 	// ── 纹理 quad 合成（图集 UV）──
 	void Shade(const Color& color) const;
 	/// @brief 常规 quad：低 v → quad 顶（行序为**顶行在前**的位图用——含字形：FreeType 位图 top-down）
-	void TexturedQuad(int ax, int ay, int aw, int ah, float x, float y, float w, float h) const;
+	void TexturedQuad(unsigned int tex, int ax, int ay, int aw, int ah,
+	                  float x, float y, float w, float h);
 	/// @brief 带 UV 翻转的 quad（圆角掩码四角复用同一份 canonical 掩码）
-	void TexturedQuadUV(int ax, int ay, int aw, int ah, float x, float y, float w, float h,
-	                    bool flipU, bool flipV) const;
+	void TexturedQuadUV(unsigned int tex, int ax, int ay, int aw, int ah,
+	                    float x, float y, float w, float h, bool flipU, bool flipV);
 	/// @brief 任意朝向的**实心**线段四边形（焦点框沿圆角周界的划段用——走 1×1 全亮单元）
 	/// @param halfWidth 垂直半宽（0.5 ⇒ 1px 宽的划）
-	void SolidSegment(float x0, float y0, float x1, float y1, float halfWidth) const;
+	void SolidSegment(float x0, float y0, float x1, float y1, float halfWidth);
 
 	/// @brief 圆角：取（或生成并上传）半径 R 的角覆盖度槽位
 	GlyphSlot CornerSlot(int radius);
@@ -138,6 +177,19 @@ private:
 	std::map<int, GlyphSlot> m_cornerSlots;     ///< 半径 → 图集槽位
 	std::map<std::tuple<int, int, int, int, int, int, int>, GlyphSlot> m_lineSlots;  ///< 线段几何 → 槽位
 	std::map<std::tuple<int, int, int, int, int, int, int, int, int, int, int>, GlyphSlot> m_arcSlots;  ///< 弧几何+角度+原点 → 槽位（★ 11 元键，见 `ArcSlot`）
+
+	std::size_t m_pendingAtlasMaxPages = GLGlyphAtlas::kDefaultMaxPages;
+	GLuint m_boundTexture = 0;
+
+	std::map<ImageCacheKey, CachedImageEntry> m_imageCache;
+	std::size_t m_imageCacheBytes = 0;
+	std::size_t m_maxImageCacheEntries = kDefaultMaxImageCacheEntries;
+	std::size_t m_maxImageCacheBytes = kDefaultMaxImageCacheBytes;
+	std::size_t m_maxSingleCachedImageBytes = kDefaultMaxSingleCachedImageBytes;
+	std::uint64_t m_imageCacheTick = 0;
+	std::size_t m_imageCacheHits = 0;
+	std::size_t m_imageCacheMisses = 0;
+	std::size_t m_imageCacheEvictions = 0;
 };
 
 }

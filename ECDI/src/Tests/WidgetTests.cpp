@@ -2924,11 +2924,11 @@ void Test45StyledSpansTwoChainConsistency() {
     EXPECT_TRUE(aReg > 0.0f);
     EXPECT_NEAR(aReg, aItalic, kEpsilon);
 
-    // 3. 无斜体族回落验证 (例如 SimSun)
+    // 3. 无真斜体族合成斜切验证 (例如 SimSun；Phase 46 CB-1c：I45-italic-fallback 作废)
     const auto idCjkReg = engine->FaceIdFor("SimSun", 400, false);
     const auto idCjkItalic = engine->FaceIdFor("SimSun", 400, true);
     if (idCjkReg != 0u) {
-        EXPECT_EQ(idCjkReg, idCjkItalic);
+        EXPECT_NE(idCjkReg, idCjkItalic);
     }
 
     // 4. 混合字号基线量化对齐 (14px 与 20px)

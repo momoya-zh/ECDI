@@ -89,7 +89,7 @@ public:
 	///          → **OS/2.usWeightClass 档位**最近平手取轻（不跨族）。
 	///          命中 family 缓存即返回；未命中 ⇒ 候选扫描 → 加载 → 分配**新** id。
 	///          ★ 解析不到 ⇒ **回退默认 face + 写告警日志**（**不静默降级**）。
-	///          ★ ZH 族名不解析（需求非目标 3——注册表键名无中文项）⇒ 回退默认 face + 告警。
+	///          ★ Phase 46 起支持合成粗体（`>= 551`）、合成斜体（`B -> O`）与 Miss 时惰性中文/本地化族名解析（`D46-1~5`）。
 	/// @param weight 0–1000（C36-1）；**默认 400 = 既有行为**（单参调用点零改动编译；
 	///        ★ 有 `Font` 在手的内部调用点必须显式传 `font.weight`）
 	/// @return 有效 `FaceId`；**无可用 face ⇒ 0**（0 恒为无效——id 从 1 起分配）
@@ -179,6 +179,9 @@ public:
 
 	/// @brief 累计栅格化次数（★ **观测缝**——命中与否的返回值相同，无法凭返回值区分）
 	std::size_t RasterizeCount() const noexcept;
+
+	/// @brief 惰性本地化族名全库扫描累计次数（Phase 46 D46-5：英文快路径恒为 0，首次未命中扫表后恒为 1）
+	std::size_t LocalizedScanCountForTests() const noexcept;
 
 private:
 	struct Impl;                                  // pimpl：把 `FT_*` 收敛在 .cpp（不污染 include 者）

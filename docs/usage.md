@@ -632,7 +632,7 @@ DrawRoundedRect / DrawImage / PushClip / PopClip / DrawFocusRect / IsRectVisible
 | 8 | Win32 宏 `DrawText` 与 `PaintContext::DrawText` 同名 | 声明 `DrawText` 的两个公共头（`Render/PaintContext.h` / `Render/RenderingBackend.h`）**各自**带防御性 `#ifdef / #undef` ⇒ 只要经过它们就自动免疫；但自己先 `#include <Windows.h>` 时**仍建议照写一遍**（§1 示例即如此）——多一行，兜住将来任何漏护栏的头 |
 | 9 | `WindowLayer::Bottom` 不承诺「绝对最底」；`Win+D` 时与普通窗口一起隐藏 | 桌面层需求用 `Desktop` |
 | 10 | DPI | 框架声明 Per-Monitor-V2；`Font::size` 是 DIP；`SetBounds/GetBounds` 用屏幕 DIP |
-| 11 | 输入层半抽象、多窗口焦点语义、光标色未主题化 | 均在 `dev/README.md` 技术债务表与 `dev/roadmap-deferred.md`（v1.0 API 审查项） |
+| 11 | 输入层半抽象、多窗口焦点语义 | 均在 `dev/README.md` 技术债务表与 `dev/roadmap-deferred.md`（v1.0 API 审查项） |
 | 12 | `Button` 的 Down/Up 都会被自动消费（Phase 35） | **嵌套可点击控件时父行收不到点中子按钮的那次点击**——把父级动作放进子按钮回调（见 §9.1「事件消费」） |
 | 13 | `RemoveChild` 立即交回所有权（很可能马上析构） | 事件回调里删控件只用 `RequestRemove()`；延迟边界 = **整次派发结束**，不是单次回调 |
 | 14 | 富文本只覆盖**显示**通路：可编辑 `TextBox` × spans 不支持（Phase 44 红线 4，记账 `L44-1`） | 编辑类场景按纯文本用，或自绘；只读预览可用 `SetStyledText`（§6.6） |

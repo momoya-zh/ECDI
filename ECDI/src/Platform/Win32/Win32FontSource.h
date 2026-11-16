@@ -42,6 +42,9 @@ public:
 	///          注册表命中项经存在性检查（镜像 legacy :150-157）。
 	std::vector<FontSourceCandidate> ResolveFileCandidates(const std::string& family) const override;
 
+	/// @brief 枚举系统已安装字体文件 ANSI 路径列表（供 `FontEngine` 惰性扫表——Phase 46 D46-5 ⓒ）
+	std::vector<std::string> EnumerateInstalledFiles() const override;
+
 	/// @brief 默认字体文件路径（空 family 时用）
 	/// @details 按**优先级列表**取第一个存在的（抗系统差异）——
 	///          `msyh.ttc`（微软雅黑，含 CJK）→ `simsun.ttc`（宋体）→ `segoeui.ttf` → `arial.ttf`。

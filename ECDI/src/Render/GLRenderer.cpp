@@ -1,4 +1,4 @@
-#include "Render/GLRenderer.h"
+﻿#include "Render/GLRenderer.h"
 
 #include "ECDI/Core/ECDIAssert.h"             // FRAMEWORK_ASSERT（决策 32 同构：Begin/End 严格配对）
 #include "ECDI/Core/Logger.h"
@@ -8,12 +8,84 @@
 #include "Render/FontEngine.h"                   // 诊断用（RasterizeCount）
 #include "Render/Utf8Decode.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 
 namespace ECDI{
+
+namespace {
+
+std::pair<std::uint64_t, std::uint64_t> Hash128ActiveRows(const Image& image) noexcept
+{
+	std::uint64_t h1 = 14695981039346656037ULL;
+	std::uint64_t h2 = 0x9E3779B97F4A7C15ULL;
+	const std::size_t activeBytes = static_cast<std::size_t>(image.width) * 4u;
+	for (int r = 0; r < image.height; ++r)
+	{
+		const std::uint8_t* p = image.pixels.data() + static_cast<std::ptrdiff_t>(r) * image.stride;
+		for (std::size_t i = 0; i < activeBytes; )
+		{
+			if (i + 8 <= activeBytes)
+			{
+				std::uint64_t v = 0;
+				std::memcpy(&v, p + i, 8);
+				h1 ^= v;
+				h1 *= 1099511628211ULL;
+				h2 += v + (h2 << 6) + (h2 >> 2);
+				h2 ^= h2 >> 30;
+				h2 *= 0xBF58476D1CE4E5B9ULL;
+				i += 8;
+			}
+			else
+			{
+				h1 ^= p[i];
+				h1 *= 1099511628211ULL;
+				h2 = (h2 * 1315423911ULL) ^ p[i];
+				++i;
+			}
+		}
+	}
+	return { h1, h2 };
+}
+
+GLuint CreateImageTexture(const Image& image)
+{
+	std::vector<std::uint8_t> rgba;
+	rgba.reserve(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u);
+	for (int j = 0; j < image.height; ++j)
+	{
+		const std::uint8_t* const row = image.pixels.data()
+		                              + static_cast<std::ptrdiff_t>(j) * image.stride;
+		for (int i = 0; i < image.width; ++i)
+		{
+			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 2]);   // R <- B
+			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 1]);   // G
+			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 0]);   // B <- R
+			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 3]);   // A
+		}
+	}
+
+	GLuint texture = 0;
+	glGenTextures(1, &texture);
+	if (texture == 0)
+	{
+		return 0;
+	}
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width, image.height, 0,
+	             GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+	return texture;
+}
+
+} // namespace
 
 // ★★ GDI 决策 25 的 GL 对应实现：Rect→像素域**逐边截断**（floor）。GDI 的 `DrawRect` 等把
 //    `RECT` 四边各自 `static_cast<LONG>`（截断）后填充 `[left, right)` 的整数像素列；
@@ -44,8 +116,9 @@ GLRenderer::~GLRenderer()
 	            + L" atlasMiss=" + std::to_wstring(m_atlas ? m_atlas->MissCount() : 0)
 	            + L" glyphRasterizations=" + std::to_wstring(m_fontEngine ? m_fontEngine->RasterizeCount() : 0));
 
-	// ★ 释放顺序（详设 §3-⑧ 不变量的**镜像**）：图集（texture 必须在 current context 下删）
-	//   → context → DC。`m_atlas.reset()` 必须在 `wglDeleteContext` 之前。
+	// ★ 释放顺序（详设 §3-⑧ 不变量的**镜像**）：图像缓存 → 图集（均须在 current context 下删纹理）
+	//   → context → DC。必须在 `wglDeleteContext` 之前释放一切 GL 纹理。
+	ClearImageCache();
 	if (m_atlas)
 	{
 		m_atlas.reset();                 // ⇒ ~GLGlyphAtlas ⇒ glDeleteTextures
@@ -117,7 +190,7 @@ void GLRenderer::Initialize(const PlatformRenderContext& context)
 	glDisable(GL_DEPTH_TEST);
 
 	// ★★ 创建顺序不变量（详设 §3-⑧）：① context current → ② 图集初始化 → ③ ready
-	m_atlas = std::make_unique<GLGlyphAtlas>();
+	m_atlas = std::make_unique<GLGlyphAtlas>(m_pendingAtlasMaxPages);
 	m_atlas->Initialize();
 	if (!m_atlas->IsReady())
 	{
@@ -132,6 +205,7 @@ void GLRenderer::Initialize(const PlatformRenderContext& context)
 		const std::vector<std::uint8_t> white(1, 255);
 		m_atlas->Upload(m_solid, white);
 	}
+	m_boundTexture = 0;
 
 	m_ready = true;
 }
@@ -211,7 +285,12 @@ void GLRenderer::BeginFrame(const Color& background)
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, m_atlas->Texture());
+	if (m_atlas)
+	{
+		m_atlas->BeginFrame();
+	}
+	m_boundTexture = 0;
+	BindTexture(m_solid.texture != 0 ? m_solid.texture : (m_atlas ? m_atlas->Texture() : 0));
 
 	m_clipStack.clear();
 	glDisable(GL_SCISSOR_TEST);
@@ -224,7 +303,7 @@ void GLRenderer::DrawRect(const Rect& rect, const Color& color)
 		return;
 	}
 	Shade(color);
-	TexturedQuad(m_solid.x, m_solid.y, 1, 1, rect.x, rect.y, rect.width, rect.height);
+	TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, rect.x, rect.y, rect.width, rect.height);
 }
 
 void GLRenderer::DrawText(const Point& pos, const std::string& text,
@@ -284,13 +363,18 @@ void GLRenderer::DrawText(const Point& pos, const std::string& text,
 
 		const GlyphKey key{ faceId, glyphIndex, pixelSize,
 		                    static_cast<std::uint8_t>(HintingMode::Normal) };
+		const std::size_t missBefore = m_atlas->MissCount();
 		const GlyphSlot slot = m_atlas->GetOrCreate(key, *m_fontEngine);
+		if (m_atlas->MissCount() != missBefore)
+		{
+			m_boundTexture = 0;   // Upload 可能切页绑定纹理，保守失效缓存态防脱耦
+		}
 
 		// ★ FreeType 位图行序 = **top-down** ⇒ 常规 UV（低 v → quad 顶），**不翻转**
 		//   （spike 的 `TexturedQuadYUp` 是给其自带 bottom-up 光栅器用的——此处不适用）
 		if (slot.valid && slot.w > 0 && slot.h > 0)
 		{
-			TexturedQuad(slot.x, slot.y, slot.w, slot.h,
+			TexturedQuad(slot.texture, slot.x, slot.y, slot.w, slot.h,
 			             pen + slot.bearingX,                 // 左端 = 笔位 + bitmap_left
 			             baseline - slot.bearingY,            // 顶端 = 基线 − bitmap_top（bearingY 向上量）
 			             static_cast<float>(slot.w), static_cast<float>(slot.h));
@@ -338,7 +422,7 @@ void GLRenderer::DrawLine(const Point& start, const Point& end, float width, con
 	}
 
 	Shade(color);
-	TexturedQuad(slot.x, slot.y, grid.width, grid.height,
+	TexturedQuad(slot.texture, slot.x, slot.y, grid.width, grid.height,
 	             static_cast<float>(grid.originX), static_cast<float>(grid.originY),
 	             static_cast<float>(grid.width), static_cast<float>(grid.height));
 }
@@ -388,7 +472,7 @@ void GLRenderer::DrawArc(const Point& center, float radius,
 	}
 
 	Shade(color);
-	TexturedQuad(slot.x, slot.y, grid.width, grid.height,
+	TexturedQuad(slot.texture, slot.x, slot.y, grid.width, grid.height,
 	             static_cast<float>(grid.originX), static_cast<float>(grid.originY),
 	             static_cast<float>(grid.width), static_cast<float>(grid.height));
 }
@@ -433,80 +517,87 @@ void GLRenderer::DrawRoundedRect(const Rect& rect, float cornerRadius, const Col
 	//   ⇒ 实测中心明显变深、外圈偏浅（可见的「回」字形）。★ 整数 clamp 保证
 	//   `2R <= min(w,h)`（M16 修复前该不变式为假），三条带的宽高恒 >= 0；
 	//   零尺寸者自然退化（真圆时三条带全零 ⇒ 仅四角拼成整圆）。
-	TexturedQuad(m_solid.x, m_solid.y, 1, 1, x, y + fr, w, h - 2.0f * fr);            // 中带（全宽）
-	TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + fr, y, w - 2.0f * fr, fr);           // 上带
-	TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + fr, y + h - fr, w - 2.0f * fr, fr);  // 下带
+	TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, x, y + fr, w, h - 2.0f * fr);            // 中带（全宽）
+	TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, x + fr, y, w - 2.0f * fr, fr);           // 上带
+	TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, x + fr, y + h - fr, w - 2.0f * fr, fr);  // 下带
 
 	const GlyphSlot corner = CornerSlot(radius);
 	if (!corner.valid)
 	{
 		// ★★ 审计 #62 / L10（第二个落点）：图集满 ⇒ 补上四角的**实心降级**，不留四个黑洞。
-		//   缺陷（修复前）：本处 `return` ⇒ 三条带已画、**四角留白** ⇒ 视觉 =「**十字形**」
-		//   （四角四个洞）。可达消费者：`ProgressBar` 半胶囊、圆角面板、圆角按钮。
-		//   ★ 修法沿用 GDI 的同一哲学（`GDIBackend.cpp:936-940`「**宁可无 AA，不可缺绘制**」：
-		//     `DrawRoundedRect` 的 a==1 分支在补丁面取不到时**降级**到 `RoundRect`）——
-		//     四角各补一个 `R×R` 的实心方块（走 1×1 全亮单元，`DrawRect` 走的同一 texel）。
-		//   ⚠️ **非等价性如实记账**：降级后四角是**方块**而非圆角 ⇒ 视觉从「胶囊」变
-		//     「带四个方角的圆角矩形」。同 L10 线降级的取舍：有形状 > 无形状。
-		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x,         y,         fr, fr);   // TL
-		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + w - fr, y,         fr, fr);   // TR
-		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x,         y + h - fr, fr, fr);   // BL
-		TexturedQuad(m_solid.x, m_solid.y, 1, 1, x + w - fr, y + h - fr, fr, fr);   // BR
+		TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, x,         y,         fr, fr);   // TL
+		TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, x + w - fr, y,         fr, fr);   // TR
+		TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, x,         y + h - fr, fr, fr);   // BL
+		TexturedQuad(m_solid.texture, m_solid.x, m_solid.y, 1, 1, x + w - fr, y + h - fr, fr, fr);   // BR
 		return;
 	}
 
 	// 四角复用**同一份 canonical 掩码**，靠 UV 翻转取向（分 4 次调用 —— 与 GDI 的角索引变换等价）
-	TexturedQuadUV(corner.x, corner.y, radius, radius, x, y, fr, fr, false, false);                       // TL
-	TexturedQuadUV(corner.x, corner.y, radius, radius, x + w - fr, y, fr, fr, true, false);               // TR
-	TexturedQuadUV(corner.x, corner.y, radius, radius, x, y + h - fr, fr, fr, false, true);               // BL
-	TexturedQuadUV(corner.x, corner.y, radius, radius, x + w - fr, y + h - fr, fr, fr, true, true);       // BR
+	TexturedQuadUV(corner.texture, corner.x, corner.y, radius, radius, x, y, fr, fr, false, false);                       // TL
+	TexturedQuadUV(corner.texture, corner.x, corner.y, radius, radius, x + w - fr, y, fr, fr, true, false);               // TR
+	TexturedQuadUV(corner.texture, corner.x, corner.y, radius, radius, x, y + h - fr, fr, fr, false, true);               // BL
+	TexturedQuadUV(corner.texture, corner.x, corner.y, radius, radius, x + w - fr, y + h - fr, fr, fr, true, true);       // BR
 }
 
 void GLRenderer::DrawImage(const Rect& dest, const Image& image)
 {
-	// ★ 审计 L14：dest 非正尺寸**不再绘制**。GL 侧无背面剔除 ⇒ 负尺寸的 quad 顶点顺序
-	//   被翻转 ⇒ 画出**镜像四边形**（可见的鬼影）；GDI 侧 `FillRect`/`AlphaBlend` 对空矩形
-	//   是 no-op。两端行为对齐：非正 dest ⇒ 两端都 no-op。
+	// ★ 审计 L14：dest 非正尺寸**不再绘制**
 	if (dest.width <= 0.0f || dest.height <= 0.0f)
 	{
 		return;
 	}
 
-	// ★★ 审计 #62 / H3：**源数据完整性**守卫——与 `GDIBackend::DrawImage` **同一个符号**
-	//   （`BackendContract::ImageIsDrawable`）。修复前 GL **完全无此校验**，而下面立即
-	//   按 `pixels.data() + j * stride` 逐行读取 ⇒ 应用自造一个 `stride`/`pixels` 不自洽的
-	//   `Image`（`PaintContext::DrawImage` 是**公开 API**）即**越界读**（UB）。
-	//   审计原文定性：「同一命令：GDI 安全 no-op，GL 越界读 —— **后端决定内存安全**」。
+	// ★★ 审计 #62 / H3：源数据完整性守卫
 	if (!m_ready || !BackendContract::ImageIsDrawable(image))
 	{
 		return;
 	}
 
-	// premultiplied BGRA → RGBA（legacy GL 无 `GL_BGRA` 依赖）
-	// ★ dest 四边同样 Snap（GDI AlphaBlend 的 RECT 截断语义——决策 25 对齐）
-	std::vector<std::uint8_t> rgba;
-	rgba.reserve(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4);
-	for (int j = 0; j < image.height; ++j)
+	// ★ 保守失效：DrawImage 需要临时切换图像纹理，退出前统一重同步至图集纹理
+	m_boundTexture = 0;
+
+	const std::size_t byteSize = static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4u;
+	GLuint transientTexture = 0;
+	GLuint drawTexture = 0;
+
+	if (byteSize > m_maxSingleCachedImageBytes || m_maxImageCacheEntries == 0)
 	{
-		const std::uint8_t* const row = image.pixels.data()
-		                              + static_cast<std::ptrdiff_t>(j) * image.stride;
-		for (int i = 0; i < image.width; ++i)
+		transientTexture = CreateImageTexture(image);
+		if (transientTexture == 0)
 		{
-			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 2]);   // R ← B
-			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 1]);   // G
-			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 0]);   // B ← R
-			rgba.push_back(row[static_cast<std::size_t>(i) * 4 + 3]);   // A
+			BindTexture(m_solid.texture);
+			return;
+		}
+		drawTexture = transientTexture;
+		BindTexture(drawTexture);
+	}
+	else
+	{
+		const auto [hLo, hHi] = Hash128ActiveRows(image);
+		const ImageCacheKey key{ image.width, image.height, hLo, hHi };
+		const auto cached = m_imageCache.find(key);
+		if (cached != m_imageCache.end())
+		{
+			++m_imageCacheHits;
+			cached->second.lastUsedTick = ++m_imageCacheTick;
+			drawTexture = cached->second.texture;
+			BindTexture(drawTexture);
+		}
+		else
+		{
+			++m_imageCacheMisses;
+			EvictImageCacheFor(byteSize);
+			drawTexture = CreateImageTexture(image);
+			if (drawTexture == 0)
+			{
+				BindTexture(m_solid.texture);
+				return;
+			}
+			m_boundTexture = drawTexture;
+			m_imageCache.emplace(key, CachedImageEntry{ drawTexture, byteSize, ++m_imageCacheTick });
+			m_imageCacheBytes += byteSize;
 		}
 	}
-
-	GLuint texture = 0;
-	glGenTextures(1, &texture);
-	glBindTexture(GL_TEXTURE_2D, texture);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width, image.height, 0,
-	             GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 
 	// ★ `Image` 契约 = **premultiplied**（`Image.h`）⇒ 用 premult 混合；数据 top-down ⇒ 顶边取 v = 0
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -519,8 +610,12 @@ void GLRenderer::DrawImage(const Rect& dest, const Image& image)
 	glEnd();
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDeleteTextures(1, &texture);
-	glBindTexture(GL_TEXTURE_2D, m_atlas->Texture());   // 恢复图集绑定（后续绘制仍走它）
+	if (transientTexture != 0)
+	{
+		glDeleteTextures(1, &transientTexture);
+	}
+	m_boundTexture = 0;
+	BindTexture(m_solid.texture != 0 ? m_solid.texture : (m_atlas ? m_atlas->Texture() : 0));
 }
 
 void GLRenderer::PushClip(const Rect& rect)
@@ -684,8 +779,9 @@ void GLRenderer::DrawFocusRect(const Rect& rect, float cornerRadius, const Color
 	}
 }
 
-void GLRenderer::SolidSegment(float x0, float y0, float x1, float y1, float halfWidth) const
+void GLRenderer::SolidSegment(float x0, float y0, float x1, float y1, float halfWidth)
 {
+	BindTexture(m_solid.texture);
 	// 以 (x0,y0)-(x1,y1) 为轴、垂直半宽 halfWidth 的**实心**四边形（走 1×1 全亮单元）
 	// ★ 顶点同样过 Snap（floor）：分数坐标的弧线段量化到像素网格——与 GDI 的整数像素划一致
 	float dx = x1 - x0, dy = y1 - y0;
@@ -758,8 +854,134 @@ void GLRenderer::Shade(const Color& color) const
 //    顶点坐标一律 floor 后，quad 恰好覆盖 `[floor(x), floor(x+w))` 的整数像素列——
 //    与 GDI 逐位一致 ⇒ 共享边的像素归属唯一确定。
 
-void GLRenderer::TexturedQuad(int ax, int ay, int aw, int ah, float x, float y, float w, float h) const
+void GLRenderer::BindTexture(unsigned int tex)
 {
+	const GLuint glTex = static_cast<GLuint>(tex);
+	if (glTex != 0 && m_boundTexture != glTex)
+	{
+		glBindTexture(GL_TEXTURE_2D, glTex);
+		m_boundTexture = glTex;
+	}
+}
+
+void GLRenderer::ClearImageCache()
+{
+	for (auto& kv : m_imageCache)
+	{
+		if (kv.second.texture != 0)
+		{
+			const GLuint tex = kv.second.texture;
+			glDeleteTextures(1, &tex);
+		}
+	}
+	m_imageCache.clear();
+	m_imageCacheBytes = 0;
+	m_boundTexture = 0;
+}
+
+void GLRenderer::EvictImageCacheFor(std::size_t incomingBytes)
+{
+	while ((m_imageCache.size() >= m_maxImageCacheEntries
+	        || m_imageCacheBytes + incomingBytes > m_maxImageCacheBytes)
+	       && !m_imageCache.empty())
+	{
+		auto victim = m_imageCache.begin();
+		for (auto it = std::next(m_imageCache.begin()); it != m_imageCache.end(); ++it)
+		{
+			if (it->second.lastUsedTick < victim->second.lastUsedTick)
+			{
+				victim = it;
+			}
+		}
+		if (victim->second.texture != 0)
+		{
+			const GLuint tex = victim->second.texture;
+			if (m_boundTexture == tex)
+			{
+				m_boundTexture = 0;
+			}
+			glDeleteTextures(1, &tex);
+		}
+		m_imageCacheBytes -= victim->second.byteSize;
+		m_imageCache.erase(victim);
+		++m_imageCacheEvictions;
+	}
+}
+
+void GLRenderer::SetAtlasMaxPagesForTests(std::size_t maxPages)
+{
+	const std::size_t clamped = (maxPages < GLGlyphAtlas::kMinMaxPages)
+		? GLGlyphAtlas::kMinMaxPages
+		: maxPages;
+	m_pendingAtlasMaxPages = clamped;
+	if (m_atlas)
+	{
+		m_atlas->SetMaxPagesForTests(maxPages);
+	}
+}
+
+void GLRenderer::SetImageCacheLimitsForTests(std::size_t maxEntries, std::size_t maxBytes)
+{
+	m_maxImageCacheEntries = (maxEntries < 1) ? 1 : maxEntries;
+	m_maxImageCacheBytes = maxBytes;
+	if (maxBytes == 0)
+	{
+		m_maxSingleCachedImageBytes = 0;
+	}
+	else
+	{
+		m_maxSingleCachedImageBytes = (std::max<std::size_t>)(
+			1, (std::min)(maxBytes / 2, kDefaultMaxSingleCachedImageBytes));
+	}
+	if (m_ready)
+	{
+		EvictImageCacheFor(0);
+	}
+}
+
+bool GLRenderer::CaptureBackbufferRGBA(int& outW, int& outH, std::vector<std::uint8_t>& outRgba) const
+{
+	outW = 0;
+	outH = 0;
+	outRgba.clear();
+
+	if (!m_ready || !m_inFrame || m_w <= 0 || m_h <= 0)
+	{
+		Logger::Log(LogLevel::Warning,
+		            L"GLRenderer::CaptureBackbufferRGBA: called outside ready active frame");
+		return false;
+	}
+
+	while (glGetError() != GL_NO_ERROR) { }
+	glFinish();
+	glReadBuffer(m_doubleBuffered ? GL_BACK : GL_FRONT);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+
+	const std::size_t rowBytes = static_cast<std::size_t>(m_w) * 4u;
+	std::vector<std::uint8_t> bottomUp(rowBytes * static_cast<std::size_t>(m_h));
+	glReadPixels(0, 0, m_w, m_h, GL_RGBA, GL_UNSIGNED_BYTE, bottomUp.data());
+	if (glGetError() != GL_NO_ERROR)
+	{
+		Logger::Log(LogLevel::Warning, L"GLRenderer::CaptureBackbufferRGBA: glReadPixels error");
+		return false;
+	}
+
+	outRgba.resize(bottomUp.size());
+	for (int y = 0; y < m_h; ++y)
+	{
+		const std::size_t srcRow = static_cast<std::size_t>(m_h - 1 - y) * rowBytes;
+		const std::size_t dstRow = static_cast<std::size_t>(y) * rowBytes;
+		std::memcpy(outRgba.data() + dstRow, bottomUp.data() + srcRow, rowBytes);
+	}
+	outW = m_w;
+	outH = m_h;
+	return true;
+}
+
+void GLRenderer::TexturedQuad(unsigned int tex, int ax, int ay, int aw, int ah,
+                              float x, float y, float w, float h)
+{
+	BindTexture(tex);
 	const float size = static_cast<float>(GLGlyphAtlas::kSize);
 	const float u0 = static_cast<float>(ax) / size;
 	const float v0 = static_cast<float>(ay) / size;
@@ -776,9 +998,10 @@ void GLRenderer::TexturedQuad(int ax, int ay, int aw, int ah, float x, float y, 
 	glEnd();
 }
 
-void GLRenderer::TexturedQuadUV(int ax, int ay, int aw, int ah, float x, float y, float w, float h,
-                                bool flipU, bool flipV) const
+void GLRenderer::TexturedQuadUV(unsigned int tex, int ax, int ay, int aw, int ah,
+                                float x, float y, float w, float h, bool flipU, bool flipV)
 {
+	BindTexture(tex);
 	const float size = static_cast<float>(GLGlyphAtlas::kSize);
 	float u0 = static_cast<float>(ax) / size;
 	float v0 = static_cast<float>(ay) / size;
@@ -802,7 +1025,12 @@ GlyphSlot GLRenderer::CornerSlot(int radius)
 	const auto cached = m_cornerSlots.find(radius);
 	if (cached != m_cornerSlots.end())
 	{
-		return cached->second;
+		if (m_atlas->IsSlotAlive(cached->second))
+		{
+			m_atlas->TouchSlot(cached->second);
+			return cached->second;
+		}
+		m_cornerSlots.erase(cached);
 	}
 
 	// ★ 复用 GDI 侧同一份平台无关生成器（`Render/CornerCoverageMask.h`）——覆盖度复用（S2）
@@ -813,10 +1041,11 @@ GlyphSlot GLRenderer::CornerSlot(int radius)
 		return slot;
 	}
 
-	slot = m_atlas->Allocate(mask.radius, mask.radius);
+	slot = m_atlas->AllocatePaged(mask.radius, mask.radius);
 	if (slot.valid)
 	{
 		m_atlas->Upload(slot, mask.coverage);
+		m_boundTexture = 0;
 		m_cornerSlots.emplace(radius, slot);
 	}
 	return slot;
@@ -825,8 +1054,7 @@ GlyphSlot GLRenderer::CornerSlot(int radius)
 GlyphSlot GLRenderer::LineSlot(const LineCoverageGrid& grid,
                                float x0, float y0, float x1, float y1, float width)
 {
-	// ★ 几何量化到 1/8 px 作键：**几何相同 ⇒ 覆盖度逐位相同**，必须复用槽位——否则每帧新分配
-	//   会迅速填满图集（spike v3.0 的实测教训：~89 帧即满 ⇒ 堆越界崩）
+	// ★ 几何量化到 1/8 px 作键
 	const auto key = std::make_tuple(
 		grid.width, grid.height,
 		static_cast<int>(std::lround(x0 * 8.0f)), static_cast<int>(std::lround(y0 * 8.0f)),
@@ -836,13 +1064,19 @@ GlyphSlot GLRenderer::LineSlot(const LineCoverageGrid& grid,
 	const auto cached = m_lineSlots.find(key);
 	if (cached != m_lineSlots.end())
 	{
-		return cached->second;
+		if (m_atlas->IsSlotAlive(cached->second))
+		{
+			m_atlas->TouchSlot(cached->second);
+			return cached->second;
+		}
+		m_lineSlots.erase(cached);
 	}
 
-	const GlyphSlot slot = m_atlas->Allocate(grid.width, grid.height);
+	const GlyphSlot slot = m_atlas->AllocatePaged(grid.width, grid.height);
 	if (slot.valid)
 	{
 		m_atlas->Upload(slot, grid.coverage);
+		m_boundTexture = 0;
 		m_lineSlots.emplace(key, slot);
 	}
 	return slot;
@@ -851,9 +1085,6 @@ GlyphSlot GLRenderer::LineSlot(const LineCoverageGrid& grid,
 GlyphSlot GLRenderer::ArcSlot(const LineCoverageGrid& grid,
                               const BackendContract::ArcParams& p, bool binarize)
 {
-	// ★★ 键 = 11 元组（见头注释）。角度用 `QA` = 1/8°；`startDeg` 先 `Mod360`——
-	//    既免疫超范围入参的 `lround`（§3.3 N4），又让 `10°` 与 `370°` 命中**同一槽位**
-	//    （两者几何等价：`Mod360(a-10)` 与 `Mod360(a-370)` 恒等）。
 	float startMod = std::fmod(p.startDeg, 360.0f);
 	if (startMod < 0.0f)
 	{
@@ -873,11 +1104,14 @@ GlyphSlot GLRenderer::ArcSlot(const LineCoverageGrid& grid,
 	const auto cached = m_arcSlots.find(key);
 	if (cached != m_arcSlots.end())
 	{
-		return cached->second;
+		if (m_atlas->IsSlotAlive(cached->second))
+		{
+			m_atlas->TouchSlot(cached->second);
+			return cached->second;
+		}
+		m_arcSlots.erase(cached);
 	}
 
-	// ★ 二值化在 **Upload 之前**、作用于**局部拷贝**——`grid` 是值参但拷贝贵，
-	//   且**不可**污染调用方语义（盯防⑨：拷贝必须被**消费**，否则等于没做）
 	std::vector<std::uint8_t> pixels = grid.coverage;
 	if (binarize)
 	{
@@ -887,10 +1121,11 @@ GlyphSlot GLRenderer::ArcSlot(const LineCoverageGrid& grid,
 		}
 	}
 
-	const GlyphSlot slot = m_atlas->Allocate(grid.width, grid.height);
+	const GlyphSlot slot = m_atlas->AllocatePaged(grid.width, grid.height);
 	if (slot.valid)
 	{
 		m_atlas->Upload(slot, pixels);
+		m_boundTexture = 0;
 		m_arcSlots.emplace(key, slot);
 	}
 	return slot;

@@ -22,7 +22,7 @@ ECDI 是一个**教学优先**的框架：它存在的意义，是让任何人�
 
 ## 为什么是 ECDI
 
-多数业余 GUI 项目止步于「一个能显示按钮的窗口」。ECDI 按真实框架的方式建造：严格分层、平台抽象、自研测试套件、库优先的构建方式——并且每个设计决策都有文档（`docs/`，**220 篇**中文设计文档）。
+多数业余 GUI 项目止步于「一个能显示按钮的窗口」。ECDI 按真实框架的方式建造：严格分层、平台抽象、自研测试套件、库优先的构建方式——并且每个设计决策都有文档（`docs/`，**226 篇**中文设计文档）。
 
 ## 它是怎么做出来的
 
@@ -64,7 +64,7 @@ Widget ──▶ PaintContext ──▶ CommandBuffer ──▶ Renderer ──�
 - **浮层与弹层**：窗口级双根拓扑，独立的 `m_overlayRoot` 与三层 Panel（Normal / Modal / Tooltip），逃逸祖先容器裁剪；支持 Light Dismiss（点外关闭，可选穿透 / 吞掉策略）、ESC 关闭、模态焦点陷阱与关闭后焦点恢复、Flip-then-Clamp 锚点跟随、脱树自动关闭
 - **窗口几何与材质**：运行期 `SetBounds` / `GetBounds`（**请求语义**——读回值才是权威）、最小尺寸、雾面衬底（`SetWindowBackdrop`，Acrylic，带明确记录的降级回退）
 - **Shell 集成**：托盘图标（应用级——挂在 `PlatformApplication` 上而非任何 `Window`，所以关掉重建全部窗口它依然在）配原生弹出菜单；窗口级文件拖入（`WM_DROPFILES` → UTF-8 路径列表，`HDROP` 在事件发出前就已释放）。两者都藏在平台接缝之后——公共 API 不暴露任何 Win32 类型。
-- **测试**：自研测试框架（**615** 条用例，2026-11-15，零依赖），带 recording backend 做绘制断言
+- **测试**：自研测试框架（**631** 条用例，2026-11-16，零依赖），带 recording backend 做绘制断言
 
 ## 构建
 
@@ -89,7 +89,7 @@ cmake --build --preset vs2026-debug
 | Target | 类型 | 说明 |
 |---|---|---|
 | `ECDI` | 静态库 | 框架本体（`include/ECDI/*.h`——**102** 个公共头；内部实现放在 `src/`） |
-| `ecdi_tests` | 可执行 | 自研测试套件——**615** 条用例（2026-11-15），零依赖 |
+| `ecdi_tests` | 可执行 | 自研测试套件——**631** 条用例（2026-11-16），零依赖 |
 | `modelprobe` | 可执行 | ModelProbe——建在 ECDI 上的真实工具（见下） |
 | `visualtest` | 可执行 | 图像解码的并排目视检查（Phase 11） |
 | `ecdi_public_header_test` | 测试 | 自包含检查：每个公共头作为独立 TU 编译（经 `--target` 选入） |
@@ -148,7 +148,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 ECDI/      框架源码（include/ = 102 个公共头，src/ = 实现与测试）
 examples/  消费者：ModelProbe（真实工具）、MinimalApp（库化冒烟测试）、VisualTest；DesktopNest（桌面整理器——应用侧 M1：需求 v1.1 评审通过、初设 v1.3（五个开放问题全部裁决）、详设 v1.3 于 2026-10-09 落盘——三件套齐备、三轮评审吸收完毕、待实施）
 probe-go/  以 RC 资源内嵌进 ModelProbe 的 Go 后端
-docs/      usage.md（API / 使用指南，讲怎么用） + dev/（219 篇设计文档：逐阶段的需求 → 初设 → 详设；含 usage.md 共 220 篇）
+docs/      usage.md（API / 使用指南，讲怎么用） + dev/（225 篇设计文档：逐阶段的需求 → 初设 → 详设；含 usage.md 共 226 篇）
 ```
 
 📚 **设计文档**（中文）：[docs/dev/README.md](docs/dev/README.md)——逐阶段设计稿的完整索引、开发进度与技术债账本。
@@ -174,6 +174,8 @@ docs/      usage.md（API / 使用指南，讲怎么用） + dev/（219 篇设�
 | 43 | 滚动条双轴厚度 | ✅ 2026-11-01 |
 | 44 | 段内内联样式（styled spans） | ✅ 2026-11-08 |
 | 45 | styled spans 表达力扩展（斜体 + 混字号） | ✅ 2026-11-09 |
+| 46 | GL 字体能力对齐（合成粗体/斜体 + 中文族名解析） | ✅ 2026-11-15（622 用例，头 102；MinGW/Clang 验证） |
+| 47 | GL 图集扩容淘汰 + `DrawImage` 纹理缓存 + 自动化像素验证 | ✅ 已收口 2026-11-16（Batch 0–2 落地 6 文件；631 用例，头 102，MinGW/Clang 验证） |
 
 逐阶段的完整叙事——需求 / 初设 / 详设三稿、每轮评审的吸收与版本递增、负对照与机检记录——见 [docs/dev/README.md](docs/dev/README.md)；那是本项目的中文一手账本，也是英文版状态表里那些长段落的中文源头。
 

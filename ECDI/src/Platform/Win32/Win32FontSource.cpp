@@ -4,6 +4,8 @@
 
 #include <Windows.h>
 
+#include <cwctype>
+#include <set>
 #include <string>
 
 namespace ECDI{
@@ -354,6 +356,43 @@ std::vector<FontSourceCandidate> Win32FontSource::ResolveFileCandidates(const st
 			return;   // 注册表有但文件不在（镜像 legacy 的存在性检查）
 		}
 		out.push_back({WideToAnsi(resolved), hint, false});
+	});
+	return out;
+}
+
+std::vector<std::string> Win32FontSource::EnumerateInstalledFiles() const
+{
+	const std::wstring dir = FontsDirectoryWide();
+	std::vector<std::string> out;
+	std::set<std::wstring> seenWideLower;
+	ForEachFontRegistryKey([&](const std::string& /*keyU8*/, const std::string& fileU8) {
+		const std::wstring wideFile = UTF8ToWide(fileU8);
+		if (wideFile.empty())
+		{
+			return;
+		}
+		const bool isAbsolute =
+			(wideFile.find(L':') != std::wstring::npos) ||
+			(wideFile.rfind(L"\\\\", 0) == 0);
+		const std::wstring resolved = isAbsolute ? wideFile : (dir + L"\\" + wideFile);
+		if (!FileExistsWide(resolved))
+		{
+			return;
+		}
+		std::wstring keyLower = resolved;
+		for (wchar_t& ch : keyLower)
+		{
+			ch = static_cast<wchar_t>(std::towlower(static_cast<std::wint_t>(ch)));
+		}
+		if (!seenWideLower.emplace(std::move(keyLower)).second)
+		{
+			return;
+		}
+		std::string ansi = WideToAnsi(resolved);
+		if (!ansi.empty())
+		{
+			out.push_back(std::move(ansi));
+		}
 	});
 	return out;
 }

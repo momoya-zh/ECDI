@@ -11,6 +11,7 @@
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
 #include FT_SFNT_NAMES_H      // ★ Phase 36 批二：nameID-1 直读（family_name 偏好 nameID-16——探针 3 证伪）
+#include FT_SYNTHESIS_H       // ★ Phase 46：FT_GlyphSlot_AdjustWeight / FT_GlyphSlot_Oblique（仅本 TU）
 #include FT_TRUETYPE_TABLES_H // ★ Phase 36 批二：OS/2 usWeightClass / fsSelection（档位 + 斜体位）
 
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include <map>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -86,6 +88,38 @@ std::string ReadNameId1En(FT_Face face)
 /// advance memo 缺字形哨兵（成功 advance = `advance.x >> 6`，量级远小于此 ⇒ 不会混淆）
 constexpr long kMissingAdvance = (std::numeric_limits<long>::min)();
 
+inline bool NeedSynthBold(std::uint16_t rawWeight, std::uint16_t reqWeight) noexcept
+{
+	return ClampWeight(reqWeight) >= 551 && rawWeight < 551;
+}
+
+inline bool NeedSynthItalic(bool rawItalic, bool reqItalic) noexcept
+{
+	return reqItalic && !rawItalic;
+}
+
+void ApplySynthesis(FT_GlyphSlot slot, bool synthBold, bool synthItalic) noexcept
+{
+	if (slot == nullptr || slot->face == nullptr || slot->face->size == nullptr)
+	{
+		return;
+	}
+	// ★ Phase 46 D46-1 / D46-2：严格按 B -> O 顺序执行（先水平整像素加粗再斜切，oR 更紧凑）。
+	if (synthBold)
+	{
+		const FT_Pos ppem = slot->face->size->metrics.x_ppem;
+		if (ppem > 0)
+		{
+			const FT_Pos xdelta = (65536 + ppem - 1) / ppem;
+			FT_GlyphSlot_AdjustWeight(slot, xdelta, 0);
+		}
+	}
+	if (synthItalic)
+	{
+		FT_GlyphSlot_Oblique(slot);
+	}
+}
+
 // ★ UTF-8 解码已上提为 `Render/Utf8Decode.h`（Phase 26 批三：测量链与渲染链**共用**——
 //   两链若各自解码，非法/截断字节处的码点切分会不一致 ⇒ 测宽与渲宽失配）
 
@@ -98,20 +132,46 @@ struct FontEngine::Impl{
 
 	FT_Library library = nullptr;
 
-	struct FaceEntry{
-		FaceId id = 0;
-		FT_Face face = nullptr;
-		long numFaces = 1;               ///< Phase 36 批二：该文件 face 总数（face0 打开时读得——先开 0 再扫）
-		std::string nameId1En;           ///< Phase 36 批二：nameID-1 EN 直读（过滤判据——**非** family_name）
-		std::uint16_t os2Weight = 400;   ///< Phase 36 批二：档位 = `OS/2.usWeightClass`（缺表记 400 + 告警）
-		bool italic = false;             ///< Phase 36 批二：`OS/2.fsSelection` bit0（斜体面穿族名过滤——consolaz 实测——显式排除）
+	struct RawFaceKey{
+		std::string filePath;
+		int faceIndex = 0;
+		auto operator<=>(const RawFaceKey&) const = default;
 	};
 
-	/// ★ 缓存键用**解析后的路径**（不是 family 原串）：空 family 与显式默认文件名
-	///   因此**复用同一 face**（比"按 family 字符串"更准——实现相对详设的细化）
-	std::map<std::pair<std::string, int>, FaceEntry> faces;   ///< Phase 36 批二：键 = (解析后路径, faceIndex)
-	std::map<FaceId, FT_Face> facesById;   ///< id → face（O(log n) 反查）
-	int nextFaceId = 1;                    ///< ★ 从 1 起（**0 恒为「无效」**）；单调递增、**永不复用**
+	struct RawFaceEntry{
+		FT_Face face = nullptr;          ///< 唯一所有权：仅由 ~FontEngine() 遍历 rawFaces 调 FT_Done_Face
+		long numFaces = 1;               ///< 该文件 face 总数（face0 打开时读得——先开 0 再扫）
+		std::string nameId1En;           ///< nameID-1 EN 直读（过滤判据——非 family_name）
+		std::vector<std::string> nameId1All;
+		bool nameId1AllLoaded = false;
+		std::uint16_t os2Weight = 400;   ///< OS/2.usWeightClass（缺表记 400 + 告警）
+		bool italic = false;             ///< OS/2.fsSelection bit0
+	};
+
+	struct BoundFaceKey{
+		std::string filePath;
+		int faceIndex = 0;
+		bool synthBold = false;
+		bool synthItalic = false;
+		auto operator<=>(const BoundFaceKey&) const = default;
+	};
+
+	struct BoundFaceEntry{
+		FT_Face face = nullptr;          ///< 非拥有指针，寿命由 rawFaces 保证
+		bool synthBold = false;
+		bool synthItalic = false;
+	};
+
+	Impl()
+	{
+		facesById.emplace_back();        // slot 0 占位（0 恒为无效 FaceId）
+	}
+
+	/// 物理句柄池（唯一所有者）与虚拟绑定层（逻辑样式隔离）
+	std::map<RawFaceKey, RawFaceEntry> rawFaces;
+	std::map<BoundFaceKey, FaceId> faces;
+	std::vector<BoundFaceEntry> facesById; ///< 1-based 索引即 FaceId（size == nextFaceId）
+	int nextFaceId = 1;                    ///< ★ 从 1 起（0 恒为「无效」）；单调递增、永不复用
 	std::map<std::tuple<std::string, std::uint16_t, bool>, FaceId> familyCache;   ///< Phase 36 批二 + Phase 45：(family, weight, italic) → FaceId（含失败结果）
 
 	/// ── CPU 两级缓存（Phase 26 详设 §3-③）──
@@ -128,15 +188,34 @@ struct FontEngine::Impl{
 	std::size_t rasterizeCount = 0;
 	std::size_t measureMissCount = 0;
 
-	FT_Face FaceOf(FaceId id) const{
-		const auto it = facesById.find(id);
-		return (it != facesById.end()) ? it->second : nullptr;
+	/// ── Phase 46 Batch 2：惰性本地化 SFNT nameID-1 索引（英文快路径未命中才触发，至多一次） ──
+	std::unordered_map<std::string, std::vector<FontSourceCandidate>> localizedIndex;
+	bool localizedIndexBuilt = false;
+	std::size_t localizedScanCount = 0;
+
+	void EnsureNameId1All(RawFaceEntry& entry);
+	void RecordLocalizedNames(FT_Face face, const std::string& path, int faceIndex);
+	void EnsureLocalizedIndex();
+
+	const BoundFaceEntry* BoundFaceOf(FaceId id) const noexcept
+	{
+		return (id > 0 && static_cast<std::size_t>(id) < facesById.size())
+			? &facesById[static_cast<std::size_t>(id)]
+			: nullptr;
 	}
 
-		/// @brief 按 (路径, faceIndex) 取/载 face（Phase 36 批二；详设 §2.3-④）
-		/// @details 打开成功 ⇒ 读 nameID-1 EN / OS/2 档位 / 斜体位入 entry；
-		///          打开失败 ⇒ 告警 + nullptr（family 级缓存兜底防重试——T26-13 锚）。
-		FaceEntry* EnsureFace(const std::string& path, long index);
+	FT_Face FaceOf(FaceId id) const noexcept
+	{
+		const BoundFaceEntry* b = BoundFaceOf(id);
+		return b ? b->face : nullptr;
+	}
+
+	/// @brief 按 (路径, faceIndex) 取/载物理 face（同一物理文件只加载一次）
+	RawFaceEntry* EnsureRawFace(const std::string& path, long index);
+
+	/// @brief 在已有物理 face 上绑定请求字重/斜体计算得出的合成状态，返回逻辑 FaceId
+	FaceId BindFace(const std::string& path, long index, const RawFaceEntry& raw,
+	                std::uint16_t reqWeight, bool reqItalic);
 
 	/// @brief 单码点 advance 求值（★ Phase 29 △3 提取：`MeasureText` 与 `FitText` **共用同一路径**）
 	/// @details ★ 共享是**逐位一致**的前提：两方法若各自实现 memo/哨兵逻辑，一旦某侧漂移
@@ -175,6 +254,14 @@ struct FontEngine::Impl{
 		const bool loaded =
 			FT_Load_Char(face, static_cast<FT_ULong>(cp),
 			             FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_BITMAP) == 0;
+		if (loaded)
+		{
+			const BoundFaceEntry* bound = BoundFaceOf(faceId);
+			if (bound != nullptr)
+			{
+				ApplySynthesis(face->glyph, bound->synthBold, bound->synthItalic);
+			}
+		}
 		if (glyphIndex != 0)
 		{
 			++advanceMemoMissCount;   // 观测缝（T28-1 真命中断言——成败均计）
@@ -213,13 +300,14 @@ FontEngine::~FontEngine()
 		return;
 	}
 
-	for (auto& entry : m_impl->faces)
+	for (auto& entry : m_impl->rawFaces)
 	{
 		if (entry.second.face != nullptr)
 		{
 			FT_Done_Face(entry.second.face);
 		}
 	}
+	m_impl->rawFaces.clear();
 	m_impl->faces.clear();
 	m_impl->facesById.clear();
 
@@ -250,22 +338,21 @@ int FontEngine::PixelSize(const Font& font) const
 	return static_cast<int>((std::max)(1LL, px));   // ★ 下限 1（字号 0/负会让 FreeType 拒绝）
 }
 
-FontEngine::Impl::FaceEntry* FontEngine::Impl::EnsureFace(const std::string& path, long index)
+FontEngine::Impl::RawFaceEntry* FontEngine::Impl::EnsureRawFace(const std::string& path, long index)
 {
-	const auto key = std::make_pair(path, static_cast<int>(index));
-	const auto it = faces.find(key);
-	if (it != faces.end())
+	const RawFaceKey key{ path, static_cast<int>(index) };
+	const auto it = rawFaces.find(key);
+	if (it != rawFaces.end())
 	{
-		return &it->second;   // 命中 ⇒ 复用（legacy「同一文件只加载一次」语义保持）
+		return &it->second;   // 命中 ⇒ 复用物理句柄（同一文件+index 只加载一次）
 	}
 	FT_Face face = nullptr;
-	if (FT_New_Face(library, path.c_str(), static_cast<FT_ULong>(index), &face) != 0 || face == nullptr)
+	if (FT_New_Face(library, path.c_str(), static_cast<FT_Long>(index), &face) != 0 || face == nullptr)
 	{
 		Logger::Log(LogLevel::Warning, L"FontEngine: FT_New_Face failed for resolved font file");
 		return nullptr;
 	}
-	FaceEntry e;
-	e.id = nextFaceId++;   // ★ 单调递增、永不复用（既有不变量）
+	RawFaceEntry e;
 	e.face = face;
 	e.numFaces = face->num_faces > 0 ? face->num_faces : 1;
 	e.nameId1En = ReadNameId1En(face);
@@ -279,8 +366,125 @@ FontEngine::Impl::FaceEntry* FontEngine::Impl::EnsureFace(const std::string& pat
 	{
 		Logger::Log(LogLevel::Warning, L"FontEngine: OS/2 table missing; assuming weight 400");   // 盯防⑨
 	}
-	facesById.emplace(e.id, face);
-	return &faces.emplace(key, std::move(e)).first->second;
+	return &rawFaces.emplace(key, std::move(e)).first->second;
+}
+
+FaceId FontEngine::Impl::BindFace(const std::string& path, long index, const RawFaceEntry& raw,
+                                  std::uint16_t reqWeight, bool reqItalic)
+{
+	const bool synthBold = NeedSynthBold(raw.os2Weight, reqWeight);
+	const bool synthItalic = NeedSynthItalic(raw.italic, reqItalic);
+	const BoundFaceKey key{ path, static_cast<int>(index), synthBold, synthItalic };
+	const auto it = faces.find(key);
+	if (it != faces.end())
+	{
+		return it->second;
+	}
+	const FaceId id = nextFaceId++;   // ★ 单调递增、永不复用
+	facesById.push_back(BoundFaceEntry{ raw.face, synthBold, synthItalic });
+	faces.emplace(key, id);
+	return id;
+}
+
+void FontEngine::Impl::EnsureNameId1All(RawFaceEntry& entry)
+{
+	if (entry.nameId1AllLoaded || !entry.face)
+	{
+		return;
+	}
+	entry.nameId1AllLoaded = true;
+	const FT_UInt count = (std::min)(FT_Get_Sfnt_Name_Count(entry.face), 1024u);
+	for (FT_UInt i = 0; i < count; ++i)
+	{
+		FT_SfntName n{};
+		if (FT_Get_Sfnt_Name(entry.face, i, &n) != 0)
+		{
+			continue;
+		}
+		if (n.platform_id == 3 && n.name_id == 1)
+		{
+			std::string s = Utf16BEToUtf8(n.string, n.string_len);
+			if (!s.empty() &&
+			    std::find(entry.nameId1All.begin(), entry.nameId1All.end(), s) == entry.nameId1All.end())
+			{
+				entry.nameId1All.push_back(std::move(s));
+			}
+		}
+	}
+}
+
+void FontEngine::Impl::RecordLocalizedNames(FT_Face face, const std::string& path, int faceIndex)
+{
+	if (!face)
+	{
+		return;
+	}
+	const FT_UInt count = (std::min)(FT_Get_Sfnt_Name_Count(face), 1024u);
+	for (FT_UInt i = 0; i < count; ++i)
+	{
+		FT_SfntName n{};
+		if (FT_Get_Sfnt_Name(face, i, &n) != 0)
+		{
+			continue;
+		}
+		if (n.platform_id != 3 || n.name_id != 1)
+		{
+			continue;
+		}
+		std::string utf8Name = Utf16BEToUtf8(n.string, n.string_len);
+		if (utf8Name.empty())
+		{
+			continue;
+		}
+		std::vector<FontSourceCandidate>& list = localizedIndex[utf8Name];
+		const bool already = std::any_of(list.begin(), list.end(), [&](const FontSourceCandidate& c) {
+			return c.filePath == path && c.faceIndexHint == faceIndex;
+		});
+		if (!already)
+		{
+			list.push_back(FontSourceCandidate{ path, faceIndex, false });
+		}
+	}
+}
+
+void FontEngine::Impl::EnsureLocalizedIndex()
+{
+	if (localizedIndexBuilt || !source || !library)
+	{
+		return;
+	}
+	localizedIndexBuilt = true;
+	++localizedScanCount;
+
+	const std::vector<std::string> files = source->EnumerateInstalledFiles();
+	for (const std::string& path : files)
+	{
+		FT_Face face0 = nullptr;
+		if (FT_New_Face(library, path.c_str(), 0, &face0) != 0 || face0 == nullptr)
+		{
+			if (face0 != nullptr)
+			{
+				FT_Done_Face(face0);
+			}
+			continue;
+		}
+		const FT_Long numFaces = face0->num_faces > 0 ? face0->num_faces : 1;
+		RecordLocalizedNames(face0, path, 0);
+		FT_Done_Face(face0);
+
+		for (FT_Long idx = 1; idx < numFaces; ++idx)
+		{
+			FT_Face subFace = nullptr;
+			if (FT_New_Face(library, path.c_str(), idx, &subFace) == 0 && subFace != nullptr)
+			{
+				RecordLocalizedNames(subFace, path, static_cast<int>(idx));
+			}
+			if (subFace != nullptr)
+			{
+				FT_Done_Face(subFace);
+			}
+		}
+	}
 }
 
 FaceId FontEngine::FaceIdFor(const std::string& family, std::uint16_t weight, bool italic)
@@ -299,44 +503,52 @@ FaceId FontEngine::FaceIdFor(const std::string& family, std::uint16_t weight, bo
 		return famCached->second;   // ★ v1.1 语义保持：**含失败/回退结果**——T26-13 防刷屏锚
 	}
 
-	// 回退：默认 face（legacy 语义——告警由调用分支负责，此处不重复打）
-	const auto fallbackToDefault = [&]() -> FaceId {
+	// 回退：默认 face（保留 reqWeight / reqItalic 合成标记）
+	const auto fallbackToDefault = [&](std::uint16_t reqWeight, bool reqItalic) -> FaceId {
 		const std::string path = impl.source->ResolveFile(std::string());
 		if (path.empty())
 		{
 			impl.familyCache.emplace(famKey, 0);   // 失败结果也缓存（防每帧重试）
 			return 0;
 		}
-		// ★ v1.5 语义保持：默认 face 通常**早已加载** ⇒ faces 命中即复用——否则每个新 key
-		//   都会重新探测 + 重新告警（实机刷屏；T26-13 回归锚点）
-		Impl::FaceEntry* entry = impl.EnsureFace(path, 0);
-		const FaceId id = entry ? entry->id : 0;
+		Impl::RawFaceEntry* raw = impl.EnsureRawFace(path, 0);
+		const FaceId id = raw ? impl.BindFace(path, 0, *raw, reqWeight, reqItalic) : 0;
 		impl.familyCache.emplace(famKey, id);
 		return id;
 	};
 
-	// ① 空 family ⇒ legacy 默认路径**原样**（不进候选机制——A1 红线）
+	// ① 空 family ⇒ legacy 默认路径（保留 weight / italic 合成标记）
 	if (family.empty())
 	{
-		return fallbackToDefault();
+		return fallbackToDefault(weight, italic);
 	}
 
-	// ② 候选（详设 §2.2：文件直查**首位** + 注册表逐项；档位由 face 自身 OS/2 提供）
-	const std::vector<FontSourceCandidate> candidates = impl.source->ResolveFileCandidates(family);
+	// ② 候选：英文快路径优先；仅未命中时惰性构建本地化 SFNT nameID-1 索引
+	std::vector<FontSourceCandidate> candidates = impl.source->ResolveFileCandidates(family);
+	bool usedLocalizedIndex = false;
 	if (candidates.empty())
 	{
-		// ★ **不静默降级**：明确告警，再回退默认 face（详设 △2 / 外部评审 §11）
+		impl.EnsureLocalizedIndex();
+		const auto locIt = impl.localizedIndex.find(family);
+		if (locIt != impl.localizedIndex.end())
+		{
+			candidates = locIt->second;
+			usedLocalizedIndex = true;
+		}
+	}
+	if (candidates.empty())
+	{
 		Logger::Log(LogLevel::Warning,
 		            L"FontEngine: font family not found; falling back to the default face: "
 		            + UTF8ToWide(family));
-		return fallbackToDefault();
+		return fallbackToDefault(weight, italic);
 	}
 
-	// ③ 按路径分组（**保持候选序**——归并平手取下标小者 = 直查优先序，评审 P0-①）
+	// ③ 按路径分组（保持候选序——直查优先序）
 	struct PathGroup
 	{
 		std::string path;
-		bool direct = false;      // 任一直查候选命中该路径 ⇒ 整路径**豁免族名过滤**
+		bool direct = false;      // 任一直查候选命中该路径 ⇒ 整路径豁免族名过滤
 		std::vector<long> hints;  // 扫描起点序（hint 优先、升序去重；其余 face 升序殿后）
 	};
 	std::vector<PathGroup> groups;
@@ -357,16 +569,20 @@ FaceId FontEngine::FaceIdFor(const std::string& family, std::uint16_t weight, bo
 		}
 	}
 
-	// ④⑤ 扫描 + 过滤（nameID-1 直读 ∧ 非斜体；**直查路径豁免**——P0-①实施期勘误）
-	std::vector<std::uint16_t> tiers;
-	std::vector<std::pair<std::size_t, long>> tierLoc;
+	// ④⑤ 单趟扫描并分入常规 / 斜体双池（支持斜体回落常规池后保形合成；directFile 保留直查兜底）
+	std::vector<std::uint16_t> regularTiers;
+	std::vector<std::pair<std::size_t, long>> regularLoc;
+	std::vector<std::uint16_t> italicTiers;
+	std::vector<std::pair<std::size_t, long>> italicLoc;
+	std::vector<std::uint16_t> directFallbackTiers;
+	std::vector<std::pair<std::size_t, long>> directFallbackLoc;
 	for (std::size_t gi = 0; gi < groups.size(); ++gi)
 	{
 		PathGroup& g = groups[gi];
-		Impl::FaceEntry* f0 = impl.EnsureFace(g.path, 0);
+		Impl::RawFaceEntry* f0 = impl.EnsureRawFace(g.path, 0);
 		if (f0 == nullptr)
 		{
-			continue;   // 打不开 ⇒ 整路径出局（告警在 EnsureFace）
+			continue;   // 打不开 ⇒ 整路径出局
 		}
 		const long numFaces = f0->numFaces;
 		std::vector<long> order;   // hint 优先（升序去重）→ 其余 face 升序
@@ -388,43 +604,71 @@ FaceId FontEngine::FaceIdFor(const std::string& family, std::uint16_t weight, bo
 		}
 		for (long idx : order)
 		{
-			Impl::FaceEntry* e = impl.EnsureFace(g.path, idx);
+			Impl::RawFaceEntry* e = impl.EnsureRawFace(g.path, idx);
 			if (e == nullptr)
 			{
 				continue;
 			}
-			const bool nameMismatch = (e->nameId1En != family);
-			if (!g.direct && (nameMismatch || (italic ? !e->italic : e->italic)))
+			bool nameMatch = g.direct || (e->nameId1En == family);
+			if (!nameMatch && usedLocalizedIndex)
 			{
-				continue;   // 族名不匹配 / 斜体面与请求不符 ⇒ 出局
+				impl.EnsureNameId1All(*e);
+				nameMatch = std::find(e->nameId1All.begin(), e->nameId1All.end(), family) != e->nameId1All.end();
 			}
-			tiers.push_back(e->os2Weight);
-			tierLoc.emplace_back(gi, idx);
+			if (!nameMatch)
+			{
+				continue;   // 族名不匹配 ⇒ 出局
+			}
+			if (e->italic)
+			{
+				italicTiers.push_back(e->os2Weight);
+				italicLoc.emplace_back(gi, idx);
+				if (g.direct)
+				{
+					directFallbackTiers.push_back(e->os2Weight);
+					directFallbackLoc.emplace_back(gi, idx);
+				}
+			}
+			else
+			{
+				regularTiers.push_back(e->os2Weight);
+				regularLoc.emplace_back(gi, idx);
+			}
 		}
 	}
 
-	// ⑥ 全灭 ⇒ italic=true 且池空回落常规池；italic=false 告警 + 回退
-	if (tiers.empty())
+	// ⑥ 选池归并：italic=true 优先真斜体池，空池时回落常规池并保留 reqItalic 合成标记
+	const std::vector<std::uint16_t>* chosenTiers = nullptr;
+	const std::vector<std::pair<std::size_t, long>>* chosenLoc = nullptr;
+	if (italic && !italicTiers.empty())
 	{
-		if (italic)
-		{
-			// 回落常规池（= italic=false 的选面结果），不重复告警
-			const FaceId regularId = FaceIdFor(family, weight, false);
-			impl.familyCache.emplace(famKey, regularId);
-			return regularId;
-		}
+		chosenTiers = &italicTiers;
+		chosenLoc = &italicLoc;
+	}
+	else if (!regularTiers.empty())
+	{
+		chosenTiers = &regularTiers;
+		chosenLoc = &regularLoc;
+	}
+	else if (!directFallbackTiers.empty())
+	{
+		chosenTiers = &directFallbackTiers;
+		chosenLoc = &directFallbackLoc;
+	}
+
+	if (chosenTiers == nullptr)
+	{
 		Logger::Log(LogLevel::Warning,
 		            L"FontEngine: font family not found; falling back to the default face: "
 		            + UTF8ToWide(family));
-		return fallbackToDefault();
+		return fallbackToDefault(weight, italic);
 	}
 
-	// ⑥ 归并：最近字面、平手取轻（C36-2；ClampWeight = 消费边界 C36-1）
-	const std::size_t pick = PickNearestTier(tiers, ClampWeight(weight));
-	const std::size_t gi = tierLoc[pick].first;
-	const long idx = tierLoc[pick].second;
-	Impl::FaceEntry* chosen = impl.EnsureFace(groups[gi].path, idx);
-	const FaceId id = chosen ? chosen->id : 0;
+	const std::size_t pick = PickNearestTier(*chosenTiers, ClampWeight(weight));
+	const std::size_t gi = (*chosenLoc)[pick].first;
+	const long idx = (*chosenLoc)[pick].second;
+	Impl::RawFaceEntry* chosen = impl.EnsureRawFace(groups[gi].path, idx);
+	const FaceId id = chosen ? impl.BindFace(groups[gi].path, idx, *chosen, weight, italic) : 0;
 	impl.familyCache.emplace(famKey, id);
 	return id;
 }
@@ -454,6 +698,11 @@ std::size_t FontEngine::AdvanceMemoMissCount() const noexcept
 std::size_t FontEngine::RasterizeCount() const noexcept
 {
 	return m_impl->rasterizeCount;
+}
+
+std::size_t FontEngine::LocalizedScanCountForTests() const noexcept
+{
+	return m_impl->localizedScanCount;
 }
 
 Size FontEngine::MeasureText(const Font& font, const std::string& text)
@@ -716,7 +965,8 @@ bool FontEngine::Glyph(const Font& font, char32_t cp, GlyphBitmap& out)
 bool FontEngine::GlyphByKey(const GlyphKey& key, GlyphBitmap& out)
 {
 	Impl& impl = *m_impl;
-	FT_Face face = impl.FaceOf(key.faceId);
+	const Impl::BoundFaceEntry* bound = impl.BoundFaceOf(key.faceId);
+	FT_Face face = bound ? bound->face : nullptr;
 	if (face == nullptr)
 	{
 		return false;
@@ -742,6 +992,7 @@ bool FontEngine::GlyphByKey(const GlyphKey& key, GlyphBitmap& out)
 	{
 		return false;
 	}
+	ApplySynthesis(face->glyph, bound->synthBold, bound->synthItalic);
 	if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL) != 0)
 	{
 		return false;

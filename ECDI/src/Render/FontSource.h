@@ -56,6 +56,10 @@ public:
 		}
 		return out;
 	}
+
+	/// @brief 枚举系统已安装字体文件路径（Phase 46 D46-5 ⓒ；编码契约同 `ResolveFile`）
+	/// @details ★ 默认返回空集（非 Win32 源或测试替身零改动编译；仅 `Win32FontSource` 覆写）。
+	virtual std::vector<std::string> EnumerateInstalledFiles() const { return {}; }
 };
 
 }
