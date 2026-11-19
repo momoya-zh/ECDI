@@ -635,10 +635,13 @@ void TestMinSizeClampsProgrammaticResize()
     TestWindow win(app, ChromeMode::Borderless, 32, 8);
 
     HWND hwnd = win.Handle();
+    auto px = [&](float dip) {
+        return static_cast<int>(std::lround(dip * win.window->GetDpiScale()));
+    };
 
-    // ① 对照世界：无下限 ⇒ 200×150 原样生效（证明下面的「不变小」归因于下限）
+    // ① 对照世界：无下限 ⇒ 200×150 DIP 原样生效（证明下面的「不变小」归因于下限）
     win.window->SetMinimumSize(0, 0);
-    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, nullptr, 0, 0, px(200.0f), px(150.0f), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     {
         const Rect got = win.window->GetBounds();
         EXPECT_NEAR(got.width, 200.0f, 1.0f);
@@ -656,7 +659,7 @@ void TestMinSizeClampsProgrammaticResize()
     }
 
     // ③ 同一请求重发 ⇒ 被抬到下限（Borderless ⇒ 整窗下限即客户区下限）
-    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, nullptr, 0, 0, px(200.0f), px(150.0f), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     {
         const Rect got = win.window->GetBounds();
         EXPECT_NEAR(got.width, 500.0f, 1.0f);
@@ -664,7 +667,7 @@ void TestMinSizeClampsProgrammaticResize()
     }
 
     // ④ 合规尺寸不被改写（下限只抬不压——最大化/还原/DPI 变更的既有几何不受影响）
-    SetWindowPos(hwnd, nullptr, 0, 0, 900, 700, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, nullptr, 0, 0, px(900.0f), px(700.0f), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     {
         const Rect got = win.window->GetBounds();
         EXPECT_NEAR(got.width, 900.0f, 1.0f);
@@ -706,10 +709,13 @@ void TestMinSizePerAxisIndependent()
     TestWindow win(app, ChromeMode::Borderless, 32, 8);
 
     HWND hwnd = win.Handle();
+    auto px = [&](float dip) {
+        return static_cast<int>(std::lround(dip * win.window->GetDpiScale()));
+    };
 
-    // 只限宽：高 150 必须原样生效，宽被抬到 500
+    // 只限宽：高 150 DIP 必须原样生效，宽被抬到 500
     win.window->SetMinimumSize(500, 0);
-    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, nullptr, 0, 0, px(200.0f), px(150.0f), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     {
         const Rect got = win.window->GetBounds();
         EXPECT_NEAR(got.width,  500.0f, 1.0f);
@@ -718,7 +724,7 @@ void TestMinSizePerAxisIndependent()
 
     // 负数按 0 处理（与 SetCaptionHeight / SetResizeInset 的边界契约一致）⇒ 两轴都没有下限
     win.window->SetMinimumSize(-10, -10);
-    SetWindowPos(hwnd, nullptr, 0, 0, 200, 150, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, nullptr, 0, 0, px(200.0f), px(150.0f), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     {
         const Rect got = win.window->GetBounds();
         EXPECT_NEAR(got.width,  200.0f, 1.0f);

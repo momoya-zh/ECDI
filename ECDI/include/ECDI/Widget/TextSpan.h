@@ -9,8 +9,8 @@
 
 namespace ECDI {
 
-/// @brief 段内样式描述符（Phase 44，#88；Phase 45 扩展）
-/// @details 允许覆盖字体族、字重、斜体、字号与前景色。size 覆盖 = DIP 绝对值（与 Font.size 同语义，不跨换算）；
+/// @brief 段内样式描述符（Phase 44，#88；Phase 45 扩展；Phase 48 增加 background）
+/// @details 允许覆盖字体族、字重、斜体、字号、前景色与背景底色。size 覆盖 = DIP 绝对值（与 Font.size 同语义，不跨换算）；
 ///          无效值（非有限 / ≤ 0）视同 nullopt（D45-11）。
 struct SpanStyle {
 	std::optional<std::string>   family     = std::nullopt; ///< 字体族（std::nullopt 表示继承基样式）
@@ -18,6 +18,7 @@ struct SpanStyle {
 	std::optional<Color>         foreground = std::nullopt; ///< 前景色（std::nullopt 表示继承控件当前前景色）
 	std::optional<bool>          italic     = std::nullopt; ///< 斜体（std::nullopt 表示继承）
 	std::optional<float>         size       = std::nullopt; ///< 字号（DIP 绝对值；std::nullopt 表示继承）
+	std::optional<Color>         background = std::nullopt; ///< 背景底色（std::nullopt 表示无底色，追加于末尾以保 C7560 声明序）
 
 	bool operator==(const SpanStyle&) const noexcept = default;
 };

@@ -3246,6 +3246,262 @@ void Test93WidgetAutoSizeCeilPrecision() {
     runCase(0.0f, -0.5f, 0, 0);
 }
 
+// ── Phase 48：SpanStyle::background 测试（T48-1, T48-2, T48-3, T48-6）──
+
+namespace {
+
+class FixedSpanBgMeasurer final : public TextMeasurer {
+public:
+    float baseCharWidth = 10.0f;
+    float largeCharWidth = 16.0f;
+
+    Size MeasureText(const Font& font, const std::string& text) override {
+        size_t cpCount = 0;
+        for (size_t i = 0; i < text.size(); ++i) {
+            if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
+                ++cpCount;
+            }
+        }
+        const float cw = (font.size >= 20.0f) ? largeCharWidth : baseCharWidth;
+        return Size{ static_cast<float>(cpCount) * cw, LineHeight(font) };
+    }
+
+    float LineHeight(const Font& font) override {
+        return (font.size >= 20.0f) ? 28.0f : 20.0f;
+    }
+
+    float Ascent(const Font& font) override {
+        return (font.size >= 20.0f) ? 22.0f : 15.0f;
+    }
+
+    float Descent(const Font& font) override {
+        return (font.size >= 20.0f) ? 6.0f : 5.0f;
+    }
+};
+
+} // namespace
+
+// T48-1：同源自洽（单行 + 软折行跨两行）与跨 DPI 响应
+void Test48SpanBackgroundAlignAndDpi() {
+    const Color bg = Color::FromRGBA8(220, 224, 230);
+
+    // ①-a 单行同源自洽
+    {
+        FixedSpanBgMeasurer measurer;
+        TestableStyledLabel label;
+        label.SetMeasurer(&measurer);
+        label.SetFont(Font{ 14.0f, "Consolas", 400 });
+        label.SetSize(200, 40);
+        label.SetStyledText("abcdEFGH", {
+            TextSpan{ 4, 4, SpanStyle{ .background = bg } }
+        });
+
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, measurer);
+        label.Paint(ctx, 0, 0);
+
+        std::vector<const DrawRectCommand*> rects;
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& cmd : cmds) {
+            if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) rects.push_back(rc);
+            if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) texts.push_back(tc);
+        }
+        EXPECT_EQ(rects.size(), 1u);
+        EXPECT_EQ(texts.size(), 2u);
+        if (rects.size() == 1u && texts.size() == 2u) {
+            EXPECT_NEAR(rects[0]->rect.x, texts[1]->pos.x, kEpsilon);
+            EXPECT_NEAR(rects[0]->rect.x, 40.0f, kEpsilon);
+            EXPECT_NEAR(rects[0]->rect.width, 40.0f, kEpsilon);
+            EXPECT_NEAR(rects[0]->rect.height, 20.0f, kEpsilon);
+            EXPECT_TRUE(rects[0]->color == bg);
+        }
+    }
+
+    // ①-b 软折行跨两行（同一 span 被软断点切分到两行，各画一块底色）
+    {
+        Application app;
+        auto ownedMeasurer = std::make_unique<FixedSpanBgMeasurer>();
+        RenderServices services{
+            std::make_unique<GDIBackend>(),
+            std::move(ownedMeasurer)
+        };
+        Window& window = app.Create("ECDI_T48_WrapBg", 200, 160, std::move(services));
+
+        auto owned = std::make_unique<Label>();
+        Label* label = owned.get();
+        window.GetRootWidget().AddChild(std::move(owned));
+        label->SetFont(Font{ 14.0f, "Consolas", 400 });
+        label->SetWordWrap(true);
+        label->SetSize(60, 100);
+        // "abcde fghij" 折为 "abcde" [0,5) 与 "fghij" [6,11)；span [2,7) 覆盖 "cde"(3) + "fgh"(3)
+        label->SetStyledText("abcde fghij", {
+            TextSpan{ 2, 7, SpanStyle{ .background = bg } }
+        });
+
+        CommandBuffer cmds;
+        PaintContext ctx(cmds, window.GetTextMeasurer());
+        label->Paint(ctx, 0, 0);
+
+        std::vector<const DrawRectCommand*> rects;
+        std::vector<const DrawTextCommand*> texts;
+        for (const auto& cmd : cmds) {
+            if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) rects.push_back(rc);
+            if (const auto* tc = std::get_if<DrawTextCommand>(&cmd)) texts.push_back(tc);
+        }
+        EXPECT_EQ(rects.size(), 2u);
+        EXPECT_EQ(texts.size(), 4u); // "ab", "cde", "fgh", "ij"
+        if (rects.size() == 2u && texts.size() == 4u) {
+            EXPECT_NEAR(rects[0]->rect.x, texts[1]->pos.x, kEpsilon);
+            EXPECT_NEAR(rects[0]->rect.x, 20.0f, kEpsilon);
+            EXPECT_NEAR(rects[0]->rect.width, 30.0f, kEpsilon);
+            EXPECT_NEAR(rects[0]->rect.y, texts[1]->pos.y, kEpsilon);
+            EXPECT_NEAR(rects[0]->rect.y, 30.0f, kEpsilon); // Label 默认垂直居中：(100 - 40) / 2 = 30
+            EXPECT_NEAR(rects[1]->rect.x, texts[2]->pos.x, kEpsilon);
+            EXPECT_NEAR(rects[1]->rect.x, 0.0f, kEpsilon);
+            EXPECT_NEAR(rects[1]->rect.width, 30.0f, kEpsilon);
+            EXPECT_NEAR(rects[1]->rect.y, texts[2]->pos.y, kEpsilon);
+            EXPECT_NEAR(rects[1]->rect.y, 50.0f, kEpsilon);
+        }
+        window.Release();
+    }
+
+    // ② 跨 DPI 响应（DIP 命令流在字宽不变时逐位一致；1.5x 字宽变化时跟随新宽）
+    {
+        FixedSpanBgMeasurer measurer;
+        TestableStyledLabel label;
+        label.SetMeasurer(&measurer);
+        label.SetFont(Font{ 14.0f, "Consolas", 400 });
+        label.SetSize(200, 40);
+        label.SetStyledText("abcdEFGH", {
+            TextSpan{ 4, 4, SpanStyle{ .background = bg } }
+        });
+
+        CommandBuffer cmds1x;
+        PaintContext ctx1x(cmds1x, measurer);
+        label.Paint(ctx1x, 0, 0);
+
+        // 模拟 1.5x DPI 下测量字宽变化
+        measurer.baseCharWidth = 12.0f;
+        label.SetStyledText("abcdEFGH", {
+            TextSpan{ 4, 4, SpanStyle{ .background = bg } }
+        });
+        CommandBuffer cmds15x;
+        PaintContext ctx15x(cmds15x, measurer);
+        label.Paint(ctx15x, 0, 0);
+
+        const DrawRectCommand* r1x = nullptr;
+        const DrawRectCommand* r15x = nullptr;
+        for (const auto& cmd : cmds1x) {
+            if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) r1x = rc;
+        }
+        for (const auto& cmd : cmds15x) {
+            if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) r15x = rc;
+        }
+        EXPECT_TRUE(r1x != nullptr && r15x != nullptr);
+        if (r1x && r15x) {
+            EXPECT_NEAR(r1x->rect.width, 40.0f, kEpsilon);
+            EXPECT_NEAR(r15x->rect.width, 48.0f, kEpsilon);
+        }
+    }
+}
+
+// T48-2：同行混字号与斜体时底色顶底齐平且全行底色先于 DrawText
+void Test48SpanBackgroundMixedLineBoxOrder() {
+    FixedSpanBgMeasurer measurer;
+    TestableStyledLabel label;
+    label.SetMeasurer(&measurer);
+    label.SetFont(Font{ 14.0f, "Consolas", 400 });
+    label.SetSize(300, 50);
+
+    const Color bg1 = Color::FromRGBA8(210, 220, 230);
+    const Color bg2 = Color::FromRGBA8(230, 210, 220);
+    label.SetStyledText("smallBIGtail", {
+        TextSpan{ 0, 5, SpanStyle{ .italic = true, .size = 14.0f, .background = bg1 } },
+        TextSpan{ 5, 3, SpanStyle{ .italic = true, .size = 22.0f, .background = bg2 } }
+    });
+
+    CommandBuffer cmds;
+    PaintContext ctx(cmds, measurer);
+    label.Paint(ctx, 0, 0);
+
+    std::vector<size_t> rectIndices;
+    std::vector<const DrawRectCommand*> rects;
+    size_t firstTextIndex = cmds.size();
+    for (size_t i = 0; i < cmds.size(); ++i) {
+        if (const auto* rc = std::get_if<DrawRectCommand>(&cmds[i])) {
+            rectIndices.push_back(i);
+            rects.push_back(rc);
+        } else if (std::holds_alternative<DrawTextCommand>(cmds[i]) && firstTextIndex == cmds.size()) {
+            firstTextIndex = i;
+        }
+    }
+
+    EXPECT_EQ(rects.size(), 2u);
+    if (rects.size() == 2u) {
+        EXPECT_TRUE(rectIndices[0] < firstTextIndex);
+        EXPECT_TRUE(rectIndices[1] < firstTextIndex);
+        EXPECT_NEAR(rects[0]->rect.y, rects[1]->rect.y, kEpsilon);
+        EXPECT_NEAR(rects[0]->rect.height, 28.0f, kEpsilon);
+        EXPECT_NEAR(rects[1]->rect.height, 28.0f, kEpsilon);
+    }
+}
+
+// T48-3：无 background 的混排 spans 下 DrawRectCommand 计数为 0
+void Test48SpanBackgroundZeroWhenUnset() {
+    RecordingBackend backend;
+    CommandBuffer cmds;
+    PaintContext ctx(cmds, backend);
+
+    Label label;
+    label.SetPosition(10, 20);
+    label.SetSize(200, 50);
+    label.SetStyledText("Hello World", {
+        { 0, 5, SpanStyle{ .family = "Segoe UI", .weight = 700, .foreground = Color::Red() } },
+        { 6, 5, SpanStyle{ .family = "Consolas", .weight = 400, .foreground = Color::Blue() } }
+    });
+    label.Paint(ctx, 0, 0);
+
+    int rectCount = 0;
+    for (const auto& cmd : cmds) {
+        if (std::holds_alternative<DrawRectCommand>(cmd)) {
+            ++rectCount;
+        }
+    }
+    EXPECT_EQ(rectCount, 0);
+}
+
+// T48-6：仅变更 SpanStyle::background 时 m_prefRuns 缓存正确刷新
+void Test48SpanBackgroundCacheRefresh() {
+    FixedSpanBgMeasurer measurer;
+    TestableStyledLabel label;
+    label.SetMeasurer(&measurer);
+    label.SetSize(200, 40);
+
+    label.SetStyledText("code", { TextSpan{ 0, 4, SpanStyle{ .background = Color::Red() } } });
+    CommandBuffer cmds1;
+    PaintContext ctx1(cmds1, measurer);
+    label.Paint(ctx1, 0, 0);
+
+    label.SetStyledText("code", { TextSpan{ 0, 4, SpanStyle{ .background = Color::Blue() } } });
+    CommandBuffer cmds2;
+    PaintContext ctx2(cmds2, measurer);
+    label.Paint(ctx2, 0, 0);
+
+    const DrawRectCommand* r1 = nullptr;
+    const DrawRectCommand* r2 = nullptr;
+    for (const auto& cmd : cmds1) {
+        if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) r1 = rc;
+    }
+    for (const auto& cmd : cmds2) {
+        if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) r2 = rc;
+    }
+    EXPECT_TRUE(r1 != nullptr && r2 != nullptr);
+    if (r1 && r2) {
+        EXPECT_TRUE(r1->color == Color::Red());
+        EXPECT_TRUE(r2->color == Color::Blue());
+    }
+}
+
 void ECDI::Test::RegisterWidgetTests()
 {
     GetTestRegistry().Add("Widget.PanelPaint", &TestPanelPaint);
@@ -3326,4 +3582,9 @@ void ECDI::Test::RegisterWidgetTests()
     GetTestRegistry().Add("TextWidget.MixedFamilyBaselineAndGuard",    &Test91MixedFamilyBaselineAndGuard);      // #91 (T1)
     GetTestRegistry().Add("TextWidget.OverhangCenteringAndWrap",       &Test92TextWidgetOverhangCenteringAndWrap); // #92 (T3/T4a)
     GetTestRegistry().Add("Widget.AutoSizeCeilPrecision",              &Test93WidgetAutoSizeCeilPrecision);      // #93 (T5)
+    // ── ★ Phase 48：SpanStyle::background（T48-1, T48-2, T48-3, T48-6）──
+    GetTestRegistry().Add("TextWidget.SpanBackgroundAlignAndDpi",      &Test48SpanBackgroundAlignAndDpi);        // T48-1
+    GetTestRegistry().Add("TextWidget.SpanBackgroundMixedLineBoxOrder",&Test48SpanBackgroundMixedLineBoxOrder);  // T48-2
+    GetTestRegistry().Add("TextWidget.SpanBackgroundZeroWhenUnset",    &Test48SpanBackgroundZeroWhenUnset);      // T48-3
+    GetTestRegistry().Add("TextWidget.SpanBackgroundCacheRefresh",     &Test48SpanBackgroundCacheRefresh);       // T48-6
 }

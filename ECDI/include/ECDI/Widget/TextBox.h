@@ -212,6 +212,16 @@ protected:
 		return HasActiveSpans() && m_echoMode == EchoMode::Normal && !m_isComposing;
 	}
 
+private:
+	/// @brief 计算目标码点在当前行内相对于行首的逻辑水平偏移（Phase 48，与 lineRuns 绘制严格同源）
+	[[nodiscard]] float MeasureCpOffsetInLine(
+	    TextMeasurer& measurer, const std::string& textSource,
+	    const std::vector<RunSlice>& lineRuns,
+	    std::size_t startCp, std::size_t drawEndCp,
+	    const Font& baseFont, std::size_t targetCp) const;
+
+protected:
+
 	/// @brief TextBox 专属样式（protected——测试派生类可访问；不含 foreground——TextStyle 是文字唯一来源）
 	/// @details 注意：隐藏 TextWidget::m_style（TextStyle）——本类内访问文字样式需显式 `TextWidget::m_style`
 	TextBoxStyle m_style;

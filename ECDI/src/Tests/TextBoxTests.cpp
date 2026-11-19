@@ -3777,6 +3777,214 @@ void Test92TextBoxOverhangInsetScrollAndPreferred() {
 	window.Release();
 }
 
+// ── Phase 48：TextBox 底色块层级与混排选区按 run 对齐（T48-4, T48-5, T48-7）──
+
+namespace {
+
+class FixedBoxSelectionMeasurer final : public TextMeasurer {
+public:
+	Size MeasureText(const Font& font, const std::string& text) override {
+		size_t cpCount = 0;
+		for (size_t i = 0; i < text.size(); ++i) {
+			if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
+				++cpCount;
+			}
+		}
+		const float cw = (font.size >= 20.0f) ? 16.0f : 10.0f;
+		return Size{ static_cast<float>(cpCount) * cw, LineHeight(font) };
+	}
+
+	float LineHeight(const Font& font) override {
+		return (font.size >= 20.0f) ? 28.0f : 20.0f;
+	}
+
+	float Ascent(const Font& font) override {
+		return (font.size >= 20.0f) ? 22.0f : 15.0f;
+	}
+
+	float Descent(const Font& font) override {
+		return (font.size >= 20.0f) ? 6.0f : 5.0f;
+	}
+};
+
+} // namespace
+
+// T48-4：TextBox 行内绘制顺序：span bg DrawRect < selection DrawRect < DrawText
+void Test48TextBoxSpanBackgroundOrder() {
+	Application app;
+	RenderServices services{
+		std::make_unique<GDIBackend>(),
+		std::make_unique<FixedBoxSelectionMeasurer>()
+	};
+	Window& window = app.Create("ECDI_T48_Order", 240, 120, std::move(services));
+
+	auto owned = std::make_unique<TestableTextBox>();
+	TestableTextBox* box = owned.get();
+	window.GetRootWidget().AddChild(std::move(owned));
+	box->SetReadOnly(true);
+	box->SetSize(200, 60);
+
+	const Color spanBg = Color::FromRGBA8(230, 234, 240);
+	const Color selColor = Color::FromRGBA8(100, 150, 220, 128);
+	box->SetStyle(TextBoxStyleOverride{ .selection = selColor, .padding = 0.0f });
+	box->SetFont(Font{ 14.0f, "Consolas", 400 });
+	box->SetStyledText("abcdEFGH", {
+		TextSpan{ 4, 4, SpanStyle{ .background = spanBg } }
+	});
+	box->SelectAll();
+
+	CommandBuffer cmds;
+	PaintContext ctx(cmds, window.GetTextMeasurer());
+	box->Paint(ctx, 0, 0);
+
+	size_t spanBgIdx = cmds.size();
+	size_t selIdx = cmds.size();
+	size_t firstTextIdx = cmds.size();
+	for (size_t i = 0; i < cmds.size(); ++i) {
+		if (const auto* rc = std::get_if<DrawRectCommand>(&cmds[i])) {
+			if (rc->color == spanBg && spanBgIdx == cmds.size()) {
+				spanBgIdx = i;
+			} else if (rc->color == selColor && selIdx == cmds.size()) {
+				selIdx = i;
+			}
+		} else if (std::holds_alternative<DrawTextCommand>(cmds[i]) && firstTextIdx == cmds.size()) {
+			firstTextIdx = i;
+		}
+	}
+
+	EXPECT_TRUE(spanBgIdx < cmds.size());
+	EXPECT_TRUE(selIdx < cmds.size());
+	EXPECT_TRUE(firstTextIdx < cmds.size());
+	EXPECT_TRUE(spanBgIdx < selIdx);
+	EXPECT_TRUE(selIdx < firstTextIdx);
+
+	window.Release();
+}
+
+// T48-5：混字号下跨 run 与 run 内局部码点选区对齐手算期望
+void Test48TextBoxMixedSelectionRunAdvance() {
+	Application app;
+	RenderServices services{
+		std::make_unique<GDIBackend>(),
+		std::make_unique<FixedBoxSelectionMeasurer>()
+	};
+	Window& window = app.Create("ECDI_T48_MixedSel", 300, 120, std::move(services));
+
+	auto owned = std::make_unique<TestableTextBox>();
+	TestableTextBox* box = owned.get();
+	window.GetRootWidget().AddChild(std::move(owned));
+	box->SetReadOnly(true);
+	box->SetSize(260, 60);
+
+	const Color spanBg = Color::FromRGBA8(230, 234, 240);
+	const Color selColor = Color::FromRGBA8(90, 140, 230);
+	box->SetStyle(TextBoxStyleOverride{ .selection = selColor, .padding = 0.0f });
+	box->SetFont(Font{ 14.0f, "Consolas", 400 });
+	box->SetStyledText("abcdEFGH", {
+		TextSpan{ 4, 4, SpanStyle{ .size = 22.0f, .background = spanBg } }
+	});
+
+	auto findSelRect = [&](const CommandBuffer& cmds) -> const DrawRectCommand* {
+		for (const auto& cmd : cmds) {
+			if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) {
+				if (rc->color == selColor) return rc;
+			}
+		}
+		return nullptr;
+	};
+
+	auto selectRange = [&](size_t startCp, size_t endCp) {
+		box->MoveCaretToStart();
+		for (size_t i = 0; i < startCp; ++i) {
+			box->MoveCaret(TextBox::CaretDirection::Right);
+		}
+		for (size_t i = startCp; i < endCp; ++i) {
+			box->OnKeyDown(KeyDownEvent(nullptr, KeyCode::Right, KeyModifier::Shift));
+		}
+	};
+
+	// ① 跨 run 选区 [2, 6)：hlMin = 2*10 = 20, hlMax = 4*10 + 2*16 = 72, width = 52
+	selectRange(2, 6);
+	CommandBuffer cmdsCross;
+	PaintContext ctxCross(cmdsCross, window.GetTextMeasurer());
+	box->Paint(ctxCross, 0, 0);
+	const DrawRectCommand* rCross = findSelRect(cmdsCross);
+	EXPECT_TRUE(rCross != nullptr);
+	if (rCross) {
+		EXPECT_NEAR(rCross->rect.x, 20.0f, kEps);
+		EXPECT_NEAR(rCross->rect.width, 52.0f, kEps);
+	}
+
+	// ② run 内局部码点选区 [5, 7)：hlMin = 4*10 + 1*16 = 56, hlMax = 4*10 + 3*16 = 88, width = 32
+	selectRange(5, 7);
+	CommandBuffer cmdsInner;
+	PaintContext ctxInner(cmdsInner, window.GetTextMeasurer());
+	box->Paint(ctxInner, 0, 0);
+	const DrawRectCommand* rInner = findSelRect(cmdsInner);
+	EXPECT_TRUE(rInner != nullptr);
+	if (rInner) {
+		EXPECT_NEAR(rInner->rect.x, 56.0f, kEps);
+		EXPECT_NEAR(rInner->rect.width, 32.0f, kEps);
+	}
+
+	window.Release();
+}
+
+// T48-7：折行态选中包含软断点行尾分隔空格（ownEndCp > drawEndCp），右界不回缩
+void Test48TextBoxWrapTrailingSpaceSelection() {
+	Application app;
+	RenderServices services{
+		std::make_unique<GDIBackend>(),
+		std::make_unique<FixedBoxSelectionMeasurer>()
+	};
+	Window& window = app.Create("ECDI_T48_WrapTrailSpace", 200, 160, std::move(services));
+
+	auto owned = std::make_unique<TestableTextBox>();
+	TestableTextBox* box = owned.get();
+	window.GetRootWidget().AddChild(std::move(owned));
+	box->SetReadOnly(true);
+	// SetSize(60, 100)：两行高 40 < 100，不出垂直滚动条，保证折行宽 == 60.0f
+	box->SetSize(60, 100);
+	box->SetWordWrap(true);
+
+	const Color spanBg = Color::FromRGBA8(220, 224, 230);
+	const Color selColor = Color::FromRGBA8(90, 140, 230);
+	box->SetStyle(TextBoxStyleOverride{ .selection = selColor, .padding = 0.0f });
+	box->SetFont(Font{ 14.0f, "Consolas", 400 });
+	// "abcde fghij"：行 0 drawEndCp=5 ("abcde"), ownEndCp=6 ("abcde ")
+	box->SetStyledText("abcde fghij", {
+		TextSpan{ 0, 3, SpanStyle{ .background = spanBg } }
+	});
+
+	box->MoveCaretToStart();
+	for (size_t i = 0; i < 3; ++i) {
+		box->MoveCaret(TextBox::CaretDirection::Right);
+	}
+	for (size_t i = 3; i < 6; ++i) {
+		box->OnKeyDown(KeyDownEvent(nullptr, KeyCode::Right, KeyModifier::Shift));
+	}
+	CommandBuffer cmds;
+	PaintContext ctx(cmds, window.GetTextMeasurer());
+	box->Paint(ctx, 0, 0);
+
+	const DrawRectCommand* selRect = nullptr;
+	for (const auto& cmd : cmds) {
+		if (const auto* rc = std::get_if<DrawRectCommand>(&cmd)) {
+			if (rc->color == selColor) {
+				selRect = rc;
+				break;
+			}
+		}
+	}
+	EXPECT_TRUE(selRect != nullptr);
+	if (selRect) {
+		EXPECT_NEAR(selRect->rect.x, 30.0f, kEps);
+		EXPECT_NEAR(selRect->rect.width, 30.0f, kEps); // hlMax = 60.0f（含行尾空格 10.0f），非 50.0f
+	}
+
+	window.Release();
+}
+
 void ECDI::Test::RegisterTextBoxTests()
 {
     GetTestRegistry().Add("TextBox.CaretColorStyle", &Test30CaretColorStyle);   // T30-1（Phase 30 批一）
@@ -3862,4 +4070,8 @@ void ECDI::Test::RegisterTextBoxTests()
     // ── ★ #91/#92：跨族基线共享与下伸 overhang（T1-tb / T4b）──
     GetTestRegistry().Add("TextBox.MixedFamilyBaseline", &Test91TextBoxMixedFamilyBaseline);
     GetTestRegistry().Add("TextBox.OverhangInsetScrollAndPreferred", &Test92TextBoxOverhangInsetScrollAndPreferred);
+    // ── ★ Phase 48：TextBox 底色块层级与混排选区按 run 对齐（T48-4, T48-5, T48-7）──
+    GetTestRegistry().Add("TextBox.SpanBackgroundOrder", &Test48TextBoxSpanBackgroundOrder);                   // T48-4
+    GetTestRegistry().Add("TextBox.MixedSelectionRunAdvance", &Test48TextBoxMixedSelectionRunAdvance);         // T48-5
+    GetTestRegistry().Add("TextBox.WrapTrailingSpaceSelection", &Test48TextBoxWrapTrailingSpaceSelection);     // T48-7
 }

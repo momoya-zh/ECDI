@@ -1408,6 +1408,42 @@ void TextBox::OnCharInput(const CharInputEvent& event){
 
 // ── 绘制（5.5.1.4 完整版：白底 + 焦点框 + 文本 + 光标同源）──
 
+float TextBox::MeasureCpOffsetInLine(
+    TextMeasurer& measurer, const std::string& textSource,
+    const std::vector<RunSlice>& lineRuns,
+    std::size_t startCp, std::size_t drawEndCp,
+    const Font& baseFont, std::size_t targetCp) const {
+	if (targetCp <= startCp) {
+		return 0.0f;
+	}
+	float x = 0.0f;
+	const std::size_t cappedCp = (std::min)(targetCp, drawEndCp);
+	for (const auto& run : lineRuns) {
+		if (run.cpCount == 0) continue;
+		const std::size_t runEnd = run.startCp + run.cpCount;
+		if (cappedCp >= runEnd) {
+			x += run.width;
+		}
+		else if (cappedCp > run.startCp) {
+			const std::size_t b0 = ByteOffsetAt(run.startCp);
+			const std::size_t b1 = ByteOffsetAt(cappedCp);
+			x += measurer.MeasureText(run.font, textSource.substr(b0, b1 - b0)).width;
+			break;
+		}
+		else {
+			break;
+		}
+	}
+	// 折行归属尾部（如行尾分隔空格，ownEndCp > drawEndCp）：该段不发射文本，
+	// 用基字体补测与旧实现整段基字体测量取值一致，勿改为 span 字体。
+	if (targetCp > drawEndCp) {
+		const std::size_t bDraw   = ByteOffsetAt(drawEndCp);
+		const std::size_t bTarget = ByteOffsetAt(targetCp);
+		x += measurer.MeasureText(baseFont, textSource.substr(bDraw, bTarget - bDraw)).width;
+	}
+	return x;
+}
+
 void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 
 	// scrollbar-placement-and-appearance △6 / D10：**起始处同步**条（先例 = 同函数内的 RecalculateLines 键守卫重建）。
@@ -1510,6 +1546,10 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 	//   供下面六处换算查表。表建在 `textSource` 上——Normal = `m_text`、echo = 掩码串，
 	//   两者字节长可差数倍，故这里**必须**喂 `textSource` 而非 `m_text`。
 	EnsureCpByteOffsets(textSource);
+	const bool activeSpans = SpansActiveForLayout();
+	TextMeasurer& measurer = ctx.GetTextMeasurer();
+	const bool lineBoxActive = activeSpans && LineBoxGuardActive();
+	const float boxA = lineBoxActive ? measurer.Ascent(EffectiveLineBoxFont(measurer)) : 0.0f;
 
 	for (int li = firstVisible; li <= lastVisible; ++li){
 		const size_t lineIndex = static_cast<size_t>(li);
@@ -1520,10 +1560,16 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 		const size_t ownEndCp = LineRange(lineIndex).second;
 		const size_t startByte   = ByteOffsetAt(startCp);       // ★ Phase 40：查表（含钳制）
 		const size_t drawEndByte = ByteOffsetAt(drawEndCp);
-		const std::string lineText = textSource.substr(startByte, drawEndByte - startByte);
 		const float lineY = textY + static_cast<float>(li) * lineH - m_scrollOffsetY;
 
-		// ① 行内 Selection 高亮（[selMin, selMax] ∩ [startCp, ownEndCp) 求交——逐行）
+		std::vector<RunSlice> lineRuns;
+		if (activeSpans) {
+			lineRuns = BuildRunsForRange(measurer, textSource, m_cpByteOffsets, startCp, drawEndCp);
+			// Layer 1：Span 底色块（超宽/滚动裁剪由循环外 PushClip 保证）
+			EmitRunBackgrounds(ctx, lineRuns, viewX, lineY, lineH);
+		}
+
+		// Layer 2：行内 Selection 高亮（[selMin, selMax] ∩ [startCp, ownEndCp) 求交——逐行）
 		// ★ 用**归属**口径：软断点行尾的分隔空格可以高亮（它属本行）；裁剪口径会让它「可选不可见」
 		if (HasSelection()){
 			const size_t selMin = GetSelectionMin();
@@ -1531,43 +1577,34 @@ void TextBox::OnPaint(PaintContext& ctx, int x, int y){
 			if (selMin < ownEndCp && selMax > startCp){   // 有交集
 				const size_t hlStartCp = (std::max)(selMin, startCp);
 				const size_t hlEndCp   = (std::min)(selMax, ownEndCp);
-				const size_t hlStartByte = ByteOffsetAt(hlStartCp);   // ★ Phase 40：查表
-				const size_t hlEndByte   = ByteOffsetAt(hlEndCp);
-				const Size hlMinSize = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, hlStartByte - startByte));
-				const Size hlMaxSize = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, hlEndByte - startByte));
+				float hlMin = 0.0f;
+				float hlMax = 0.0f;
+				if (activeSpans) {
+					hlMin = MeasureCpOffsetInLine(measurer, textSource, lineRuns, startCp, drawEndCp,
+					                              TextWidget::m_style.font.value, hlStartCp);
+					hlMax = MeasureCpOffsetInLine(measurer, textSource, lineRuns, startCp, drawEndCp,
+					                              TextWidget::m_style.font.value, hlEndCp);
+				}
+				else {
+					const size_t hlStartByte = ByteOffsetAt(hlStartCp);   // ★ Phase 40：查表
+					const size_t hlEndByte   = ByteOffsetAt(hlEndCp);
+					hlMin = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, hlStartByte - startByte)).width;
+					hlMax = ctx.MeasureText(TextWidget::m_style.font.value, textSource.substr(startByte, hlEndByte - startByte)).width;
+				}
 				// 9.5 R1：不再 clamp 到可视宽——高亮保持完整逻辑几何，超宽部分由 Clip 裁（视觉等价）
-				const float hlMin = hlMinSize.width;
-				const float hlMax = hlMaxSize.width;
 				ctx.DrawRect(Rect{ viewX + hlMin, lineY, hlMax - hlMin, lineH }, m_style.selection.value);
 			}
 		}
 
-		// ② 行文本绘制（9.5 R1：删逐码点截断测量——单次完整 DrawText，超宽/滚动由 Clip + viewX 处理）
-		// ★ Phase 44：只读 TextBox 富文本混排分支（REQ-20 判据③ 守护）
-		const bool activeSpans = SpansActiveForLayout();
+		// Layer 3：行文本绘制（9.5 R1：删逐码点截断测量——单次完整 DrawText，超宽/滚动由 Clip + viewX 处理）
 		if (activeSpans)
 		{
-			EnsureCpByteOffsets(textSource);
-			TextMeasurer& measurer = ctx.GetTextMeasurer();
-			const auto lineRuns = BuildRunsForRange(measurer, textSource, m_cpByteOffsets, startCp, drawEndCp);
-			const bool lineBoxActive = LineBoxGuardActive();
-			const float boxA = lineBoxActive ? measurer.Ascent(EffectiveLineBoxFont(measurer)) : 0.0f;
-			float runX = viewX;
-			for (const auto& run : lineRuns)
-			{
-				if (run.cpCount == 0) continue;
-				const std::size_t b0 = ByteOffsetAt(run.startCp);
-				const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
-				const Color rColor = run.color.value_or(TextWidget::m_style.foreground.value);
-				float runY = lineY;
-				if (lineBoxActive)
-					runY = lineY + boxA - measurer.Ascent(run.font);
-				ctx.DrawText(Point{ runX, runY }, textSource.substr(b0, b1 - b0), rColor, run.font);
-				runX += run.width;
-			}
+			EmitRunTexts(ctx, measurer, textSource, lineRuns, viewX, lineY,
+			             TextWidget::m_style.foreground.value, lineBoxActive, boxA);
 		}
 		else
 		{
+			const std::string lineText = textSource.substr(startByte, drawEndByte - startByte);
 			if (!lineText.empty()){
 				ctx.DrawText(Point{ viewX, lineY }, lineText,
 					TextWidget::m_style.foreground.value, TextWidget::m_style.font.value);

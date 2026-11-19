@@ -438,7 +438,7 @@ std::vector<TextWidget::RunSlice> TextWidget::BuildRunsForRange(
 			const std::size_t b0 = OffsetAt(byteOffsets, cur);
 			const std::size_t b1 = OffsetAt(byteOffsets, gapEnd);
 			const float w = measurer.MeasureText(baseFont, textSource.substr(b0, b1 - b0)).width;
-			runs.push_back(RunSlice{ cur, gapEnd - cur, w, baseFont, std::nullopt });
+			runs.push_back(RunSlice{ cur, gapEnd - cur, w, baseFont, std::nullopt, std::nullopt });
 			cur = gapEnd;
 			if (cur >= endCp) {
 				break;
@@ -453,7 +453,7 @@ std::vector<TextWidget::RunSlice> TextWidget::BuildRunsForRange(
 			const std::size_t b0 = OffsetAt(byteOffsets, rStart);
 			const std::size_t b1 = OffsetAt(byteOffsets, rEnd);
 			const float w = measurer.MeasureText(rFont, textSource.substr(b0, b1 - b0)).width;
-			runs.push_back(RunSlice{ rStart, rEnd - rStart, w, rFont, span.style.foreground });
+			runs.push_back(RunSlice{ rStart, rEnd - rStart, w, rFont, span.style.foreground, span.style.background });
 			cur = rEnd;
 		}
 	}
@@ -463,10 +463,42 @@ std::vector<TextWidget::RunSlice> TextWidget::BuildRunsForRange(
 		const std::size_t b0 = OffsetAt(byteOffsets, cur);
 		const std::size_t b1 = OffsetAt(byteOffsets, endCp);
 		const float w = measurer.MeasureText(baseFont, textSource.substr(b0, b1 - b0)).width;
-		runs.push_back(RunSlice{ cur, endCp - cur, w, baseFont, std::nullopt });
+		runs.push_back(RunSlice{ cur, endCp - cur, w, baseFont, std::nullopt, std::nullopt });
 	}
 
 	return runs;
+}
+
+void TextWidget::EmitRunBackgrounds(
+    PaintContext& ctx, const std::vector<RunSlice>& runs,
+    float startX, float lineY, float lineHeight) {
+	float bgX = startX;
+	for (const auto& run : runs) {
+		// 前提：零码点 run 恒有 width == 0（BuildRunsForRange 仅对非空切片推入），跳过安全
+		if (run.cpCount == 0) continue;
+		if (run.background.has_value() && run.width > 0.0f) {
+			ctx.DrawRect(Rect{ bgX, lineY, run.width, lineHeight }, *run.background);
+		}
+		bgX += run.width;
+	}
+}
+
+void TextWidget::EmitRunTexts(
+    PaintContext& ctx, TextMeasurer& measurer, const std::string& textSource,
+    const std::vector<RunSlice>& runs, float startX, float lineY,
+    const Color& baseColor, bool lineBoxActive, float boxAscent) const {
+	float runX = startX;
+	for (const auto& run : runs) {
+		if (run.cpCount == 0) continue;
+		const std::size_t b0 = ByteOffsetAt(run.startCp);
+		const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
+		const Color runColor = run.color.value_or(baseColor);
+		const float runY = lineBoxActive
+			? (lineY + boxAscent - measurer.Ascent(run.font))
+			: lineY;
+		ctx.DrawText(Point{ runX, runY }, textSource.substr(b0, b1 - b0), runColor, run.font);
+		runX += run.width;
+	}
 }
 
 float TextWidget::MeasureStyledRangeWidth(
@@ -747,19 +779,8 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 			{
 				const bool lineBoxActive = LineBoxGuardActive();
 				const float boxA = lineBoxActive ? measurer.Ascent(lineBoxFont) : 0.0f;
-				float runX = block.x;
-				for (const auto& run : line.runs)
-				{
-					if (run.cpCount == 0) continue;
-					const std::size_t b0 = ByteOffsetAt(run.startCp);
-					const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
-					const Color runColor = run.color.value_or(baseColor);
-					float runY = lineY;
-					if (lineBoxActive)
-						runY = lineY + boxA - measurer.Ascent(run.font);
-					ctx.DrawText(Point{ runX, runY }, m_text.substr(b0, b1 - b0), runColor, run.font);
-					runX += run.width;
-				}
+				EmitRunBackgrounds(ctx, line.runs, block.x, lineY, lineHeight);
+				EmitRunTexts(ctx, measurer, m_text, line.runs, block.x, lineY, baseColor, lineBoxActive, boxA);
 			}
 			else
 			{
@@ -802,19 +823,8 @@ void TextWidget::DrawTextContent(PaintContext& ctx, int x, int y){
 		EnsureCpByteOffsets(m_text);
 		const bool lineBoxActive = LineBoxGuardActive();
 		const float boxA = lineBoxActive ? measurer.Ascent(lineBoxFont) : 0.0f;
-		float curX = startPos.x;
-		for (const auto& run : m_prefRuns)
-		{
-			if (run.cpCount == 0) continue;
-			const std::size_t b0 = ByteOffsetAt(run.startCp);
-			const std::size_t b1 = ByteOffsetAt(run.startCp + run.cpCount);
-			const Color runColor = run.color.value_or(baseColor);
-			float curY = startPos.y;
-			if (lineBoxActive)
-				curY = startPos.y + boxA - measurer.Ascent(run.font);
-			ctx.DrawText(Point{ curX, curY }, m_text.substr(b0, b1 - b0), runColor, run.font);
-			curX += run.width;
-		}
+		EmitRunBackgrounds(ctx, m_prefRuns, startPos.x, startPos.y, lineHeight);
+		EmitRunTexts(ctx, measurer, m_text, m_prefRuns, startPos.x, startPos.y, baseColor, lineBoxActive, boxA);
 		return;
 	}
 

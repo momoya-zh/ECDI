@@ -22,7 +22,7 @@
 
 ## 开发进度（2026-11-15 更新）
 
-> **当前规模锚点**：测试 **631** 用例 · 公共头文件 **102** · `docs/` **226** 篇文档（分批里程碑与演进史见 [roadmap-deferred.md §8](roadmap-deferred.md)）。
+> **当前规模锚点**：测试 **638** 用例 · 公共头文件 **102** · `docs/` **229** 篇文档（分批里程碑与演进史见 [roadmap-deferred.md §8](roadmap-deferred.md)）。
 
 ### ✅ 已完成
 
@@ -85,7 +85,7 @@
 
 ### 🔄 当前
 
-- （无——Phase 47 已于 2026-11-16 收口，详见 [phase47-gl-cache-and-verification-requirements.md](phase47-gl-cache-and-verification-requirements.md) / [phase47-gl-cache-and-verification-preliminary-design.md](phase47-gl-cache-and-verification-preliminary-design.md) / [phase47-gl-cache-and-verification-detailed-design.md](phase47-gl-cache-and-verification-detailed-design.md)。）
+- **Phase 48**（`SpanStyle::background` 与混排选区按 run 对齐，#90）：Batch 1–2 已实施，AI 侧自检通过，待用户侧四链 Debug 终验与跨仓 `--md-probe` 回归（详见 [phase48-span-background-requirements.md](phase48-span-background-requirements.md) / [phase48-span-background-preliminary-design.md](phase48-span-background-preliminary-design.md) / [phase48-span-background-detailed-design.md](phase48-span-background-detailed-design.md)）。
 
 ### 🔲 未来
 

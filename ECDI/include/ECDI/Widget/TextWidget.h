@@ -126,11 +126,12 @@ protected:
 	///          派生类只**读**输出；`GetTextLayout` / `IsWrapLayoutActive` / `BlockWidth` / 全部缓存字段仍 private。
 	/// @brief 单行内的样式渲染切片（Phase 44，P1-1 基色解耦模型）
 	struct RunSlice {
-		std::size_t          startCp; ///< 切片起始码点索引
-		std::size_t          cpCount; ///< 切片码点数
-		float                width;   ///< 切片测量宽度
-		Font                 font;    ///< 生效字体（族 + 字重）
-		std::optional<Color> color;   ///< 切片前景色（std::nullopt 表示继承基色，绘制期解析）
+		std::size_t          startCp;    ///< 切片起始码点索引
+		std::size_t          cpCount;    ///< 切片码点数
+		float                width;      ///< 切片测量宽度
+		Font                 font;       ///< 生效字体（族 + 字重 + 斜体 + 字号）
+		std::optional<Color> color;      ///< 切片前景色（std::nullopt 表示继承基色，绘制期解析）
+		std::optional<Color> background; ///< 切片背景底色（std::nullopt 表示不绘制底色）
 	};
 
 	struct TextLine{
@@ -236,6 +237,19 @@ protected:
 	    TextMeasurer& measurer, const std::string& textSource,
 	    const std::vector<std::uint32_t>& byteOffsets,
 	    std::size_t startCp, std::size_t endCp) const;
+
+	/// @brief 发射整行 span 底色矩形（Phase 48，先于同帧文本/选区绘制）
+	/// @note static 而非 const 成员：不读取 m_cpByteOffsets 偏移表；不加 noexcept（内部调用 DrawRect 可能分配 vector）
+	static void EmitRunBackgrounds(
+	    PaintContext& ctx, const std::vector<RunSlice>& runs,
+	    float startX, float lineY, float lineHeight);
+
+	/// @brief 发射整行 styled runs 文本（Phase 48，三通路复用，消除重复循环）
+	/// @note const 成员：需读取本类经 EnsureCpByteOffsets 建立的 ByteOffsetAt
+	void EmitRunTexts(
+	    PaintContext& ctx, TextMeasurer& measurer, const std::string& textSource,
+	    const std::vector<RunSlice>& runs, float startX, float lineY,
+	    const Color& baseColor, bool lineBoxActive, float boxAscent) const;
 
 	/// @brief 码点→字节偏移表：`m_cpByteOffsets[k]` = 第 k 个码点的首字节偏移
 	/// @details `size() == count + 1`（`count` 是 **`SequenceLength` 空间**的码点数，**不是** `cps.size()`）；
